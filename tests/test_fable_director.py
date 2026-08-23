@@ -355,6 +355,9 @@ async def test_the_capsule_marker_is_true_by_construction(tmp_path: Path) -> Non
 async def test_nothing_writes_the_capsule_marker(tmp_path: Path) -> None:
     # The half that makes the test above honest: it is a default, so say so
     # rather than letting a future reader mistake it for an observation again.
+    # Scans fable_director only, which is the sole site constructing
+    # ShadowObservation — narrower than the claim's "nothing in src/", and
+    # sufficient exactly while that stays true.
     import ast
     from pathlib import Path as _Path
 

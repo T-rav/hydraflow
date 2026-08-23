@@ -988,3 +988,109 @@ class TestARefusedBatchCarriesNoBorrowedJoin:
         assert (
             receipts[0].reason_code is RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
         )
+
+
+class TestOnlyAChildThatExistedCarriesASpawnId:
+    """`lineage` is the discriminator `WORKER_TIMEOUT`'s contract promises, so
+    exactly the paths that follow a real spawn may carry one.
+
+    Pass 8 gave it to every refusal inside the ``try``, including the
+    ``except Exception`` arm — and that arm fires *before* any process exists:
+    ``run_lightweight_agent`` converts a failed spawn into a soft ``rc=-1`` and
+    fills ``spawn_out``, so what escapes it is a ``GatewayMintError`` from the
+    mint and its own ``provider 'gateway' requires the Claude harness`` guard.
+    A spawn id there would have made a request that never started
+    indistinguishable from a reaped child — the same defect one level down from
+    the one pass 8 was fixing.
+    """
+
+    async def test_a_gateway_outage_names_no_child(self, config, task) -> None:
+        from gateway_mint_client import GatewayMintError
+
+        spawn = SpawnDouble(raises=GatewayMintError("gateway unreachable"))
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].lineage is None
+
+    async def test_a_refusal_before_the_seam_names_no_child(self, config, task) -> None:
+        # The CH-6 gate / enforcement-refusal shape: the seam returns without
+        # filling `model`, so nothing was ever spawned.
+        class NeverSpawned(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                return SimpleResult(stderr="refused", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, NeverSpawned()), task, [_request()])
+
+        assert receipts[0].lineage is None
+
+    async def test_a_batch_budget_refusal_names_no_child(self, config, task) -> None:
+        class VerySlowSpawn(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                _elapse(float(config.fable_plan_worker_timeout_seconds) + 1.0)
+                return await super().__call__(**kwargs)
+
+        receipts = await _dispatch(
+            _runner(config, VerySlowSpawn()),
+            task,
+            [
+                _request(key="k1", request_id="r1"),
+                _request(key="k2", request_id="r2"),
+            ],
+        )
+
+        assert receipts[1].lineage is None
+
+    async def test_a_reaped_child_does_name_one(self, config, task) -> None:
+        # Non-vacuity: the three Nones above must be the code's answer, not the
+        # field being unreachable.
+        class TimedOut(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                kwargs["spawn_out"]["timed_out"] = True
+                return SimpleResult(stderr="timed out", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, TimedOut()), task, [_request()])
+
+        assert receipts[0].lineage is not None
+        assert receipts[0].status is ReceiptStatus.EXPIRED
+
+    async def test_a_timeout_before_the_seam_spawned_names_no_child(
+        self, config, task
+    ) -> None:
+        """A ``TimeoutError`` escaping the seam does not imply a child.
+
+        The seam handles its own deadline and converts it to a soft rc=-1, so
+        what escapes comes from the work *around* the spawn — the CH-6 gate,
+        the route-shadow and enforcement threads, or a Docker socket, where
+        ``socket.timeout`` IS ``TimeoutError``. An earlier version attached a
+        spawn id here on the strength of a comment asserting the opposite, and
+        this PR's own double (``SpawnDouble(raises=TimeoutError())``) raises
+        before it touches ``spawn_out`` — modelling exactly the case that never
+        spawned.
+        """
+        spawn = SpawnDouble(raises=TimeoutError())
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].status is ReceiptStatus.EXPIRED
+        assert receipts[0].reason_code is RejectionReason.WORKER_TIMEOUT
+        assert receipts[0].lineage is None
+
+    async def test_a_timeout_after_the_seam_spawned_names_its_child(
+        self, config, task
+    ) -> None:
+        # Non-vacuity, and the other half of the rule: once the seam recorded a
+        # model it got as far as spawning, so a deadline from its outer finally
+        # describes a child that ran.
+        class SpawnedThenRaised(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                raise TimeoutError
+
+        receipts = await _dispatch(
+            _runner(config, SpawnedThenRaised()), task, [_request()]
+        )
+
+        assert receipts[0].lineage is not None

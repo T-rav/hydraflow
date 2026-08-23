@@ -25,6 +25,7 @@ each of them lived one seam further out than the tests reached.
 from __future__ import annotations
 
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -39,6 +40,7 @@ from fable_director import FableDirector
 from issue_driver import AdvanceOutcome, DriverAdvance, IssueDriver
 from models import Task
 from plan_broker import PlanCanaryLatch, plan_canary_covers
+import plan_worker_runner
 from plan_worker_runner import PlanWorkerRunner
 from scheduling_model import ExecutionRuntime, SchedulingModel
 from stream_parser import parse_result_envelope
@@ -78,6 +80,72 @@ REAL_MODEL_USAGE = {
         "provider": "firstParty",
     }
 }
+
+
+_CLOCK = {"offset": 0.0}
+_REAL_MONOTONIC = time.monotonic
+
+
+@pytest.fixture(autouse=True)
+def _fake_batch_clock(monkeypatch: pytest.MonkeyPatch):
+    """A controllable ``time.monotonic`` for the batch deadline, patched on the
+    module under test so nothing else in the process sees a moved clock."""
+    _CLOCK["offset"] = 0.0
+    monkeypatch.setattr(
+        plan_worker_runner.time,
+        "monotonic",
+        lambda: _REAL_MONOTONIC() + _CLOCK["offset"],
+    )
+
+
+class TwoDispatchTurn:
+    """A director asking for two children in one turn."""
+
+    def __init__(self) -> None:
+        self.cli_version = "2.1.239"
+
+    async def preflight(self) -> str:
+        return self.cli_version
+
+    async def run_turn(self, prompt: str) -> DirectorTurnResult:
+        payload = prompt.split(CAPSULE_OPEN, 1)[1].split(CAPSULE_CLOSE, 1)[0]
+        lease = json.loads(payload)["lease"]
+        command = {
+            "kind": "dispatch_workers",
+            "rationale": "map, then judge",
+            "dispatches": [
+                _one(lease, "planner", "claude-sonnet", 1),
+                _one(lease, "architect", "claude-opus", 2),
+            ],
+        }
+        return DirectorTurnResult(
+            frames=[
+                CLEAN_INIT,
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": json.dumps(command)}]
+                    },
+                },
+                {"type": "result", "is_error": False, "total_cost_usd": 0.0},
+            ],
+            exit_code=0,
+        )
+
+
+def _one(lease: dict[str, Any], role: str, family: str, n: int) -> dict[str, Any]:
+    return {
+        "request_id": f"req-{n}",
+        "driver_id": lease["driver_id"],
+        "epoch": lease["epoch"],
+        "phase_attempt": lease["phase_attempt"],
+        "worker_role": role,
+        "model_requirement": {"kind": "literal_family", "value": family},
+        "task_contract": f"the {role}'s part",
+        "reason": "the plan needs it",
+        "expected_route_policy_revision": ROUTE_REVISION,
+        "idempotency_key": f"key-{lease['issue_number']}-{n}",
+    }
 
 
 class SameRequestIdTurn:
@@ -207,6 +275,17 @@ def _director(tmp_path: Path, spawn: object) -> FableDirector:
         is_covered=lambda phase: plan_canary_covers(config, phase=phase),
         latch=PlanCanaryLatch(ttl_seconds=900),
     )
+
+
+def _two_dispatch_director(tmp_path, spawn: object) -> FableDirector:
+    director = _director(tmp_path, spawn)
+    director._runner = TwoDispatchTurn()  # type: ignore[assignment]  # noqa: SLF001
+    return director
+
+
+async def _observe_two(director: FableDirector, issue: int) -> None:
+    director._runner = TwoDispatchTurn()  # type: ignore[assignment]  # noqa: SLF001
+    await _observe(director, issue)
 
 
 async def _observe(director: FableDirector, issue: int) -> None:
@@ -396,3 +475,44 @@ class TestAChildThatRanIsDispatchedEvenWhenItsReceiptIsNotAccepted:
 
         summary = director.shadow_log.summary()
         assert (summary["workers_dispatched"], summary["workers_refused"]) == (1, 1)
+
+    async def test_the_tree_and_the_receipts_agree_on_a_mixed_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        """The agreement invariant, on a boundary where the two predicates differ.
+
+        The canary scenario asserts this too, but it cannot *fail* on it: both
+        of its receipts are accepted, so keying the receipt set on ``accepted``
+        or on ``child_spawn_id`` gives the same answer there. Mutation-checked
+        — flipping the scenario's predicate survives; flipping it here dies.
+
+        Here the boundary has one child that ran to its deadline and was reaped
+        (``expired``, with a spawn id) and one request the batch budget refused
+        before starting (``expired``, without one). Same status, opposite
+        answers, which is the whole point of the discriminator.
+        """
+        budget = 240.0
+
+        class OneRanOneNeverStarted(EnvelopeSpawn):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                _CLOCK["offset"] += budget + 1.0
+                kwargs["spawn_out"]["timed_out"] = True
+                return SimpleResult(stderr="timed out", returncode=-1)
+
+        director = _director(tmp_path, OneRanOneNeverStarted(REAL_MODEL_USAGE))
+        await _observe_two(director, 7)
+
+        row = director.shadow_log.recent()[0]
+        dispatched = {
+            node["request_id"] for node in row.would_dispatch if node["dispatched"]
+        }
+        ran = {r["request_id"] for r in row.dispatched if r["child_spawn_id"]}
+        accepted = {
+            r["request_id"] for r in row.dispatched if r["status"] == "accepted"
+        }
+
+        assert dispatched == ran
+        assert len(ran) == 1
+        # The predicate the scenario cannot tell apart, told apart.
+        assert accepted != ran

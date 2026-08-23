@@ -155,9 +155,11 @@ class BrokerVerdict:
 
         Hypothetical in shadow mode, where *dispatched_ids* is empty and every
         node reads ``dispatched: false`` — which is then a fact rather than a
-        default. Under the armed canary the caller passes the ids that produced
-        an accepted receipt, so the tree and the receipts agree about the same
-        ``request_id`` instead of contradicting each other.
+        default. Under the armed canary the caller passes the ids of the
+        requests that produced a child that actually **ran** — every receipt
+        carrying a lineage, which includes a reaped ``EXPIRED`` child and not
+        only an ``ACCEPTED`` one — so the tree and the receipts agree about the
+        same ``request_id`` instead of contradicting each other.
         """
         return [
             dispatch.as_tree_node(dispatched=dispatch.request_id in dispatched_ids)

@@ -336,7 +336,8 @@ class TestTheShadowDirectorRecordsWhatItWouldHaveDone:
     ) -> None:
         # Shadow mode, so this is a fact about this scenario rather than an
         # unconditional property of the field: #11541's armed canary marks a
-        # node dispatched when its request produced an accepted receipt, and
+        # node dispatched when its request produced a child that ran — a
+        # receipt carrying a child_spawn_id — and
         # tests/scenarios/test_fable_plan_canary_scenario.py asserts that.
         _effects, shadow_log = await _shadowed(seeded_issues, tmp_path)
 

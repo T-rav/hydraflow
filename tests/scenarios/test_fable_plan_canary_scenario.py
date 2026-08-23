@@ -506,16 +506,26 @@ class TestTheTreeAndTheReceiptsAgree:
     async def test_the_tree_and_the_receipts_name_the_same_requests(
         self, seeded_issues, tmp_path
     ) -> None:
+        """Keyed on *a child ran*, not on ``status == accepted``.
+
+        The first version used accepted, which is the predicate pass 8
+        deliberately replaced — it passed here only because both receipts in
+        this scenario happen to be accepted, and it **failed** against the
+        reaped-child fixture in
+        ``tests/regressions/test_issue_11541_review_findings.py``. Two tests in
+        one PR encoding opposite predicates is worse than either alone; this is
+        the one that was wrong.
+        """
         _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
 
         row = log.recent()[0]
         dispatched = {
             node["request_id"] for node in row.would_dispatch if node["dispatched"]
         }
-        accepted = {
+        ran = {
             receipt["request_id"]
             for receipt in row.dispatched
-            if receipt["status"] == "accepted"
+            if receipt["child_spawn_id"]
         }
 
-        assert dispatched == accepted
+        assert dispatched == ran

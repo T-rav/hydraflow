@@ -494,21 +494,37 @@ class PlanWorkerRunner:
                 spawn_out=spawn_out,
             )
         except TimeoutError:
-            # The seam normally converts its own deadline into a soft rc=-1; a
-            # bare TimeoutError means the child outlived even that, and its
-            # process group has already been reaped by ``run_simple``.
+            # A deadline that escaped the seam rather than one it handled: the
+            # seam converts its OWN timeout into ``spawn_out["timed_out"]`` and
+            # a soft rc=-1, which lands below. So this fires for work outside
+            # that inner try — ``gate_prompt``, the route-shadow and enforcement
+            # threads, the Docker client (``socket.timeout`` IS ``TimeoutError``)
+            # before a child exists, or the seam's outer ``finally`` after one
+            # did. An earlier comment here asserted the second case only, and
+            # attached a spawn id on the strength of it.
             return _refusal(
                 request,
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
-                lineage=lineage,
+                lineage=_child_lineage(spawn_out, lineage),
             )
         except Exception as exc:
             # A burnt credit balance is factory-wide and must not be converted
             # into a worker refusal (dark-factory 2.2); everything else is this
             # child's failure and becomes a receipt rather than an exception a
             # shadow-shaped observer would have to carry into the allocator.
+            #
+            # **No lineage on this path**, deliberately, and it is the one
+            # refusal after the ``try`` that gets none. An exception *escaping*
+            # the seam does not imply a child: ``run_lightweight_agent``
+            # converts a failed spawn into a soft ``rc=-1`` and fills
+            # ``spawn_out``, so what reaches here is the cases that raise
+            # BEFORE any process exists — a ``GatewayMintError`` from the mint,
+            # and the seam's own ``provider 'gateway' requires the Claude
+            # harness`` guard. Claiming a spawn id for those would break the
+            # discriminator ``WORKER_TIMEOUT``'s contract promises in this same
+            # commit, and would mark their tree node ``dispatched: true``.
             reraise_on_credit_or_bug(exc)
             logger.warning(
                 "plan_worker_runner: #%d %s could not be dispatched: %s",
@@ -543,7 +559,7 @@ class PlanWorkerRunner:
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
-                lineage=lineage,
+                lineage=_child_lineage(spawn_out, lineage),
             )
         # The model the CLI *reported*, when it reported one. When it did not,
         # the requested id is recorded and ``model_observed`` says so rather
@@ -563,7 +579,7 @@ class PlanWorkerRunner:
                 request,
                 RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
                 decision,
-                lineage=lineage,
+                lineage=_child_lineage(spawn_out, lineage),
             )
 
         text = (result.stdout or "")[:MAX_ARTIFACT_CHARS]
@@ -712,6 +728,28 @@ def _refusal(
         route_policy_revision=decision.route_policy_revision,
         output_contract_ok=False,
     )
+
+
+def _child_lineage(
+    spawn_out: dict[str, object], lineage: WorkerLineage
+) -> WorkerLineage | None:
+    """*lineage* when a child actually started, ``None`` when none did.
+
+    One rule for every refusal that can follow a spawn, rather than one per
+    ``except`` clause. Which clause fired says nothing useful: the seam handles
+    its own deadline and converts it to a soft ``rc=-1``, so a ``TimeoutError``
+    that *escapes* it comes from the work around the spawn — the CH-6 gate, the
+    route-shadow and enforcement threads, a Docker socket (``socket.timeout``
+    IS ``TimeoutError``) — which happen before a child exists, or from the outer
+    ``finally``, which happens after one did.
+
+    ``spawn_out["model"]`` is the signal the code already trusts twenty lines
+    below to mean "the seam got as far as spawning", filled in the seam's own
+    ``finally`` before anything in the outer one can raise. Reusing it keeps
+    ``WORKER_TIMEOUT``'s two emitters tellable apart by the discriminator its
+    contract promises, instead of by a comment's assertion about a branch.
+    """
+    return lineage if spawn_out.get("model") else None
 
 
 def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
