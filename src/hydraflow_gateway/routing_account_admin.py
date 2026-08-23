@@ -199,17 +199,24 @@ class AccountAdminStore:
         if cached is not None and cached[0] == head.record_hash:
             return cached[1]
         try:
-            records = self._trusted_records(head)
+            records = self._trusted_records()
         except AuditChainError:
             return _corrupt()
-        if records is None:
-            return _corrupt()
+        if not records:
+            # The chain emptied between the tail read and the full read.
+            return self._empty_view()
+        # BOTH halves of the view come from this ONE read. Taking the revision
+        # from the earlier tail read and the states from here would let a writer
+        # append between the two and produce a view whose revision is one behind
+        # the overlay it published — an internally inconsistent answer, and one
+        # an operator would then compose an `expected_revision` against.
+        settled = records[-1]
         view = AccountStateView(
             state=SnapshotState.OK,
-            revision=head.seq + 1,
+            revision=settled.seq + 1,
             states=_fold(records),
         )
-        self._cache = (head.record_hash, view)
+        self._cache = (settled.record_hash, view)
         return view
 
     def set_state(
@@ -293,8 +300,8 @@ class AccountAdminStore:
             return _corrupt()
         return AccountStateView(state=SnapshotState.ABSENT, revision=0, states={})
 
-    def _trusted_records(self, head: AuditRecord) -> tuple[AuditRecord, ...] | None:
-        """The chain's records, or ``None`` when it may not be trusted.
+    def _trusted_records(self) -> tuple[AuditRecord, ...]:
+        """The chain's records, or ``()`` when it may not be trusted.
 
         Both checks run on every *re-fold*, not merely before a mutation. A
         reader that trusted the chain it was about to fold would publish exactly
@@ -303,9 +310,12 @@ class AccountAdminStore:
         from being an O(chain) cost per poll: an unchanged head is served without
         re-reading, and the head itself is a bounded tail read.
         """
-        if not self._audit.verify().ok or not self._anchored(head):
-            return None
-        return self._audit.read_all()
+        records = self._audit.read_all()
+        if not records:
+            return ()
+        if not self._audit.verify().ok or not self._anchored(records[-1]):
+            raise AuditChainError("the account administration chain is not trusted")
+        return records
 
     def _anchored(self, head: AuditRecord) -> bool:
         """Whether the chain is at least as long as the anchor it last wrote.

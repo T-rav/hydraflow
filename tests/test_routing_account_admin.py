@@ -677,3 +677,42 @@ def test_a_gateway_that_never_mutated_is_still_plainly_absent(
 ) -> None:
     """The contrast: no chain and no anchor is a fresh install, not a rollback."""
     assert _store(tmp_path).read().state is SnapshotState.ABSENT
+
+
+def test_a_view_reports_the_revision_of_the_overlay_it_published(
+    tmp_path: Path,
+) -> None:
+    """Both halves come from one read of the chain, so they cannot disagree.
+
+    Taking the revision from the cheap tail read and the states from the full
+    read lets a writer append between the two, publishing an overlay one record
+    ahead of the revision it is labelled with — and an operator then composes an
+    ``expected_revision`` against a number that never described what they saw.
+    """
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    view = store.read()
+
+    assert (view.revision, len(view.states)) == (2, 2)
+
+
+def test_a_stale_tail_read_does_not_publish_a_revision_the_overlay_outran(
+    tmp_path: Path,
+) -> None:
+    """Deterministic stand-in for a writer appending between the two reads.
+
+    ``head()`` is a cheap bounded tail read and ``read_all()`` is a separate full
+    read; a writer landing between them leaves the first behind the second. The
+    view must be built entirely from the second, or it reports a revision that
+    never described the overlay beside it.
+    """
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    fresh = _store(tmp_path)
+    stale = fresh.audit.read_all()[0]
+    fresh.audit.head = lambda: stale  # type: ignore[method-assign]
+    view = fresh.read()
+
+    assert (view.revision, len(view.states)) == (2, 2)
