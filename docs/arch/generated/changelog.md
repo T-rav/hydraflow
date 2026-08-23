@@ -6,13 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `910b8b5` — fix(review pass 8): give a reaped child its lineage, and stop three constants lying *(2026-08-23)*
+- `4327307` — fix(director): the Plan canary's worker tree said a child did not run while its receipt said accepted (#11541) (#11541) *(2026-08-23)*
+- `0dec4e5` — fix(path-membership): make module-path gates follow a module into a package, and close the class (#11669) (#11672) (#11672) *(2026-08-23)*
+- `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) (#11670) *(2026-08-23)*
 - `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) (#11665) *(2026-08-22)*
-- `73b0565` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11657) (#11657) *(2026-08-22)*
-- `46af438` — fix(review pass 5): correct three false claims and pin two unguarded invariants *(2026-08-22)*
-- `0fad28e` — fix(review pass 4): classify a routing refusal on its reason, not its outcome *(2026-08-22)*
-- `7fc6f77` — fix(review pass 3): land the batch budget, blank the join on refuse, read the canonical model *(2026-08-22)*
-- `c645c86` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11541) *(2026-08-22)*
-- `8714f5c` — fix(director): the Plan canary's worker tree said a child did not run while its receipt said accepted (#11541) (#11541) *(2026-08-23)*
 - `73b0565` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11657) (#11657) *(2026-08-22)*
 - `befb5a6` — refactor(mockworld,arch): close two latent gate holes and finish the cluster pass (#11659) (#11659) *(2026-08-22)*
 - `1dfa921` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) (#11658) *(2026-08-22)*
