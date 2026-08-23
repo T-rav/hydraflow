@@ -367,21 +367,6 @@ def test_an_unconfigured_legacy_account_has_no_upstream() -> None:
     assert pool.upstream(legacy_account_id(ProviderBinding.ANTHROPIC)) is None
 
 
-def test_a_lane_served_only_by_a_declared_account_still_counts_as_configured(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "accounts.yaml"
-    path.write_text(_DECLARED_DOCUMENT, encoding="utf-8")
-    settings = _settings(
-        accounts_file=path,
-        upstreams={ProviderBinding.ANTHROPIC: _upstream("https://anthropic.test")},
-    )
-    pool = load_account_pool(
-        settings, {"GATEWAY_ACCOUNT_ZAI_SECONDARY_KEY": "declared-key"}
-    )
-    assert ProviderBinding.ZAI_HARNESS in pool.configured_bindings()
-
-
 def test_a_registry_file_that_cannot_be_read_fails_closed(tmp_path: Path) -> None:
     settings = _settings(accounts_file=tmp_path / "absent.yaml")
     with pytest.raises(AccountRegistryError, match="could not be read"):

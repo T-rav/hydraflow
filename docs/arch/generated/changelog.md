@@ -7,6 +7,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W34
 
 - `c21a5c0` — wip(director): Fable P3 checkpoint before make quality *(2026-08-22)*
+- `3fa3278` — fix(gateway): build the overlay view from one read of the chain *(2026-08-22)*
 - `efb6dc4` — fix(review pass 2): a mutation decides from the file; an emptied chain is corrupt *(2026-08-22)*
 - `f1a8d30` — fix(review pass 1): gateway-authored failures are not upstream evidence; anchor the admin chain *(2026-08-22)*
 - `964ea09` — docs(adr-0142): cite the receipt the Divergence line rests on (P1.17) *(2026-08-22)*

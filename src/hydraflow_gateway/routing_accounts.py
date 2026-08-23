@@ -392,20 +392,6 @@ class AccountPool:
         """The static, ordered candidate ids for *model*. See the registry."""
         return self._registry.candidates_for_model(model)
 
-    def configured_bindings(self) -> frozenset[ProviderBinding]:
-        """Every lane that has at least one configured account.
-
-        The v1 mint's compatibility question — "is there a credential for this
-        provider at all?" — asked of the registry rather than of the legacy
-        upstream map, so a lane served only by a declared account still answers
-        yes.
-        """
-        return frozenset(
-            account.provider_binding
-            for account in self._registry.accounts
-            if self.configured(account.account_id)
-        )
-
 
 def load_account_pool(
     settings: GatewaySettings, environ: Mapping[str, str] | None = None

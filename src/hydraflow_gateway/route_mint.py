@@ -316,35 +316,6 @@ def _inadmissible(request: MintV2Request) -> str | None:
     return None
 
 
-def evaluate_attempt(
-    request: MintV2Request, *, configured_bindings: frozenset[ProviderBinding]
-) -> tuple[DecisionOutcome, str, ProviderBinding | None]:
-    """Classify one attempt without minting anything. Pure and total.
-
-    The gateway does not re-derive the *route* — it has no policy snapshot — so
-    this answers the narrower question it can answer alone: may the model the
-    policy chose be served, and by which account?
-
-    This is the lane-level verdict only. ADR-0142 moved the *account*-level one
-    into :func:`~hydraflow_gateway.routing_account_state.select_account`, which
-    needs live state this function deliberately does not read, so the store calls
-    both: this one to refuse an inadmissible attempt, that one to choose.
-    """
-    rejection = _inadmissible(request)
-    if rejection is not None:
-        return DecisionOutcome.REJECTED, rejection, None
-    binding = binding_for_model(request.effective_model.strip())
-    if binding not in configured_bindings:
-        # An operational gap, not a policy verdict: the route is right and the
-        # credential is missing, so the honest answer is hold.
-        return (
-            DecisionOutcome.HELD,
-            MintRefusal.ACCOUNT_NOT_CONFIGURED.value,
-            binding,
-        )
-    return DecisionOutcome.SELECTED, "matched-policy", binding
-
-
 def unavailable_reason(rejected: Sequence[AccountRejection]) -> str:
     """Why no account on this lane could take a lease, as one code.
 
