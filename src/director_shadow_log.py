@@ -234,6 +234,16 @@ class ShadowObservation(BaseModel):
     rejection_reasons: tuple[str, ...] = ()
     route_revisions: int = Field(default=0, ge=0)
 
+    dispatched: tuple[dict[str, Any], ...] = ()
+    """Receipts for children this boundary actually ran (#11541).
+
+    Empty under shadow mode, and empty for every boundary outside the Plan
+    canary's bound — which is what makes ``workers_dispatched`` in the rollup a
+    fact rather than a claim. ``would_dispatch`` beside it stays the
+    *hypothetical* tree, so an operator can see a director asking for four
+    workers and the canary running one.
+    """
+
     capsule_reconstructed_fresh: bool = True
     """Always true, and recorded rather than assumed.
 
@@ -271,6 +281,7 @@ class ShadowObservationLog:
         self._recent: list[ShadowObservation] = []
         self._counts: dict[str, int] = {}
         self._usd_total = 0.0
+        self._worker_usd_total = 0.0
         self._latency_total_ms = 0
         self._observations = 0
         self._load()
@@ -362,8 +373,16 @@ class ShadowObservationLog:
             "latency_ms_mean": (
                 round(self._latency_total_ms / observations) if observations else 0
             ),
-            "workers_dispatched": 0,
-            "shadow_mode": True,
+            # Counted from the receipts on disk, not asserted. Under shadow
+            # mode this is zero because nothing writes a receipt — an
+            # invariant, and one that stops being an invariant the moment the
+            # Plan canary is armed, which is exactly when an operator needs the
+            # number to be real (#11541).
+            "workers_dispatched": self._counts.get("workers_dispatched", 0),
+            "workers_accepted": self._counts.get("workers_accepted", 0),
+            "workers_refused": self._counts.get("workers_refused", 0),
+            "worker_usd_cost_total": round(self._worker_usd_total, 6),
+            "shadow_mode": self._counts.get("workers_dispatched", 0) == 0,
         }
 
     # -- internals ----------------------------------------------------------
@@ -406,6 +425,13 @@ class ShadowObservationLog:
             self._bump(observation.turn_failure.value)
         self._bump("invalid_requests", observation.invalid_requests)
         self._bump("route_revisions", observation.route_revisions)
+        for receipt in observation.dispatched:
+            self._bump("workers_dispatched")
+            accepted = receipt.get("status") == "accepted"
+            self._bump("workers_accepted" if accepted else "workers_refused")
+            cost = receipt.get("usd_cost")
+            if isinstance(cost, int | float):
+                self._worker_usd_total += float(cost)
         self._usd_total += observation.usd_cost
         self._latency_total_ms += observation.latency_ms
         self._recent.append(observation)

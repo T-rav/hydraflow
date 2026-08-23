@@ -167,6 +167,7 @@ if TYPE_CHECKING:
 
     from auto_tighten.ratchet_adapter import RatchetAdapter
     from metrics_manager import MetricsManager
+    from plan_worker_runner import PlanWorkerRunner
 
 logger = logging.getLogger("hydraflow.service_registry")
 
@@ -627,8 +628,15 @@ def _build_fable_director(
     from director_sandbox import DirectorSandboxError
     from director_shadow_log import ShadowObservationLog
     from director_turn_runner import DirectorTurnRunner
-    from gateway_mint_client import revoke_gateway_key
+    from gateway_mint_client import bound_model_for, revoke_gateway_key
     from package_resources import ResourceNotFoundError
+    from plan_broker import (
+        DIRECTOR_TURN_FAMILY,
+        PLAN_TIER_CATALOG,
+        PlanCanaryLatch,
+        plan_canary_covers,
+    )
+    from route_enforcement import enforce_director_route
     from runner_utils import resolve_harness_env
 
     try:
@@ -641,8 +649,10 @@ def _build_fable_director(
         )
         raise DirectorSandboxError(msg) from exc
 
+    director_model = PLAN_TIER_CATALOG[DIRECTOR_TURN_FAMILY]
+
     async def _mint_director_key() -> dict[str, str]:
-        """ADR-0137 S2: the director's one credential, per turn.
+        """ADR-0137 S2: the director's one credential, per turn — now routed.
 
         Routed through the same ``resolve_harness_env`` gateway path every other
         spawn uses rather than a bespoke one, so the director inherits the
@@ -650,12 +660,26 @@ def _build_fable_director(
         through to an ambient provider key) and the existing revoke lease. The
         principal is the director itself, not a worker: it is a parent, and the
         key it holds must not be able to reach a worker account.
+
+        **#11541 closes ADR-0141 §D1's named gap here.** This call used to pass
+        no route, so it minted v1 — *unbound* — even for the canary repository,
+        which made the enforcement canary and the Fable director mutually
+        exclusive for one repo: with ``GATEWAY_GOVERNED_REPOS`` armed, an
+        unbound mint for a governed repository is refused and the director fails
+        closed. ``enforce_director_route`` returns a bound route when the canary
+        covers this repository and ``None`` otherwise, so an unarmed host mints
+        exactly the v1 key it did before.
         """
+        route = await asyncio.to_thread(
+            enforce_director_route, config, model=director_model
+        )
         return await resolve_harness_env(
             "gateway",
             config,
+            model=director_model,
             source="fable-director",
             timeout_seconds=float(config.director_turn_timeout_seconds),
+            route=route,
         )
 
     return FableDirector(
@@ -666,6 +690,9 @@ def _build_fable_director(
             timeout_seconds=config.director_turn_timeout_seconds,
             mint_credential=_mint_director_key,
             revoke_credential=revoke_gateway_key,
+            # A bound lease commits the turn to one model; an unbound one
+            # returns "" and the argv is unchanged.
+            bound_model=bound_model_for,
         ),
         broker=ShadowDispatchBroker(),
         shadow_log=ShadowObservationLog(
@@ -673,11 +700,7 @@ def _build_fable_director(
         ),
         evidence=evidence,
         repo_slug=config.repo,
-        # The routing view a dispatch is judged against. Derived from the dials
-        # that actually decide a route, so an operator changing the model or the
-        # harness moves the revision and a director working from the old view is
-        # refused with ROUTE_POLICY_REVISION_STALE rather than silently served.
-        route_policy_revision=f"{config.model}:{config.execution_runtime.value}"[:64],
+        route_policy_revision=_route_policy_revision(config),
         stage_labels=_driver_stage_labels(config),
         stop_event=stop_event,
         usd_budget_per_boundary=config.director_shadow_usd_budget,
@@ -686,7 +709,64 @@ def _build_fable_director(
         # registry's own honesty rule forbids.
         usd_ceiling=lambda: config.director_shadow_usd_ceiling,
         is_enabled=lambda: config.director_shadow_enabled,
+        # --- the Plan canary (#11541) ------------------------------------
+        # The actuator exists only when this repository is the named canary
+        # repository. Not "constructed and dormant": an operator who has not
+        # armed the dial has no dispatcher in their process at all, which is
+        # the same object-graph standard #11535 and #11537 held themselves to.
+        dispatcher=(
+            _build_plan_worker_runner(
+                config=config, subprocess_runner=subprocess_runner
+            )
+            if config.fable_plan_canary_armed()
+            else None
+        ),
+        # Live, so clearing the dial stops the NEXT dispatch rather than the
+        # next restart. The dispatcher object surviving a rollback is harmless
+        # precisely because this predicate, not its existence, is what lets it
+        # run — and re-arming then needs nothing re-authored.
+        is_covered=lambda phase: plan_canary_covers(config, phase=phase),
+        latch=PlanCanaryLatch(ttl_seconds=CANARY_SLOT_TTL_SECONDS),
     )
+
+
+CANARY_SLOT_TTL_SECONDS = 3600
+"""How long one issue may hold the brokered-Plan slot before it is reclaimed.
+
+A backstop, not the normal release: the director frees the slot on the tick its
+issue leaves PLAN. This covers the abnormal exit — an exception between claim
+and release — so a crash cannot idle the canary for the process lifetime.
+Generous relative to a plan (``fable_plan_worker_timeout_seconds`` defaults to
+ten minutes for the whole batch), because reclaiming a slot that is still in
+use would produce the concurrent second director the latch exists to prevent.
+"""
+
+
+def _build_plan_worker_runner(
+    *, config: HydraFlowConfig, subprocess_runner: SubprocessRunner
+) -> PlanWorkerRunner:
+    """The Plan canary's actuator, assembled at the composition root (#11541)."""
+    from plan_worker_runner import PlanWorkerRunner
+
+    return PlanWorkerRunner(
+        config=config,
+        # The same routing view the director's dispatches are judged against,
+        # so a worker cannot be spawned under a revision the broker refused.
+        route_policy_revision=_route_policy_revision(config),
+        # Injected, never built inside a method (#11602/#11615).
+        runner=subprocess_runner,
+    )
+
+
+def _route_policy_revision(config: HydraFlowConfig) -> str:
+    """The routing view a dispatch is judged against.
+
+    Derived from the dials that actually decide a route, so an operator
+    changing the model or the harness moves the revision and a director working
+    from the old view is refused with ``ROUTE_POLICY_REVISION_STALE`` rather
+    than silently served.
+    """
+    return f"{config.model}:{config.execution_runtime.value}"[:64]
 
 
 def _build_driver_manager(

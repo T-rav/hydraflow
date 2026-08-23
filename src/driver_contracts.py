@@ -165,6 +165,38 @@ class RejectionReason(StrEnum):
     BUDGET_EXHAUSTED = "budget_exhausted"
     SANDBOX_UNVERIFIED = "sandbox_unverified"
 
+    # Added by #11541, when dispatch stopped being hypothetical. Both describe
+    # failures that cannot occur while nothing is dispatched, which is why
+    # neither existed before. Additive members only: the schema version gates
+    # consumers of the *shape*, and no field changed.
+    ROUTE_UNAVAILABLE = "route_unavailable"
+    """No route or credential could be obtained for an otherwise legal request.
+
+    The gateway was unreachable, refused the governed route, or minted nothing.
+    Distinct from :attr:`ROUTE_POLICY_REVISION_STALE`, which means the director
+    worked from a routing view that had moved: this one means the route was
+    right and could not be obtained, so a caretaker retry is the correct
+    response and an operator should look at the gateway rather than the policy.
+    """
+
+    WORKER_TIMEOUT = "worker_timeout"
+    """The child exceeded its own wall-clock budget and was reaped with its group.
+
+    Deliberately not folded into :attr:`BUDGET_EXHAUSTED`, which counts a
+    *USD* budget a director may not spend against: an operator reading a spike
+    in one of these needs to know whether the fleet ran out of money or a
+    worker ran out of time, and one counter cannot say both.
+    """
+
+    CANARY_SLOT_HELD = "canary_slot_held"
+    """Another issue holds this repository's single brokered-Plan slot.
+
+    Its own code rather than :attr:`FANOUT_OVERFLOW`, which counts a *role*
+    exceeding its concurrency: folding the two together would make the canary's
+    "one active Fable-directed issue per repository" bound unreadable in the
+    evidence it is supposed to be proved by.
+    """
+
 
 def has_anthropic_provenance(served_model: str) -> bool:
     """True when *served_model*'s id is an Anthropic one by the allow-list.

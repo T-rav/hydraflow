@@ -442,3 +442,90 @@ def test_the_dial_the_predicate_reads_is_declared_on_the_real_config() -> None:
     from config import HydraFlowConfig
 
     assert "gateway_enforcement_canary_repo" in HydraFlowConfig.model_fields
+
+
+# --------------------------------------------------------------------------
+# ADR-0141 §D1's named gap: the Fable director's own per-turn credential
+# --------------------------------------------------------------------------
+
+
+class TestTheDirectorsOwnKeyIsRoutedLikeEverythingElse:
+    """§D1 named ``service_registry._mint_director_key`` as the one gateway
+    minting path outside the canary's table, and assigned routing it to #11541.
+
+    The consequence it stated precisely: with ``GATEWAY_GOVERNED_REPOS`` armed
+    for a repository whose director is enabled, an **unbound** v1 mint for a
+    governed repository is refused, so the enforcement canary and the Fable
+    director were mutually exclusive for one repository. These tests are that
+    exclusivity being removed.
+    """
+
+    def test_a_disarmed_host_mints_unrouted_exactly_as_before(
+        self, tmp_path: Path
+    ) -> None:
+        from route_enforcement import enforce_director_route
+
+        config = _Config(tmp_path, gateway_enforcement_canary_repo="")
+
+        assert enforce_director_route(config, model="claude-sonnet-4-6") is None
+
+    def test_a_canary_armed_elsewhere_mints_unrouted(self, tmp_path: Path) -> None:
+        from route_enforcement import enforce_director_route
+
+        config = _Config(tmp_path, gateway_enforcement_canary_repo="acme/other")
+
+        assert enforce_director_route(config, model="claude-sonnet-4-6") is None
+
+    def test_the_canary_repository_binds_the_directors_key(
+        self, tmp_path: Path
+    ) -> None:
+        from route_enforcement import enforce_director_route
+
+        config = _Config(tmp_path)
+        _write_policies(tmp_path)
+
+        assert enforce_director_route(config, model="claude-sonnet-4-6") is not None
+
+    def test_the_director_is_not_attributed_to_a_worker_account(
+        self, tmp_path: Path
+    ) -> None:
+        # A director is a parent, and ADR-0137 S2 requires its key never to
+        # reach a worker account. ``canonical_worker_role`` returning None for
+        # it is the mechanism, and the v2 request carries the None through.
+        from route_enforcement import enforce_director_route
+
+        config = _Config(tmp_path)
+        _write_policies(tmp_path)
+        route = enforce_director_route(config, model="claude-sonnet-4-6")
+
+        assert route is not None
+        assert route.worker_role is None
+
+    def test_the_bound_model_is_the_one_the_turn_must_name(
+        self, tmp_path: Path
+    ) -> None:
+        # The gateway's data plane refuses a body naming any other model, so a
+        # bound turn has to spawn on exactly this id.
+        from route_enforcement import enforce_director_route
+
+        config = _Config(tmp_path)
+        _write_policies(tmp_path)
+        route = enforce_director_route(config, model="claude-sonnet-4-6")
+
+        assert route is not None
+        assert route.effective_model == "claude-sonnet-4-6"
+
+    def test_a_policy_that_cannot_serve_the_director_refuses_the_mint(
+        self, tmp_path: Path
+    ) -> None:
+        # Fail closed, and on the far side of the trust boundary: a z.ai-locked
+        # repository cannot serve a literal Claude family, and the director's
+        # mint is refused before a credential exists rather than falling
+        # through to an ambient one.
+        from route_enforcement import enforce_director_route
+
+        config = _Config(tmp_path)
+        _write_policies(tmp_path, _zai_policy())
+
+        with pytest.raises(EnforcementRefused):
+            enforce_director_route(config, model="claude-opus-4-7")

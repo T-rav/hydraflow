@@ -50,6 +50,7 @@ from hydraflow_gateway.routing_store import RoutingPolicyStore
 from prompt_telemetry import rewrite_command_model
 from route_shadow import (
     build_route_context,
+    dialled_route_stages,
     local_account_availability,
     policy_snapshot_path,
     repo_class_for,
@@ -190,6 +191,57 @@ def enforce_canary_route(
         effective_model=effective,
         dispatch_id=uuid.uuid4().hex,
         mint_attempt_id=uuid.uuid4().hex,
+    )
+
+
+DIRECTOR_PRINCIPAL = "fable-director"
+"""The Fable director's principal id. Not a catalogued worker role by design.
+
+``routing_policy.canonical_worker_role`` returns ``None`` for it, and that is
+correct rather than a gap: a director is a *parent* whose key must deliberately
+never reach a worker account (ADR-0137 S2). It still needs a bound route — see
+:func:`enforce_director_route`.
+"""
+
+
+def enforce_director_route(
+    config: HydraFlowConfig, *, model: str
+) -> EnforcedRoute | None:
+    """The route for the Fable director's own per-turn credential (#11541).
+
+    ADR-0141 §D1 named this as the one gateway-minting path outside the canary's
+    table: ``service_registry._mint_director_key`` passed no route, so it minted
+    **v1, unbound**, even for the canary repository — which meant that with
+    ``GATEWAY_GOVERNED_REPOS`` armed for a repository whose director was
+    enabled, the director's mint was refused and the two features were mutually
+    exclusive for one repository. §D1 assigned routing it to #11541, and this is
+    it.
+
+    The director is not a worker spawn, and nothing here pretends otherwise: the
+    v2 request carries ``worker_role=None``, which the wire contract already
+    allows, so the key is bound to a *route* without being attributable to a
+    worker account. Everything else is the ordinary governed path — same
+    predicate, same resolver, same mint — because a second, bespoke minting path
+    for one principal is exactly the fifth-seam problem §D1 was written about.
+
+    Returns ``None`` when the canary is disarmed or does not cover this
+    repository, and the caller then mints v1 exactly as before: outside the
+    slice, byte-identical. There is deliberately **no** local ``canary_armed``
+    check before the delegate: :func:`enforce_canary_route` already answers
+    that, and a second copy would be a guard no test could kill — mutation
+    testing found exactly that on the first draft of this function.
+    """
+    return enforce_canary_route(
+        config=config,
+        principal_id=DIRECTOR_PRINCIPAL,
+        stages=dialled_route_stages(
+            config=config,
+            requested_provider="gateway",
+            transport_provider="gateway",
+        ),
+        final_provider="gateway",
+        final_model=model,
+        request_face=RequestFace.AGENTIC,
     )
 
 

@@ -1416,6 +1416,7 @@ async def run_lightweight_agent(
     provider: str | None = None,
     response_schema: dict[str, object] | None = None,
     gateway_client: GatewayControlClient | None = None,
+    spawn_out: dict[str, object] | None = None,
 ) -> SimpleResult:
     """One-shot lightweight LLM call with credit detection + telemetry.
 
@@ -1464,6 +1465,16 @@ async def run_lightweight_agent(
     an issue in scope MUST pass its labels (``issue.labels`` /
     ``issue.tags``); without them only the repo-declared class is enforced
     (``tests/test_prompt_gate_completeness.py`` pins every call site).
+
+    *spawn_out*, when given, is filled with what this seam actually spawned:
+    ``model`` (the model the child really ran on, **after** any enforcement
+    rewrite), ``provider``, ``usage`` (real token counts when the backend
+    reported them), and ``route_decision_id`` when a governed route bound the
+    spawn. It exists because ``SimpleResult`` carries reply text and nothing
+    else, and a caller that must *record* which model served a request — a
+    brokered worker's receipt, #11541 — cannot honestly report the model it
+    asked for. Purely additive: every existing caller omits it and nothing
+    about the spawn changes.
     """
     from exception_classify import (  # noqa: PLC0415
         exc_detail,
@@ -1638,6 +1649,21 @@ async def run_lightweight_agent(
         return result
     finally:
         try:
+            if spawn_out is not None:
+                # Filled in the ``finally`` so it is populated on every exit —
+                # including the timeout and soft-failure returns above, where a
+                # caller minting a receipt still has to say which model it was
+                # that failed.
+                spawn_out.update(
+                    {
+                        "model": model,
+                        "provider": transport_provider,
+                        "usage": dict(usage_stats),
+                        "route_decision_id": (
+                            "" if route is None else route.decision.decision_id
+                        ),
+                    }
+                )
             if record_row:
                 record_inference_telemetry(
                     config,

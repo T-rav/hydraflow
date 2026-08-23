@@ -158,6 +158,7 @@ class DirectorTurnRunner:
         sandbox_base_dir: Path | None = None,
         mint_credential: Callable[[], Awaitable[dict[str, str]]] | None = None,
         revoke_credential: Callable[[dict[str, str]], Awaitable[None]] | None = None,
+        bound_model: Callable[[dict[str, str]], str] | None = None,
         source_env: Mapping[str, str] | None = None,
     ) -> None:
         # Injected, never built inside a method: that is what lets the sandbox
@@ -169,6 +170,13 @@ class DirectorTurnRunner:
         self._sandbox_base_dir = sandbox_base_dir
         self._mint_credential = mint_credential
         self._revoke_credential = revoke_credential
+        # #11541: when the mint was route-BOUND, the gateway will only serve a
+        # body naming the model the binding names, so a bound turn has to say
+        # which model it is running on. Injected rather than imported so this
+        # module keeps knowing nothing about the gateway's client, and ``None``
+        # (or an unbound lease, which returns "") leaves the argv exactly what
+        # it was under shadow mode.
+        self._bound_model = bound_model
         # The environment the allow-list filters. ADR-0137 S1 is explicit that
         # this is "an allow-list filter over the parent environment, not a
         # literal ``env -i``: PATH, LANG, LC_ALL and TMPDIR are inherited by
@@ -285,7 +293,7 @@ class DirectorTurnRunner:
                 )
                 try:
                     result = await self._runner.run_simple(
-                        self._argv(),
+                        self._argv(self._bound_model_of(credential)),
                         cwd=str(paths.cwd),
                         env=env,
                         timeout=self._timeout_seconds,
@@ -312,9 +320,21 @@ class DirectorTurnRunner:
 
     # -- internals ----------------------------------------------------------
 
-    def _argv(self) -> list[str]:
-        """The spawn's argv. ``--resume`` is absent and must stay absent."""
-        return [
+    def _bound_model_of(self, credential: dict[str, str]) -> str:
+        """The model this turn's lease binds it to, or ``""`` when unbound."""
+        if self._bound_model is None or not credential:
+            return ""
+        return self._bound_model(credential)
+
+    def _argv(self, bound_model: str = "") -> list[str]:
+        """The spawn's argv. ``--resume`` is absent and must stay absent.
+
+        ``--model`` appears **only** when the turn's credential is route-bound.
+        An unbound turn is spawned with the argv it always had, so the shadow
+        path stays byte-identical; a bound one must name the binding's model or
+        the gateway refuses its first request as ``model-not-bound`` (#11541).
+        """
+        argv = [
             self._cli_path,
             "-p",
             "--output-format",
@@ -329,6 +349,9 @@ class DirectorTurnRunner:
             "--disallowedTools",
             ",".join(DIRECTOR_DENIED_TOOLS),
         ]
+        if bound_model:
+            argv += ["--model", bound_model]
+        return argv
 
     async def _mint(self) -> dict[str, str]:
         """Mint this turn's short-lived virtual gateway key (S2).
