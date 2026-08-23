@@ -169,6 +169,12 @@ class SpawnCounter:
         if spawn_out is not None:
             spawn_out.update(
                 {
+                    # The seam sets this on the last line before it starts the
+                    # process. A double that filled `model` without it models a
+                    # CAUGHT MINT FAILURE — which is a real thing the seam does
+                    # and a different one, and omitting it here silently turned
+                    # this file's dispatch non-vacuity into a refusal test.
+                    "spawned": True,
                     "model": kwargs["model"],
                     "provider": "gateway",
                     "usage": {"input_tokens": 100, "output_tokens": 20},
@@ -465,6 +471,10 @@ class TestInsideTheBoundSomethingActuallyHappens:
         assert len(calls) == 1
 
     async def test_the_boundary_records_a_receipt(self, tmp_path: Path) -> None:
+        # Asserted on the STATUS, not just the count: this is the file's
+        # dispatch non-vacuity, and a refusal receipt satisfies a bare count
+        # just as well as an accepted one — which is exactly what happened when
+        # this file's spawn double was left without ``spawned``.
         rows, _calls = await _run(
             tmp_path,
             name="armed",
@@ -473,7 +483,8 @@ class TestInsideTheBoundSomethingActuallyHappens:
             phase=DriverPhase.PLAN,
         )
 
-        assert len(rows[0]["dispatched"]) == 1
+        assert [r["status"] for r in rows[0]["dispatched"]] == ["accepted"]
+        assert [node["dispatched"] for node in rows[0]["would_dispatch"]] == [True]
 
     async def test_the_armed_evidence_differs_from_the_shadow_evidence(
         self, tmp_path: Path, baseline

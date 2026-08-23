@@ -461,6 +461,15 @@ class PlanWorkerRunner:
         budget: float,
     ) -> WorkerReceipt:
         child_spawn_id = uuid.uuid4().hex
+        # Minted before the spawn so every path AFTER it can name the child that
+        # ran — including the refusals. A refusal that dropped it made a reaped
+        # child look like one that never started.
+        lineage = WorkerLineage(
+            driver_id=lease.driver_id,
+            epoch=lease.epoch,
+            child_spawn_id=child_spawn_id,
+            depth=1,
+        )
         spawn_out: dict[str, object] = {}
         started = datetime.now(UTC)
         try:
@@ -485,20 +494,48 @@ class PlanWorkerRunner:
                 spawn_out=spawn_out,
             )
         except TimeoutError:
-            # The seam normally converts its own deadline into a soft rc=-1; a
-            # bare TimeoutError means the child outlived even that, and its
-            # process group has already been reaped by ``run_simple``.
+            # A deadline that escaped the seam rather than one it handled: the
+            # seam converts its OWN timeout into ``spawn_out["timed_out"]`` and
+            # a soft rc=-1, which lands below. So this fires for work outside
+            # that inner try — ``gate_prompt``, the route-shadow and enforcement
+            # threads, the Docker client (``socket.timeout`` IS ``TimeoutError``)
+            # before a child exists, or the seam's outer ``finally`` after one
+            # did. An earlier comment here asserted the second case only, and
+            # attached a spawn id on the strength of it.
             return _refusal(
                 request,
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
+                lineage=_child_lineage(spawn_out, lineage),
             )
         except Exception as exc:
             # A burnt credit balance is factory-wide and must not be converted
             # into a worker refusal (dark-factory 2.2); everything else is this
             # child's failure and becomes a receipt rather than an exception a
             # shadow-shaped observer would have to carry into the allocator.
+            #
+            # **No lineage on this path**, and the honest reason is not the
+            # one an earlier version of this comment gave. It named
+            # ``GatewayMintError`` and the seam's ``provider 'gateway' requires
+            # the Claude harness`` guard, and **neither reaches here**: the mint
+            # error is caught inside the seam and becomes a soft ``rc=-1`` (that
+            # is the case the ``spawned`` guard below exists for), and the
+            # harness guard is a ``ValueError``, which is a likely bug and is
+            # re-raised by ``reraise_on_credit_or_bug`` below — besides being
+            # unreachable from a call site that passes ``tool="claude"``
+            # literally.
+            #
+            # What actually lands here is the work *around* the spawn:
+            # ``_terminal_gateway_runner`` failing to open a Docker client, a
+            # non-``EnforcementRefused`` failure from the route-shadow or
+            # enforcement threads, a non-``PromptGateBlockedError`` from the
+            # CH-6 gate — all before a child exists — and ``cleanup()`` in the
+            # seam's outer ``finally``, which is the one case where a child
+            # *did* run. That last one is a known under-attribution: a receipt
+            # with no spawn id for a child that had one. Under-claiming is the
+            # safe direction for the discriminator, and the alternative is
+            # claiming a spawn on every case above it.
             reraise_on_credit_or_bug(exc)
             logger.warning(
                 "plan_worker_runner: #%d %s could not be dispatched: %s",
@@ -509,10 +546,26 @@ class PlanWorkerRunner:
             return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
 
         requested = str(spawn_out.get("model", "") or "")
-        if not requested:
-            # The seam returned before it spawned anything — a CH-6 block or an
-            # enforcement refusal. No inference happened, so there is no served
-            # model to record and nothing to bill.
+        if not spawn_out.get("spawned"):
+            # The seam returned without starting a process. FOUR ways in,
+            # and the last two are why this guard reads ``spawned`` rather than
+            # ``model``:
+            #
+            # * the CH-6 gate and an ``EnforcementRefused`` return *before* the
+            #   seam's try block, so they fill no ``model`` (the refusal does
+            #   leave ``refused``/``refused_outcome``, which ``_refusal_for_spawn``
+            #   reads below);
+            # * a ``GatewayMintError`` is neither fatal nor a likely bug, so the
+            #   seam CATCHES it and its ``finally`` fills ``model`` anyway;
+            # * ``run_simple`` itself can fail to start anything — a
+            #   ``DockerRunner`` whose daemon is down, a ``HostRunner`` with no
+            #   CLI binary — which the seam also swallows.
+            #
+            # Keying on ``model`` let the second fall through to the ACCEPTED
+            # receipt below, and setting ``spawned`` before ``run_simple`` let
+            # the third: a worker recorded as accepted, with a spawn id, a
+            # served model and zero cost, for a child that never existed. In
+            # the canary's own evidence record, twice.
             refusal = _refusal_for_spawn(spawn_out)
             logger.info(
                 "plan_worker_runner: #%d %s never spawned: %s/%s -> %s",
@@ -533,6 +586,7 @@ class PlanWorkerRunner:
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
+                lineage=_child_lineage(spawn_out, lineage),
             )
         # The model the CLI *reported*, when it reported one. When it did not,
         # the requested id is recorded and ``model_observed`` says so rather
@@ -549,7 +603,10 @@ class PlanWorkerRunner:
                 served,
             )
             return _refusal(
-                request, RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE, decision
+                request,
+                RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
+                decision,
+                lineage=_child_lineage(spawn_out, lineage),
             )
 
         text = (result.stdout or "")[:MAX_ARTIFACT_CHARS]
@@ -567,12 +624,7 @@ class PlanWorkerRunner:
             request_id=request.request_id,
             idempotency_key=request.idempotency_key,
             status=ReceiptStatus.ACCEPTED,
-            lineage=WorkerLineage(
-                driver_id=lease.driver_id,
-                epoch=lease.epoch,
-                child_spawn_id=child_spawn_id,
-                depth=1,
-            ),
+            lineage=lineage,
             worker_role=request.worker_role,
             transport=WorkerTransport.BROKERED,
             requested_model=request.model_requirement,
@@ -674,6 +726,7 @@ def _refusal(
     decision: PlanRouteDecision,
     *,
     status: ReceiptStatus = ReceiptStatus.REJECTED,
+    lineage: WorkerLineage | None = None,
 ) -> WorkerReceipt:
     """A real receipt for a real refusal, naming no served model.
 
@@ -682,18 +735,64 @@ def _refusal(
     it would put a mis-resolved id on a receipt in the one field whose validator
     exists to make that a validation error, which is the smuggling path rather
     than the evidence.
+
+    ``lineage`` is the opposite case and is passed on the refusals that follow a
+    **real spawn**: a child that ran to its deadline and was reaped did exist,
+    was billed, and had a spawn id, and a receipt that hid that would make a
+    dispatched child indistinguishable from one that was never started. It is
+    what tells the two emitters of ``WORKER_TIMEOUT`` apart, and what keeps the
+    worker tree from reporting ``dispatched: false`` for a child that ran.
     """
     return WorkerReceipt(
         request_id=request.request_id,
         idempotency_key=request.idempotency_key,
         status=status,
         reason_code=reason,
+        lineage=lineage,
         worker_role=request.worker_role,
         transport=WorkerTransport.BROKERED,
         requested_model=request.model_requirement,
         route_policy_revision=decision.route_policy_revision,
         output_contract_ok=False,
     )
+
+
+def _child_lineage(
+    spawn_out: dict[str, object], lineage: WorkerLineage
+) -> WorkerLineage | None:
+    """*lineage* when a child actually started, ``None`` when none did.
+
+    One rule for every refusal that can follow a spawn, rather than one per
+    ``except`` clause. Which clause fired says nothing useful: the seam handles
+    its own deadline and converts it to a soft ``rc=-1``, so a ``TimeoutError``
+    that *escapes* it comes from the work around the spawn — the CH-6 gate, the
+    route-shadow and enforcement threads, a Docker socket (``socket.timeout``
+    IS ``TimeoutError``) — which happen before a child exists, or from the seam's
+    outer ``finally``, which happens after one did.
+
+    ``spawn_out["spawned"]`` is set from ``run_simple``'s **outcome**: it
+    returned, or it timed out. Both imply a process — neither runner
+    implementation returns for one that failed to start, and only a started
+    process can outlive a deadline.
+
+    The residual runs the other way now, and is named rather than hidden: a
+    child that started but whose call ended some third way — a Docker
+    ``attach_socket`` failing after ``container.start()`` succeeded, or the
+    seam's ``cleanup()`` raising in its outer ``finally`` — reads *unspawned*
+    and loses its lineage. **Under**-claiming, which is the safe direction for
+    a discriminator whose whole job is to stop a receipt saying a child ran
+    when none did.
+
+    An earlier version keyed on ``model`` instead, reasoning that the seam fills
+    it once it has "got as far as spawning" — and that was wrong in production:
+    a ``GatewayMintError`` is neither fatal nor a likely bug, so the seam
+    catches it, converts it to a soft ``rc=-1``, and its ``finally`` fills
+    ``model`` anyway. No child had started, and the receipt said ``ACCEPTED``.
+    The unit test did not catch it because its double raised the mint error
+    *out* of the seam, which is not what the seam does — a double more
+    convenient than the thing it stands for.
+    """
+    return lineage if spawn_out.get("spawned") else None
 
 
 def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:

@@ -335,14 +335,42 @@ async def test_the_capsule_offers_only_the_roles_the_phase_allows(
     assert '"reviewer"' not in runner.prompts[0]
 
 
-async def test_the_reconstruction_is_recorded_rather_than_assumed(
-    tmp_path: Path,
-) -> None:
+async def test_the_capsule_marker_is_true_by_construction(tmp_path: Path) -> None:
+    """A schema marker, not a measurement — and named as one.
+
+    This was ``test_the_reconstruction_is_recorded_rather_than_assumed`` and it
+    asserted a pydantic default nothing in ``src/`` ever writes: it could not
+    fail for any production reason, and its name claimed the opposite. The
+    marker stays (it is on-disk schema), the claim is corrected, and the real
+    guarantee is pinned where it can actually break — the argv guard in
+    ``tests/architecture/test_director_no_authority.py``.
+    """
     director, log = _director(tmp_path, FakeTurnRunner(_yield_turn()))
 
     await _observe(director)
 
     assert log.recent()[0].capsule_reconstructed_fresh is True
+
+
+async def test_nothing_writes_the_capsule_marker(tmp_path: Path) -> None:
+    # The half that makes the test above honest: it is a default, so say so
+    # rather than letting a future reader mistake it for an observation again.
+    # Scans fable_director only, which is the sole site constructing
+    # ShadowObservation — narrower than the claim's "nothing in src/", and
+    # sufficient exactly while that stays true.
+    import ast
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[1]
+    source = ast.parse((root / "src" / "fable_director.py").read_text(encoding="utf-8"))
+    written = {
+        keyword.arg
+        for node in ast.walk(source)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+    }
+
+    assert "capsule_reconstructed_fresh" not in written
 
 
 # --------------------------------------------------------------------------

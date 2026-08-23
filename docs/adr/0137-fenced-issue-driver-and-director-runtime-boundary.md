@@ -551,7 +551,7 @@ telemetry file's schema.
 
 **Three refusal codes were added to the contract module**, additively:
 `ROUTE_UNAVAILABLE` (no route or credential could be obtained for an otherwise
-legal request), `WORKER_TIMEOUT` (the child outlived its own wall-clock budget)
+legal request), `WORKER_TIMEOUT` (a wall-clock budget ran out — the child outlived its own, or the batch's shared one was already spent and the request was refused rather than started)
 and `CANARY_SLOT_HELD` (another issue holds this repository's one slot). None
 of the three can occur while nothing is dispatched, which is why none existed
 before; folding them into `FANOUT_OVERFLOW` or `BUDGET_EXHAUSTED` would make
@@ -581,14 +581,35 @@ than issuing a fresh GitHub read: C1 makes that view a cache of the label the
 driver re-read at this boundary, and giving an observer its own port would hand
 authority to the component that must not have any.
 
-**Arming both canaries has one gateway-side prerequisite, stated here rather
-than discovered.** A brokered child mints with `principal_id` = its worker role,
-which `routing_policy.canonical_worker_role` resolves — so with the ADR-0141
-enforcement canary *also* armed for the same repository, that repository's
-routing policy must already admit `planner` / `architect` / `explorer` at the
-one-shot face, or every brokered child is refused. The two dials are otherwise
-independent by design: one governs credential binding, the other governs
-dispatch.
+**Arming both canaries has one policy-side prerequisite, stated here rather
+than discovered — and it is narrower than it first looks.** A brokered child
+mints with `principal_id` = its worker role, which
+`routing_policy.canonical_worker_role` resolves. So with the ADR-0141
+enforcement canary *also* armed for the same repository, any policy that
+**matches** a brokered child must be able to serve it: a matching policy whose
+account pool cannot reach an Anthropic lane refuses every brokered child.
+
+A policy that does *not* match one is harmless, which is the half worth being
+exact about: an unmatched role yields `ROLE_NOT_IN_SET`, no policy wins, and
+`explain` falls through to `_legacy_decision`, which returns **selected** /
+`no-policy-applies` with the effective model the spawn already had — the
+`PLAN_TIER_CATALOG` id — so the child runs, on a bound v2 key, unchanged. An
+empty snapshot behaves the same way.
+
+Two dimensions decide whether a policy matches at all, and the safety-relevant
+reading is the opposite of the intuitive one. A policy that names **no** roles
+matches every brokered child (an empty `match.roles` means *all* roles); a
+policy that **does** name roles matches one only if it names `planner`,
+`architect` or `explorer` — so an `implementer`-only policy is inert here
+rather than hostile. `match.principal_ids` is a separate dimension and can
+exclude a brokered child even with `roles` empty.
+
+The prerequisite is **policy-side, not gateway-side**: the snapshot lives under
+the repository's own data root and the check is `enforce_canary_route` on the
+HydraFlow side (ADR-0141 §D1). The gateway's own `route_mint` never looks at a
+worker role, and `ONE_SHOT` is already in its mintable face set. The two dials
+are otherwise independent by design: one governs credential binding, the other
+governs dispatch.
 
 **S2's credential proof is converted, and D2's request is answered.** The
 director's per-turn key now mints through the same bound v2 path as every other

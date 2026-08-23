@@ -187,7 +187,16 @@ class RejectionReason(StrEnum):
     """
 
     WORKER_TIMEOUT = "worker_timeout"
-    """The child exceeded its own wall-clock budget and was reaped with its group.
+    """A wall-clock budget ran out. Either the child outlived its own and was
+    reaped with its process group, or the batch's **shared** budget was already
+    spent when this request came up, so it was refused rather than started with
+    no time to run — in which case no child existed, nothing was reaped, and
+    nothing was billed. Both are the same fact for an operator (the work did not
+    fit in the time allowed) and the receipt's ``lineage`` tells them apart: a
+    child that ran carries one, a request that was never started does not. That
+    is why :class:`WorkerLineage` is permitted on a non-``ACCEPTED`` receipt —
+    a reaped child existed, and a receipt that hid its spawn id would make it
+    indistinguishable from work that never began.
 
     Deliberately not folded into :attr:`BUDGET_EXHAUSTED`, which counts a
     *USD* budget a director may not spend against: an operator reading a spike
