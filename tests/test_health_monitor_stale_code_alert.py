@@ -18,7 +18,7 @@ import pytest
 import health_monitor_loop
 from config import Credentials, HydraFlowConfig
 from events import EventBus, EventType
-from health_monitor_loop import HealthMonitorLoop
+from health_monitor_loop import HealthMonitorLoop, _freshness
 
 
 @pytest.fixture
@@ -50,20 +50,18 @@ def hm_env(tmp_path: Path):
 
 def _stub_fetch_ok(monkeypatch) -> AsyncMock:
     mock_fetch = AsyncMock(return_value="")
-    monkeypatch.setattr(health_monitor_loop, "run_subprocess", mock_fetch)
+    monkeypatch.setattr(_freshness, "run_subprocess", mock_fetch)
     return mock_fetch
 
 
 def _stub_fetch_fails(monkeypatch) -> AsyncMock:
     mock_fetch = AsyncMock(side_effect=RuntimeError("fetch failed"))
-    monkeypatch.setattr(health_monitor_loop, "run_subprocess", mock_fetch)
+    monkeypatch.setattr(_freshness, "run_subprocess", mock_fetch)
     return mock_fetch
 
 
 def _stub_commits_behind(monkeypatch, value: int | None) -> None:
-    monkeypatch.setattr(
-        health_monitor_loop, "get_commits_behind", lambda base_ref: value
-    )
+    monkeypatch.setattr(_freshness, "get_commits_behind", lambda base_ref: value)
 
 
 async def test_no_prs_dependency_is_silent_noop(hm_env, monkeypatch) -> None:
@@ -80,9 +78,7 @@ async def test_fetch_failure_degrades_no_op(hm_env, monkeypatch) -> None:
     _stub_fetch_fails(monkeypatch)
     # get_commits_behind should never even be consulted after a failed fetch.
     called = AsyncMock()
-    monkeypatch.setattr(
-        health_monitor_loop, "get_commits_behind", lambda base_ref: called()
-    )
+    monkeypatch.setattr(_freshness, "get_commits_behind", lambda base_ref: called())
 
     await hm._check_stale_code()
 

@@ -30,8 +30,8 @@ _SRC = _REPO / "src"
 GRANDFATHERED_UNDECLARED: frozenset[str] = frozenset(
     {
         "src/acceptance_criteria.py::_build_command",
-        "src/agent.py::_build_pre_quality_review_command",
-        "src/agent.py::_run_skill_verifier",
+        "src/agent/_prequality.py::_build_pre_quality_review_command",
+        "src/agent/_skills.py::_run_skill_verifier",
         "src/discover_runner.py::_build_command",
         "src/implement_spec_reviewer.py::run",
         "src/plan_reviewer.py::_build_command",

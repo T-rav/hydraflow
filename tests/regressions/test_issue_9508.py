@@ -30,6 +30,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests.loop_module_scan import loop_source_files
+
 SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"
 
 # Context-manager callables that bound an enclosed ``await`` (asyncio.timeout /
@@ -94,7 +96,7 @@ def _unbounded_communicate_lines(tree: ast.Module) -> list[int]:
 
 def test_no_background_loop_awaits_unbounded_communicate() -> None:
     offenders: dict[str, list[int]] = {}
-    for path in sorted(SRC_DIR.rglob("*_loop.py")):
+    for path in loop_source_files(SRC_DIR):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         lines = _unbounded_communicate_lines(tree)
         if lines:

@@ -126,7 +126,7 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
   duplicate class names manually — `test_no_dead_duplicate_model_class_definitions`
   runs on every PR via `make quality` and fails the build on a dead merge-artifact
   duplicate (Rule 5, Trigger C fired per #10867).
-- **Implementation agent** (`src/agent.py:AgentRunner`): When adding new model
+- **Implementation agent** (`src/agent/_runner.py:AgentRunner`): When adding new model
   classes, the agent must search for existing classes with the same name before
   creating a new definition.
 - No runtime behaviour changes — this is a development and review discipline.

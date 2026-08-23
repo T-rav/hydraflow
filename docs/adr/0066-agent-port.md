@@ -36,5 +36,5 @@ Method signatures are kept identical to `AgentRunner` so structural subtype chec
 ## Related
 
 - `src/ports.py:AgentPort` — the port definition
-- `src/agent.py:AgentRunner`, `src/base_runner.py:BaseRunner` — concrete implementations
+- `src/agent/_runner.py:AgentRunner`, `src/base_runner.py:BaseRunner` — concrete implementations
 - [ADR-0044](0044-hydraflow-principles.md) — four-layer architecture

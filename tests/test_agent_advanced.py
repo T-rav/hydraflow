@@ -275,7 +275,7 @@ class TestLoadPlanFallback:
         (plan_dir / "issue-42.md").write_text("# Plan for Issue #42\n\nPlan body\n")
 
         runner = AgentRunner(config, event_bus)
-        with patch("agent.logger") as mock_logger:
+        with patch("agent._plan.logger") as mock_logger:
             runner._load_plan_fallback(42)
         mock_logger.warning.assert_called_once()
 
@@ -318,7 +318,7 @@ class TestBuildPromptFallbackAndTruncation:
             comments=[],
         )
         runner = AgentRunner(config, event_bus)
-        with patch("agent.logger") as mock_logger:
+        with patch("agent._prompts.logger") as mock_logger:
             prompt, _ = await runner._build_prompt_with_stats(issue)
         mock_logger.error.assert_called_once()
         # Should still produce a valid prompt without a plan section

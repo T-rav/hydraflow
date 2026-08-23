@@ -47,6 +47,8 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path
 
+from tests.loop_module_scan import loop_source_files
+
 SRC = Path(__file__).resolve().parent.parent / "src"
 
 # Spawn primitives that ALWAYS indicate an LLM subprocess spawn regardless of
@@ -342,5 +344,11 @@ def find_violations_in_file(path: Path) -> list[UnprotectedSwallow]:
 
 
 def iter_supervised_loop_files() -> list[Path]:
-    """Every top-level ``src/*_loop.py`` — the ``BaseBackgroundLoop`` convention."""
-    return sorted(SRC.glob("*_loop.py"))
+    """Every source file of every background loop — module OR package.
+
+    A bare ``src.glob("*_loop.py")`` stops seeing a loop the moment it is
+    decomposed into a package, and this audit would then pass over the very
+    ``except Exception`` blocks it exists to check. ``loop_source_files``
+    flattens both shapes; see ``tests/loop_module_scan.py``.
+    """
+    return loop_source_files(SRC)

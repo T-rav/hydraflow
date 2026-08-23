@@ -120,14 +120,31 @@ def test_no_spawner_bypasses_the_gated_seams() -> None:
 _RUNNER_EXECUTE_EXEMPT: tuple[str, ...] = ()
 
 
+def _runner_source_files(src_dir: Path) -> list[Path]:
+    """Top-level ``*.py`` plus every file of a top-level package.
+
+    A runner that outgrows one file becomes a package (``src/agent/``, the mass
+    roster shape — #11547). ``src_dir.glob("*.py")`` stops seeing it, and every
+    ``self._execute`` call site inside it drops out of this pin. Walking the
+    package keeps the scan on the code rather than on a filename.
+    """
+    files = list(src_dir.glob("*.py"))
+    for pkg in sorted(src_dir.iterdir()):
+        if pkg.is_dir() and (pkg / "__init__.py").is_file():
+            files.extend(pkg.glob("*.py"))
+    return sorted(files)
+
+
 def _base_runner_modules(src_dir: Path = SRC) -> tuple[str, ...]:
-    """Enumerate top-level ``*.py`` in *src_dir* defining a BaseRunner subclass.
+    """Enumerate ``src/`` modules defining a BaseRunner subclass, ``src``-relative.
 
     AST-derived (``class X(BaseRunner)`` / ``class X(mod.BaseRunner)``) so the
     module list can never rot the way the hand-maintained tuple did (#10000).
+    Paths are ``src``-relative POSIX strings so a decomposed runner reports
+    ``agent/_quality.py``, not a bare basename that could collide.
     """
     modules: list[str] = []
-    for path in sorted(src_dir.glob("*.py")):
+    for path in _runner_source_files(src_dir):
         tree = ast.parse(path.read_text(), filename=path.name)
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -137,7 +154,7 @@ def _base_runner_modules(src_dir: Path = SRC) -> tuple[str, ...]:
                 for base in node.bases
             }
             if "BaseRunner" in bases:
-                modules.append(path.name)
+                modules.append(path.relative_to(src_dir).as_posix())
                 break
     return tuple(modules)
 
@@ -177,7 +194,18 @@ def test_every_runner_execute_call_passes_issue_labels() -> None:
     """
     modules = _base_runner_modules()
     # Sanity floor: if derivation ever breaks the pin must not pass vacuously.
-    core = {"agent.py", "planner.py", "reviewer.py", "triage.py"}
+    # ``agent/`` is a package (#11547 batch 4): its BaseRunner-derived slices
+    # are where the ``self._execute`` call sites live, so the floor names the
+    # files, not the old ``agent.py`` basename.
+    core = {
+        "agent/_runner.py",
+        "agent/_prequality.py",
+        "agent/_quality.py",
+        "agent/_skills.py",
+        "planner.py",
+        "reviewer.py",
+        "triage.py",
+    }
     assert core <= set(modules), (
         f"BaseRunner subclass derivation lost core runner modules: "
         f"{sorted(core - set(modules))} — _base_runner_modules is broken."

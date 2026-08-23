@@ -5,7 +5,7 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0045](0045-trust-architecture-hardening.md) (establishes the trust fleet that this ADR supervises)
-- **Enforced by:** `src/trust_fleet_sanity_loop.py:TrustFleetSanityLoop` (the meta-observer); `src/health_monitor_loop.py:HealthMonitorLoop._check_sanity_loop_staleness` (the dead-man-switch watching the meta-observer); `tests/test_health_monitor_sanity_stall.py` (runtime enforcement test).
+- **Enforced by:** `src/trust_fleet_sanity_loop.py:TrustFleetSanityLoop` (the meta-observer); `src/health_monitor_loop/_stall.py:HealthMonitorStallMixin._check_sanity_loop_staleness` (the dead-man-switch watching the meta-observer); `tests/test_health_monitor_sanity_stall.py` (runtime enforcement test).
 
 ## Context
 
@@ -52,6 +52,6 @@ If a proposal fails all three (wants to add a loop that watches sanity), it's vi
 
 ## Implementation notes
 
-The `_SANITY_STALL_MULTIPLIER = 3` in `health_monitor_loop.py` is chosen so the dead-man-switch fires after missing 3 scheduled ticks. At the default 10-minute interval that's a 30-minute silence before a page. This is the *maximum* time the fleet can be unmonitored before a human is notified.
+The `_SANITY_STALL_MULTIPLIER = 3` in `health_monitor_loop/_common.py` is chosen so the dead-man-switch fires after missing 3 scheduled ticks. At the default 10-minute interval that's a 30-minute silence before a page. This is the *maximum* time the fleet can be unmonitored before a human is notified.
 
 The dead-man-switch has its own dedup (`_sanity_stall_dedup`) so a prolonged silence fires exactly one `sanity-loop-stalled` issue, not one per `HealthMonitorLoop` tick (~1 minute).

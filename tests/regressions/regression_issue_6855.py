@@ -7,9 +7,15 @@ block (line 460). If the Hindsight client raises ``AuthenticationError`` or
 processing continues with the next suggestion. The outer handler at line 464
 also lacks a ``reraise_on_credit_or_bug`` guard.
 
-Affected sites:
-- ``src/health_monitor_loop.py:460`` — per-item ``except Exception: continue``
-- ``src/health_monitor_loop.py:464`` — outer ``except Exception: pass``
+Affected sites (both inside
+``HealthMonitorLoop._run_harness_suggestion_ingestion_cycle``, which now lives
+in ``src/health_monitor_loop/_heavy.py`` after the #11547 decomposition):
+- the per-item ``except Exception: continue``
+- the outer ``except Exception: pass`` wrapping the whole cycle
+
+Anchored on the METHOD, not on a line number in a file: the line numbers in the
+original issue rotted the moment the loop was decomposed, and a path that no
+longer exists makes this test fail for the wrong reason.
 
 Expected behaviour after fix:
   - ``AuthenticationError`` and ``CreditExhaustedError`` propagate up from
@@ -18,6 +24,17 @@ Expected behaviour after fix:
 
 These tests assert the *correct* behaviour and are RED against the current
 (buggy) code.
+
+STATUS (2026-08-23, #11547 batch 4): still RED. The #6855 guard was never
+added at either site. The line-window anchors above (``445 <= ln <= 475`` /
+``abs(ln - approx_line) <= 15``) had drifted off the method years ago, so both
+tests were matching an empty window and passing VACUOUSLY. Re-anchoring them on
+the enclosing METHOD — which the god-class decomposition forced, since the old
+path no longer exists — restored the real assertion and it fails, correctly.
+Marked ``xfail`` (the ``regression_issue_6630.py`` convention) rather than
+fixed: the decomposition PR moves code verbatim and changes no behaviour, and
+adding ``reraise_on_credit_or_bug`` here changes what escapes a heavy-pass
+cycle under credit exhaustion. Filed as #11664; drop the markers with the fix.
 """
 
 from __future__ import annotations
@@ -31,17 +48,19 @@ SRC = Path(__file__).resolve().parent.parent.parent / "src"
 
 REQUIRED_GUARD = "reraise_on_credit_or_bug"
 
-#: (file, approx_line, short description) from the issue findings.
-KNOWN_UNGUARDED_SITES: list[tuple[str, int, str]] = [
+#: The method that owned both sites in the issue findings, and the file it
+#: lives in today. One entry per (module, method) — the two handlers inside it
+#: are checked together, since both must carry the guard.
+INGESTION_SITE = (
+    "health_monitor_loop/_heavy.py",
+    "_run_harness_suggestion_ingestion_cycle",
+)
+
+#: Every known site from the issue, as (module, enclosing method, description).
+KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
     (
-        "health_monitor_loop.py",
-        460,
-        "per-item except Exception: continue in harness suggestion ingestion",
-    ),
-    (
-        "health_monitor_loop.py",
-        464,
-        "outer except Exception: pass wrapping harness suggestion ingestion",
+        *INGESTION_SITE,
+        "except Exception blocks in harness suggestion ingestion",
     ),
 ]
 
@@ -51,7 +70,7 @@ KNOWN_UNGUARDED_SITES: list[tuple[str, int, str]] = [
 # ---------------------------------------------------------------------------
 
 
-def _except_exception_handlers(tree: ast.Module) -> list[ast.ExceptHandler]:
+def _except_exception_handlers(tree: ast.AST) -> list[ast.ExceptHandler]:
     """Return all ``except Exception`` handler nodes in *tree*."""
     handlers: list[ast.ExceptHandler] = []
     for node in ast.walk(tree):
@@ -75,15 +94,30 @@ def _handler_calls_reraise_guard(handler: ast.ExceptHandler) -> bool:
     return False
 
 
-def _unguarded_handlers(filepath: Path) -> list[tuple[int, ast.ExceptHandler]]:
-    """Return ``(lineno, handler)`` pairs for every ``except Exception``
-    that does **not** call ``reraise_on_credit_or_bug``.
+def _method_node(filepath: Path, method: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """Return the ``def``/``async def`` named *method* in *filepath*."""
+    tree = ast.parse(filepath.read_text(), filename=str(filepath))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == method
+        ):
+            return node
+    raise AssertionError(
+        f"{filepath.name} no longer defines {method}() — the guard has lost its "
+        "anchor and would pass vacuously. Re-point it at the method's new home."
+    )
+
+
+def _unguarded_handlers(
+    filepath: Path, method: str
+) -> list[tuple[int, ast.ExceptHandler]]:
+    """Return ``(lineno, handler)`` pairs for every ``except Exception`` inside
+    *method* that does **not** call ``reraise_on_credit_or_bug``.
     """
-    source = filepath.read_text()
-    tree = ast.parse(source, filename=str(filepath))
     return [
         (h.lineno, h)
-        for h in _except_exception_handlers(tree)
+        for h in _except_exception_handlers(_method_node(filepath, method))
         if not _handler_calls_reraise_guard(h)
     ]
 
@@ -99,18 +133,21 @@ class TestHealthMonitorSuggestionIngestionBlocksHaveReraise:
     ``reraise_on_credit_or_bug``.
     """
 
+    @pytest.mark.xfail(
+        reason="#6855 guard never landed; re-anchored off rotted line windows "
+        "in #11547 batch 4 — tracked by #11664",
+        strict=False,
+    )
     def test_suggestion_ingestion_except_blocks_have_reraise_guard(self) -> None:
-        filepath = SRC / "health_monitor_loop.py"
+        module, method = INGESTION_SITE
+        filepath = SRC / module
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
-        # Filter to the two known sites near lines 460 and 464
-        suggestion_lines = [ln for ln, _ in unguarded if 445 <= ln <= 475]
+        unguarded = _unguarded_handlers(filepath, method)
 
-        assert not suggestion_lines, (
-            f"health_monitor_loop.py has unguarded ``except Exception`` "
-            f"block(s) in the suggestion ingestion region.\n"
-            f"Lines: {suggestion_lines}\n"
+        assert not unguarded, (
+            f"{module} has unguarded ``except Exception`` block(s) in "
+            f"{method}().\nLines: {[ln for ln, _ in unguarded]}\n"
             f"Auth/credit failures are silently swallowed — see issue #6855."
         )
 
@@ -119,22 +156,26 @@ class TestKnownSitesHaveReraiseGuard:
     """Parametrised check for each specific site from the issue findings."""
 
     @pytest.mark.parametrize(
-        ("filename", "approx_line", "desc"),
+        ("filename", "method", "desc"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
+    )
+    @pytest.mark.xfail(
+        reason="#6855 guard never landed; re-anchored off rotted line windows "
+        "in #11547 batch 4 — tracked by #11664",
+        strict=False,
     )
     def test_known_site_has_reraise_guard(
-        self, filename: str, approx_line: int, desc: str
+        self, filename: str, method: str, desc: str
     ) -> None:
         filepath = SRC / filename
         assert filepath.exists()
 
-        unguarded = _unguarded_handlers(filepath)
-        nearby = [ln for ln, _ in unguarded if abs(ln - approx_line) <= 15]
+        nearby = [ln for ln, _ in _unguarded_handlers(filepath, method)]
 
         assert not nearby, (
-            f"{filename}:{approx_line} ({desc}) — ``except Exception`` "
-            f"near line {nearby[0]} does not call reraise_on_credit_or_bug(). "
+            f"{filename}:{method}() ({desc}) — ``except Exception`` "
+            f"at line {nearby[0]} does not call reraise_on_credit_or_bug(). "
             f"Auth/credit failures are silently swallowed (issue #6855)."
         )
 

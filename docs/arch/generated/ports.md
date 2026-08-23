@@ -37,7 +37,7 @@ graph LR
 - Module: `src.ports`
 - Methods: `build_command`, `execute`, `verify_result`
 - Adapters:
-  - `AgentRunner` (`src.agent`)
+  - `AgentRunner` (`src.agent._runner`)
 - Fake: `FakeAgent` (`mockworld.fakes.fake_agent`)
 
 ### BotPRPort

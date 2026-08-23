@@ -73,7 +73,7 @@ Guidance is folded into the prompt at every phase, not just IMPLEMENT, including
 | Shape | `src/shape_coherence.py`, `src/shape_runner.py` |
 | Plan | `src/planner.py` |
 | Review | `src/reviewer.py`, `src/review_advisor.py` |
-| Implement | `src/agent.py` |
+| Implement | `src/agent/_runner.py` |
 | HITL | `src/hitl_runner.py` (cause-template prompt) |
 
 Each builder calls `fenced_steering_guidance` independently — there is no shared prompt-assembly path across phases — so the fence invariant is asserted per builder in tests, not once globally.

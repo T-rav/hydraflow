@@ -15,9 +15,11 @@ sandbox/MockWorld inject a fake. This pins:
 
 - ``_repo_probe`` returns exactly what the injected prober returns (True/False/
   None), forwarding the slug — i.e. it is a pure pass-through, not a spawn.
-- The loop module no longer references the ``run_subprocess_result`` spawn
-  primitive at all (the raw ``git ls-remote`` left ``health_monitor_loop.py``),
-  while ``_check_stale_code``'s grandfathered ``run_subprocess`` fetch stays.
+- The loop no longer references the ``run_subprocess_result`` spawn primitive
+  at ALL — checked across every module of the ``health_monitor_loop`` package,
+  not just its entry module, since the #11547 decomposition spread the loop
+  across mixins — while ``_check_stale_code``'s grandfathered ``run_subprocess``
+  fetch stays (in ``_freshness``, which owns that call site).
 """
 
 from __future__ import annotations
@@ -85,9 +87,24 @@ async def test_repo_probe_is_pure_delegation(
 
 
 def test_loop_module_no_longer_names_the_raw_spawn_primitive() -> None:
-    """The extracted probe removed ``run_subprocess_result`` from the loop
-    module namespace — the s51/s56 wedge class the seam guard prevents. The
-    grandfathered ``run_subprocess`` (``_check_stale_code``'s git fetch) stays.
+    """The extracted probe removed ``run_subprocess_result`` from the loop —
+    the s51/s56 wedge class the seam guard prevents. Scanned over the whole
+    package, so a mixin cannot smuggle the primitive back in. The
+    grandfathered ``run_subprocess`` (``_check_stale_code``'s git fetch) stays,
+    in the module that owns that call site.
     """
-    assert not hasattr(health_monitor_loop, "run_subprocess_result")
-    assert hasattr(health_monitor_loop, "run_subprocess")
+    package_dir = Path(health_monitor_loop.__file__).parent
+    modules = sorted(package_dir.glob("*.py"))
+    assert modules, "health_monitor_loop package is empty — the scan is vacuous"
+
+    naming_result = [
+        m.name for m in modules if "run_subprocess_result" in m.read_text()
+    ]
+    assert not naming_result, (
+        "the raw ``run_subprocess_result`` spawn is back in the loop: "
+        f"{naming_result}. It belongs behind the injected ``RepoProber`` seam."
+    )
+
+    from health_monitor_loop import _freshness
+
+    assert hasattr(_freshness, "run_subprocess")

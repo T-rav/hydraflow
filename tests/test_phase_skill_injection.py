@@ -78,7 +78,7 @@ class TestImplementSkillInjection:
         issue = TaskFactory.create(id=1, title="t", body="b")
         runner = AgentRunner(config, event_bus)
 
-        with patch("agent.discover_plugin_skills", return_value=fake_skills):
+        with patch("agent._prompts.discover_plugin_skills", return_value=fake_skills):
             prompt, _ = await runner._build_prompt_with_stats(issue)
 
         assert "superpowers:test-driven-development" in prompt
@@ -96,7 +96,7 @@ class TestImplementSkillInjection:
         issue = TaskFactory.create(id=1, title="t", body="b")
         runner = AgentRunner(config, event_bus)
 
-        with patch("agent.discover_plugin_skills", return_value=[]):
+        with patch("agent._prompts.discover_plugin_skills", return_value=[]):
             prompt, _ = await runner._build_prompt_with_stats(issue)
 
         assert "## Available Skills" not in prompt
@@ -112,7 +112,9 @@ class TestImplementSkillInjection:
         issue = TaskFactory.create(id=1, title="t", body="b")
         runner = AgentRunner(config, event_bus)
 
-        with patch("agent.discover_plugin_skills", return_value=_all_phase_skills()):
+        with patch(
+            "agent._prompts.discover_plugin_skills", return_value=_all_phase_skills()
+        ):
             prompt, _ = await runner._build_prompt_with_stats(issue)
 
         assert "## Available Skills" in prompt
