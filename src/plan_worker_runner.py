@@ -119,9 +119,12 @@ _REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
 
 #: Routing-policy refusal reasons that mean *the request was inadmissible*
 #: rather than *something operational is missing*. These map to
-#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing and the thing to
-#: edit is the policy; every other reason is ROUTE_UNAVAILABLE, where a
-#: caretaker retry is right and the operator should look at the gateway.
+#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing, whatever an
+#: operator edits; every other reason is ROUTE_UNAVAILABLE, where a caretaker
+#: retry is right once whatever is missing is supplied. The remedy for a hold
+#: may be a policy edit rather than a gateway one, so this does not say "look
+#: at the gateway" — an earlier version did, and it was wrong for every hold
+#: except an outage.
 #:
 #: Built from the resolver's own enum rather than from string literals, because
 #: the first draft of this set contained a member that does not exist
@@ -170,6 +173,13 @@ _OPERATIONAL_ROUTE_REASONS = frozenset(
         # operational is the correct reading of the case that can occur.
         DecisionReason.MATCHED_POLICY.value,
         DecisionReason.NO_POLICY_APPLIES.value,
+        # NOT one of those two, and an earlier comment here swept it in with
+        # them: ``_legacy_decision`` emits it HELD, so it raises at the outcome
+        # check rather than at the empty-model guard. It is unreachable for a
+        # different reason — ``route_shadow.build_route_context`` always
+        # constructs a ``LegacyRoute``, so ``context.legacy_route`` is never
+        # ``None`` on this path. Operational either way: nothing about the
+        # request is wrong.
         DecisionReason.NO_LEGACY_ROUTE.value,
     }
 )
@@ -691,9 +701,10 @@ def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
 
     The seam collapses a routing-policy refusal and a transport failure onto
     the same soft ``rc=-1``, so without the reason it left behind, both would
-    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator to retry and
-    look at the gateway. For an inadmissible route that is wrong twice: the
-    retry will never succeed, and the thing to edit is the policy.
+    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator the request was
+    fine and to retry once whatever is missing is supplied. For an inadmissible
+    route that is wrong: the retry will never succeed, and the thing to edit is
+    the policy.
     """
     # Classified on the REASON alone, deliberately. A previous draft short-
     # circuited on ``refused_outcome == held`` first, reasoning that a hold is

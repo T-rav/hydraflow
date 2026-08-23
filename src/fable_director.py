@@ -191,9 +191,14 @@ class FableDirector:
         )
         self._is_enabled = is_enabled
         self._ceiling_announced = False
-        # The canary half (#11541). All three are ``None`` under shadow mode and
-        # nothing below reads any of them, so an operator who has not named a
-        # canary repository runs exactly the object graph #11537 shipped.
+        # The canary half (#11541). All three are ``None`` only for a director
+        # hand-built without them — a test, or #11537's shape. A production
+        # ``fable_director`` build always passes all three, because making
+        # construction conditional on the dial made arming restart-required.
+        # What keeps a disarmed operator's boundary inert is ``is_covered``,
+        # not their absence; ``_dispatcher`` and ``_latch`` are read on EVERY
+        # boundary regardless of arming (the decision join in ``_record``, the
+        # slot release in ``_release_slot_if_moved_on``).
         # ``is_covered`` is a callable rather than a captured boolean for the
         # same reason the kill switch is: the dial is live, and clearing it must
         # stop the NEXT dispatch rather than the next restart.

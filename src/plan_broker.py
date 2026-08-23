@@ -21,10 +21,10 @@ into the dial arms nothing, and a slug-derived repository cannot fall into an
 armed canary.
 
 **The tier choice.** :func:`resolve_plan_model` is where the broker starts
-making a real model choice, and the whole of what it may depend on is three
-things: the requirement the director asked for, the role's catalogued entry,
-and whether this repository's lane can serve an Anthropic model at all. Not the
-issue text, not the time of day, not a previous decision. The answer is a
+making a real model choice, and the whole of what it may depend on is two
+things: the requirement the director asked for and the role's catalogued entry.
+Not the issue text, not the time of day, not a previous decision — and not the
+lane, which it deliberately does not ask about (see that function's docstring). The answer is a
 :class:`PlanRouteDecision` carrying a content-addressed id, the rule that fired,
 the source the tier came from, both revisions it was made against, and the input
 echoed back — the same contract ``hydraflow_gateway.routing_policy.explain``

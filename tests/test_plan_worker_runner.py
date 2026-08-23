@@ -393,10 +393,16 @@ class TestALiteralFamilyIsRefusedBeforeAnythingIsSpawned:
         it could not tell the case it names from any other. The double writes
         both fields because the seam always does, and ``held`` is the outcome
         the default ``on_unavailable`` actually produces.
+
+        The refusal happens **inside** the seam, so the seam IS entered — a
+        later version of this test overrode ``__call__`` without recording the
+        call and then asserted ``spawn.calls == []``, which could not fail and
+        asserted the opposite of what happens.
         """
 
         class PolicyRefused(SpawnDouble):
             async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
                 kwargs["spawn_out"]["refused"] = "literal-family-unsatisfiable"
                 kwargs["spawn_out"]["refused_outcome"] = "held"
                 return SimpleResult(stderr="policy rejected", returncode=-1)
@@ -405,7 +411,7 @@ class TestALiteralFamilyIsRefusedBeforeAnythingIsSpawned:
 
         receipts = await _dispatch(_runner(config, spawn), task, [_request()])
 
-        assert spawn.calls == []
+        assert len(spawn.calls) == 1
         assert (
             receipts[0].reason_code is RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
         )
