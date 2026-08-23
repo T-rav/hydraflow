@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import time
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -88,13 +89,21 @@ _REAL_MONOTONIC = time.monotonic
 
 @pytest.fixture(autouse=True)
 def _fake_batch_clock(monkeypatch: pytest.MonkeyPatch):
-    """A controllable ``time.monotonic`` for the batch deadline, patched on the
-    module under test so nothing else in the process sees a moved clock."""
+    """A controllable ``time.monotonic`` for the batch deadline.
+
+    Rebinds the **name** in the module under test, not an attribute on the
+    ``time`` module. ``plan_worker_runner`` does a plain ``import time``, so
+    ``plan_worker_runner.time`` IS ``sys.modules["time"]`` — patching an
+    attribute on it moves the clock for every library in the process, including
+    the asyncio event loop, whose own clock is ``time.monotonic``. Both of these
+    fixtures claimed to be module-local while doing exactly that, and one of
+    them advances the clock by four minutes inside a running async test.
+    """
     _CLOCK["offset"] = 0.0
     monkeypatch.setattr(
-        plan_worker_runner.time,
-        "monotonic",
-        lambda: _REAL_MONOTONIC() + _CLOCK["offset"],
+        plan_worker_runner,
+        "time",
+        SimpleNamespace(monotonic=lambda: _REAL_MONOTONIC() + _CLOCK["offset"]),
     )
 
 
@@ -230,6 +239,10 @@ class EnvelopeSpawn:
         )
         assert envelope is not None
         spawn_out = kwargs["spawn_out"]
+        # The seam sets this on the line before it starts the process. A double
+        # that filled `model` without it would model a caught mint failure —
+        # which is a thing the seam really does, and a different thing.
+        spawn_out["spawned"] = True
         spawn_out["model"] = kwargs["model"]
         spawn_out["provider"] = "gateway"
         spawn_out["usage"] = {"input_tokens": 100, "output_tokens": 20}
@@ -275,12 +288,6 @@ def _director(tmp_path: Path, spawn: object) -> FableDirector:
         is_covered=lambda phase: plan_canary_covers(config, phase=phase),
         latch=PlanCanaryLatch(ttl_seconds=900),
     )
-
-
-def _two_dispatch_director(tmp_path, spawn: object) -> FableDirector:
-    director = _director(tmp_path, spawn)
-    director._runner = TwoDispatchTurn()  # type: ignore[assignment]  # noqa: SLF001
-    return director
 
 
 async def _observe_two(director: FableDirector, issue: int) -> None:
@@ -514,5 +521,33 @@ class TestAChildThatRanIsDispatchedEvenWhenItsReceiptIsNotAccepted:
 
         assert dispatched == ran
         assert len(ran) == 1
-        # The predicate the scenario cannot tell apart, told apart.
+        # The predicate the scenario cannot tell apart, told apart. Both
+        # receipts are `expired` with reason `worker_timeout`; only the lineage
+        # differs, which is the entire discriminator.
         assert accepted != ran
+        assert {r["status"] for r in row.dispatched} == {"expired"}
+        assert {r["reason"] for r in row.dispatched} == {"worker_timeout"}
+
+    async def test_a_reaped_child_is_not_counted_as_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """A child that ran and did not finish cleanly is its own bucket.
+
+        Counting it as ``workers_refused`` put a child that consumed a worker
+        slot, a key and real spend in the same bucket as one that was never
+        started — the same conflation the tree's ``dispatched`` flag had.
+        """
+
+        class TimedOutChild(EnvelopeSpawn):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                kwargs["spawn_out"]["timed_out"] = True
+                return SimpleResult(stderr="timed out after 240s", returncode=-1)
+
+        director = _director(tmp_path, TimedOutChild(REAL_MODEL_USAGE))
+        await _observe(director, 7)
+
+        summary = director.shadow_log.summary()
+        assert summary["workers_expired"] == 1
+        assert summary["workers_refused"] == 0
+        assert summary["workers_dispatched"] == 1

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -59,15 +60,19 @@ def _elapse(seconds: float) -> None:
 def _fake_batch_clock(monkeypatch: pytest.MonkeyPatch):
     """A controllable ``time.monotonic`` for the batch deadline.
 
-    Patched on the module under test rather than globally: a global patch would
-    change the clock every other library in the process reads, and the point is
-    to move one budget forward, not to stop time.
+    Rebinds the **name** in the module under test, not an attribute on the
+    ``time`` module. ``plan_worker_runner`` does a plain ``import time``, so
+    ``plan_worker_runner.time`` IS ``sys.modules["time"]`` — patching an
+    attribute on it moves the clock for every library in the process, including
+    the asyncio event loop, whose own clock is ``time.monotonic``. Both of these
+    fixtures claimed to be module-local while doing exactly that, and one of
+    them advances the clock by four minutes inside a running async test.
     """
     _CLOCK["offset"] = 0.0
     monkeypatch.setattr(
-        plan_worker_runner.time,
-        "monotonic",
-        lambda: _REAL_MONOTONIC() + _CLOCK["offset"],
+        plan_worker_runner,
+        "time",
+        SimpleNamespace(monotonic=lambda: _REAL_MONOTONIC() + _CLOCK["offset"]),
     )
 
 
@@ -101,6 +106,10 @@ class SpawnDouble:
             )
             spawn_out.update(
                 {
+                    # The seam sets this on the line before it starts the
+                    # process. A double that filled `model` without it would
+                    # model a mint failure, not a spawn.
+                    "spawned": True,
                     "model": served,
                     "provider": "gateway",
                     "usage": {"input_tokens": 1000, "output_tokens": 200},
@@ -1005,13 +1014,30 @@ class TestOnlyAChildThatExistedCarriesASpawnId:
     """
 
     async def test_a_gateway_outage_names_no_child(self, config, task) -> None:
-        from gateway_mint_client import GatewayMintError
+        """The seam CATCHES a mint failure; it does not raise it at us.
 
-        spawn = SpawnDouble(raises=GatewayMintError("gateway unreachable"))
+        ``GatewayMintError`` is neither fatal nor a likely bug, so
+        ``run_lightweight_agent`` converts it to a soft ``rc=-1`` — and its
+        ``finally`` still fills ``model``. A double that raised the error out of
+        the seam modelled something production never does, and hid that keying
+        "a child ran" on ``model`` attributes a spawn id to a mint that produced
+        no child. This double does what the seam does.
+        """
+
+        class MintFailed(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                kwargs["spawn_out"].update(
+                    {"model": kwargs["model"], "provider": "gateway", "usage": {}}
+                )
+                return SimpleResult(stderr="gateway unreachable", returncode=-1)
+
+        spawn = MintFailed()
 
         receipts = await _dispatch(_runner(config, spawn), task, [_request()])
 
         assert receipts[0].lineage is None
+        assert receipts[0].status is not ReceiptStatus.ACCEPTED
 
     async def test_a_refusal_before_the_seam_names_no_child(self, config, task) -> None:
         # The CH-6 gate / enforcement-refusal shape: the seam returns without
@@ -1094,3 +1120,55 @@ class TestOnlyAChildThatExistedCarriesASpawnId:
         )
 
         assert receipts[0].lineage is not None
+
+    async def test_a_caught_mint_failure_is_never_recorded_as_accepted(
+        self, config, task
+    ) -> None:
+        """The live defect the honest double exposed, pinned.
+
+        A gateway outage reaches the seam's try block, so its ``finally`` fills
+        ``model`` — and the guard that was meant to catch "the seam returned
+        before it spawned anything" keyed on exactly that field. A mint failure
+        therefore fell through to the ACCEPTED receipt: a worker recorded as
+        accepted, with a spawn id, a served model and zero cost, for a child
+        that never existed, in the record ADR-0137 B5's bar is read from.
+
+        This predates the review chain — it shipped in #11655 and survived nine
+        passes, because every double raised the mint error out of the seam
+        instead of doing what the seam does with it.
+        """
+
+        class MintFailed(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                kwargs["spawn_out"].update(
+                    {"model": kwargs["model"], "provider": "gateway", "usage": {}}
+                )
+                return SimpleResult(stderr="gateway unreachable", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, MintFailed()), task, [_request()])
+
+        assert receipts[0].status is ReceiptStatus.REJECTED
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+        assert receipts[0].served_model is None
+        assert receipts[0].lineage is None
+        assert receipts[0].usd_cost == 0.0
+
+    async def test_a_failure_around_the_spawn_names_no_child(
+        self, config, task
+    ) -> None:
+        """The ``except Exception`` arm: work *around* the spawn, not the spawn.
+
+        What lands here is `_terminal_gateway_runner` failing to open a Docker
+        client, a non-`EnforcementRefused` failure from the route-shadow or
+        enforcement threads, or a non-`PromptGateBlockedError` from the CH-6
+        gate — all before a child exists. Mutation-checked: re-attaching a
+        lineage on this arm has to fail something, and until this test existed
+        it failed nothing.
+        """
+        spawn = SpawnDouble(raises=OSError("docker socket unavailable"))
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+        assert receipts[0].lineage is None

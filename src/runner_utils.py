@@ -1269,6 +1269,16 @@ async def _claude_cli_complete(
             if provider == _GATEWAY:
                 env = scrub_gateway_spawn_env(env)
             env.update(harness_env)
+        if served_out is not None:
+            # Recorded HERE, immediately before the process starts, because this
+            # is the only line that knows. Everything above can fail without a
+            # child existing — most importantly ``resolve_harness_env``, whose
+            # ``GatewayMintError`` is neither fatal nor a likely bug, so it is
+            # caught below and converted to a soft rc=-1 whose ``finally`` still
+            # fills ``model``. A caller inferring "a child ran" from the model
+            # would attribute a spawn id to a mint that never produced one
+            # (#11541).
+            served_out["spawned"] = True
         result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
         result = _unwrap_result_envelope(result, usage_out, served_out)
         raise_if_credit_exhausted(
@@ -1475,8 +1485,10 @@ async def run_lightweight_agent(
     (``tests/test_prompt_gate_completeness.py`` pins every call site).
 
     *spawn_out*, when given, is filled with what this seam actually spawned:
-    ``model`` (the model requested of the child, **after** any enforcement
-    rewrite), ``served_model`` (only when the CLI's own result envelope names
+    ``spawned`` (True only once a child process has been started — everything
+    else here is filled on paths where none was), ``model`` (the model requested
+    of the child, **after** any enforcement rewrite), ``served_model`` (only
+    when the CLI's own result envelope names
     one — absent means unobserved, never substituted), ``provider``, ``usage``
     (real token counts when the backend reported them), ``route_decision_id``
     when a governed route bound the spawn, ``timed_out`` when the deadline was

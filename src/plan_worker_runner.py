@@ -515,16 +515,26 @@ class PlanWorkerRunner:
             # child's failure and becomes a receipt rather than an exception a
             # shadow-shaped observer would have to carry into the allocator.
             #
-            # **No lineage on this path**, deliberately, and it is the one
-            # refusal after the ``try`` that gets none. An exception *escaping*
-            # the seam does not imply a child: ``run_lightweight_agent``
-            # converts a failed spawn into a soft ``rc=-1`` and fills
-            # ``spawn_out``, so what reaches here is the cases that raise
-            # BEFORE any process exists — a ``GatewayMintError`` from the mint,
-            # and the seam's own ``provider 'gateway' requires the Claude
-            # harness`` guard. Claiming a spawn id for those would break the
-            # discriminator ``WORKER_TIMEOUT``'s contract promises in this same
-            # commit, and would mark their tree node ``dispatched: true``.
+            # **No lineage on this path**, and the honest reason is not the
+            # one an earlier version of this comment gave. It named
+            # ``GatewayMintError`` and the seam's ``provider 'gateway' requires
+            # the Claude harness`` guard, and **neither reaches here**: the mint
+            # error is caught inside the seam and becomes a soft ``rc=-1`` (that
+            # is the case the ``spawned`` guard below exists for), and the
+            # harness guard is a ``ValueError``, which is a likely bug and is
+            # re-raised by the line above — besides being unreachable from a
+            # call site that passes ``tool="claude"`` literally.
+            #
+            # What actually lands here is the work *around* the spawn:
+            # ``_terminal_gateway_runner`` failing to open a Docker client, a
+            # non-``EnforcementRefused`` failure from the route-shadow or
+            # enforcement threads, a non-``PromptGateBlockedError`` from the
+            # CH-6 gate — all before a child exists — and ``cleanup()`` in the
+            # seam's outer ``finally``, which is the one case where a child
+            # *did* run. That last one is a known under-attribution: a receipt
+            # with no spawn id for a child that had one. Under-claiming is the
+            # safe direction for the discriminator, and the alternative is
+            # claiming a spawn on every case above it.
             reraise_on_credit_or_bug(exc)
             logger.warning(
                 "plan_worker_runner: #%d %s could not be dispatched: %s",
@@ -535,10 +545,19 @@ class PlanWorkerRunner:
             return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
 
         requested = str(spawn_out.get("model", "") or "")
-        if not requested:
-            # The seam returned before it spawned anything — a CH-6 block or an
-            # enforcement refusal. No inference happened, so there is no served
-            # model to record and nothing to bill.
+        if not spawn_out.get("spawned"):
+            # The seam returned without starting a process. Three ways in, and
+            # the third is why this guard reads ``spawned`` rather than
+            # ``model``: the CH-6 gate and an ``EnforcementRefused`` return
+            # *before* the seam's try block, so they fill nothing — but a
+            # ``GatewayMintError`` is neither fatal nor a likely bug, so the
+            # seam CATCHES it, converts it to a soft ``rc=-1``, and its
+            # ``finally`` fills ``model`` anyway.
+            #
+            # Keying on ``model`` therefore let a gateway outage fall through to
+            # the ACCEPTED receipt below: a worker recorded as accepted, with a
+            # spawn id, a served model and zero cost, for a child that never
+            # existed. In the canary's own evidence record.
             refusal = _refusal_for_spawn(spawn_out)
             logger.info(
                 "plan_worker_runner: #%d %s never spawned: %s/%s -> %s",
@@ -740,16 +759,26 @@ def _child_lineage(
     its own deadline and converts it to a soft ``rc=-1``, so a ``TimeoutError``
     that *escapes* it comes from the work around the spawn — the CH-6 gate, the
     route-shadow and enforcement threads, a Docker socket (``socket.timeout``
-    IS ``TimeoutError``) — which happen before a child exists, or from the outer
-    ``finally``, which happens after one did.
+    IS ``TimeoutError``) — which happen before a child exists, or from the seam's
+    outer ``finally``, which happens after one did.
 
-    ``spawn_out["model"]`` is the signal the code already trusts twenty lines
-    below to mean "the seam got as far as spawning", filled in the seam's own
-    ``finally`` before anything in the outer one can raise. Reusing it keeps
-    ``WORKER_TIMEOUT``'s two emitters tellable apart by the discriminator its
-    contract promises, instead of by a comment's assertion about a branch.
+    ``spawn_out["spawned"]`` is set by the seam on the **last line before** it
+    starts the process — the closest the seam can get, not a report from the
+    process itself. The residual is named rather than hidden: an exec that never
+    forks (a missing CLI binary raises ``OSError``, which the seam swallows to a
+    soft ``rc=-1``) still reads ``spawned``. That is one line's worth of
+    over-claim, against a whole category of it before.
+
+    An earlier version keyed on ``model`` instead, reasoning that the seam fills
+    it once it has "got as far as spawning" — and that was wrong in production:
+    a ``GatewayMintError`` is neither fatal nor a likely bug, so the seam
+    catches it, converts it to a soft ``rc=-1``, and its ``finally`` fills
+    ``model`` anyway. No child had started, and the receipt said ``ACCEPTED``.
+    The unit test did not catch it because its double raised the mint error
+    *out* of the seam, which is not what the seam does — a double more
+    convenient than the thing it stands for.
     """
-    return lineage if spawn_out.get("model") else None
+    return lineage if spawn_out.get("spawned") else None
 
 
 def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
