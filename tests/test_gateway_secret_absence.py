@@ -17,6 +17,14 @@ the one route that both *receives* a caller-supplied identity and *returns* live
 credential material, so it is the nearest thing in the system to a disclosure —
 and its decision half, which is echoed onto a lease view, an in-flight view, a
 terminal view and a durable ledger row, must carry none of it.
+
+ADR-0142 (#11540) extends it once more for multi-account pools. A pool moves the
+credential question from "the two compiled env pairs" to "a **file** a deployment
+writes", and adds a second write plane — the audited administrative overlay an
+operator drains an account with. Both halves land on the existing sweeps: the
+registry models prove a file-backed account can never grow a field to paste a key
+into, and the admin routes prove the mutation an operator makes under the control
+token never echoes it back.
 """
 
 from __future__ import annotations
@@ -38,7 +46,11 @@ import hydraflow_gateway.accounts as accounts_module
 import hydraflow_gateway.active_routes as active_routes_module
 import hydraflow_gateway.governed_preflight as governed_preflight_module
 import hydraflow_gateway.route_mint as route_mint_module
+import hydraflow_gateway.routing_account_admin as routing_account_admin_module
+import hydraflow_gateway.routing_account_state as routing_account_state_module
+import hydraflow_gateway.routing_accounts as routing_accounts_module
 import hydraflow_gateway.routing_audit as routing_audit_module
+import hydraflow_gateway.routing_fallback as routing_fallback_module
 import hydraflow_gateway.routing_policy as routing_policy_module
 import hydraflow_gateway.routing_store as routing_store_module
 import hydraflow_gateway.routing_workspace as routing_workspace_module
@@ -46,7 +58,7 @@ import operator_identity as operator_identity_module
 import route_shadow as route_shadow_module
 import routing_matrix as routing_matrix_module
 from dashboard_routes._gateway_policy_routes import build_gateway_policy_router
-from hydraflow_gateway.accounts import AccountView
+from hydraflow_gateway.accounts import AccountLiveFacts, AccountView
 from hydraflow_gateway.active_routes import (
     ActiveRouteRegistry,
     InFlightRouteView,
@@ -57,6 +69,7 @@ from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import VirtualKeyStore
 from hydraflow_gateway.ledger import GatewayLedgerRow
 from hydraflow_gateway.models import (
+    GatewayIdentity,
     GatewayRequestStatus,
     MintKeyRequest,
     ProviderBinding,
@@ -64,6 +77,15 @@ from hydraflow_gateway.models import (
     RouteBinding,
 )
 from hydraflow_gateway.route_mint import MintDecisionView, MintV2Request
+from hydraflow_gateway.routing_account_admin import (
+    AccountAdminAuditView,
+    AccountAdminEntry,
+    AccountStateRequest,
+    AccountStateResponse,
+    RevokeLeasesRequest,
+    RevokeLeasesResponse,
+)
+from hydraflow_gateway.routing_accounts import AccountRegistry, GatewayAccount
 from hydraflow_gateway.routing_policy import (
     AccountAvailability,
     LegacyRoute,
@@ -127,6 +149,10 @@ def _settings(tmp_path: Path) -> GatewaySettings:
         },
         ledger_path=tmp_path / "gateway.jsonl",
         body_dir=tmp_path / "bodies",
+        # ADR-0142's admin overlay is a hash-linked chain on disk. Pointed at
+        # ``tmp_path`` rather than the packaged default so a sweep reads the
+        # chain this test wrote, not one a previous run left in the repo.
+        account_state_dir=tmp_path / "accounts",
     )
 
 
@@ -328,6 +354,43 @@ async def test_every_payload_section_actually_returned_a_row(
         MintV2Request,
         MintDecisionView,
         RouteBinding,
+        # ADR-0142 (#11540) multi-account pools. ``GatewayAccount`` is the one
+        # model here that is populated from a **file a deployment writes**, so
+        # this guard is what keeps a future ``api_key`` field from existing for
+        # someone to paste a key into: the account names the *variable* that
+        # configures it (``credential_env``) and never a value. The registry that
+        # holds them is swept for the same reason a container is swept.
+        GatewayAccount,
+        AccountRegistry,
+        # The live pool facts fed into the account read model. It rides beside
+        # ``AccountView`` on the wire, so it inherits ``AccountView``'s guard.
+        AccountLiveFacts,
+        # ADR-0142's administrative overlay: two operator-supplied request bodies
+        # and the three read models the mutations answer with. The write half is
+        # swept for ADR-0140's reason — a body an operator composes is where a
+        # pasted credential enters — and the read half because both responses and
+        # the audit projection are echoes of a durable, hash-linked chain.
+        AccountStateRequest,
+        AccountStateResponse,
+        RevokeLeasesRequest,
+        RevokeLeasesResponse,
+        AccountAdminEntry,
+        AccountAdminAuditView,
+        # Flagged by a PR-#11653 review as missing from this sweep rather than
+        # failing it: ``GatewayIdentity`` is the non-secret half every valid
+        # virtual key resolves to, is stamped onto every ledger row and route
+        # view, and had simply never been listed.
+        GatewayIdentity,
+        # ``GatewayLedgerRow`` was flagged by the same review and is deliberately
+        # NOT here: it declares ADR-0138's four usage counters — ``input_tokens``,
+        # ``output_tokens``, ``cache_read_input_tokens``,
+        # ``cache_creation_input_tokens`` — which are billing counts, not
+        # credential material, and the substring marker ``token`` cannot tell the
+        # two apart. Listing it would mean loosening the marker set for all 24
+        # models above to admit one, which trades a real guard for a nominal
+        # entry. The row is already covered where it matters: ``_row()`` drives a
+        # populated row through ``/control/v2/routes/recent`` in ``_payloads``,
+        # so its wire projection is swept by every absence assertion in this file.
     ],
 )
 def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
@@ -356,9 +419,24 @@ def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
         gateway_policy_routes_module,
         governed_preflight_module,
         route_mint_module,
+        # ADR-0142 (#11540). ``routing_accounts`` is on the sweep despite being
+        # the module that *builds* credentials: it wraps a raw environment value
+        # into ``UpstreamSettings(api_key=SecretStr(...))`` and hands the result
+        # to ``AccountPool``, which is a plain object precisely so nothing here
+        # has to unwrap one again. The other three are pure projection and
+        # decision code over the pool.
+        routing_accounts_module,
+        routing_account_state_module,
+        routing_account_admin_module,
+        routing_fallback_module,
         # The one module that legitimately handles a credential: it must still
         # never unwrap a ``SecretStr`` into anything it returns or records.
         operator_identity_module,
+        # ``hydraflow_gateway.settings`` stays off this sweep, as it has since
+        # ADR-0138: it is the module that *validates* a credential's header
+        # shape, so unwrapping is its job rather than a leak. ``app`` is off for
+        # the same reason — it unwraps the control token once, to compare against
+        # an inbound header. Everything downstream of those two is swept.
     ],
 )
 def test_projection_module_never_unwraps_a_secret(module: object) -> None:
@@ -608,3 +686,92 @@ async def test_the_mint_decision_publishes_the_join_keys_it_is_meant_to(
     _, decision = await _governed_mint(tmp_path)
 
     assert "dec_abc" in decision
+
+
+# --------------------------------------------------------------------------
+# ADR-0142's account admin plane: the write surface an operator drains with
+# --------------------------------------------------------------------------
+
+_ADMIN_ACCOUNT = "legacy-zai-harness"
+_ADMIN_ACTOR = "operator@example.test"
+
+
+async def _admin_plane_payloads(tmp_path: Path) -> str:
+    """Drive every ADR-0142 admin route and return their joined response bodies.
+
+    Two authenticated writes and the audit projection that answers for them. A
+    mutation is the one place an operator's own string reaches a durable,
+    hash-linked chain that is later served back, so it gets the same treatment
+    ADR-0140's policy workspace did.
+    """
+    app = create_app(_settings(tmp_path), wall_clock=_NOW.timestamp)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://gateway.test"
+    ) as client:
+        responses = [
+            await client.patch(
+                f"/control/v2/accounts/{_ADMIN_ACCOUNT}/state",
+                headers=_AUTH,
+                json={
+                    "administrative_state": "draining",
+                    "expected_revision": 0,
+                    "actor": _ADMIN_ACTOR,
+                },
+            ),
+            # Revision 1: the state change above is itself one link in the chain,
+            # so a revoke composed against 0 would be refused as stale.
+            await client.post(
+                f"/control/v2/accounts/{_ADMIN_ACCOUNT}/revoke-leases",
+                headers=_AUTH,
+                json={"expected_revision": 1, "actor": _ADMIN_ACTOR},
+            ),
+            await client.get("/control/v2/accounts/audit", headers=_AUTH),
+        ]
+    # Checked before anything is scanned: a sweep over three 401 bodies would
+    # find no credential and prove nothing, having never reached the write plane.
+    assert [response.status_code for response in responses] == [200, 200, 200], [
+        response.text for response in responses
+    ]
+    return "\n".join(response.text for response in responses)
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        pytest.param(_ANTHROPIC_KEY, id="the-anthropic-upstream-key"),
+        pytest.param(_ZAI_KEY, id="the-zai-upstream-key-the-drained-account-uses"),
+        pytest.param(_CONTROL_TOKEN, id="the-control-token-that-authorised-the-write"),
+    ],
+)
+async def test_the_admin_plane_payloads_carry_no_credential(
+    tmp_path: Path, credential: str
+) -> None:
+    """Draining an account names it; it never quotes what reaches it."""
+    payload = await _admin_plane_payloads(tmp_path)
+
+    assert credential not in payload
+
+
+async def test_the_admin_plane_payloads_trip_no_canonical_secret_pattern(
+    tmp_path: Path,
+) -> None:
+    """The repo's canonical detector (ADR-0085) finds nothing to redact."""
+    payload = await _admin_plane_payloads(tmp_path)
+
+    assert scan_for_secrets(payload) == []
+
+
+@pytest.mark.parametrize(
+    "published",
+    [
+        pytest.param(_ADMIN_ACCOUNT, id="the-account-id-both-mutations-named"),
+        pytest.param(_ADMIN_ACTOR, id="the-actor-the-chain-attributes-them-to"),
+    ],
+)
+async def test_the_admin_plane_publishes_what_it_is_meant_to(
+    tmp_path: Path, published: str
+) -> None:
+    """The absence assertions are not vacuous: the audited join keys ARE present."""
+    payload = await _admin_plane_payloads(tmp_path)
+
+    assert published in payload

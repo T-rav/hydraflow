@@ -7,13 +7,19 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  EMPTY_ACCOUNT_ADMIN_VM,
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
+  adminRejectionMessage,
+  accountWriteGateMessage,
+  circuitTone,
   formatAge,
+  formatCapacity,
   formatCost,
   formatLatency,
   healthTone,
   statusTone,
+  toAccountAdmin,
   toGatewayAccounts,
   toGatewayLiveRoutes,
 } from '../gatewayRouting'
@@ -173,6 +179,197 @@ describe('toGatewayAccounts', () => {
     const raw = accountsEnvelope()
     raw.data.evidence_truncated = true
     expect(toGatewayAccounts(raw).evidenceTruncated).toBe(true)
+  })
+})
+
+describe('toGatewayAccounts pool facts (#11540, ADR-0142)', () => {
+  it('keeps an undeclared lease ceiling as null, never zero', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ lease_capacity: null }))
+    expect(vm.accounts[0].leaseCapacity).toBeNull()
+  })
+
+  it('keeps an undeclared request ceiling as null, never zero', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ request_capacity: null }))
+    expect(vm.accounts[0].requestCapacity).toBeNull()
+  })
+
+  it('carries a declared lease ceiling as a number', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ lease_capacity: 8 }))
+    expect(vm.accounts[0].leaseCapacity).toBe(8)
+  })
+
+  it('labels lease capacity as used over limit where a limit exists', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ lease_capacity: 8 }))
+    expect(vm.accounts[0].leaseCapacityLabel).toBe('2 / 8')
+  })
+
+  it('says "no limit" rather than inventing a ceiling nobody set', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ lease_capacity: null }))
+    expect(vm.accounts[0].leaseCapacityLabel).toBe('2 / no limit')
+  })
+
+  it('labels request capacity from the in-flight count, not the lease count', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ request_capacity: 4 }))
+    expect(vm.accounts[0].requestCapacityLabel).toBe('1 / 4')
+  })
+
+  it('defaults a missing circuit state to closed rather than blank', () => {
+    expect(toGatewayAccounts(accountsEnvelope()).accounts[0].circuitState).toBe('closed')
+  })
+
+  it('carries an open circuit through with its trip condition', () => {
+    const vm = toGatewayAccounts(
+      accountsEnvelope({
+        circuit_state: 'open',
+        circuit_last_condition: 'rate_limited',
+        circuit_reset_at: '2026-08-22T12:05:00Z',
+        circuit_consecutive_failures: 3,
+      }),
+    )
+    expect([
+      vm.accounts[0].circuitState,
+      vm.accounts[0].circuitLastCondition,
+      vm.accounts[0].circuitResetAt,
+      vm.accounts[0].circuitConsecutiveFailures,
+    ]).toEqual(['open', 'rate_limited', '2026-08-22T12:05:00Z', 3])
+  })
+
+  it('coerces a malformed failure count to zero rather than NaN', () => {
+    const vm = toGatewayAccounts(
+      accountsEnvelope({ circuit_consecutive_failures: 'lots' }),
+    )
+    expect(vm.accounts[0].circuitConsecutiveFailures).toBe(0)
+  })
+})
+
+describe('circuitTone', () => {
+  it('never renders a closed breaker as a success tone', () => {
+    expect(circuitTone('closed')).toBe('neutral')
+  })
+
+  it('renders an open breaker as danger', () => {
+    expect(circuitTone('open')).toBe('danger')
+  })
+})
+
+describe('formatCapacity', () => {
+  it('states an undeclared ceiling instead of drawing a zero', () => {
+    expect(formatCapacity(3, null)).toBe('3 / no limit')
+  })
+
+  it('renders used over limit where a limit exists', () => {
+    expect(formatCapacity(3, 10)).toBe('3 / 10')
+  })
+
+  it('never renders a negative use', () => {
+    expect(formatCapacity(-4, 10)).toBe('0 / 10')
+  })
+})
+
+function adminEnvelope(overrides = {}, dataOverrides = {}) {
+  return {
+    available: true,
+    source_state: 'available',
+    write_gate: 'enabled',
+    editable: true,
+    ...overrides,
+    data: {
+      schema_version: 1,
+      revision: 4,
+      chain_verified: true,
+      entries: [
+        {
+          seq: 3,
+          recorded_at: '2026-08-22T12:00:00Z',
+          mutation: 'set-state',
+          account_id: 'legacy-zai-harness',
+          actor: 'travis',
+          actor_authenticated_by: 'gateway-control-token',
+          prior_revision: 3,
+          next_revision: 4,
+          administrative_state: 'draining',
+          revoked_key_count: null,
+        },
+      ],
+      ...dataOverrides,
+    },
+  }
+}
+
+describe('toAccountAdmin', () => {
+  it('carries the revision the controls must be composed against', () => {
+    expect(toAccountAdmin(adminEnvelope()).revision).toBe(4)
+  })
+
+  it('projects the audited history', () => {
+    expect(toAccountAdmin(adminEnvelope()).entries[0].actor).toBe('travis')
+  })
+
+  it('takes editability from the backend gate rather than inferring it', () => {
+    expect(toAccountAdmin(adminEnvelope()).editable).toBe(true)
+  })
+
+  it('is not editable when the backend closed the gate', () => {
+    const vm = toAccountAdmin(
+      adminEnvelope({ editable: false, write_gate: 'dashboard-not-loopback' }),
+    )
+    expect(vm.editable).toBe(false)
+  })
+
+  it('carries the closed gate reason so the panel can explain itself', () => {
+    const vm = toAccountAdmin(
+      adminEnvelope({ editable: false, write_gate: 'dashboard-not-loopback' }),
+    )
+    expect(vm.writeGate).toBe('dashboard-not-loopback')
+  })
+
+  it('refuses to be editable when the audit chain does not verify', () => {
+    const vm = toAccountAdmin(adminEnvelope({}, { chain_verified: false }))
+    expect(vm.editable).toBe(false)
+  })
+
+  it('renders no history from a chain that does not verify', () => {
+    const vm = toAccountAdmin(adminEnvelope({}, { chain_verified: false }))
+    expect(vm.entries).toEqual([])
+  })
+
+  it('leaves the revision null when the overlay was never read', () => {
+    const vm = toAccountAdmin({ available: false, source_state: 'unreachable', data: null })
+    expect(vm.revision).toBeNull()
+  })
+
+  it('is never editable from an unavailable feed', () => {
+    const vm = toAccountAdmin({
+      available: false,
+      source_state: 'unreachable',
+      data: null,
+      editable: true,
+    })
+    expect(vm.editable).toBe(false)
+  })
+
+  it('returns the frozen empty VM for a malformed payload', () => {
+    expect(toAccountAdmin(null)).toEqual(EMPTY_ACCOUNT_ADMIN_VM)
+  })
+})
+
+describe('admin messages', () => {
+  it('renders a 409 as an instruction to reload, not as an error', () => {
+    expect(adminRejectionMessage('stale-revision')).toMatch(/Reload/)
+  })
+
+  it('names the account plane rather than the policy plane in the gate reason', () => {
+    expect(accountWriteGateMessage('dashboard-not-loopback')).toMatch(
+      /Account administration/,
+    )
+  })
+
+  it('falls back to the raw code rather than swallowing an unknown refusal', () => {
+    expect(adminRejectionMessage('some-future-code')).toBe('some-future-code')
+  })
+
+  it('returns an empty string when there is no refusal to explain', () => {
+    expect(adminRejectionMessage(null)).toBe('')
   })
 })
 

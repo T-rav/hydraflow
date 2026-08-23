@@ -1,12 +1,14 @@
-"""``gateway_control_reader`` — the dashboard's read-only gateway client (ADR-0138).
+"""``gateway_control_reader`` — the dashboard's gateway control client (ADR-0138).
 
 Unit-level: the reader's own contract — source-state honesty, payload validation,
-and the canonical role join — without a FastAPI route in the way. The route-level
-envelope is covered by ``tests/test_dashboard_gateway_routes.py``.
+and the canonical role join — plus the module's one mutation seam (ADR-0142),
+without a FastAPI route in the way. The route-level envelope and the operator
+write gate are covered by ``tests/test_dashboard_gateway_routes.py``.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,17 +20,22 @@ from pydantic import SecretStr
 from gateway_control_reader import (
     GATEWAY_CONTROL_TOKEN_ENV,
     GatewayControlReader,
+    GatewayControlWriter,
     GatewayReadResult,
     GatewaySourceState,
+    GatewayWriteState,
     annotate_active_routes,
     annotate_recent_routes,
     canonical_worker_role,
     reader_from_config,
+    writer_from_config,
 )
+from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.active_routes import ActiveRouteRegistry
 from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import VirtualKeyStore
 from hydraflow_gateway.models import MintKeyRequest, ProviderBinding, RepoClass
+from hydraflow_gateway.routing_account_admin import AdminRejection
 from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
@@ -253,3 +260,193 @@ def test_recent_route_annotation_leaves_the_payload_otherwise_intact() -> None:
     )
 
     assert payload["routes"][0]["status"] == "completed"
+
+
+# --------------------------------------------------------------------------
+# The one mutation seam (ADR-0142, #11540)
+# --------------------------------------------------------------------------
+
+
+def _writer(handler: object, *, control_token: str = _CONTROL_TOKEN) -> object:
+    def client_factory() -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[arg-type]
+
+    return GatewayControlWriter(
+        base_url="http://gateway.test",
+        control_token=control_token,
+        client_factory=client_factory,
+    )
+
+
+async def _set_state(writer: object) -> object:
+    return await writer.set_account_state(  # type: ignore[attr-defined]
+        "legacy-anthropic",
+        administrative_state=AdministrativeState.DRAINING,
+        expected_revision=0,
+        actor="travis",
+    )
+
+
+async def test_a_committed_mutation_is_reported_as_applied() -> None:
+    """The happy path is an explicit state, not merely the absence of an error."""
+
+    async def committed(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "account_id": "legacy-anthropic",
+                "administrative_state": "draining",
+                "revision": 1,
+            },
+        )
+
+    result = await _set_state(_writer(committed))
+
+    assert result.state is GatewayWriteState.APPLIED  # type: ignore[attr-defined]
+
+
+async def test_the_writer_sends_the_actor_it_was_given_and_no_other() -> None:
+    """Provenance travels as an argument, so no body can substitute its own."""
+    seen: list[dict[str, object]] = []
+
+    async def capture(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "account_id": "legacy-anthropic",
+                "administrative_state": "draining",
+                "revision": 1,
+            },
+        )
+
+    await _set_state(_writer(capture))
+
+    assert seen[0]["actor"] == "travis"
+
+
+async def test_an_unconfigured_writer_never_attempts_a_mutation() -> None:
+    """No control token is "not configured", and emphatically not a silent no-op."""
+
+    async def unreachable(_: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("an unconfigured writer must not open a request")
+
+    result = await _set_state(_writer(unreachable, control_token=""))
+
+    assert result.state is GatewayWriteState.NOT_CONFIGURED  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "state", "rejection"),
+    [
+        pytest.param(
+            409,
+            "stale-revision",
+            GatewayWriteState.REFUSED,
+            AdminRejection.STALE_REVISION,
+            id="a-lost-update-keeps-the-gateways-409",
+        ),
+        pytest.param(
+            404,
+            "unknown-account",
+            GatewayWriteState.REFUSED,
+            AdminRejection.UNKNOWN_ACCOUNT,
+            id="a-phantom-account-keeps-the-gateways-404",
+        ),
+        pytest.param(
+            503,
+            "audit-chain-broken",
+            GatewayWriteState.REFUSED,
+            AdminRejection.AUDIT_CHAIN_BROKEN,
+            id="an-unverifiable-chain-keeps-the-gateways-503",
+        ),
+        pytest.param(
+            409,
+            "some-future-code",
+            GatewayWriteState.REFUSED,
+            None,
+            id="an-unrecognised-refusal-code-is-reported-never-echoed",
+        ),
+        pytest.param(
+            401,
+            "invalid control credential",
+            GatewayWriteState.UNREACHABLE,
+            None,
+            id="this-proxys-own-credential-failure-is-not-the-operators",
+        ),
+        pytest.param(
+            413,
+            "body too large",
+            GatewayWriteState.UNREACHABLE,
+            None,
+            id="this-proxys-own-bound-failure-is-not-the-operators",
+        ),
+    ],
+)
+async def test_a_gateway_refusal_is_mapped_rather_than_relayed(
+    status: int,
+    detail: str,
+    state: GatewayWriteState,
+    rejection: AdminRejection | None,
+) -> None:
+    """Only the three statuses that describe the OPERATOR's request pass through."""
+
+    async def refused(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"detail": detail})
+
+    result = await _set_state(_writer(refused))
+
+    assert (result.state, result.rejection) == (state, rejection)  # type: ignore[attr-defined]
+
+
+async def test_a_transport_failure_on_a_write_is_unreachable_not_refused() -> None:
+    """Nobody knows whether it committed, so it is never reported as a refusal."""
+
+    async def dead(_: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("gateway down")
+
+    result = await _set_state(_writer(dead))
+
+    assert result.state is GatewayWriteState.UNREACHABLE  # type: ignore[attr-defined]
+
+
+async def test_a_drifted_success_payload_fails_closed_as_invalid() -> None:
+    """A mutation this dashboard could not verify is never reported as applied."""
+
+    async def drifted(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"account_id": "legacy-anthropic"})
+
+    result = await _set_state(_writer(drifted))
+
+    assert result.state is GatewayWriteState.INVALID  # type: ignore[attr-defined]
+
+
+async def test_a_revocation_reports_the_key_ids_the_gateway_ended() -> None:
+    """The blast radius is published, because a count nobody can see is not one."""
+
+    async def revoked(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "account_id": "legacy-anthropic",
+                "revoked_key_ids": ["key-1", "key-2"],
+                "revision": 3,
+            },
+        )
+
+    result = await _writer(revoked).revoke_account_leases(  # type: ignore[attr-defined]
+        "legacy-anthropic", expected_revision=2, actor="travis"
+    )
+
+    assert result.data["revoked_key_ids"] == ["key-1", "key-2"]
+
+
+def test_writer_from_config_reads_the_same_env_only_control_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One credential for the control plane; the write seam does not get a second."""
+    monkeypatch.setenv(GATEWAY_CONTROL_TOKEN_ENV, _CONTROL_TOKEN)
+
+    writer = writer_from_config(ConfigFactory.create())
+
+    assert writer._control_token == _CONTROL_TOKEN  # noqa: SLF001 — the seam under test

@@ -176,6 +176,12 @@ class RouteBinding(BaseModel):
     policy_id: str | None = Field(default=None, max_length=64)
     policy_revision: int = Field(default=0, ge=0)
     snapshot_hash: str = Field(default="", max_length=128)
+    # ADR-0142. Where in the account pool this lease landed, and how many
+    # bounded-fallback hops its dispatch had spent by the time it did. Both are
+    # fixed at mint like everything else here, so the ledger row a request
+    # produces says which hop paid for it.
+    fallback_position: int = Field(default=0, ge=0)
+    fallback_hops: int = Field(default=0, ge=0)
 
 
 class GatewayIdentity(BaseModel):

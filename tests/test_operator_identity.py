@@ -148,3 +148,15 @@ def test_the_identity_carries_no_credential_material() -> None:
     )
 
     assert identity is not None and _TOKEN not in repr(identity)
+
+
+def test_a_non_ascii_bearer_authenticates_nobody_rather_than_crashing() -> None:
+    """``compare_digest`` on ``str`` raises on non-ASCII; on bytes it does not.
+
+    A 500 on an authentication path is both a worse answer than a 401 and a
+    signal an attacker can probe with, so the comparison takes bytes.
+    """
+    assert (
+        authenticate_operator("Bearer ünïcödé", env={OPERATOR_TOKEN_ENV: _TOKEN})
+        is None
+    )
