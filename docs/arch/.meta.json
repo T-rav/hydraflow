@@ -18,9 +18,6 @@
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
-    "changelog.md": {
-      "content_sha": "539be3bd095e7c10c01c69775a1cad87ff294a0e346c1aae14973280b030a958"
-    },
     "coverage_matrix.md": {
       "content_sha": "a2f313db50a91f02f177d1a6c61824439da8050dd53ff8f42c9f4412dc43eaeb"
     },
@@ -48,9 +45,6 @@
     "ports.md": {
       "content_sha": "3158aad6d49ec374e5260d2d289b2222b3942a7b10fc36a53d4177abd6a3f0e0"
     },
-    "traceability_matrix.md": {
-      "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
-    },
     "ubiquitous-language-context-map.md": {
       "content_sha": "bec384b2a00e8dd2ff7216babcfd67d509285117ccd1b800fd7ff7f8a11edcba"
     },
@@ -61,5 +55,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "2ccb150c4d73490ccc9a526e24855dcd4c3d0be4e52cd5c173f0bef4a97138ed"
+  "content_sha": "735d1b9114bb8439b0a828b05d85485edf3421c9a0b4dcd3db6a7c43df178851"
 }
