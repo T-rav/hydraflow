@@ -107,9 +107,11 @@ _REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
         RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
     ),
-    PlanRouteReason.CAPABILITY_UNMAPPED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
+    # A hold, not a rejection: the tier table is the fixable thing and the
+    # request was not inadmissible. Mapping it to the terminal code — which an
+    # earlier draft did — put two holds for the same reason under opposite
+    # receipt codes inside one module.
+    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
     PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
         RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
     ),
@@ -132,7 +134,6 @@ _REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
 _INADMISSIBLE_ROUTE_REASONS = frozenset(
     {
         DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
-        DecisionReason.CAPABILITY_UNMAPPED.value,
         DecisionReason.MODEL_NOT_ALLOWED.value,
         # Two policies claim the same rung: an operator must resolve it, and a
         # retry against an unresolved conflict is an infinite one.
@@ -146,6 +147,12 @@ _OPERATIONAL_ROUTE_REASONS = frozenset(
     {
         # The snapshot will be back; nothing about the request is wrong.
         DecisionReason.SNAPSHOT_UNAVAILABLE.value,
+        # Emitted only as a HELD decision, and the remedy is the policy's
+        # requirement map gaining an entry — an edit, after which the same
+        # request succeeds. Listing it as inadmissible made it a dead member:
+        # the classification would have been consulted for a reason the
+        # resolver never rejects on.
+        DecisionReason.CAPABILITY_UNMAPPED.value,
         # Collapses "no credential for this account" with "a provider lock
         # excluded every account". The first is operational and the second is
         # policy, and the resolver does not distinguish them here — so the
@@ -671,14 +678,15 @@ def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
     look at the gateway. For an inadmissible route that is wrong twice: the
     retry will never succeed, and the thing to edit is the policy.
     """
-    # The outcome outranks the reason. ``capability-unmapped`` is emitted only
-    # as a HELD decision, and mapping a hold to a terminal code would contradict
-    # the held/rejected distinction ADR-0141 D3 draws — a hold is right with
-    # something missing, and telling an operator it is inadmissible sends them
-    # to the wrong place. This is also what makes ``refused_outcome`` a field
-    # something reads rather than one the seam writes for nobody.
-    if str(spawn_out.get("refused_outcome", "") or "") == "held":
-        return RejectionReason.ROUTE_UNAVAILABLE
+    # Classified on the REASON alone, deliberately. A previous draft short-
+    # circuited on ``refused_outcome == held`` first, reasoning that a hold is
+    # retryable whatever its reason — and that silently reversed the one code
+    # this canary is named after: ``RoutingAction.on_unavailable`` defaults to
+    # HOLD, so the ordinary ``provider_lock=zai-harness`` refusal arrives as
+    # HELD with ``literal-family-unsatisfiable``, and the guard turned it back
+    # into a retryable ``ROUTE_UNAVAILABLE``. The reason is the durable fact
+    # about the request; the outcome is a per-policy *dial* over what to do
+    # when a lane is unavailable, and it is the wrong axis to classify on.
     reason = str(spawn_out.get("refused", "") or "")
     if reason in _INADMISSIBLE_ROUTE_REASONS:
         return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE

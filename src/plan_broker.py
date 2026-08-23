@@ -395,9 +395,15 @@ class PlanCanaryLatch:
     is also the true state (nothing is dispatching). The TTL covers the other
     direction: a hold abandoned *within* a run — an exception between claim and
     release — expires rather than wedging the canary for the process lifetime.
+
+    ``ttl_seconds`` is **required**. It had a default, and the default came to
+    equal the batch budget's ceiling — recreating the coincidence that makes the
+    backstop able to reclaim a slot from a batch still running. A backstop whose
+    value can silently drift into the thing it is a backstop *for* is not one,
+    so there is nothing to drift: the composition root states it.
     """
 
-    def __init__(self, *, ttl_seconds: int = 900) -> None:
+    def __init__(self, *, ttl_seconds: int) -> None:
         self._ttl_seconds = ttl_seconds
         self._holder: int | None = None
         self._claimed_at: datetime | None = None

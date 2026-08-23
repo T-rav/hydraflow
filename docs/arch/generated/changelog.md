@@ -8,6 +8,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `b7c29af` — refactor(mockworld,tests): follow the PRPort reach-through allowlist and tighten one cluster *(2026-08-22)*
 - `f7a79e2` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages *(2026-08-22)*
+- `cea4754` — fix(review pass 3): land the batch budget, blank the join on refuse, read the canonical model *(2026-08-22)*
 - `3255903` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11541) *(2026-08-22)*
 - `1dfa921` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) (#11658) *(2026-08-22)*
 - `822a2eb` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) (#11656) (#11656) *(2026-08-22)*

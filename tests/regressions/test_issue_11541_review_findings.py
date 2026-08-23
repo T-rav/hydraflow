@@ -136,10 +136,10 @@ class SameRequestIdTurn:
 class EnvelopeSpawn:
     """A spawn that answers the way the real seam does — through the parser.
 
-    It does **not** write ``spawn_out["served_model"]`` itself. It builds the
-    CLI's own result envelope and runs it through the production
-    ``parse_result_envelope``, so the id that reaches the receipt is the one the
-    parser extracts and not one the double chose.
+    It does not **choose** the served model. It builds the CLI's own result
+    envelope and runs it through the production ``parse_result_envelope``, so
+    the id that reaches the receipt is the one the parser extracted; the double
+    only copies it across the two lines the real seam copies it across.
     """
 
     def __init__(self, usage: dict[str, Any]) -> None:

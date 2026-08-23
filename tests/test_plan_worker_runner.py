@@ -764,30 +764,59 @@ class TestTheSeamsOwnSignalsAreRead:
         assert runner.artifacts[0].model_observed is True
 
     @pytest.mark.parametrize(
-        ("refused", "expected"),
+        ("refused", "outcome", "expected"),
         [
+            # The ordinary provider_lock refusal. ``on_unavailable`` defaults to
+            # HOLD, so this is what a z.ai-locked repository actually produces —
+            # and it is the case a "a hold is always retryable" short-circuit
+            # silently reversed.
             pytest.param(
                 "literal-family-unsatisfiable",
+                "held",
                 RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
-                id="inadmissible",
+                id="inadmissible-held",
             ),
             pytest.param(
-                "account-not-configured",
+                "literal-family-unsatisfiable",
+                "rejected",
+                RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
+                id="inadmissible-rejected",
+            ),
+            pytest.param(
+                "no-eligible-account",
+                "held",
                 RejectionReason.ROUTE_UNAVAILABLE,
                 id="operational-hold",
+            ),
+            pytest.param(
+                "capability-unmapped",
+                "held",
+                RejectionReason.ROUTE_UNAVAILABLE,
+                id="unmapped-capability",
             ),
         ],
     )
     async def test_a_policy_refusal_is_told_apart_from_a_transport_failure(
-        self, config, task, refused: str, expected: RejectionReason
+        self, config, task, refused: str, outcome: str, expected: RejectionReason
     ) -> None:
-        # Both arrive as the same soft rc=-1, and they want different reason
-        # codes: retrying an inadmissible route never succeeds and the thing to
-        # edit is the policy, not the gateway.
+        """Both arrive as the same soft rc=-1 and want different codes.
+
+        The reason is the classifying axis, never the outcome: ``on_unavailable``
+        is a per-policy dial over what to do when a lane is unavailable, so the
+        *same inadmissible request* arrives HELD or REJECTED depending on a
+        setting that says nothing about the request. Both rows above pin that.
+
+        The double writes **both** fields because the seam always does — an
+        earlier version wrote only ``refused``, which is a shape production
+        never produces, and that is why a guard reading the other field went
+        unnoticed.
+        """
+
         class Refused(SpawnDouble):
             async def __call__(self, **kwargs: Any) -> SimpleResult:
                 self.calls.append(kwargs)
                 kwargs["spawn_out"]["refused"] = refused
+                kwargs["spawn_out"]["refused_outcome"] = outcome
                 return SimpleResult(stderr="routing policy said no", returncode=-1)
 
         receipts = await _dispatch(_runner(config, Refused()), task, [_request()])
@@ -892,17 +921,23 @@ class TestARefusedBatchCarriesNoBorrowedJoin:
         assert dispatched_id
         assert runner.last_decision_ids["req-1"] == ""
 
-    async def test_a_held_route_is_retryable_whatever_its_reason(
-        self, config, task
-    ) -> None:
-        # The outcome outranks the reason: ``capability-unmapped`` is emitted
-        # only as HELD, and a hold is right with something missing.
+    async def test_the_outcome_does_not_override_the_reason(self, config, task) -> None:
+        """A HELD ``literal-family-unsatisfiable`` is still inadmissible.
+
+        The premise "a hold is retryable whatever its reason" is the bug: with
+        ``on_unavailable`` defaulting to HOLD, the ordinary provider-lock
+        refusal *is* a hold, and treating it as retryable sends an operator to
+        the gateway for a problem only a policy edit fixes.
+        """
+
         class Held(SpawnDouble):
             async def __call__(self, **kwargs: Any) -> SimpleResult:
-                kwargs["spawn_out"]["refused"] = "capability-unmapped"
+                kwargs["spawn_out"]["refused"] = "literal-family-unsatisfiable"
                 kwargs["spawn_out"]["refused_outcome"] = "held"
                 return SimpleResult(stderr="held", returncode=-1)
 
         receipts = await _dispatch(_runner(config, Held()), task, [_request()])
 
-        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+        assert (
+            receipts[0].reason_code is RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+        )
