@@ -171,7 +171,6 @@ _STRUCTURAL_SUBSTRINGS: tuple[str, ...] = (
     "src/orchestrator.py",
     "src/orchestrator_",  # the orchestrator mixin family (#11547)
     "src/service_registry.py",
-    "src/coordinator.py",
     "src/persistence/",
     "src/state/",
     "docs/arch/functional_areas.yml",

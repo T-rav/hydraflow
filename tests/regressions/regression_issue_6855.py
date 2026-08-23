@@ -226,6 +226,21 @@ class TestKnownSitesHaveReraiseGuard:
 
 
 class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
+    """Behavioural half: the fatal errors must escape ``_do_work``.
+
+    The patch target is ``phase_utils.file_memory_suggestion`` — where the
+    function is DEFINED — because ``_run_harness_suggestion_ingestion_cycle``
+    imports it inside the function body, so the name is rebound per call and
+    patching the caller's module would not intercept it.
+
+    These previously patched ``memory.file_memory_suggestion``, a module that
+    has never existed in this repo. Every run died at ``monkeypatch`` with
+    ``ModuleNotFoundError`` before reaching ``_do_work()``, and
+    ``xfail(strict=False)`` swallowed that as expected — so the tests were
+    green, exercised nothing, and would have stayed green even after the
+    #6855 fix landed. Third instance of this file's own failure mode.
+    """
+
     """Behavioural tests — when ``file_memory_suggestion`` raises
     ``AuthenticationError`` or ``CreditExhaustedError``, the exception
     must NOT be swallowed by the per-item or outer except blocks.
@@ -233,9 +248,19 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
 
     @pytest.fixture()
     def suggestions_dir(self, tmp_path: Path) -> Path:
-        """Create a harness_suggestions.jsonl with one valid suggestion."""
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        """Seed harness_suggestions.jsonl where the loop will actually read it.
+
+        The path is REPO-scoped (``repo_memory_dir``, ADR-0021 D2), not
+        ``memory_dir``. This fixture used to write ``<data_root>/memory/``,
+        which the loop never reads: the cycle returned at its
+        ``if not suggestions_path.exists()`` guard, the patched
+        ``file_memory_suggestion`` was never called, and both tests below
+        failed for that reason instead of the one they were written for.
+        Derived from the config the loop is actually built with so the two
+        cannot drift apart again.
+        """
+        memory_dir = _loop_config(tmp_path).repo_memory_dir
+        memory_dir.mkdir(parents=True, exist_ok=True)
         jsonl = memory_dir / "harness_suggestions.jsonl"
         jsonl.write_text(
             '{"suggestion":"test principle","title":"test","occurrences":1,'
@@ -244,9 +269,25 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
         )
         return tmp_path
 
+    def test_the_seeded_suggestions_file_is_where_the_loop_reads(
+        self, suggestions_dir: Path
+    ) -> None:
+        """Anti-vacuity: seeding the wrong directory makes both tests below
+        exercise nothing, which is exactly how they sat green for months."""
+        expected = (
+            _loop_config(suggestions_dir).repo_memory_dir / "harness_suggestions.jsonl"
+        )
+        assert expected.is_file(), (
+            f"the ingestion cycle reads {expected}, and nothing seeded it — "
+            "the tests below would return at the existence guard and never "
+            "reach file_memory_suggestion."
+        )
+
     @pytest.mark.asyncio()
     @pytest.mark.xfail(
-        reason="Regression for issue #6855 — fix not yet landed", strict=False
+        reason="Regression for issue #6855 — fix not yet landed (#11664). "
+        "strict=True so landing it forces the marker off.",
+        strict=True,
     )
     async def test_authentication_error_propagates(
         self, suggestions_dir: Path, monkeypatch: pytest.MonkeyPatch
@@ -262,14 +303,16 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
 
         # Patch file_memory_suggestion to raise AuthenticationError
         mock_fms = AsyncMock(side_effect=AuthenticationError("token expired"))
-        monkeypatch.setattr("memory.file_memory_suggestion", mock_fms)
+        monkeypatch.setattr("phase_utils.file_memory_suggestion", mock_fms)
 
         with pytest.raises(AuthenticationError):
             await loop._do_work()
 
     @pytest.mark.asyncio()
     @pytest.mark.xfail(
-        reason="Regression for issue #6855 — fix not yet landed", strict=False
+        reason="Regression for issue #6855 — fix not yet landed (#11664). "
+        "strict=True so landing it forces the marker off.",
+        strict=True,
     )
     async def test_credit_exhausted_error_propagates(
         self, suggestions_dir: Path, monkeypatch: pytest.MonkeyPatch
@@ -284,7 +327,7 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
         loop = _make_health_monitor(suggestions_dir)
 
         mock_fms = AsyncMock(side_effect=CreditExhaustedError("credits gone"))
-        monkeypatch.setattr("memory.file_memory_suggestion", mock_fms)
+        monkeypatch.setattr("phase_utils.file_memory_suggestion", mock_fms)
 
         with pytest.raises(CreditExhaustedError):
             await loop._do_work()
@@ -295,18 +338,28 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
 # ---------------------------------------------------------------------------
 
 
-def _make_health_monitor(data_dir: Path) -> object:
-    """Build a HealthMonitorLoop with data_root pointing at *data_dir*.
-
-    Uses ``make_bg_loop_deps`` to get a real LoopDeps, then overrides
-    ``data_root`` so ``data_path("memory", ...)`` resolves to the tmp dir.
-    """
-    from health_monitor_loop import HealthMonitorLoop
+def _loop_deps(data_dir: Path):  # noqa: ANN202 — test-local helper
+    """Real LoopDeps with ``data_root`` repointed at *data_dir*."""
     from tests.helpers import make_bg_loop_deps
 
     bg = make_bg_loop_deps(data_dir)
-    config = bg.config
     # Bypass Pydantic __setattr__ to point data_root at our fixture dir
-    object.__setattr__(config, "data_root", data_dir)
+    object.__setattr__(bg.config, "data_root", data_dir)
+    return bg
 
-    return HealthMonitorLoop(config=config, deps=bg.loop_deps)
+
+def _loop_config(data_dir: Path):  # noqa: ANN202 — test-local helper
+    """The config the loop under test is built with.
+
+    The fixture and the loop MUST derive paths from the same object, or the
+    fixture seeds a directory the loop never reads.
+    """
+    return _loop_deps(data_dir).config
+
+
+def _make_health_monitor(data_dir: Path) -> object:
+    """Build a HealthMonitorLoop with data_root pointing at *data_dir*."""
+    from health_monitor_loop import HealthMonitorLoop
+
+    bg = _loop_deps(data_dir)
+    return HealthMonitorLoop(config=bg.config, deps=bg.loop_deps)
