@@ -105,7 +105,7 @@ PR (#9775).
 - `src/discover_runner.py:DiscoverRunner._escalate_stuck` — coherence-failure path
 - Shape-phase `ExpertCouncil` two-round mediation — removed by ADR-0107 (the standalone `ShapePhase` wrapper and its council are gone; shaping is now a planner-invoked `ShapeRunner` helper).
 - `src/plan_phase.py:PlanPhase` — `PlanReviewer` validation + `PipelineEscalator`
-- `src/implement_phase.py:ImplementPhase._check_attempt_cap` — plus `_escalate_no_changes_to_hitl`
+- `src/implement_phase/_abort.py:ImplementAbortMixin._check_attempt_cap` — plus `src/implement_phase/_pr.py:ImplementPRMixin._escalate_no_changes_to_hitl`
 - `src/review_phase/_visual_gate.py:VisualGateMixin._handle_visual_failure` — plus merge-conflict, CI-red escalation handlers
 - `src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop` — current generic preflight loop
 - `src/preflight/` — playbook bundle, decision, context-gather (directory; illustrative, not drift-matched)

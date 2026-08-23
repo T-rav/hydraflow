@@ -10,7 +10,7 @@ pytest:tests/scenarios/fakes/test_prior_failure_propagation.py
 
 ## Context
 
-HydraFlow's implement phase (`src/implement_phase.py:ImplementPhase`) manages a retry flow for
+HydraFlow's implement phase (`src/implement_phase/_phase.py:ImplementPhase`) manages a retry flow for
 failed implementations. The current architecture follows a three-step pattern:
 
 1. **`_check_attempt_cap()`** — Increments the per-issue attempt counter and
@@ -74,7 +74,7 @@ by whether review feedback is present.
 ### Scope boundaries
 
 - The retry recovery changes are scoped to the implement phase
-  (`src/implement_phase.py:ImplementPhase`) and its interaction with
+  (`src/implement_phase/_phase.py:ImplementPhase`) and its interaction with
   `src/state/__init__.py:StateTracker` and `src/agent.py:AgentRunner`.
 - The review phase's own retry/escalation logic remains unchanged.
 - The `max_issue_attempts` cap continues to serve as the upper bound for all
@@ -130,4 +130,4 @@ by whether review feedback is present.
 
 - Source memory: [#2258 — Implementation retry recovery architecture](https://github.com/T-rav/hydra/issues/2258)
 - Implementing issue: [#2264](https://github.com/T-rav/hydra/issues/2264)
-- Key files: `src/implement_phase.py:ImplementPhase`, `src/state/__init__.py:StateTracker`, `src/agent.py:AgentRunner`
+- Key files: `src/implement_phase/_phase.py:ImplementPhase`, `src/state/__init__.py:StateTracker`, `src/agent.py:AgentRunner`

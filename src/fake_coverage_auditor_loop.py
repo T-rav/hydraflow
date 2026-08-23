@@ -185,10 +185,71 @@ def _real_surface_for_fake(fake: str, repo_root: Path) -> set[str] | None:
     return union if resolved_any else None
 
 
+def _scan_fake_classes(fake_dir: Path) -> dict[str, ast.ClassDef]:
+    """Every module-level class under ``fake_dir``, keyed by name.
+
+    ``rglob`` rather than ``glob``: a fake large enough to be decomposed lives
+    in a package of its own (``fake_github/_issues.py``, …), and a
+    non-recursive scan would simply stop seeing it — the whole surface would
+    drop out of the audit silently. ``__init__.py`` is skipped as before; it
+    only re-exports.
+    """
+    classes: dict[str, ast.ClassDef] = {}
+    for path in sorted(fake_dir.rglob("*.py")):
+        if path.name.startswith("test_") or path.name == "__init__.py":
+            continue
+        try:
+            tree = ast.parse(path.read_text(), filename=str(path))
+        except SyntaxError:
+            logger.debug("syntax error parsing %s", path)
+            continue
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, ast.ClassDef):
+                classes.setdefault(node.name, node)
+    return classes
+
+
+def _own_and_inherited_methods(
+    node: ast.ClassDef, classes: dict[str, ast.ClassDef]
+) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """``node``'s own runtime methods plus those of every base defined here.
+
+    A fake decomposed into mixins keeps ONE class identity at runtime, so its
+    audited surface is the union of the bodies. Bases that resolve outside
+    ``fake_dir`` are ignored (they are not part of the fake's own surface), and
+    ``if TYPE_CHECKING:`` seam declarations are not runtime definitions, so
+    only direct children of a class body count.
+    """
+    out: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    seen: set[str] = set()
+    queue = [node]
+    while queue:
+        current = queue.pop(0)
+        if current.name in seen:
+            continue
+        seen.add(current.name)
+        out.extend(
+            child
+            for child in current.body
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+        )
+        for base in current.bases:
+            if isinstance(base, ast.Name) and base.id in classes:
+                queue.append(classes[base.id])
+    return out
+
+
 def catalog_fake_methods(
     fake_dir: Path, repo_root: Path | None = None
 ) -> dict[str, dict[str, list[str]]]:
-    """AST-scan ``fake_dir/*.py`` for classes starting with ``Fake``.
+    """AST-scan ``fake_dir`` for classes starting with ``Fake``.
+
+    A fake's surface is its own body PLUS every base class defined under
+    ``fake_dir`` — the god-class pass (Refs #11547) split ``FakeGitHub`` into
+    per-surface mixins the way ``PRManager`` is split, and the runtime object
+    is unchanged, so the audited surface must be too. Mixin classes are
+    therefore folded into the fakes that inherit them rather than catalogued as
+    fakes in their own right.
 
     When ``repo_root`` is given, fakes with a ``_FAKE_REAL_SURFACE_SOURCES``
     entry have their non-helper publics split against the real production
@@ -210,44 +271,40 @@ def catalog_fake_methods(
     catalog: dict[str, dict[str, list[str]]] = {}
     if not fake_dir.exists():
         return catalog
-    for path in sorted(fake_dir.glob("*.py")):
-        if path.name.startswith("test_") or path.name == "__init__.py":
+    classes = _scan_fake_classes(fake_dir)
+    # A class another scanned class inherits is a slice of that host, not a
+    # fake of its own — cataloguing it separately would move its methods out
+    # of the host's audited surface and into an entry no cassette map covers.
+    inherited = {
+        base.id
+        for node in classes.values()
+        for base in node.bases
+        if isinstance(base, ast.Name) and base.id in classes
+    }
+    for name, node in sorted(classes.items()):
+        if not name.startswith("Fake") or name in inherited:
             continue
-        try:
-            tree = ast.parse(path.read_text(), filename=str(path))
-        except SyntaxError:
-            logger.debug("syntax error parsing %s", path)
-            continue
-        for node in ast.iter_child_nodes(tree):
-            if not isinstance(node, ast.ClassDef):
+        real_surface = (
+            _real_surface_for_fake(name, repo_root) if repo_root is not None else None
+        )
+        surface: list[str] = []
+        helpers: list[str] = []
+        scaffolding: list[str] = []
+        for child in _own_and_inherited_methods(node, classes):
+            method = child.name
+            if method.startswith("_"):
                 continue
-            if not node.name.startswith("Fake"):
-                continue
-            real_surface = (
-                _real_surface_for_fake(node.name, repo_root)
-                if repo_root is not None
-                else None
-            )
-            surface: list[str] = []
-            helpers: list[str] = []
-            scaffolding: list[str] = []
-            for child in node.body:
-                if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                    continue
-                name = child.name
-                if name.startswith("_"):
-                    continue
-                if _is_helper(name, node.name):
-                    helpers.append(name)
-                elif real_surface is not None and name not in real_surface:
-                    scaffolding.append(name)
-                else:
-                    surface.append(name)
-            catalog[node.name] = {
-                "adapter-surface": sorted(surface),
-                "test-helper": sorted(helpers),
-                "scaffolding": sorted(scaffolding),
-            }
+            if _is_helper(method, name):
+                helpers.append(method)
+            elif real_surface is not None and method not in real_surface:
+                scaffolding.append(method)
+            else:
+                surface.append(method)
+        catalog[name] = {
+            "adapter-surface": sorted(surface),
+            "test-helper": sorted(helpers),
+            "scaffolding": sorted(scaffolding),
+        }
     return catalog
 
 

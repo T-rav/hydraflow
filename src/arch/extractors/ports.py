@@ -95,6 +95,12 @@ def _repo_relative_module(path: Path, repo_root: Path) -> str:
     # not src.mockworld.fakes.X).
     if parts and parts[0] == "src":
         parts = parts[1:]
+    # A fake big enough to be decomposed lives in a package whose members are
+    # ``_``-prefixed and private (``fake_github/_fake.py``); the importable
+    # identity is the package, and that is also the string scenario files
+    # actually contain (Refs #11547).
+    if len(parts) > 1 and parts[-1].startswith("_"):
+        parts = parts[:-1]
     return ".".join(parts)
 
 

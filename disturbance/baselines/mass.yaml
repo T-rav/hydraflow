@@ -23,15 +23,9 @@ classes:
   src/health_monitor_loop.py:HealthMonitorLoop:
     loc: 1506
     methods: 36
-  src/implement_phase.py:ImplementPhase:
-    loc: 1845
-    methods: 61
   src/issue_store.py:IssueStore:
     loc: 726
     methods: 49
-  src/mockworld/fakes/fake_github.py:FakeGitHub:
-    loc: 1656
-    methods: 133
   src/planner.py:PlannerRunner:
     loc: 854
     methods: 23
@@ -76,14 +70,12 @@ comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC o
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: correct the 9 class + 8 file entries that had rotted below live\
-  \ size since #11522; this PR's whole diff is the baseline advance (#11646)"
+  \ PR. Last moved: decomposed ImplementPhase and FakeGitHub into per-surface mixin\
+  \ packages (batch 3, Refs #11547)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109
   src/health_monitor_loop.py: 1753
-  src/implement_phase.py: 1949
-  src/mockworld/fakes/fake_github.py: 1773
   src/models.py: 2950
   src/repo_wiki.py: 1594
   src/service_registry.py: 1782
