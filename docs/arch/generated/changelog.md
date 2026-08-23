@@ -6,65 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `ee851eb` — fix(review pass 5): make the sandbox-pin gate actually bite *(2026-08-23)*
-- `4b07057` — fix(review pass 4): share the route-refusal classifier, close a divergent copy *(2026-08-23)*
-- `b30e17a` — fix(rebase): port #11657's P3 review findings into the implement path *(2026-08-23)*
-- `d47e9c0` — fix(review pass 3): point three cross-references at where the code now lives *(2026-08-23)*
-- `1024178` — fix(review pass 2): split the director's actuator half, register the worker prompt *(2026-08-23)*
-- `e020f08` — fix(review pass 1): scope hibernation to the implement fence, close 5 mutation gaps *(2026-08-23)*
-- `41f3b4c` — feat(director): Fable P4 — fenced implementation and correction workers (#11542) (#11542) *(2026-08-23)*
-- `e865bb4` — fix(director): the Plan canary's worker tree contradicted its own receipts (#11541) (#11662) (#11662) *(2026-08-23)*
-- `0dec4e5` — fix(path-membership): make module-path gates follow a module into a package, and close the class (#11669) (#11672) (#11672) *(2026-08-23)*
-- `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) (#11670) *(2026-08-23)*
-- `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) (#11665) *(2026-08-22)*
-- `73b0565` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11657) (#11657) *(2026-08-22)*
-- `befb5a6` — refactor(mockworld,arch): close two latent gate holes and finish the cluster pass (#11659) (#11659) *(2026-08-22)*
-- `1dfa921` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) (#11658) *(2026-08-22)*
-- `822a2eb` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) (#11656) (#11656) *(2026-08-22)*
-- `d412796` — feat(director): Fable P3 — brokered Sonnet and Opus Plan canary (#11541) (#11655) (#11655) *(2026-08-22)*
-- `f714ecf` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) (#11653) (#11653) *(2026-08-22)*
-- `1363268` — fix(erosion): stop mass.yaml's numbers rotting — targeted --only regen, method-axis growth, and drop the field nobody read (#11652) (#11652) *(2026-08-22)*
-- `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
-- `8c392d0` — feat(gateway): P2 — revision-safe project policy workspace (ADR-0140) (#11648) (#11648) *(2026-08-22)*
-- `8eb762f` — fix(instruments): the calibration accept arm scored fresh merges as clean — #11643's last commit never landed (#11647) (#11647) *(2026-08-22)*
-- `2f440e8` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) (#11645) *(2026-08-22)*
-- `6523893` — feat(instruments): calibrate the test-adequacy gate — the reject arm is outcome-censored (#11593 seam 2) (#11643) (#11643) *(2026-08-22)*
-- `dfd0e25` — fix(director): the shadow observer spun the allocator and fsync'd per tick (#11641) (#11641) *(2026-08-22)*
-- `d227fab` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11638) (#11638) *(2026-08-22)*
-- `36468f8` — feat(gateway): P1 — policy resolver, explanation, and shadow decisions (ADR-0139) (#11639) (#11639) *(2026-08-22)*
-- `9b52c13` — fix(secret-scrub): redact gateway virtual keys and control tokens (#11635) (#11637) (#11637) *(2026-08-22)*
-- `81e811e` — feat(scheduling): Fable P1 — deterministic IssueDriver behind an explicit scheduling_model dial (#11535) (#11634) (#11634) *(2026-08-22)*
-- `f16dcc5` — feat(gateway): read-only account and active-route visibility (ADR-0138) (#11633) (#11633) *(2026-08-22)*
-- `798cdd2` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11632) (#11632) *(2026-08-21)*
-- `ab3e5d1` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) (#11628) *(2026-08-21)*
-- `e24b730` — fix(mixins): TYPE_CHECKING-only seam declarations + guard against MRO shadowing (#11631) (#11631) *(2026-08-21)*
-- `5128551` — feat(driver): ADR-0137 narrows ADR-0094, fixes driver contracts, proves the runtime boundary (#11533) (#11627) (#11627) *(2026-08-21)*
-- `980253f` — fix(pools): derive the worker-pool fatal set from one source of truth (#11626) (#11626) *(2026-08-21)*
-- `8fcd6a0` — fix(control): Start clears the pipeline-worker disable set on both branches (#11611) (#11623) (#11623) *(2026-08-21)*
-- `5c33050` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11617) (#11617) *(2026-08-21)*
-- `72faffb` — feat(ci): cache the agent image and add a dispatchable sandbox-scenario run (#11601) (#11621) (#11621) *(2026-08-21)*
-- `faaaa9e` — fix(liveness): event-loop stall — attribute starvation vs block before hard restart (#11604) (#11622) (#11622) *(2026-08-21)*
-- `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*
-- `2a2fb8c` — feat(triage): honor 'Blocked by: #N' so phase-ordered children flow in order (#11614) (#11616) (#11616) *(2026-08-21)*
-- `c298996` — fix(sandbox): air-gap the composition-root AutoAgentRunner constructions (#11602) (#11615) (#11615) *(2026-08-21)*
-- `41b468b` — feat(config): light lane on by default — issues at complexity ≤3 take one spawn to PR (refs #11568) (#11590) (#11590) *(2026-08-21)*
-- `c104554` — chore(config): remove retired feature flags and their machinery (flag-rot audit) (#11599) (#11599) *(2026-08-21)*
-- `7af74dd` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11603) (#11603) *(2026-08-21)*
-- `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
-- `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
-- `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
-- `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*
-- `83b0f29` — fix(implement): take make quality off the host lock on the implement path (#11568 seam 3) (#11592) (#11592) *(2026-08-21)*
-- `b3ff35a` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose (#11568) (#11585) (#11585) *(2026-08-21)*
-- `e25d020` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof (Fixes #11570, Fixes #11571) (#11582) (#11582) *(2026-08-21)*
-- `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*
-- `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
-- `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
-- `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
-- `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
-- `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
-- `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
-- `9ada8c2` — fix(arch): stop .meta.json tracking the branch's commit graph *(2026-08-23)*
+- `4413e22` — chore(arch): regenerate after rebase *(2026-08-23)*
+- `836335d` — fix(arch): stop .meta.json tracking the branch's commit graph *(2026-08-23)*
+- `d4f9f6d` — feat(director): Fable P4 — fenced implementation and correction workers (#11542) (#11661) *(2026-08-23)*
 - `e865bb4` — fix(director): the Plan canary's worker tree contradicted its own receipts (#11541) (#11662) *(2026-08-23)*
 - `0dec4e5` — fix(path-membership): make module-path gates follow a module into a package, and close the class (#11669) (#11672) *(2026-08-23)*
 - `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) *(2026-08-23)*
