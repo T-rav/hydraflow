@@ -79,6 +79,14 @@ logger = logging.getLogger("plan_worker_runner")
 MAX_ARTIFACT_CHARS = 20000
 """How much of a child's reply is retained. A receipt is evidence, not a store."""
 
+MAX_RETAINED_RECORDS = 50
+"""How many recent decisions and artifacts this runner keeps for diagnosis.
+
+Bounded for the same reason :data:`MAX_DISPATCHED_KEYS` is. These are
+diagnostics read by a human or a test; the durable evidence is the receipt on
+the shadow log, and a canary that had to keep every artifact in memory to be
+auditable would be one whose evidence lived in the wrong place."""
+
 MAX_DISPATCHED_KEYS = 2000
 """How many spent idempotency keys the replay fence remembers.
 
@@ -106,8 +114,19 @@ _REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     ),
 }
 
-_ZAI_LANES = frozenset({"zai", "kimi", "openrouter"})
-"""Legacy provider dials that cannot carry an Anthropic model at all."""
+#: Routing-policy refusal reasons that mean *the request was inadmissible on
+#: this lane* rather than *something operational is missing*. The first maps to
+#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing and the operator
+#: must edit the policy; everything else is ROUTE_UNAVAILABLE, where a caretaker
+#: retry is right and the operator should look at the gateway.
+_INADMISSIBLE_ROUTE_REASONS = frozenset(
+    {
+        "literal-family-unsatisfiable",
+        "capability-unmapped",
+        "model-not-allowed",
+        "concrete-model-not-allowed",
+    }
+)
 
 
 class PlanWorkerSpawn(Protocol):
@@ -189,6 +208,17 @@ class PlanWorkerArtifact:
     request_id: str
     role: str
     served_model: str
+    model_observed: bool
+    """True when the CLI named the model; False when the requested id stands in.
+
+    Recorded rather than assumed, because "the served model" is the claim this
+    canary is judged on and an unobserved one is weaker evidence than an
+    observed one. Collapsing the two would make the weaker claim invisible.
+    """
+
+    decision_id: str
+    """The tier decision that authorised this child. The join back to *why*."""
+
     text: str
 
 
@@ -233,8 +263,16 @@ class PlanWorkerRunner:
         # exists to catch.
         self._dispatched_keys: set[str] = set()
         self._dispatched_order: deque[str] = deque()
-        self.decisions: list[PlanRouteDecision] = []
-        self.artifacts: list[PlanWorkerArtifact] = []
+        # Bounded for the same reason the replay fence is: this object lives
+        # for the whole run, and an unbounded list on one is a leak with no
+        # ceiling. Both are diagnostics — the durable record is the receipt.
+        self.decisions: deque[PlanRouteDecision] = deque(maxlen=MAX_RETAINED_RECORDS)
+        # request_id -> decision_id for the batch just dispatched. Batch-local
+        # and therefore bounded by MAX_DISPATCH_BATCH: it exists so the
+        # receipt row can carry the join back to the tier decision, and a
+        # run-lifetime version of it would be a third accumulator.
+        self.last_decision_ids: dict[str, str] = {}
+        self.artifacts: deque[PlanWorkerArtifact] = deque(maxlen=MAX_RETAINED_RECORDS)
 
     @property
     def spawn(self) -> PlanWorkerSpawn:
@@ -270,6 +308,7 @@ class PlanWorkerRunner:
         deadline = time.monotonic() + float(
             self._config.fable_plan_worker_timeout_seconds
         )
+        self.last_decision_ids = {}
         receipts: list[WorkerReceipt] = []
         for request in requests:
             receipts.append(
@@ -307,9 +346,9 @@ class PlanWorkerRunner:
             request,
             phase=phase,
             route_policy_revision=self._route_policy_revision,
-            lane_serves_anthropic=self._lane_serves_anthropic(),
         )
         self.decisions.append(decision)
+        self.last_decision_ids[request.request_id] = decision.decision_id
         if decision.outcome is not PlanRouteOutcome.SELECTED:
             logger.info(
                 "plan_worker_runner: #%d %s refused before spawn (%s)",
@@ -399,12 +438,28 @@ class PlanWorkerRunner:
             )
             return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
 
-        served = str(spawn_out.get("model", "") or "")
-        if not served:
+        requested = str(spawn_out.get("model", "") or "")
+        if not requested:
             # The seam returned before it spawned anything — a CH-6 block or an
             # enforcement refusal. No inference happened, so there is no served
             # model to record and nothing to bill.
-            return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
+            return _refusal(request, _refusal_for_spawn(spawn_out), decision)
+        if spawn_out.get("timed_out"):
+            # A deadline, not a bad reply. The seam converts its own timeout
+            # into a soft rc=-1, so without this signal a timed-out child would
+            # be recorded ACCEPTED with an unusable artifact — which is exactly
+            # what the acceptance criteria call an EXPIRED worker.
+            return _refusal(
+                request,
+                RejectionReason.WORKER_TIMEOUT,
+                decision,
+                status=ReceiptStatus.EXPIRED,
+            )
+        # The model the CLI *reported*, when it reported one. When it did not,
+        # the requested id is recorded and ``model_observed`` says so rather
+        # than the receipt implying an observation it never made.
+        observed = str(spawn_out.get("served_model", "") or "")
+        served = observed or requested
         if not request.model_requirement.satisfied_by(served):
             logger.warning(
                 "plan_worker_runner: #%d %s asked for %s and was served %r; "
@@ -424,6 +479,8 @@ class PlanWorkerRunner:
                 request_id=request.request_id,
                 role=request.worker_role.value,
                 served_model=served,
+                model_observed=bool(observed),
+                decision_id=decision.decision_id,
                 text=text,
             )
         )
@@ -462,22 +519,6 @@ class PlanWorkerRunner:
         self._dispatched_order.append(key)
         while len(self._dispatched_order) > MAX_DISPATCHED_KEYS:
             self._dispatched_keys.discard(self._dispatched_order.popleft())
-
-    def _lane_serves_anthropic(self) -> bool:
-        """Whether this repository's legacy dials can carry an Anthropic model.
-
-        The gateway's own resolver refuses a ``provider_lock=zai-harness``
-        policy meeting a literal Opus with ``literal-family-unsatisfiable``
-        (ADR-0139 D4), so this is the *legacy* half of the same invariant: a
-        repository pinned to the z.ai harness by ``repo_provider`` or by the
-        planner's own role dial cannot serve one either, and finding that out
-        after the spawn would mean paying for the discovery.
-        """
-        dials = (
-            str(getattr(self._config, "repo_provider", "") or ""),
-            str(getattr(self._config, "planner_provider", "") or ""),
-        )
-        return not any(dial.strip().lower() in _ZAI_LANES for dial in dials)
 
 
 def build_plan_worker_prompt(
@@ -574,6 +615,21 @@ def _refusal(
         route_policy_revision=decision.route_policy_revision,
         output_contract_ok=False,
     )
+
+
+def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
+    """Why a spawn that never ran did not run, in the receipt's vocabulary.
+
+    The seam collapses a routing-policy refusal and a transport failure onto
+    the same soft ``rc=-1``, so without the reason it left behind, both would
+    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator to retry and
+    look at the gateway. For an inadmissible route that is wrong twice: the
+    retry will never succeed, and the thing to edit is the policy.
+    """
+    reason = str(spawn_out.get("refused", "") or "")
+    if reason in _INADMISSIBLE_ROUTE_REASONS:
+        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    return RejectionReason.ROUTE_UNAVAILABLE
 
 
 def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:

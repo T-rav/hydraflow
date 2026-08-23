@@ -540,6 +540,14 @@ class ResultEnvelope:
     is_error: bool
     session_id: str
     usage: dict[str, object]
+    served_model: str = ""
+    """The model the CLI reports having actually used, or ``""`` (#11541).
+
+    Empty is a real answer and must stay distinguishable from a wrong one: the
+    field is absent on older CLIs, so a caller that needs to *record* which
+    model served a request has to be able to say "the CLI did not tell me"
+    rather than substitute the one it asked for and call that an observation.
+    """
 
 
 def parse_result_envelope(stdout: str) -> ResultEnvelope | None:
@@ -574,7 +582,29 @@ def parse_result_envelope(stdout: str) -> ResultEnvelope | None:
         is_error=bool(event.get("is_error", False)),
         session_id=session_id if isinstance(session_id, str) else "",
         usage=parser.usage_snapshot,
+        served_model=_served_model(event),
     )
+
+
+def _served_model(event: dict[str, Any]) -> str:
+    """The model id the CLI says it used, from whichever field carries it.
+
+    Two shapes, tried in order and neither assumed: a bare ``model`` string,
+    and ``modelUsage``, whose keys are the model ids a turn billed against.
+    A turn that billed exactly one model is the only case that can name one —
+    with several, no single id served the request and answering with any of
+    them would be a guess. Unknown shapes return ``""``, which the caller reads
+    as "unobserved" rather than as a model.
+    """
+    model = event.get("model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()[:128]
+    usage = event.get("modelUsage")
+    if isinstance(usage, dict) and len(usage) == 1:
+        only = next(iter(usage))
+        if isinstance(only, str) and only.strip():
+            return only.strip()[:128]
+    return ""
 
 
 def _pick_usage_extractor(

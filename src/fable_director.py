@@ -80,7 +80,7 @@ from plan_broker import CANARY_PHASE
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from director_broker import BrokerVerdict, ShadowDispatchBroker
@@ -433,6 +433,9 @@ class FableDirector:
             command=command,
             verdict=verdict,
             receipts=receipts,
+            decisions=(
+                None if self._dispatcher is None else self._dispatcher.last_decision_ids
+            ),
         )
 
     # -- the canary's actuator ---------------------------------------------
@@ -689,6 +692,7 @@ class FableDirector:
         command: DirectorCommand | None = None,
         verdict: BrokerVerdict | None = None,
         receipts: tuple[WorkerReceipt, ...] = (),
+        decisions: Mapping[str, str] | None = None,
     ) -> None:
         """Write one observation. A failed turn records **no** hypothetical work.
 
@@ -717,7 +721,7 @@ class FableDirector:
                 if verdict is None
                 else tuple(reason.value for reason in verdict.rejection_reasons),
                 route_revisions=0 if verdict is None else verdict.route_revisions,
-                dispatched=tuple(_receipt_row(r) for r in receipts),
+                dispatched=tuple(_receipt_row(r, decisions) for r in receipts),
                 # The parent turn's spend plus every child's. Keeping them in
                 # one number is what makes the aggregate ceiling a real ceiling
                 # now that a boundary can cost more than one turn.
@@ -746,13 +750,19 @@ def _admitted_requests(
     )
 
 
-def _receipt_row(receipt: WorkerReceipt) -> dict[str, object]:
+def _receipt_row(
+    receipt: WorkerReceipt, decisions: Mapping[str, str] | None
+) -> dict[str, object]:
     """One receipt as the operator status and the evidence log render it.
 
     Never the artifact and never a credential: a receipt is the *fact* that a
-    child ran, on which model, at what cost, under whose lineage.
+    child ran, on which model, at what cost, under whose lineage — and under
+    which tier decision. ``plan_broker`` content-addresses that decision so a
+    receipt can be joined back to *why* the model was chosen; a row that did
+    not carry the id would leave the join unbuilt and the id decorative.
     """
     return {
+        "route_decision_id": (decisions or {}).get(receipt.request_id, ""),
         "request_id": receipt.request_id,
         "role": receipt.worker_role.value,
         "status": receipt.status.value,

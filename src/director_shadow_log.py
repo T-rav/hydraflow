@@ -50,7 +50,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("director_shadow_log")
 
-SHADOW_LOG_SCHEMA_VERSION = 1
+SHADOW_LOG_SCHEMA_VERSION = 2
+"""Bumped by #11541, which added ``dispatched`` to every row.
+
+A row is written with ``sort_keys`` over the whole model dump, so the new field
+appears — as ``[]`` — on every row a shadow-mode host writes too. The model is
+``extra="forbid"``, so *older* code reading a newer log drops those rows at
+:meth:`ShadowObservationLog._load`; the version is what makes that diagnosable
+instead of mysterious. Newer code reading an older log is unaffected: the
+missing field takes its default."""
 
 MAX_LOADED_OBSERVATIONS = 5000
 """How many trailing observations are read back into the rollup at startup."""

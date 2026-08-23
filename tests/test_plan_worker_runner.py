@@ -371,37 +371,71 @@ class TestTheServedModelIsReadBackNotEchoed:
 
 
 class TestALiteralFamilyIsRefusedBeforeAnythingIsSpawned:
-    @pytest.fixture
-    def zai_config(self, tmp_path):
-        from config import HydraFlowConfig
+    """The z.ai lock that matters is a routing policy, not a legacy dial.
 
-        return HydraFlowConfig(
-            state_file=tmp_path / "state.json",
-            repo="acme/widgets",
-            fable_plan_canary_repo="acme/widgets",
-            repo_provider="zai",
-            repo_model="glm-5.3",
-        )
+    An earlier draft of this class pinned ``repo_provider="zai"`` refusing every
+    brokered worker. That was wrong: ``apply_repo_provider`` runs at the two
+    agentic seams and never at the one-shot seam a brokered child takes, so the
+    dial does not govern this spawn — the child is pinned to the gateway, which
+    derives the account from the model. The real lock refuses at the resolver,
+    before ``resolve_harness_env`` and therefore before any credential exists,
+    and it reaches the receipt through ``spawn_out["refused"]``.
+    """
 
-    async def test_a_zai_locked_repository_spawns_nothing(
-        self, zai_config, task
+    async def test_a_policy_locked_lane_spawns_nothing(self, config, task) -> None:
+        # `EnforcementRefused` inside the seam: the prompt was never sent.
+        class PolicyRefused(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                kwargs["spawn_out"]["refused"] = "literal-family-unsatisfiable"
+                return SimpleResult(stderr="policy rejected", returncode=-1)
+
+        spawn = PolicyRefused()
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].served_model is None
+
+    async def test_a_catalog_that_disagrees_with_the_requirement_is_rejected(
+        self, config, task, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # The check this layer *can* answer: an edit putting a non-satisfying
+        # id under a family is caught before the spend rather than at the
+        # receipt. Mutating the table is how that guard is killable at all.
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
         spawn = SpawnDouble()
 
-        await _dispatch(_runner(zai_config, spawn), task, [_request()])
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
 
         assert spawn.calls == []
-
-    async def test_a_zai_locked_repository_reports_the_requirement_unsatisfiable(
-        self, zai_config, task
-    ) -> None:
-        receipts = await _dispatch(
-            _runner(zai_config, SpawnDouble()), task, [_request()]
-        )
-
         assert (
             receipts[0].reason_code is RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
         )
+
+    async def test_a_capability_request_is_checked_the_same_way(
+        self, config, task, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Exempting the capability arm would reopen the substitution path one
+        # requirement kind over from the one the invariant is named after.
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-opus", "glm-5.3")
+        spawn = SpawnDouble()
+
+        await _dispatch(
+            _runner(config, spawn),
+            task,
+            [
+                _request(
+                    role=WorkerRole.ARCHITECT,
+                    kind=ModelRequirementKind.CAPABILITY,
+                    value="high-reasoning",
+                )
+            ],
+        )
+
+        assert spawn.calls == []
 
 
 class TestEveryFailClosedPathDispatchesNothing:
@@ -660,3 +694,131 @@ class TestTheBatchBudgetBoundsTheAllocatorTick:
             runner._claim(f"key-{n}")
 
         assert len(runner._dispatched_keys) == MAX_DISPATCHED_KEYS
+
+
+class TestTheSeamsOwnSignalsAreRead:
+    """Pass-2 fixes: the seam reports more than a reply, and the receipt has to
+    read it rather than infer it from what it asked for.
+
+    Each of these pins a defect an adversarial review found by noticing that
+    the *test double* modelled behaviour the real seam does not have — a timed
+    out child that raises, and a served model that differs from the requested
+    one. Both are real signals now, and both come back through ``spawn_out``.
+    """
+
+    async def test_a_timed_out_child_is_expired_not_accepted(
+        self, config, task
+    ) -> None:
+        # The seam converts its own deadline into a soft rc=-1 and fills
+        # spawn_out, so without the flag a timed-out child was recorded
+        # ACCEPTED with an unusable artifact.
+        class TimedOut(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                kwargs["spawn_out"]["timed_out"] = True
+                return SimpleResult(stderr="timed out after 240s", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, TimedOut()), task, [_request()])
+
+        assert receipts[0].status is ReceiptStatus.EXPIRED
+        assert receipts[0].reason_code is RejectionReason.WORKER_TIMEOUT
+
+    async def test_the_receipt_prefers_the_model_the_cli_reported(
+        self, config, task
+    ) -> None:
+        class Observed(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                result = await super().__call__(**kwargs)
+                kwargs["spawn_out"]["served_model"] = "claude-sonnet-4-6-20260101"
+                return result
+
+        receipts = await _dispatch(_runner(config, Observed()), task, [_request()])
+
+        assert receipts[0].served_model == "claude-sonnet-4-6-20260101"
+
+    async def test_an_unobserved_model_is_recorded_as_unobserved(
+        self, config, task
+    ) -> None:
+        # Older CLIs name no model. The requested id stands in — and the
+        # artifact says the id was not observed, so the weaker claim stays
+        # visible instead of being laundered into an observation.
+        runner = _runner(config, SpawnDouble())
+
+        await _dispatch(runner, task, [_request()])
+
+        assert runner.artifacts[0].model_observed is False
+
+    async def test_an_observed_model_is_recorded_as_observed(
+        self, config, task
+    ) -> None:
+        class Observed(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                result = await super().__call__(**kwargs)
+                kwargs["spawn_out"]["served_model"] = "claude-sonnet-4-6"
+                return result
+
+        runner = _runner(config, Observed())
+
+        await _dispatch(runner, task, [_request()])
+
+        assert runner.artifacts[0].model_observed is True
+
+    @pytest.mark.parametrize(
+        ("refused", "expected"),
+        [
+            pytest.param(
+                "literal-family-unsatisfiable",
+                RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
+                id="inadmissible",
+            ),
+            pytest.param(
+                "account-not-configured",
+                RejectionReason.ROUTE_UNAVAILABLE,
+                id="operational-hold",
+            ),
+        ],
+    )
+    async def test_a_policy_refusal_is_told_apart_from_a_transport_failure(
+        self, config, task, refused: str, expected: RejectionReason
+    ) -> None:
+        # Both arrive as the same soft rc=-1, and they want different reason
+        # codes: retrying an inadmissible route never succeeds and the thing to
+        # edit is the policy, not the gateway.
+        class Refused(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                kwargs["spawn_out"]["refused"] = refused
+                return SimpleResult(stderr="routing policy said no", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, Refused()), task, [_request()])
+
+        assert receipts[0].reason_code is expected
+
+    async def test_the_batch_decision_join_is_recorded_per_request(
+        self, config, task
+    ) -> None:
+        # ``decision_id`` is content-addressed so a receipt can be joined back
+        # to why the model was chosen. A join nothing carries is decorative.
+        runner = _runner(config, SpawnDouble())
+
+        await _dispatch(runner, task, [_request(request_id="r1")])
+
+        assert runner.last_decision_ids["r1"] == runner.decisions[0].decision_id
+
+    def test_the_diagnostic_accumulators_are_bounded(self, config) -> None:
+        from plan_worker_runner import MAX_RETAINED_RECORDS, PlanWorkerArtifact
+
+        runner = _runner(config, SpawnDouble())
+        for n in range(MAX_RETAINED_RECORDS + 10):
+            runner.artifacts.append(
+                PlanWorkerArtifact(
+                    request_id=str(n),
+                    role="planner",
+                    served_model="claude-sonnet-4-6",
+                    model_observed=True,
+                    decision_id="d",
+                    text="x",
+                )
+            )
+
+        assert len(runner.artifacts) == MAX_RETAINED_RECORDS

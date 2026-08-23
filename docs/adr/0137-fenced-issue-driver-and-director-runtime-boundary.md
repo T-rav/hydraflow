@@ -426,17 +426,35 @@ phase is `PLAN`. "Implement, review and HITL remain Classic" is therefore a
 property of that function rather than of every caller remembering to check.
 `tests/regressions/test_issue_11541_outside_the_slice.py` proves it
 differentially — the same director over the same boundary, actuator fully
-wired, records byte-identical evidence to a director with no actuator at all,
-for an empty dial, another repository, and each later phase — with two
-non-vacuity tests so deleting the feature would not pass.
+wired, records byte-identical evidence to a director with no actuator at all —
+for an empty dial and for another repository. The later-phase arms assert the
+weaker but sufficient property that the boundary is never *offered* to the
+canary (no spawn, no receipt, not even a refusal), using a role the catalog
+does allow at the phase under test: mutation testing showed that a `planner` at
+IMPLEMENT is refused by the capsule's role allow-list anyway, so a planner-only
+arm could not tell the bound from the catalog. `HITL` is deliberately absent —
+`WORKER_CATALOG` catalogues no role for it, so no request could distinguish the
+two there. Three non-vacuity tests sit beside all of it.
 
-**The rollback is one field**, and the same field. `fable_plan_canary_repo` is
-live (`settings_registry`), empty by default, and deliberately **not** an env
+**The rollback is one field**, and the same field arms it. `fable_plan_canary_repo`
+is live (`settings_registry`), empty by default, and deliberately **not** an env
 override for ADR-0141 D5's reason: an env row applies whenever a field is at
 its default and the disarmed value *is* the default, so an env var would mean
 clearing the dial disarmed nothing. Its absence is pinned with the reason.
 Rolling back returns the repository to shadow mode rather than to Classic, so
 the evidence keeps accruing while nothing is dispatched.
+
+**Both directions of that dial are live, and the first draft got one of them
+wrong.** Construction of the actuator was made conditional on the dial —
+which reads as a stronger default-off proof and is in fact a bug: the dial is
+empty by default, so a factory booted disarmed had no dispatcher to arm, and
+naming a canary repository would have done nothing until a restart while the
+settings screen reported it live. The actuator is now built whenever a director
+is selected and gated *only* by the live predicate. Default-off is proven where
+it is actually true: under Classic and under the deterministic controller there
+is no director and therefore no actuator at all, and under a director with the
+dial empty nothing is ever dispatched — proven differentially rather than by an
+absent object.
 
 **Arming lives on the config, not on the preset.**
 `SchedulingPreset.director_dispatch_armed` stays `False` on every preset and no
@@ -459,14 +477,31 @@ choices cannot be explained afterwards. `PLAN_TIER_CATALOG` is code-owned like
 and satisfies its own family, so an edit putting `glm-5.3` under `claude-opus`
 fails at test time rather than at a receipt.
 
-**A literal family resolves literally or refuses, before anything is spawned.**
-A lane pinned to the z.ai harness rejects with `literal-family-unsatisfiable`
-rather than substituting, and the capability arm is refused on the same lane
-rather than exempted — exempting it would reopen the substitution path one
-requirement kind over. After the spawn, the **served** model is read back off
-the seam (`run_lightweight_agent`'s new `spawn_out`) and re-checked against the
-requirement, because asserting on the *requested* tier would be blind to
-exactly the failure the invariant is named after.
+**A literal family resolves literally or refuses, and the division of labour
+is stated rather than guessed.** A brokered child is pinned to the gateway and
+the gateway derives the account from the model, so **no legacy dial can put one
+on GLM** — `repo_provider` and the role dials are applied by
+`repo_backend.apply_repo_provider` at the two *agentic* seams and never at the
+one-shot seam a brokered child takes. The lock that can is a
+`provider_lock=zai-harness` routing policy, and it refuses at
+`route_enforcement.enforce_canary_route` — before `resolve_harness_env`, so
+with no credential in existence and zero upstream bytes — reaching the receipt
+as `MODEL_REQUIREMENT_UNSATISFIABLE` rather than as a retryable
+`ROUTE_UNAVAILABLE`, because retrying an inadmissible route never succeeds and
+the thing to edit is the policy.
+
+What the broker itself checks is the question it can answer: that
+`PLAN_TIER_CATALOG`'s answer satisfies the **family** it was resolved from —
+the family, not the incoming requirement, because `ModelRequirement.satisfied_by`
+returns `True` unconditionally for a capability and asking the requirement
+would have left the capability arm with no fence at all.
+
+After the spawn, the served model is read back off the seam
+(`run_lightweight_agent`'s new `spawn_out`) and re-checked. It is read from the
+CLI's own result envelope when the CLI names a model, and the receipt records
+whether that happened: an unobserved id falls back to the requested one and is
+marked `model_observed: false`, because a weaker claim that looks like a
+stronger one is worse evidence than a weak claim that says so.
 
 **One issue per repository.** `plan_broker.PlanCanaryLatch` holds the issue's
 first acceptance criterion as a fence. It is in-memory and per-run: a durable
@@ -485,6 +520,15 @@ not about a brokered plan replacing a validated one — and it is what keeps
 gates remain authoritative" literally true. Letting a brokered artifact *become*
 the plan is #11542's decision, and it needs the writer lease #11542 also owns.
 
+**The shadow log's schema version moved to 2.** `ShadowObservation` gained
+`dispatched`, and a row is serialised over the whole model dump — so the new
+field appears, as `[]`, on every row a shadow-mode host writes too. The model is
+`extra="forbid"`, so older code reading a newer log drops those rows; the
+version bump is what makes that diagnosable rather than mysterious. "Byte
+identical outside the slice" is therefore a claim about the **pipeline's**
+effects — labels, journal, store claims, tick report — and not about the
+telemetry file's schema.
+
 **Three refusal codes were added to the contract module**, additively:
 `ROUTE_UNAVAILABLE` (no route or credential could be obtained for an otherwise
 legal request), `WORKER_TIMEOUT` (the child outlived its own wall-clock budget)
@@ -494,6 +538,17 @@ before; folding them into `FANOUT_OVERFLOW` or `BUDGET_EXHAUSTED` would make
 the evidence B5's bar is read from unreadable.
 `DRIVER_CONTRACTS_SCHEMA_VERSION` stays `1` — the members are additive and no
 field changed.
+
+**The dispatch is awaited inside the allocator tick, and that cost is named
+rather than hidden.** `fable_plan_worker_timeout_seconds` bounds the whole
+*batch* rather than each child, and its default (240s) and ceiling (900s) are
+deliberately low, because this figure is exactly how long one armed PLAN
+boundary can delay every other driver in the fleet — a per-child budget would
+multiply it by `MAX_DISPATCH_BATCH`. It is of the same order as
+`director_turn_timeout_seconds`, which the shadow director already spends on
+that tick. This adds to B3's worst-case P0 wait and the canary must report it
+alongside the 70-minute ceiling. Moving dispatch off the tick is #11542's, and
+is a precondition for the batch growing.
 
 **The pre-spawn fence is re-read with no `await` between the check and the
 claim.** The broker admitted against a snapshot; a stop, an epoch bump, a
@@ -505,6 +560,15 @@ for one key. The label arm reads the driver's own post-boundary view rather
 than issuing a fresh GitHub read: C1 makes that view a cache of the label the
 driver re-read at this boundary, and giving an observer its own port would hand
 authority to the component that must not have any.
+
+**Arming both canaries has one gateway-side prerequisite, stated here rather
+than discovered.** A brokered child mints with `principal_id` = its worker role,
+which `routing_policy.canonical_worker_role` resolves — so with the ADR-0141
+enforcement canary *also* armed for the same repository, that repository's
+routing policy must already admit `planner` / `architect` / `explorer` at the
+one-shot face, or every brokered child is refused. The two dials are otherwise
+independent by design: one governs credential binding, the other governs
+dispatch.
 
 **S2's credential proof is converted, and D2's request is answered.** The
 director's per-turn key now mints through the same bound v2 path as every other

@@ -70,7 +70,6 @@ def _resolve(request: WorkerDispatchRequest, **kwargs: object):
     defaults: dict[str, object] = {
         "phase": DriverPhase.PLAN,
         "route_policy_revision": ROUTE_REVISION,
-        "lane_serves_anthropic": True,
     }
     defaults.update(kwargs)
     return resolve_plan_model(request, **defaults)  # type: ignore[arg-type]
@@ -272,28 +271,49 @@ class TestTheDecisionExplainsItselfAfterTheFact:
 
 
 class TestALiteralFamilyHoldsOrRejectsRatherThanSubstituting:
-    def test_a_lane_that_cannot_serve_anthropic_rejects_a_literal_family(self) -> None:
-        # The z.ai-locked repository. "Resolve literally or hold/reject; never
-        # substitute GLM" — asserted on the outcome, not on the served model,
-        # because a served model of "" proves nothing on its own.
-        decision = _resolve(_request(), lane_serves_anthropic=False)
+    """What this layer can answer, and what it deliberately leaves to the policy.
+
+    ``resolve_plan_model`` used to take a ``lane_serves_anthropic`` argument the
+    caller answered from ``repo_provider``. That dial does not govern a brokered
+    child — it is applied at the agentic seams, and a brokered child takes the
+    one-shot seam pinned to the gateway — so the argument was answering a
+    question nobody had asked. The lock that matters is a ``provider_lock``
+    routing policy, refused at the resolver before any credential exists.
+
+    What is left here is the check this layer owns: the catalogued id must
+    satisfy the requirement it was resolved from.
+    """
+
+    def test_a_catalog_id_that_does_not_satisfy_its_family_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
+
+        decision = _resolve(_request())
 
         assert decision.outcome is PlanRouteOutcome.REJECTED
         assert decision.reason is PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE
 
-    def test_a_rejected_decision_names_no_served_model(self) -> None:
-        decision = _resolve(_request(), lane_serves_anthropic=False)
+    def test_a_rejected_decision_names_no_served_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
 
-        assert decision.served_model == ""
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
 
-    def test_a_capability_class_also_rejects_on_a_non_anthropic_lane(self) -> None:
-        # The tier table answers a capability with an Anthropic model, so a
-        # lane that cannot serve one cannot serve this either. Letting the
-        # capability arm through would be the substitution path reopened one
-        # requirement kind over.
+        assert _resolve(_request()).served_model == ""
+
+    def test_the_capability_arm_is_checked_the_same_way(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
+
         decision = _resolve(
-            _request(kind=ModelRequirementKind.CAPABILITY, value="balanced"),
-            lane_serves_anthropic=False,
+            _request(kind=ModelRequirementKind.CAPABILITY, value="balanced")
         )
 
         assert decision.outcome is PlanRouteOutcome.REJECTED

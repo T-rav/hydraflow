@@ -432,13 +432,29 @@ class TestTheEvidenceIsComplete:
 
         assert len(log.recent()[0].dispatched) == 2
 
-    async def test_every_receipt_names_the_model_that_served_it(
+    async def test_the_two_receipts_name_two_different_models(
         self, seeded_issues, tmp_path
     ) -> None:
+        # Collapsing into a set and asserting "all contain claude" passed when
+        # both children served the SAME model, which is the one thing a
+        # Sonnet-and-Opus canary must not do.
         _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
 
-        served = {row["served_model"] for row in log.recent()[0].dispatched}
-        assert all(model and "claude" in model for model in served)
+        served = sorted(row["served_model"] for row in log.recent()[0].dispatched)
+        assert len(set(served)) == 2
+        assert "opus" in served[0]
+        assert "sonnet" in served[1]
+
+    async def test_every_receipt_carries_the_decision_that_authorised_it(
+        self, seeded_issues, tmp_path
+    ) -> None:
+        # ``decision_id`` is content-addressed so a receipt joins back to why
+        # the tier was chosen. A join nothing carries is decorative.
+        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+
+        ids = [row["route_decision_id"] for row in log.recent()[0].dispatched]
+        assert all(i.startswith("plan_") for i in ids)
+        assert len(set(ids)) == 2
 
     async def test_every_receipt_carries_a_child_spawn_id(
         self, seeded_issues, tmp_path

@@ -1227,6 +1227,7 @@ async def _claude_cli_complete(
     session_id: str | None = None,
     gateway_client: GatewayControlClient | None = None,
     usage_out: dict[str, object] | None = None,
+    served_out: dict[str, object] | None = None,
     route: EnforcedRoute | None = None,
 ) -> SimpleResult:
     """The Claude CLI backend (today's behaviour). Credit-out surfaces as
@@ -1269,7 +1270,7 @@ async def _claude_cli_complete(
                 env = scrub_gateway_spawn_env(env)
             env.update(harness_env)
         result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
-        result = _unwrap_result_envelope(result, usage_out)
+        result = _unwrap_result_envelope(result, usage_out, served_out)
         raise_if_credit_exhausted(
             result.stdout,
             result.stderr,
@@ -1282,7 +1283,9 @@ async def _claude_cli_complete(
 
 
 def _unwrap_result_envelope(
-    result: SimpleResult, usage_out: dict[str, object] | None
+    result: SimpleResult,
+    usage_out: dict[str, object] | None,
+    served_out: dict[str, object] | None = None,
 ) -> SimpleResult:
     """Collapse a ``--output-format json`` envelope to reply text + usage.
 
@@ -1298,6 +1301,11 @@ def _unwrap_result_envelope(
         return result
     if usage_out is not None:
         usage_out.update(envelope.usage)
+    if served_out is not None and envelope.served_model:
+        # Only when the CLI actually named one. Writing the requested id here
+        # would turn "unobserved" into a false observation, which is exactly
+        # what a receipt recording a served model must never do (#11541).
+        served_out["served_model"] = envelope.served_model
     returncode = result.returncode
     stderr = result.stderr
     if envelope.is_error and returncode == 0:
@@ -1467,10 +1475,13 @@ async def run_lightweight_agent(
     (``tests/test_prompt_gate_completeness.py`` pins every call site).
 
     *spawn_out*, when given, is filled with what this seam actually spawned:
-    ``model`` (the model the child really ran on, **after** any enforcement
-    rewrite), ``provider``, ``usage`` (real token counts when the backend
-    reported them), and ``route_decision_id`` when a governed route bound the
-    spawn. It exists because ``SimpleResult`` carries reply text and nothing
+    ``model`` (the model requested of the child, **after** any enforcement
+    rewrite), ``served_model`` (only when the CLI's own result envelope names
+    one — absent means unobserved, never substituted), ``provider``, ``usage``
+    (real token counts when the backend reported them), ``route_decision_id``
+    when a governed route bound the spawn, ``timed_out`` when the deadline was
+    the failure, and ``refused``/``refused_outcome`` when the routing policy
+    held or rejected the spawn before it ran. It exists because ``SimpleResult`` carries reply text and nothing
     else, and a caller that must *record* which model served a request — a
     brokered worker's receipt, #11541 — cannot honestly report the model it
     asked for. Purely additive: every existing caller omits it and nothing
@@ -1568,6 +1579,13 @@ async def run_lightweight_agent(
         # (fail closed), and no telemetry row is recorded because no inference
         # happened. A caretaker loop reads rc=-1 and tries again later, which is
         # right — a held route is a state an operator can change.
+        if spawn_out is not None:
+            # This return is before the ``finally`` that fills spawn_out, and a
+            # caller minting a receipt has to tell "the policy said no" from
+            # "the transport failed" — the two want different reason codes and
+            # different operator actions (#11541).
+            spawn_out["refused"] = exc.decision.reason.value
+            spawn_out["refused_outcome"] = exc.decision.outcome.value
         return SimpleResult(stderr=str(exc), returncode=-1)
     if route is not None:
         model = route.effective_model
@@ -1618,6 +1636,7 @@ async def run_lightweight_agent(
                     session_id=session_id,
                     gateway_client=gateway_client,
                     usage_out=usage_stats,
+                    served_out=spawn_out,
                     route=route,
                 )
         except TimeoutError:
@@ -1630,6 +1649,11 @@ async def run_lightweight_agent(
             result = SimpleResult(
                 stderr=f"timed out after {timeout:.0f}s", returncode=-1
             )
+            if spawn_out is not None:
+                # A deadline is not a bad reply, and a caller minting a receipt
+                # has to be able to say EXPIRED rather than "ran and produced
+                # nothing usable" (#11541).
+                spawn_out["timed_out"] = True
             record_row = True
             return result
         except Exception as exc:

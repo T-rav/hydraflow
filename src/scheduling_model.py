@@ -50,11 +50,13 @@ class ExecutionRuntime(StrEnum):
     """Today's deterministic stage runners, one fresh subprocess per phase."""
 
     FABLE_DIRECTOR = "fable_director"
-    """A shadow Fable director beside the deterministic runtime (#11537).
+    """A Fable director beside the deterministic runtime (#11537, #11541).
 
     The stage subprocesses still run and still decide; the director observes
-    each boundary and records the choice it would have made. Graduating it from
-    observer to decider is #11541's, behind ``director_dispatch_armed``.
+    each boundary and records the choice it would have made. Selecting this
+    dispatches nothing on its own — #11541 arms real Sonnet/Opus workers at
+    ``PLAN`` for **one repository**, behind ``config.fable_plan_canary_repo``,
+    and every repository that dial does not name stays in shadow mode.
     """
 
 
@@ -93,16 +95,21 @@ class SchedulingPreset:
     support: SchedulingSupport
     reason: str = ""
     director_dispatch_armed: bool = False
-    """Whether a director may dispatch a **real** worker under this preset.
+    """Whether *this preset* arms real dispatch. False on every preset, always.
 
-    False everywhere today, and the flip is #11541's, gated on ADR-0137 B5's
-    evidence bar. It is a field of its own rather than a reading of
-    ``execution_runtime`` because selecting the director and *trusting* the
-    director are two different operator decisions, and collapsing them into one
-    dial is how "we turned on the observer" becomes "we turned on the actuator".
-    In shadow mode there is no code path that would read it as permission —
-    :mod:`director_broker` has no dispatch method at all — so it is a declared
-    seam for the next phase, not a live switch.
+    #11537 declared this as the seam for arming dispatch. #11541 armed it and
+    put the switch somewhere else, deliberately: a preset is **fleet-wide**, so
+    a preset that armed dispatch would arm it for every repository the factory
+    touches — the opposite of a bounded canary. The real switch is
+    ``config.fable_plan_canary_repo``, which names one repository, is live, and
+    is empty by default (:meth:`config.HydraFlowConfig.fable_plan_canary_armed`).
+
+    The distinction #11537 built this field to preserve survives the move
+    intact: selecting the director and *trusting* the director are still two
+    separate operator decisions, and one of them is still not a preset. The
+    field is kept because the operator status surfaces the preset shape, and
+    because a preset-level arming is the thing a later phase would have to
+    argue *for* rather than inherit by default.
     """
 
     @property
