@@ -278,6 +278,360 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) *(2026-07-20)*
 - `67cc3ce` — fix(file-util): bounded file_lock with FIFO gate + FileLockTimeout (#9661) (#10032) *(2026-07-20)*
 - `ccebee6` — feat(refinement): IssueRefinementLoop — tiered backlog dedup, priority scoring, operator digest (#9957) (#10024) *(2026-07-20)*
+- `d1bcf20` — Merge remote-tracking branch 'origin/main' into rc/2026-08-23-0430 *(2026-08-23)*
+- `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) (#11670) *(2026-08-23)*
+- `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) (#11665) *(2026-08-22)*
+- `5c33350` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `2dc271b` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-2334 *(2026-08-22)*
+- `73b0565` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11657) (#11657) *(2026-08-22)*
+- `befb5a6` — refactor(mockworld,arch): close two latent gate holes and finish the cluster pass (#11659) (#11659) *(2026-08-22)*
+- `1dfa921` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) (#11658) *(2026-08-22)*
+- `822a2eb` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) (#11656) (#11656) *(2026-08-22)*
+- `d412796` — feat(director): Fable P3 — brokered Sonnet and Opus Plan canary (#11541) (#11655) (#11655) *(2026-08-22)*
+- `855603b` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `b482bc1` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-1911 *(2026-08-22)*
+- `f714ecf` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) (#11653) (#11653) *(2026-08-22)*
+- `1363268` — fix(erosion): stop mass.yaml's numbers rotting — targeted --only regen, method-axis growth, and drop the field nobody read (#11652) (#11652) *(2026-08-22)*
+- `ac9ef21` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `6a06e09` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-1422 *(2026-08-22)*
+- `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
+- `8c392d0` — feat(gateway): P2 — revision-safe project policy workspace (ADR-0140) (#11648) (#11648) *(2026-08-22)*
+- `8eb762f` — fix(instruments): the calibration accept arm scored fresh merges as clean — #11643's last commit never landed (#11647) (#11647) *(2026-08-22)*
+- `2f440e8` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) (#11645) *(2026-08-22)*
+- `6523893` — feat(instruments): calibrate the test-adequacy gate — the reject arm is outcome-censored (#11593 seam 2) (#11643) (#11643) *(2026-08-22)*
+- `7df4f1a` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `99a839e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0838 *(2026-08-22)*
+- `dfd0e25` — fix(director): the shadow observer spun the allocator and fsync'd per tick (#11641) (#11641) *(2026-08-22)*
+- `8531cd5` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `f0939e7` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0746 *(2026-08-22)*
+- `d227fab` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11638) (#11638) *(2026-08-22)*
+- `36468f8` — feat(gateway): P1 — policy resolver, explanation, and shadow decisions (ADR-0139) (#11639) (#11639) *(2026-08-22)*
+- `9b52c13` — fix(secret-scrub): redact gateway virtual keys and control tokens (#11635) (#11637) (#11637) *(2026-08-22)*
+- `8925ba1` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `ddee723` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0456 *(2026-08-22)*
+- `81e811e` — feat(scheduling): Fable P1 — deterministic IssueDriver behind an explicit scheduling_model dial (#11535) (#11634) (#11634) *(2026-08-22)*
+- `f16dcc5` — feat(gateway): read-only account and active-route visibility (ADR-0138) (#11633) (#11633) *(2026-08-22)*
+- `fd05af8` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
+- `11d86a3` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0004 *(2026-08-22)*
+- `798cdd2` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11632) (#11632) *(2026-08-21)*
+- `ab3e5d1` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) (#11628) *(2026-08-21)*
+- `e24b730` — fix(mixins): TYPE_CHECKING-only seam declarations + guard against MRO shadowing (#11631) (#11631) *(2026-08-21)*
+- `5128551` — feat(driver): ADR-0137 narrows ADR-0094, fixes driver contracts, proves the runtime boundary (#11533) (#11627) (#11627) *(2026-08-21)*
+- `980253f` — fix(pools): derive the worker-pool fatal set from one source of truth (#11626) (#11626) *(2026-08-21)*
+- `8fcd6a0` — fix(control): Start clears the pipeline-worker disable set on both branches (#11611) (#11623) (#11623) *(2026-08-21)*
+- `5c33050` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11617) (#11617) *(2026-08-21)*
+- `72faffb` — feat(ci): cache the agent image and add a dispatchable sandbox-scenario run (#11601) (#11621) (#11621) *(2026-08-21)*
+- `faaaa9e` — fix(liveness): event-loop stall — attribute starvation vs block before hard restart (#11604) (#11622) (#11622) *(2026-08-21)*
+- `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*
+- `2a2fb8c` — feat(triage): honor 'Blocked by: #N' so phase-ordered children flow in order (#11614) (#11616) (#11616) *(2026-08-21)*
+- `c298996` — fix(sandbox): air-gap the composition-root AutoAgentRunner constructions (#11602) (#11615) (#11615) *(2026-08-21)*
+- `41b468b` — feat(config): light lane on by default — issues at complexity ≤3 take one spawn to PR (refs #11568) (#11590) (#11590) *(2026-08-21)*
+- `c104554` — chore(config): remove retired feature flags and their machinery (flag-rot audit) (#11599) (#11599) *(2026-08-21)*
+- `7af74dd` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11603) (#11603) *(2026-08-21)*
+- `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
+- `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
+- `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
+- `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*
+- `83b0f29` — fix(implement): take make quality off the host lock on the implement path (#11568 seam 3) (#11592) (#11592) *(2026-08-21)*
+- `b3ff35a` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose (#11568) (#11585) (#11585) *(2026-08-21)*
+- `e25d020` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof (Fixes #11570, Fixes #11571) (#11582) (#11582) *(2026-08-21)*
+- `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*
+- `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
+- `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
+- `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
+- `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
+- `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
+- `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
+- `0cce8a7` — Fixes #11481: fold sixth site, and widen the class-closure guard to find it *(2026-08-21)*
+- `1bffda8` — Merge remote-tracking branch 'origin/main' into rc/2026-08-21-1043 *(2026-08-21)*
+- `53b4905` — fix(workspace-gc): prove exact HEAD landed before cleanup (#11530) (#11530) *(2026-08-21)*
+- `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
+- `54795e2` — fix: inherit maintenance routing for shared caretakers (#11525) (#11525) *(2026-08-21)*
+- `4474b1a` — fix: fail closed on wrong-branch worktree reuse (#11523) (#11523) *(2026-08-21)*
+- `3c6d708` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11349) (#11349) *(2026-08-21)*
+- `2f73247` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#11545) (#11545) *(2026-08-20)*
+- `cd84a92` — feat(erosion): mass + suite-hygiene sensors — repeatable god-class breakup and test-suite pruning (#11522) (#11522) *(2026-08-20)*
+- `418f2cb` — chore(arch): refresh generated artifacts after the main merge *(2026-08-20)*
+- `7838527` — chore(rc): merge main into rc/2026-08-21-0200 to clear the DIRTY promotion *(2026-08-20)*
+- `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
+- `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
+- `d729b3b` — fix(planner): guard epic replans against stale ownership (#11482) (#11484) (#11484) *(2026-08-20)*
+- `6013271` — feat: add LLM gateway session tap (#11477) (#11477) *(2026-08-20)*
+- `daa3c82` — Fixes #11418: promote StaleIssueLoop/ReportIssueLoop/service_registry reach-throughs to PRPort methods *(2026-08-18)*
+- `6e036a0` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
+- `5280a46` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
+- `194befa` — chore(rc): merge main into rc/2026-08-18-0649 to clear the DIRTY promotion *(2026-08-18)*
+- `a3eef8b` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
+- `9ef92ab` — chore(rc): merge main into rc/2026-08-18-0220 to clear the DIRTY promotion *(2026-08-18)*
+- `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
+- `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
+- `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
+
+## 2026-W33
+
+- `9bbae16` — feat(supervisor): fleet-vitals shadow alarms — bands, mechanical diagnosis, closed-menu proposals (#11391) (#11392) (#11392) *(2026-08-16)*
+- `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
+- `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
+- `7d3eefb` — chore(arch): regenerate architecture artifacts post-merge *(2026-08-16)*
+- `2228982` — chore(rc): merge origin/main into rc/2026-08-16-0923 to clear DIRTY promotion state *(2026-08-16)*
+- `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
+- `27f42fe` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
+- `1a381ff` — rc: merge main back into rc/2026-08-15-2032 (#11216 manual bridge) *(2026-08-15)*
+- `4718776` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
+- `25dc931` — rc: merge main back into rc/2026-08-15-1628 (#11216 manual bridge) *(2026-08-15)*
+- `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
+- `54e0906` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
+- `bc0a457` — rc: merge main back into rc/2026-08-15-1023 (#11216 manual bridge) *(2026-08-15)*
+- `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
+- `0434348` — Fixes #11211: Per-project model/harness selection: run claude and g... (#11233) (#11233) *(2026-08-15)*
+- `f65da66` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
+- `a546050` — rc: merge main back into rc/2026-08-15-0623 (resolves promotion conflict; #11216 manual bridge) *(2026-08-15)*
+- `6c8b9ba` — feat(ul): edge-proposer — 2 new edges across 2 terms (#11226) (#11226) *(2026-08-15)*
+- `fa7be8a` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-14)*
+- `adef5d8` — rc: merge main back into rc/2026-08-15-0220 (resolves promotion conflict) *(2026-08-14)*
+- `8783d2c` — Fixes #11176: Escape ledger: regression-pin escape `055267e7b2b7` —... (#11191) (#11191) *(2026-08-14)*
+- `55f225f` — review: fix ADR-0115 stale flag-default claim + add dual-reason dedup tests (PR #11173) (#11174) (#11174) *(2026-08-14)*
+- `344ff01` — Fixes #11161: Escape ledger: bug-issue escape `9196f7403620` — unen... (#11173) (#11173) *(2026-08-14)*
+- `cdae12d` — chore(arch): refresh generated artifacts for RC *(2026-08-14)*
+- `9cc2627` — rc: promote staging → main (2026-08-14 noise-fix payload) *(2026-08-14)*
+- `9cb0191` — test(harness): exercise script_plan_credit_exhaustion + promote foreground-verification rule (#11158) (#11158) *(2026-08-14)*
+- `85c104b` — fix(quality): UI vitest lane — conditional fail-loud skip + nvm node discovery (#11155) (#11155) *(2026-08-14)*
+- `e7c0cbc` — feat(audit): P8.7 — code review after every PR (memory-backlog promotion) (#11153) (#11153) *(2026-08-14)*
+- `d34ceac` — feat(ul): term-proposer batch — 1 drafts (#11131) (#11131) *(2026-08-14)*
+- `e2bac6d` — Merge pull request #11129 from T-rav/rc/2026-08-14-0937 *(2026-08-14)*
+- `c31f2ee` — feat(ul): edge-proposer — 39 new edges across 16 terms (#11097) (#11097) *(2026-08-14)*
+- `fb149cf` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2245) *(2026-08-13)*
+- `8194a7f` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2140) *(2026-08-13)*
+- `88a162b` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2050) *(2026-08-13)*
+- `cf0b0b1` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-1920) *(2026-08-13)*
+- `26f96e9` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-1801) *(2026-08-13)*
+- `57a741d` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-1725) *(2026-08-13)*
+- `1f8ed86` — Merge remote-tracking branch 'origin/main' into rc/2026-08-13-1725 *(2026-08-13)*
+- `a1d1d53` — feat(control): setpoint register + first regulator conversion — GateHealthLoop (#11071) (#11071) *(2026-08-13)*
+- `8eb99a5` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2315) *(2026-08-13)*
+- `874be8f` — Merge remote-tracking branch 'origin/main' into rc/2026-08-13-2315 *(2026-08-13)*
+- `f4ab7e7` — fix(audit): host-hermetic prompt renders — call-time cache root + frozen plugin-skill set (#11069) (#11069) *(2026-08-13)*
+- `c5eb54a` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-2120) *(2026-08-12)*
+- `964ea47` — Merge remote-tracking branch 'origin/main' into rc/2026-08-12-2120 *(2026-08-12)*
+- `2187acb` — feat(process): encode session lessons — supervisor classify rules, self-check, gotchas (#11065) (#11065) *(2026-08-12)*
+- `ef89f0c` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-1844) *(2026-08-12)*
+- `47762f0` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-1558) *(2026-08-12)*
+- `3f4c1bd` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-0139) *(2026-08-12)*
+- `a6ecc95` — feat(quality): time-travel guard — detonate fixture time-bombs before real time does (#11054) (#11054) *(2026-08-11)*
+- `a55de0a` — chore(rc): regen arch artifacts after main merge (rc/2026-08-11-1335) *(2026-08-11)*
+- `f402c7a` — Merge remote-tracking branch 'origin/main' into rc/2026-08-11-1335 *(2026-08-11)*
+
+## 2026-W32
+
+- `5e66727` — feat(arch): vitals-methodology surface — wire ADR-0133 live (#10838 follow-up) (#11048) (#11048) *(2026-08-09)*
+- `7946975` — feat(vitals): multiplicity/MDE/time-between-events methodology (ADR-0133, #10838) (#11046) (#11046) *(2026-08-09)*
+- `8771a20` — chore(rc): regen arch artifacts after main merge (rc/2026-08-09-1545) *(2026-08-09)*
+- `4f41033` — Merge remote-tracking branch 'origin/main' into rc/2026-08-09-1545 *(2026-08-09)*
+- `da25b20` — docs(adr): ADR-0132 cognitive-process constitution — reviewed + refined (#11040) (#11042) (#11042) *(2026-08-07)*
+- `fb574bb` — feat(stillness): quiet-week experiment runner — wire the decay engine live (#10822) (#11034) (#11034) *(2026-08-06)*
+- `397a8e8` — feat(arch): ADR falsifiability baseline — wire the spec-intake metric live (#10830/#10821) (#11033) (#11033) *(2026-08-06)*
+- `3cac31a` — feat(stillness): settling-window sensing — don't read your own actuation (#10825) (#11032) (#11032) *(2026-08-06)*
+- `d54d190` — feat(stillness): quiet-week decay curve — the acceptance instrument (#10822) (#11031) (#11031) *(2026-08-06)*
+- `d56e3ba` — feat(quality): spec intake gate — falsifiability core + verdict schema (#10830) (#11030) (#11030) *(2026-08-06)*
+- `9768aa7` — chore(rc): regen arch artifacts after main merge (rc/2026-08-04-2300) *(2026-08-04)*
+- `221807d` — Merge remote-tracking branch 'origin/main' into rc/2026-08-04-2300 *(2026-08-04)*
+- `7dd6799` — feat(quality): prompt outcome pairing — make the form rubric ungameable (#10855) (#11026) (#11026) *(2026-08-04)*
+- `c4cbd45` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#11025) (#11025) *(2026-08-04)*
+- `08b8fad` — feat(security): external Claude review Action as an out-of-band assurance anchor (#10986) (#11024) (#11024) *(2026-08-04)*
+- `e4d9293` — chore(rc): regen arch artifacts after main merge (rc/2026-08-04-0816) *(2026-08-04)*
+- `1f659a1` — Merge remote-tracking branch 'origin/main' into rc/2026-08-04-0816 *(2026-08-04)*
+- `b7c5961` — feat(quality): judge calibration — proper-scoring instrument, first slice (#10836) (#11019) (#11019) *(2026-08-04)*
+- `faca3d5` — chore(rc): regen arch artifacts after main merge (rc/2026-08-03-2246) *(2026-08-03)*
+- `cd5d953` — chore(rc): regen arch artifacts after main merge (rc/2026-08-03-1024) *(2026-08-03)*
+
+## 2026-W31
+
+- `d0abd08` — chore(rc): regen arch artifacts after main merge (rc/2026-08-02-2256) *(2026-08-02)*
+- `ee36e90` — Merge remote-tracking branch 'origin/main' into rc/2026-08-02-2256 *(2026-08-02)*
+- `912a9a0` — feat(stillness): golden-baseline finder calibration — noise-floor engine, first slice (#10821) (#11009) (#11009) *(2026-08-02)*
+- `388e58a` — feat(quality): mutation gauntlet — gate-sensitivity instrument, first slice (#10835) (#11007) (#11007) *(2026-08-02)*
+- `de61229` — chore(rc): regen arch artifacts after main merge (rc/2026-08-02-1838) *(2026-08-02)*
+- `bae3c8c` — chore(rc): regen arch artifacts after main merge (rc/2026-08-02-1257) *(2026-08-02)*
+- `08a005a` — Merge remote-tracking branch 'origin/main' into rc/2026-08-02-1257 *(2026-08-02)*
+- `829f486` — feat(supervisor): Fable goal-supervisor loop — Tier-2 liveness (#10733) (#11000) (#11000) *(2026-08-02)*
+- `14a2577` — fix(adr): close two ratchet-integrity gaps — deadline receipts + REAL relatedness (#10861) (#10999) (#10999) *(2026-08-02)*
+- `1c0d194` — feat: bidirectional enforcement — Binds: axis + broadened self-mod class (#10849, #10851) (#10997) (#10997) *(2026-08-02)*
+- `ac8db5e` — docs(ul): UL scoping ADR (0122) + 7 assurance term entries (#10834) (#10995) (#10995) *(2026-08-02)*
+- `1b76da9` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10992) (#10992) *(2026-08-01)*
+- `005d775` — feat(timeline): emit PR diff stats in pr_created/merge_update payloads (#10788) (#10993) (#10993) *(2026-08-01)*
+- `160bfbd` — chore(config): remove dead memory_auto_approve knob (#10789) (#10987) (#10987) *(2026-08-01)*
+- `9a0b704` — fix(adr): exclude recorded exemptions from ADR-enforcement debt headline (#10868) (#10989) (#10989) *(2026-08-01)*
+- `e5791bc` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1707) *(2026-08-01)*
+- `3903d7e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1707 *(2026-08-01)*
+- `1be7dbf` — refactor: god-file decomposition sweep — pr_manager, review_phase, plan_phase (#10840) (#10982) (#10982) *(2026-08-01)*
+- `0f0a672` — refactor: extract WebSocket streaming from dashboard _routes god-file (#10978) (#10978) *(2026-08-01)*
+- `cecd424` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1203) *(2026-08-01)*
+- `820c568` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1203 *(2026-08-01)*
+- `d90fd04` — Fixes #10843: damper-0a — align slow-signal loop cadence to measurement window (#10969) (#10969) *(2026-08-01)*
+- `2ed1bd1` — docs(adr): ADR-0120 stillness control architecture (Proposed) — #10824/#10827/#10825 (#10968) (#10968) *(2026-08-01)*
+- `630613c` — Fixes #10840 (part): concentration (god-file) sensor — counter-metric to erosion.spread (#10966) (#10966) *(2026-08-01)*
+- `7553e49` — Fixes #10820: oscillation fingerprint — read-only flux-carrier diagnostic (#10965) (#10965) *(2026-08-01)*
+- `40087d1` — Fixes #10844: credit failover — reroute work to GLM instead of pausing (ADR-0119) (#10964) (#10964) *(2026-08-01)*
+- `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
+- `15e1e6d` — chore: arch-regen for RC promotion 2026-08-01-0329 *(2026-07-31)*
+- `17c6240` — chore: arch-regen for RC *(2026-07-31)*
+- `0b0b838` — Merge remote-tracking branch 'origin/main' into rc/2026-07-31-1816 *(2026-07-31)*
+- `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*
+- `46ad47f` — Remove Honeycomb/OTel telemetry from the factory (ADR-0118 supersedes ADR-0055) (#10950) (#10950) *(2026-07-31)*
+- `32bedda` — Fixes #10859: Prompt baselines are environment-dependent: HydraFlow... (#10938) (#10938) *(2026-07-31)*
+- `ce75b4f` — Fixes #10883: Gate health: Coverage (trailing) suspected CI hang, n... (#10929) (#10929) *(2026-07-31)*
+- `dba3064` — Fixes #10867: ADR-0027 is the only Accepted ADR classifying MISSING... (#10901) (#10901) *(2026-07-31)*
+- `b322479` — Observed prompt coverage: measure the denominator at the gate (ADR-0117) (#10927) (#10927) *(2026-07-31)*
+- `e066cdb` — chore(rc): regenerate arch artifacts for rc/2026-07-31-1047 promotion *(2026-07-31)*
+- `d4c7ecd` — Merge origin/main into rc/2026-07-31-1047 (promotion sync) *(2026-07-31)*
+- `c472943` — feat(ul): term-proposer batch — 1 drafts (#10919) (#10919) *(2026-07-31)*
+- `e3757c4` — chore(rc): regenerate arch artifacts for rc/2026-07-31-0053 promotion *(2026-07-31)*
+- `33215fc` — Merge origin/main into rc/2026-07-31-0053 (promotion sync) *(2026-07-31)*
+- `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
+- `2b4eaf4` — chore(rc): regenerate arch artifacts for rc/2026-07-30-1058 promotion *(2026-07-30)*
+- `ed39cc6` — Merge origin/main into rc/2026-07-30-1058 (promotion sync) *(2026-07-30)*
+- `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
+- `9e01094` — fix(arch): deterministic regen so unchanged architecture produces no diff/PR (#10811) (#10811) *(2026-07-28)*
+- `3de3e09` — feat(ul): term-proposer batch — 1 drafts (#10796) (#10796) *(2026-07-28)*
+- `d496213` — fix(health): opt flake_tracker into tight stall-sweep remediation (#10795) (#10800) (#10800) *(2026-07-28)*
+- `e97750d` — feat(autonomy): auto-diagnose audit + escape surfaces before human (ADR-0115) (#10780) (#10780) *(2026-07-27)*
+- `40615e9` — fix(sandbox): renumber s50_disturbance_dampener_idle_poll to s90 (scenario-number collision) (#10774) (#10774) *(2026-07-27)*
+- `bbde918` — chore(rc): regenerate arch artifacts after promotion merge *(2026-07-27)*
+- `480a496` — Merge origin/main into rc/2026-07-27-1534 (promotion sync) *(2026-07-27)*
+- `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
+- `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
+- `308a6df` — fix(operator): registry-seeded stable loop-health count, not a window/tick artifact (#10556) (#10739) (#10739) *(2026-07-27)*
+- `98c8462` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10729) (#10729) *(2026-07-27)*
+- `30e34cb` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) (#10723) (#10723) *(2026-07-27)*
+- `b244257` — feat(adr): lineage seed pass + escalate audit to STRUCTURAL + wiki term (#10674) (#10722) (#10722) *(2026-07-27)*
+
+## 2026-W30
+
+- `c32990f` — feat(adr): lineage pass — Precedent/Divergence fields + audit CULTURAL check (ADR-0113, #10674) (#10720) (#10720) *(2026-07-26)*
+- `880c542` — feat(adr): supersede ADR-0003 (clone-local isolation, ADR-0112) + mark ADR-0091 superseded by ADR-0105; enforcement debt 2→0 (#10623 Task 3) (#10719) (#10719) *(2026-07-26)*
+- `7720a90` — feat(adr): resolve remaining debt ADRs via enforcement+exemptions (#10623 Task 3 batch 2) (#10718) (#10718) *(2026-07-26)*
+- `0fdaf04` — feat(adr): REAL enforcement for 3 debt ADRs, ratchet 12→9 (#10623 Task 3 batch 1) (#10717) (#10717) *(2026-07-26)*
+- `3ca2193` — refactor(flows): retire bespoke per-phase control code + document flow pattern (P4 of #10682) (#10703) (#10703) *(2026-07-26)*
+- `e1c0336` — refactor(triage): run triage as a flow (DAG) on the primitive (P3c of #10682) (#10702) (#10702) *(2026-07-26)*
+- `3f57972` — fix(adr): make ADR-0094/0095 enforcement checks genuinely assert (#10623 Task 2) (#10701) (#10701) *(2026-07-26)*
+- `48e918a` — refactor(review): run review as a flow (DAG) on the primitive (P3b of #10682) (#10700) (#10700) *(2026-07-26)*
+- `5ff5005` — refactor(plan): run plan as a flow (DAG) on the primitive (P3a of #10682) (#10696) (#10696) *(2026-07-26)*
+- `c5fecf3` — refactor(implement): run implement as a flow (DAG) + no-progress abort (P2 of #10682) (#10694) (#10694) *(2026-07-26)*
+- `58476f5` — Fixes #10652: staging_bisect stall remediation no longer lags the sanity alert (#10686) (#10686) *(2026-07-26)*
+- `56795f5` — refactor(wiki-compiler): run compile as a flow (DAG) on the P0 primitive (P1 of #10682) (#10687) (#10687) *(2026-07-26)*
+- `ca6fd9a` — feat(arch): integrity gate — fail on degenerate generated artifacts (#10685) (#10685) *(2026-07-26)*
+- `c74283c` — feat(flows): in-framework flow (DAG) primitive + ADR (P0 of #10682) (#10684) (#10684) *(2026-07-26)*
+- `108a348` — feat: provider/harness backend split — z.ai as a Claude-harness backend (#10550) (#10550) *(2026-07-26)*
+- `81a7a66` — feat(ul): edge-proposer — 42 new edges across 23 terms (#10650) (#10650) *(2026-07-26)*
+- `958d9a5` — fix(arch): canonical label transition table + real ADR-0002 drift gate (#10642) (#10642) *(2026-07-26)*
+- `d3a4ced` — fix(escape-ledger): close the HITL issue when an escape is resolved (#10633) (#10633) *(2026-07-26)*
+- `7dcc422` — Fixes #10555: opt-in /code-review ultra review-phase option (#10620) (#10620) *(2026-07-26)*
+- `1c76ec6` — fix(arch): event-bus extractor recognizes fan-out subscribe(); stop false 'dead' flags (#10629) (#10629) *(2026-07-26)*
+- `e2625f4` — Fixes #10567: PRPort has no get_pr_labels — PR-level label routing ... (#10584) (#10584) *(2026-07-25)*
+- `7d284d6` — Fixes #10565: Sampled re-audit disagreement: PR #10479 (structural)... (#10576) (#10576) *(2026-07-25)*
+- `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*
+- `65c493d` — Merge remote-tracking branch 'origin/main' into HEAD *(2026-07-25)*
+- `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
+- `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
+- `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*
+- `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
+- `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
+- `d6bad2e` — feat(signal-control): pure control-theory substrate (Stage 1) (#10502) (#10502) *(2026-07-24)*
+- `acf3848` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
+- `a8ae443` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
+- `87a4d86` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
+- `625eca3` — Fixes #10457: Fleet-batch ADR-drift triage auto-close (#10474) (#10474) *(2026-07-24)*
+- `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
+- `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
+- `ee56677` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
+- `7150d37` — Fixes #10457: Fleet-batch ADR-drift triage auto-close (#10474) (#10474) *(2026-07-24)*
+- `23a02b7` — feat(ul): term-proposer batch — 2 drafts (#10465) (#10465) *(2026-07-24)*
+- `25b0df2` — fix(ul): drop over-broad prose aliases from CreditExhaustedError term (#10466) (#10466) *(2026-07-24)*
+- `c0821c9` — Fixes #10403: Erosion: symbol `append` scattered across 4 modules (#10446) (#10446) *(2026-07-24)*
+- `af958b0` — feat(ul): term-proposer batch — 3 drafts (#10439) (#10439) *(2026-07-24)*
+- `2d39c89` — Fixes #10400: ADR-0012 bare-cites src/epic.py — same drift false-po... (#10430) (#10430) *(2026-07-24)*
+- `9c01d59` — Fixes #10402: Erosion: symbol `_GIT_TIMEOUT_S` scattered across 3 m... (#10422) (#10422) *(2026-07-24)*
+- `f66b0a0` — feat(adr): surface unenforced-decision debt + flag weak enforcements (#10421) (#10421) *(2026-07-24)*
+- `b482e52` — fix(labels): strip stage labels on close + OPEN-filter dispatch + drift-watcher check (#10394) (#10417) (#10417) *(2026-07-24)*
+- `5ee1477` — feat(ul): entry-evidence — 13 new entry links across 11 terms (#10412) (#10412) *(2026-07-23)*
+- `856435d` — feat(ul): entry-evidence — 6 new entry links across 6 terms (#10407) (#10407) *(2026-07-23)*
+- `dce4307` — feat(ul): entry-evidence — 4 new entry links across 4 terms (#10389) (#10389) *(2026-07-23)*
+- `33e7f43` — feat(instruments): second-order vitals — detect green-while-dying (#10373) (#10379) (#10379) *(2026-07-23)*
+- `679fb22` — feat(instruments): sampled adversarial re-audit — silent-escape estimator (#10370) (#10378) (#10378) *(2026-07-23)*
+- `95d9c04` — feat(instruments): intervention tally — attention-side telemetry (#10369) (#10377) (#10377) *(2026-07-23)*
+- `3428cd6` — feat(evidence): judge-independence budget + fail-visible dispatch (#10371) (#10376) (#10376) *(2026-07-23)*
+- `f166e7f` — feat(instruments): escape ledger + erosion trend surfaces (#10367) (#10375) (#10375) *(2026-07-23)*
+- `db16faf` — feat(hygiene): close-verification controller — reopen+retriage false auto-close, default-off (#10358) (#10364) (#10364) *(2026-07-23)*
+- `e612920` — docs(adr): evaluate deterministic-simulation fault injection on sandbox compose (#10361) (#10362) (#10362) *(2026-07-23)*
+- `0b341ec` — feat(audit): close-verification — flag issues closed without a fix delta (#10354) (#10356) (#10356) *(2026-07-23)*
+- `df6f0a6` — docs(adr): reconcile 5 ADR citations drifted by #10238 (#10247) (#10347) (#10347) *(2026-07-23)*
+- `8e68c92` — test(arch): grandfather ratchet for new-loop-vs-workstream + correct #10027 doc (#10318) (#10346) (#10346) *(2026-07-23)*
+- `d775531` — docs(memory-feedback): promote 4 documented-convention entries (#10328) (#10328) *(2026-07-22)*
+- `111e858` — docs(memory-feedback): promote feedback_make_audit_separate_from_quality (#10173) (#10324) (#10324) *(2026-07-22)*
+- `379b576` — feat(sandbox): post-merge full-machine smoke — s82 exercises both merge lanes (#10309) (#10321) (#10321) *(2026-07-22)*
+- `b28837f` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10305) (#10305) *(2026-07-22)*
+- `bb77fb1` — fix(triage): parse code-quoting verdicts + raise turn budget (#10291); infra-park != clarification-park (#10290) (#10300) (#10300) *(2026-07-22)*
+- `b1cde30` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10295) (#10295) *(2026-07-22)*
+- `bfc5d9d` — docs(memory-feedback): mirror 3 pending feedback entries + refresh coverage_matrix (#10288) (#10288) *(2026-07-22)*
+- `1cc250d` — feat(ul): entry-evidence — 4 new entry links across 3 terms (#10284) (#10284) *(2026-07-22)*
+- `48aa743` — feat(ul): edge-proposer — 49 new edges across 24 terms (#10283) (#10283) *(2026-07-22)*
+- `f66ad04` — fix(adr-conformance): pre-flight skip when pytest runner env is broken (#10243) (#10277) (#10277) *(2026-07-22)*
+- `fec83cb` — Fixes #10260: Fix label/dispatch reconciliation so resolved issues ... (#10268) (#10268) *(2026-07-22)*
+- `1bd34db` — feat(ul): term-proposer batch — 4 drafts (#10266) (#10266) *(2026-07-22)*
+- `e11c542` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10248) (#10248) *(2026-07-22)*
+- `fc4e755` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#10235) (#10235) *(2026-07-22)*
+- `9516955` — feat(pipeline): hydraflow-in-progress claim label — ready→in-progress→review, durable cross-actor build claim (#10168) (#10172) (#10172) *(2026-07-22)*
+- `21f2343` — docs(build): add pre-push self-check checklist for six recurring CI-red patterns (#10169) (#10171) (#10171) *(2026-07-22)*
+- `6b45686` — feat(merge-heal): pin docs/arch/.meta.json to base in arch-stale heal to stop re-DIRTY churn (#10167) (#10170) (#10170) *(2026-07-22)*
+- `c9b9ab6` — feat(ul): edge-proposer — 1 new edges across 1 terms (#10222) (#10222) *(2026-07-21)*
+- `36ac0f4` — feat(ul): edge-proposer — 1 new edges across 1 terms (#10218) (#10218) *(2026-07-21)*
+- `637fbbb` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10210) (#10210) *(2026-07-21)*
+- `d071fbd` — refactor(pipeline): collapse Discover+Shape into Plan — full removal (#9773) (#10166) (#10166) *(2026-07-21)*
+- `3f833ff` — fix(codeql): model scrub_secrets() as py/clear-text-storage sanitizer (#9143) (#10164) (#10164) *(2026-07-21)*
+- `dc6060b` — test(fake-coverage): cover final FakeGitHub adapter-surface slice — gap→0 (#9768) (#10165) (#10165) *(2026-07-21)*
+- `37dcabe` — feat(health): loop self-repair actuator — persistent error-heartbeat → auto-repair or file (#10140) (#10155) (#10155) *(2026-07-21)*
+- `94be7b3` — fix(fake-fidelity): FakeGitHub PR-title format matches real PRManager (#10153) (#10160) (#10160) *(2026-07-21)*
+- `31e4cbd` — test(fake-coverage): cover next FakeGitHub adapter-surface slice (#9768) (#10161) (#10161) *(2026-07-21)*
+- `e9115b0` — feat(pr-red): Phase 2 — dispatch auto-agent to fix real (non-infra) settled CI reds on their branch (#10027) (#10157) (#10157) *(2026-07-21)*
+- `90d56c9` — test(trust): cassette FakeGitHub PR-review/label cluster — 11 methods (#9768 slice 3) (#10152) (#10152) *(2026-07-21)*
+- `f76c267` — feat(adr): AdrDriftResolverLoop — triage-before-escalate so drift rollups self-resolve (#9976) (#10146) (#10146) *(2026-07-21)*
+- `0d66c52` — feat(pipeline): ADR-0107 + flag-gated Triage→Plan routing — keystone for collapsing Discover/Shape (#9773) (#10145) (#10145) *(2026-07-21)*
+- `d4d4ecc` — fix(factory): perf/ auto-merge + worktree arch-meta merge driver (#10143) (#10143) *(2026-07-21)*
+- `e556096` — feat(erosion): ErosionMetricsLoop v1 — Pattern-B caretaker files change-spread/concept-scatter drift to triage (#10107) (#10138) (#10138) *(2026-07-21)*
+- `769843e` — feat(sandbox): seed repo-wiki broken-cite fixture + wiki_rot_detector active-trigger scenario (#10133) (#10137) (#10137) *(2026-07-21)*
+- `2c34150` — feat(erosion): v1 concept-scatter sensor — newly-added symbol across K>=3 modules (#10106) (#10136) (#10136) *(2026-07-21)*
+- `76bc56b` — feat(sandbox): seed worker-status event-history + trust_fleet_sanity active-trigger scenario (#10133) (#10135) (#10135) *(2026-07-21)*
+- `9af3aa2` — feat(sandbox): per-issue updated_at seed field + stale_issue_gc fresh-skip active-trigger scenario (#9544) (#10132) (#10132) *(2026-07-21)*
+- `281548c` — feat(sandbox): seed BGWorkerManager registered_workers set + dead-man-switch stall-escalation e2e scenario (#10086) (#10131) (#10131) *(2026-07-21)*
+- `896486d` — feat(sandbox): seed materializer for EpicState + health trend/heartbeat history; s71/s72 active-trigger scenarios (#9643) (#10084) (#10084) *(2026-07-21)*
+- `0c629f3` — feat(erosion): pure change-spread sensor — modules-crossed + files-touched per change, baselined (#10105) (#10116) (#10116) *(2026-07-21)*
+- `97d7436` — feat(pr-red): Phase 1 infra-flake retrier caretaker loop — settled-red detect + bounded rerun (#10027) (#10124) (#10124) *(2026-07-21)*
+- `95a6402` — feat(retrospective): re-arm HITL stale-insight window only on human close via is_bot_close (#8996) (#10110) (#10110) *(2026-07-21)*
+- `6f0e235` — fix(state-gc): sweep route_back_counts + review-orphan counters on issue close; structural issue-keyed-field guard (#10083) (#10114) (#10114) *(2026-07-21)*
+- `77a163a` — test(trust): cassette the staging/RC promotion cluster — 13 FakeGitHub methods (#9768 slice 1) (#10092) (#10092) *(2026-07-21)*
+- `0668416` — feat(config): heavy make-invoking loop subprocess timeouts become operator knobs (#9555) (#10091) (#10091) *(2026-07-21)*
+- `33ff371` — feat(preflight): widen AutoAgentPreflightLoop intake to attempt-cap/quality-gate HITL issues (#9721) (#10080) (#10080) *(2026-07-21)*
+- `2ff96bb` — fix(adr-drift): batch cross-cutting fleet-PR drift into one rollup (#9662) (#10093) (#10093) *(2026-07-21)*
+- `52b6752` — fix(subprocess): cooperative kill-switch in the shared helper — migrate staging_bisect._run_git (#9577) (#10077) (#10077) *(2026-07-21)*
+- `b0c7d5e` — test(guard): spawn-side reap guard — raw-spawn containment + reap-pairing ratchets (#9623) (#10088) (#10088) *(2026-07-21)*
+- `ddfdb66` — build(arch): auto-resolve docs/arch/.meta.json + changelog.md merge conflicts (#10099) (#10099) *(2026-07-20)*
+- `9f99bcf` — fix(escalation): TTL re-drive so stale auto-agent escalations self-heal (#9719) (#10079) (#10079) *(2026-07-20)*
+- `982cec5` — fix(workspace,state): automate HITL reset runbook residuals — main-repo core.worktree heal + attempt-counter close-to-clear (#9723) (#10082) (#10082) *(2026-07-20)*
+- `ee15f26` — feat(test-adequacy): independent second-opinion verifier gated on explicit OK (#9546) (#10076) (#10076) *(2026-07-20)*
+- `fa5e02e` — feat(gh-load): cached CI-run + issue-list reads and first-tick stagger — cut direct-gh load (#9814) (#10075) (#10075) *(2026-07-20)*
+- `aee928c` — feat(sandbox): active-trigger scenarios for six governance loops (s65-s70) (#9543) (#10074) (#10074) *(2026-07-20)*
+- `64fc05d` — feat(watchdog): thread-level event-loop freeze detector (#9552) (#10070) (#10070) *(2026-07-20)*
+- `14f4a2e` — fix(refinement): v1 follow-ups — not-planned closes, priority budget, fail-closed fake, inefficiency re-file (#10025) (#10066) (#10066) *(2026-07-20)*
+- `1306712` — fix(fitness): cadence-derived min_samples — scorecards can finally score (#9841) (#10056) (#10056) *(2026-07-20)*
+- `8509ee0` — feat(orchestration): v2 IssueDriver runtime phase spec + accept ADR-0099 (#10038) (#10055) (#10055) *(2026-07-20)*
+- `d94945e` — fix(ul): one file per term — delete stale forks, hard-fail uniqueness lint, store-level dedupe (#9938) (#10051) (#10051) *(2026-07-20)*
+- `f4c0d38` — fix(stale-issue): branch-GC reconciler + unpushed-work boot check (#10011) (#10052) (#10052) *(2026-07-20)*
+- `9d6184d` — feat(liveness): external factory watchdog + boot-time down-detection (#10044) (#10044) *(2026-07-20)*
+- `9fa2966` — fix(health-monitor): stale-code dead-man-switch — host in HealthMonitorLoop (#9596) (#10035) (#10035) *(2026-07-20)*
+- `6206f38` — fix(stale-issue): detect regression-test rot — false-close + orphaned-RED (#9597) (#10039) (#10039) *(2026-07-20)*
+- `45ef36f` — fix(wiki): worktree-isolate runtime wiki writes — boot store read-only + queue-routed ingest (#9836) (#10033) (#10033) *(2026-07-20)*
+- `67cc3ce` — fix(file-util): bounded file_lock with FIFO gate + FileLockTimeout (#9661) (#10032) (#10032) *(2026-07-20)*
+- `ccebee6` — feat(refinement): IssueRefinementLoop — tiered backlog dedup, priority scoring, operator digest (#9957) (#10024) (#10024) *(2026-07-20)*
 
 ## 2026-W29
 
