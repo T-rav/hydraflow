@@ -106,9 +106,11 @@ class SpawnDouble:
             )
             spawn_out.update(
                 {
-                    # The seam sets this on the line before it starts the
-                    # process. A double that filled `model` without it would
-                    # model a mint failure, not a spawn.
+                    # The seam sets this from ``run_simple``'s OUTCOME — it returned,
+                    # or it timed out. This double models the returned case. One that
+                    # filled `model` without it models a caught mint failure or a
+                    # runner that never started anything, which are real and
+                    # different things (see TestARunnerThatNeverStartsAProcess...).
                     "spawned": True,
                     "model": served,
                     "provider": "gateway",

@@ -1,8 +1,14 @@
-"""Two defects the Plan canary shipped with, pinned end to end (#11541).
+"""Defects the Plan canary shipped with, pinned end to end (#11541).
 
-PR #11655 auto-merged before its review passes finished. Both defects below
-survived the unit layer for the same reason: the thing that would have caught
-each of them lived one seam further out than the tests reached.
+PR #11655 and #11657 each auto-merged before their review passes finished. Every
+family below survived the unit layer for the same reason: the thing that would
+have caught it lived one seam further out than the tests reached — which is why
+the last class here drives the **production** seam and fails only the runner.
+
+The count is deliberately not stated. An earlier header said "two", and by the
+time three more families had been added it was enumerating less than half its
+own file — the same "complete enumeration that has stopped being complete"
+class this PR corrected at two other sites.
 
 * **A refused batch borrowed the previous batch's decision join.** `dispatch()`
   reset `last_decision_ids` and `refuse()` did not, so the canary's one-issue
@@ -239,9 +245,11 @@ class EnvelopeSpawn:
         )
         assert envelope is not None
         spawn_out = kwargs["spawn_out"]
-        # The seam sets this on the line before it starts the process. A double
-        # that filled `model` without it would model a caught mint failure —
-        # which is a thing the seam really does, and a different thing.
+        # The seam sets this from ``run_simple``'s OUTCOME — it returned,
+        # or it timed out. This double models the returned case. One that
+        # filled `model` without it models a caught mint failure or a
+        # runner that never started anything, which are real and
+        # different things (see TestARunnerThatNeverStartsAProcess...).
         spawn_out["spawned"] = True
         spawn_out["model"] = kwargs["model"]
         spawn_out["provider"] = "gateway"
@@ -628,6 +636,7 @@ class TestARunnerThatNeverStartsAProcessIsNotAnAcceptedWorker:
         )
         await _observe(director, 7)
         assert runner.calls == 1, "the seam never reached the runner"
+        self._director = director
         return director.shadow_log.recent()[0]
 
     @pytest.mark.parametrize(
@@ -658,13 +667,27 @@ class TestARunnerThatNeverStartsAProcessIsNotAnAcceptedWorker:
     async def test_the_rollup_counts_no_worker(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        # workers_dispatched keys on child_spawn_id, so a runner that started
-        # nothing must not appear in it — nor in shadow_mode's denominator.
+        """The rollup, asserted — its name promised it and its body did not.
+
+        An earlier version re-asserted ``child_spawn_id is None``, duplicating
+        the sibling test above and leaving every counter this test is named for
+        unchecked. A test that does not test what it says is worse than no
+        test, because the gap reads as covered.
+        """
         row = await self._receipt(
             tmp_path, monkeypatch, RuntimeError("Docker daemon not available")
         )
+        summary = self._director.shadow_log.summary()
 
-        assert row.dispatched and row.dispatched[0]["child_spawn_id"] is None
+        assert row.dispatched[0]["child_spawn_id"] is None
+        # workers_dispatched keys on child_spawn_id, so a runner that started
+        # nothing must not appear in it — nor flip shadow_mode, which reads it.
+        assert summary["workers_dispatched"] == 0
+        assert summary["shadow_mode"] is True
+        assert summary["workers_refused"] == 1
+        assert summary["workers_accepted"] == 0
+        assert summary["workers_expired"] == 0
+        assert summary["workers_rejected_after_spawn"] == 0
 
     async def test_a_substituted_model_is_not_counted_as_a_timeout(
         self, tmp_path: Path

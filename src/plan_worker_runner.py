@@ -770,12 +770,18 @@ def _child_lineage(
     IS ``TimeoutError``) — which happen before a child exists, or from the seam's
     outer ``finally``, which happens after one did.
 
-    ``spawn_out["spawned"]`` is set by the seam on the **last line before** it
-    starts the process — the closest the seam can get, not a report from the
-    process itself. The residual is named rather than hidden: an exec that never
-    forks (a missing CLI binary raises ``OSError``, which the seam swallows to a
-    soft ``rc=-1``) still reads ``spawned``. That is one line's worth of
-    over-claim, against a whole category of it before.
+    ``spawn_out["spawned"]`` is set from ``run_simple``'s **outcome**: it
+    returned, or it timed out. Both imply a process — neither runner
+    implementation returns for one that failed to start, and only a started
+    process can outlive a deadline.
+
+    The residual runs the other way now, and is named rather than hidden: a
+    child that started but whose call ended some third way — a Docker
+    ``attach_socket`` failing after ``container.start()`` succeeded, or the
+    seam's ``cleanup()`` raising in its outer ``finally`` — reads *unspawned*
+    and loses its lineage. **Under**-claiming, which is the safe direction for
+    a discriminator whose whole job is to stop a receipt saying a child ran
+    when none did.
 
     An earlier version keyed on ``model`` instead, reasoning that the seam fills
     it once it has "got as far as spawning" — and that was wrong in production:
