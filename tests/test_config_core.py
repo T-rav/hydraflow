@@ -114,80 +114,58 @@ class TestFindRepoRoot:
 
 
 class TestDetectRepoSlug:
-    def test_ssh_remote_url(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    # Every case fakes a successful `git remote get-url origin` and pins the
+    # slug parsed out of its stdout; the `id` is the name the case carried
+    # before it became a row here.
+    @pytest.mark.parametrize(
+        ("remote_stdout", "expected"),
+        [
+            pytest.param(
+                "git@github.com:owner/repo.git\n", "owner/repo", id="ssh_remote_url"
+            ),
+            pytest.param(
+                "https://github.com/owner/repo.git\n",
+                "owner/repo",
+                id="https_remote_url",
+            ),
+            # The `.git` suffix is optional in both URL forms.
+            pytest.param(
+                "git@github.com:owner/repo\n",
+                "owner/repo",
+                id="ssh_url_without_git_suffix",
+            ),
+            pytest.param(
+                "https://github.com/owner/repo\n",
+                "owner/repo",
+                id="https_url_without_git_suffix",
+            ),
+            pytest.param("", "", id="empty_remote_returns_empty_string"),
+            # A non-GitHub host parses fine but is not a GitHub repo slug.
+            pytest.param(
+                "https://gitlab.com/owner/repo.git\n",
+                "",
+                id="non_github_remote_returns_empty_string",
+            ),
+        ],
+    )
+    def test_slug_parsed_from_remote_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        remote_stdout: str,
+        expected: str,
     ) -> None:
         monkeypatch.setattr(
             subprocess,
             "run",
             lambda *_args, **_kwargs: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="git@github.com:owner/repo.git\n"
+                args=[], returncode=0, stdout=remote_stdout
             ),
         )
 
         result = _detect_repo_slug(tmp_path)
 
-        assert result == "owner/repo"
-
-    def test_https_remote_url(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            subprocess,
-            "run",
-            lambda *_args, **_kwargs: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="https://github.com/owner/repo.git\n"
-            ),
-        )
-
-        result = _detect_repo_slug(tmp_path)
-
-        assert result == "owner/repo"
-
-    def test_ssh_url_without_git_suffix(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            subprocess,
-            "run",
-            lambda *_args, **_kwargs: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="git@github.com:owner/repo\n"
-            ),
-        )
-
-        result = _detect_repo_slug(tmp_path)
-
-        assert result == "owner/repo"
-
-    def test_https_url_without_git_suffix(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            subprocess,
-            "run",
-            lambda *_args, **_kwargs: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="https://github.com/owner/repo\n"
-            ),
-        )
-
-        result = _detect_repo_slug(tmp_path)
-
-        assert result == "owner/repo"
-
-    def test_empty_remote_returns_empty_string(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            subprocess,
-            "run",
-            lambda *_args, **_kwargs: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=""
-            ),
-        )
-
-        result = _detect_repo_slug(tmp_path)
-
-        assert result == ""
+        assert result == expected
 
     def test_subprocess_file_not_found_returns_empty_string(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -220,21 +198,6 @@ class TestDetectRepoSlug:
             raise subprocess.TimeoutExpired(cmd="git", timeout=10)
 
         monkeypatch.setattr(subprocess, "run", _raise)
-
-        result = _detect_repo_slug(tmp_path)
-
-        assert result == ""
-
-    def test_non_github_remote_returns_empty_string(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            subprocess,
-            "run",
-            lambda *_args, **_kwargs: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="https://gitlab.com/owner/repo.git\n"
-            ),
-        )
 
         result = _detect_repo_slug(tmp_path)
 

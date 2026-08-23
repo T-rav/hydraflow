@@ -176,15 +176,26 @@ def test_adr_0137_declares_enforced_enforcement() -> None:
     )
 
 
-def test_adr_0137_names_this_regression_module_as_an_enforcing_check() -> None:
-    assert (
-        "pytest:tests/regressions/test_issue_11533_stale_driver_states.py"
-        in ADR.read_text()
-    )
-
-
-def test_adr_0137_narrows_rather_than_reverses_adr_0094() -> None:
-    assert "**Amends:** ADR-0094" in ADR.read_text()
+@pytest.mark.parametrize(
+    "clause",
+    [
+        pytest.param(
+            "pytest:tests/regressions/test_issue_11533_stale_driver_states.py",
+            id="adr_0137_names_this_regression_module_as_an_enforcing_check",
+        ),
+        pytest.param(
+            "**Amends:** ADR-0094",
+            id="adr_0137_narrows_rather_than_reverses_adr_0094",
+        ),
+        # The condition the conditional GO rests on.
+        pytest.param(
+            "SANDBOX_UNVERIFIED",
+            id="adr_0137_records_the_sandbox_verification_constraint",
+        ),
+    ],
+)
+def test_adr_0137_holds_the_narrowing_clause(clause: str) -> None:
+    assert clause in ADR.read_text()
 
 
 def test_adr_0094_points_at_the_narrowing_adr() -> None:
@@ -201,11 +212,6 @@ def test_adr_0094_keeps_its_original_rejection_text() -> None:
 )
 def test_adr_0137_answers_each_adversarial_finding(finding: str) -> None:
     assert finding in ADR.read_text()
-
-
-def test_adr_0137_records_the_sandbox_verification_constraint() -> None:
-    # The condition the conditional GO rests on.
-    assert "SANDBOX_UNVERIFIED" in ADR.read_text()
 
 
 # --------------------------------------------------------------------------
@@ -225,13 +231,32 @@ def test_spec_names_the_backward_transition_hazard() -> None:
     assert "silently undoes the route-back" in text
 
 
-def test_adr_documents_the_backward_swap_reversal() -> None:
-    assert "the route-back is silently undone" in ADR.read_text()
-
-
-def test_adr_records_the_sub_state_commit_constraint() -> None:
-    # DIAGNOSE/HITL_APPLY/PARKED write no label, so C8's commit cannot cover them.
-    assert "C9 (sub-state transitions commit in the ledger)" in ADR.read_text()
+@pytest.mark.parametrize(
+    "clause",
+    [
+        pytest.param(
+            "the route-back is silently undone",
+            id="adr_documents_the_backward_swap_reversal",
+        ),
+        # DIAGNOSE/HITL_APPLY/PARKED write no label, so C8's commit cannot cover them.
+        pytest.param(
+            "C9 (sub-state transitions commit in the ledger)",
+            id="adr_records_the_sub_state_commit_constraint",
+        ),
+        pytest.param("70 minutes", id="adr_quantifies_the_p0_wait_ceiling"),
+        pytest.param(
+            "one director turn",
+            id="adr_names_the_post_hoc_sandbox_exposure_window",
+        ),
+        # Otherwise C5 rule 1 deletes the very commit record C9 introduces.
+        pytest.param(
+            "separate slots",
+            id="sub_state_records_are_not_cleared_by_single_label_reconciliation",
+        ),
+    ],
+)
+def test_adr_holds_the_corrected_b1_clause(clause: str) -> None:
+    assert clause in ADR.read_text()
 
 
 def test_adr_states_that_the_ledger_still_owns_convergence_state() -> None:
@@ -241,18 +266,10 @@ def test_adr_states_that_the_ledger_still_owns_convergence_state() -> None:
     assert "remains the sole owner of convergence state" in text
 
 
-def test_adr_quantifies_the_p0_wait_ceiling() -> None:
-    assert "70 minutes" in ADR.read_text()
-
-
 def test_proven_bar_compares_against_the_classic_baseline_not_itself() -> None:
     text = ADR.read_text()
 
     assert "`phase_requeue` (classic) baseline" in text
-
-
-def test_adr_names_the_post_hoc_sandbox_exposure_window() -> None:
-    assert "one director turn" in ADR.read_text()
 
 
 def test_spec_splits_the_bundled_p2_row_by_risk() -> None:
@@ -264,11 +281,6 @@ def test_spec_splits_the_bundled_p2_row_by_risk() -> None:
 def test_reconciliation_carves_out_external_operator_drift() -> None:
     # A third label dragged in mid-swap must preempt, not be removed by the driver.
     assert "external drift, not an interrupted swap" in SPEC.read_text()
-
-
-def test_sub_state_records_are_not_cleared_by_single_label_reconciliation() -> None:
-    # Otherwise C5 rule 1 deletes the very commit record C9 introduces.
-    assert "separate slots" in ADR.read_text()
 
 
 def test_intent_record_staleness_is_defined() -> None:

@@ -159,28 +159,36 @@ class TestDiagnosticsIssueDrillEndpoints:
         assert body["summary"] == {"run_id": 1}
         assert body["subprocesses"] == [{"name": "a"}]
 
-    def test_issue_phase_run_missing_returns_404(self, app: FastAPI) -> None:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            pytest.param(
+                "/api/diagnostics/issue/999/implement/1",
+                id="issue_phase_run_missing_returns_404",
+            ),
+            # Uppercase / space is not in the [a-z_-]+ pattern. Matches the
+            # drill-down sibling's 404 behavior so consumers get a consistent
+            # error signal for bad phase names.
+            pytest.param(
+                "/api/diagnostics/issue/42/Plan%20A",
+                id="issue_phase_rejects_non_canonical_phase",
+            ),
+            # A valid phase name with no on-disk directory returns 404.
+            pytest.param(
+                "/api/diagnostics/issue/999/implement",
+                id="issue_phase_missing_dir_returns_404",
+            ),
+            pytest.param(
+                "/api/diagnostics/issue/42/Plan%20A/1",
+                id="issue_phase_run_rejects_non_canonical_phase",
+            ),
+        ],
+    )
+    def test_issue_drill_returns_404(self, app: FastAPI, path: str) -> None:
         client = TestClient(app)
-        response = client.get("/api/diagnostics/issue/999/implement/1")
-        assert response.status_code == 404
 
-    def test_issue_phase_rejects_non_canonical_phase(self, app: FastAPI) -> None:
-        client = TestClient(app)
-        # Uppercase / space is not in the [a-z_-]+ pattern. Matches the
-        # drill-down sibling's 404 behavior so consumers get a consistent
-        # error signal for bad phase names.
-        response = client.get("/api/diagnostics/issue/42/Plan%20A")
-        assert response.status_code == 404
+        response = client.get(path)
 
-    def test_issue_phase_missing_dir_returns_404(self, app: FastAPI) -> None:
-        """A valid phase name with no on-disk directory returns 404."""
-        client = TestClient(app)
-        response = client.get("/api/diagnostics/issue/999/implement")
-        assert response.status_code == 404
-
-    def test_issue_phase_run_rejects_non_canonical_phase(self, app: FastAPI) -> None:
-        client = TestClient(app)
-        response = client.get("/api/diagnostics/issue/42/Plan%20A/1")
         assert response.status_code == 404
 
 
@@ -198,18 +206,28 @@ class TestPathTraversalProtection:
         assert result is not None
         assert result == (tmp_path / "traces" / "42" / "implement").resolve()
 
-    def test_phase_traversal_blocked_at_router_level(self, app: FastAPI) -> None:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            pytest.param(
+                "/api/diagnostics/issue/42/..%2F..%2Fetc",
+                id="phase_traversal_blocked_at_router_level",
+            ),
+            pytest.param(
+                "/api/diagnostics/issue/42/..%2F..%2Fetc/1",
+                id="phase_run_traversal_blocked_at_router_level",
+            ),
+        ],
+    )
+    def test_traversal_blocked_at_router_level(self, app: FastAPI, path: str) -> None:
         """FastAPI/starlette normalizes ``..`` before routing, so a traversal
         attempt never reaches the handler. The phase-list endpoint now
         raises 404 on bad phases to match the drill-down sibling.
         """
         client = TestClient(app)
-        response = client.get("/api/diagnostics/issue/42/..%2F..%2Fetc")
-        assert response.status_code == 404
 
-    def test_phase_run_traversal_blocked_at_router_level(self, app: FastAPI) -> None:
-        client = TestClient(app)
-        response = client.get("/api/diagnostics/issue/42/..%2F..%2Fetc/1")
+        response = client.get(path)
+
         assert response.status_code == 404
 
 
