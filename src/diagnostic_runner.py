@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from exception_classify import reraise_on_credit_or_bug
@@ -229,7 +231,20 @@ class DiagnosticRunner(BaseRunner):
 
         try:
             return DiagnosisResult.model_validate(parsed)
-        except Exception:
+        except ValidationError:
+            # Caught SPECIFICALLY, and deliberately WITHOUT a broad fallback
+            # behind it (#6752). One bare ``except Exception`` used to serve two
+            # incompatible roles: it read as "the model's output did not match
+            # the schema", but it also absorbed every programming error raised
+            # inside ``model_validate`` -- a mis-typed field, a broken validator
+            # -- and filed it under the same fallback. A real bug then looked
+            # like weak model compliance and escalated to HITL as one, which is
+            # the misdiagnosis #6752 was opened about.
+            #
+            # Anything that is not a schema mismatch now propagates to the
+            # caller, whose own handler classifies it. That is the point: this
+            # site can honestly say "the output did not validate" only about
+            # exceptions that mean exactly that.
             logger.warning(
                 "DiagnosisResult validation failed for issue #%d — using fallback",
                 issue_number,

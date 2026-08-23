@@ -386,7 +386,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
         if self._workspaces is not None and not wt_path.exists():
             try:
                 wt_path = await self._workspaces.create(issue_number, branch)
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.exception(
                     "Diagnostic: workspace creation failed for issue #%d",
                     issue_number,
@@ -425,12 +426,18 @@ class DiagnosticLoop(BaseBackgroundLoop):
             # Exception subclasses are logged with exc_info and treated as a
             # failed fix so the diagnostic loop can continue with the next
             # issue (#6606).
-            from subprocess_util import (  # noqa: PLC0415
-                AuthenticationError,
-                CreditExhaustedError,
-            )
-
-            if isinstance(exc, AuthenticationError | CreditExhaustedError | OSError):
+            #
+            # This used to re-state the fatal set as a local literal tuple, which
+            # is exactly how the worker pools drifted from it and quietly dropped
+            # ``TypeError`` (#11618). It named auth + credit but not ``MemoryError``
+            # nor any of ``LIKELY_BUG_EXCEPTIONS``, so a ``TypeError`` here was
+            # logged as "runner.fix() crashed" and the loop moved on. Deferring to
+            # the one definition widens it to the whole canonical set.
+            reraise_on_credit_or_bug(exc)
+            # ``OSError`` is this site's own addition, kept explicit rather than
+            # pushed into the shared set: #6411 is about a worktree that cannot be
+            # written, which is fatal *here* and merely retryable elsewhere.
+            if isinstance(exc, OSError):
                 raise
             logger.exception(
                 "Diagnostic: runner.fix() crashed for issue #%d",
@@ -445,7 +452,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
         if not success and self._workspaces is not None:
             try:
                 await self._workspaces.destroy(issue_number)
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Diagnostic: workspace cleanup failed for issue #%d",
                     issue_number,
@@ -496,7 +504,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 await self._prs.swap_pipeline_labels(
                     issue_number, self._config.review_label[0]
                 )
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Diagnostic: label swap to review failed for issue #%d "
                     "— fix was applied but issue may need manual label update",
@@ -569,7 +578,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
         else:
             try:
                 await self._prs.post_comment(issue_number, comment)
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Diagnostic: failed to post comment for issue #%d",
                     issue_number,
@@ -589,7 +599,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
         )
         try:
             await self._prs.swap_pipeline_labels(issue_number, stage_label)
-        except Exception:
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "Diagnostic: label swap to %s failed for issue #%d "
                 "— issue may need manual label update",
@@ -622,7 +633,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 await self._prs.add_labels(
                     issue_number, ["hitl-escalation", "diagnose-failed"]
                 )
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Diagnostic: failed to add Auto-Agent routing labels for #%d",
                     issue_number,
