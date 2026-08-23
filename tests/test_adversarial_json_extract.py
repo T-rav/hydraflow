@@ -28,24 +28,26 @@ class _StubAgent:
         return self.payload
 
 
-def test_extract_json_parses_bare_object() -> None:
-    assert extract_json('{"a": 1}') == {"a": 1}
-
-
-def test_extract_json_strips_json_fence() -> None:
-    assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
-
-
-def test_extract_json_strips_bare_fence() -> None:
-    assert extract_json('```\n{"a": 1}\n```') == {"a": 1}
-
-
-def test_extract_json_tolerates_leading_prose() -> None:
-    assert extract_json('Here is the result:\n{"a": 1}') == {"a": 1}
-
-
-def test_extract_json_tolerates_trailing_prose() -> None:
-    assert extract_json('{"a": 1}\nHope that helps!') == {"a": 1}
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param('{"a": 1}', id="test_extract_json_parses_bare_object"),
+        pytest.param(
+            '```json\n{"a": 1}\n```', id="test_extract_json_strips_json_fence"
+        ),
+        pytest.param('```\n{"a": 1}\n```', id="test_extract_json_strips_bare_fence"),
+        pytest.param(
+            'Here is the result:\n{"a": 1}',
+            id="test_extract_json_tolerates_leading_prose",
+        ),
+        pytest.param(
+            '{"a": 1}\nHope that helps!',
+            id="test_extract_json_tolerates_trailing_prose",
+        ),
+    ],
+)
+def test_extract_json_recovers_object(raw: str) -> None:
+    assert extract_json(raw) == {"a": 1}
 
 
 def test_extract_json_handles_nested_braces_and_string_braces() -> None:

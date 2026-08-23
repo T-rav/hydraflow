@@ -13,6 +13,8 @@ not synthetic strings.
 
 from __future__ import annotations
 
+import pytest
+
 from wiki_anchor_gate import (
     config_field_vocabulary,
     has_repo_anchor,
@@ -81,24 +83,33 @@ _ANCHORED = [
 
 
 class TestStructuralAnchors:
-    def test_py_path_is_anchor(self) -> None:
-        assert has_repo_anchor("See src/repo_wiki.py for the mint logic.")
-
-    def test_bare_py_filename_is_anchor(self) -> None:
-        assert has_repo_anchor("wiki_compiler.py owns the synthesis prompt.")
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                "See src/repo_wiki.py for the mint logic.", id="test_py_path_is_anchor"
+            ),
+            pytest.param(
+                "wiki_compiler.py owns the synthesis prompt.",
+                id="test_bare_py_filename_is_anchor",
+            ),
+            pytest.param(
+                "RepoWikiLoop keeps the wiki fresh.", id="test_loop_classname_is_anchor"
+            ),
+            pytest.param(
+                "Route reads through WorkspacePort.", id="test_port_classname_is_anchor"
+            ),
+            pytest.param(
+                "FakeGitHub records the command.", id="test_fake_classname_is_anchor"
+            ),
+        ],
+    )
+    def test_structural_anchor_is_detected(self, text: str) -> None:
+        assert has_repo_anchor(text)
 
     def test_adr_number_is_anchor(self) -> None:
         assert has_repo_anchor("PRs target staging per ADR-0042.")
         assert has_repo_anchor("see adr 53 for the glossary")
-
-    def test_loop_classname_is_anchor(self) -> None:
-        assert has_repo_anchor("RepoWikiLoop keeps the wiki fresh.")
-
-    def test_port_classname_is_anchor(self) -> None:
-        assert has_repo_anchor("Route reads through WorkspacePort.")
-
-    def test_fake_classname_is_anchor(self) -> None:
-        assert has_repo_anchor("FakeGitHub records the command.")
 
     def test_ecase_dot_prose_is_not_a_py_path(self) -> None:
         # "e.g." and ordinary dotted prose must not be read as a .py path.

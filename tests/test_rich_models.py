@@ -120,30 +120,42 @@ class TestTrackedReportTransition:
         assert report.history[0].action == "processing"
         assert report.history[0].detail == "Started"
 
-    def test_valid_transition_in_progress_to_filed(self) -> None:
-        report = self._make_report("in-progress")
-        report.transition("filed", action="filed")
-        assert report.status == "filed"
-
-    def test_valid_transition_filed_to_fixed(self) -> None:
-        report = self._make_report("filed")
-        report.transition("fixed", action="fixed")
-        assert report.status == "fixed"
-
-    def test_valid_transition_fixed_to_closed(self) -> None:
-        report = self._make_report("fixed")
-        report.transition("closed", action="confirm_fixed")
-        assert report.status == "closed"
-
-    def test_valid_transition_closed_to_reopened(self) -> None:
-        report = self._make_report("closed")
-        report.transition("reopened", action="reopen")
-        assert report.status == "reopened"
-
-    def test_valid_transition_reopened_to_in_progress(self) -> None:
-        report = self._make_report("reopened")
-        report.transition("in-progress", action="processing")
-        assert report.status == "in-progress"
+    @pytest.mark.parametrize(
+        ("start", "target", "action"),
+        [
+            pytest.param(
+                "in-progress",
+                "filed",
+                "filed",
+                id="test_valid_transition_in_progress_to_filed",
+            ),
+            pytest.param(
+                "filed", "fixed", "fixed", id="test_valid_transition_filed_to_fixed"
+            ),
+            pytest.param(
+                "fixed",
+                "closed",
+                "confirm_fixed",
+                id="test_valid_transition_fixed_to_closed",
+            ),
+            pytest.param(
+                "closed",
+                "reopened",
+                "reopen",
+                id="test_valid_transition_closed_to_reopened",
+            ),
+            pytest.param(
+                "reopened",
+                "in-progress",
+                "processing",
+                id="test_valid_transition_reopened_to_in_progress",
+            ),
+        ],
+    )
+    def test_valid_transition(self, start: str, target: str, action: str) -> None:
+        report = self._make_report(start)
+        report.transition(target, action=action)
+        assert report.status == target
 
     def test_valid_transition_in_progress_to_queued_retry(self) -> None:
         report = self._make_report("in-progress")

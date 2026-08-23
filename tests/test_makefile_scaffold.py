@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from makefile_scaffold import (
     _check_prereq_deps,
     _diff_targets,
@@ -166,10 +168,40 @@ class TestMergeMakefile:
         # Original lint should appear exactly once (not duplicated)
         assert new_content.count("\nlint:\n") + new_content.startswith("lint:\n") == 1
 
-    def test_warns_on_different_recipe(self) -> None:
-        existing = "test:\n\tnpm test\n"
+    @pytest.mark.parametrize(
+        ("existing", "warned_target"),
+        [
+            pytest.param(
+                "test:\n\tnpm test\n", "test", id="test_warns_on_different_recipe"
+            ),
+            # quality: exists but chains different targets — should warn
+            pytest.param(
+                "quality: build deploy\n",
+                "quality",
+                id="test_warns_on_different_quality_prerequisites",
+            ),
+            # quality-lite: exists but chains different targets — should warn
+            pytest.param(
+                "quality-lite: lint-check typecheck\n",
+                "quality-lite",
+                id="test_warns_on_different_quality_lite_prerequisites",
+            ),
+            pytest.param(
+                "smoke: test-fast\n",
+                "smoke",
+                id="test_warns_on_different_smoke_prerequisites",
+            ),
+            # Regression: coverage-check warning path was previously untested.
+            pytest.param(
+                "coverage-check:\n\t@echo 'custom coverage'\n",
+                "coverage-check",
+                id="test_warns_on_coverage_check_recipe_mismatch",
+            ),
+        ],
+    )
+    def test_warns_on_divergent_target(self, existing: str, warned_target: str) -> None:
         _, warnings = merge_makefile(existing, "python")
-        assert any("test" in w for w in warnings)
+        assert any(warned_target in w for w in warnings)
 
     def test_no_warning_for_recipe_indent_only_differences(self) -> None:
         existing = (
@@ -226,23 +258,6 @@ class TestMergeMakefile:
         assert "deploy" in phony_line
         assert "release" in phony_line
 
-    def test_warns_on_different_quality_prerequisites(self) -> None:
-        # quality: exists but chains different targets — should warn
-        existing = "quality: build deploy\n"
-        _, warnings = merge_makefile(existing, "python")
-        assert any("quality" in w for w in warnings)
-
-    def test_warns_on_different_quality_lite_prerequisites(self) -> None:
-        # quality-lite: exists but chains different targets — should warn
-        existing = "quality-lite: lint-check typecheck\n"
-        _, warnings = merge_makefile(existing, "python")
-        assert any("quality-lite" in w for w in warnings)
-
-    def test_warns_on_different_smoke_prerequisites(self) -> None:
-        existing = "smoke: test-fast\n"
-        _, warnings = merge_makefile(existing, "python")
-        assert any("smoke" in w for w in warnings)
-
     def test_no_warning_when_quality_deps_match(self) -> None:
         # quality: exists with correct chain — no warning
         existing = (
@@ -270,12 +285,6 @@ class TestMergeMakefile:
         new_content, _ = merge_makefile(existing, "python")
         assert ".DEFAULT_GOAL := quality" in new_content
         assert new_content.count(".DEFAULT_GOAL") == 1
-
-    def test_warns_on_coverage_check_recipe_mismatch(self) -> None:
-        # Regression: coverage-check warning path was previously untested.
-        existing = "coverage-check:\n\t@echo 'custom coverage'\n"
-        _, warnings = merge_makefile(existing, "python")
-        assert any("coverage-check" in w for w in warnings)
 
 
 class TestNormalizeRecipe:

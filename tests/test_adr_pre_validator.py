@@ -417,10 +417,37 @@ class TestCheckVolatileLineCitations:
         codes = [i.code for i in result.issues]
         assert "volatile_line_citation" not in codes
 
-    def test_single_line_citation_detected(self, validator: ADRPreValidator) -> None:
-        content = _valid_adr(
-            consequences="- `src/config.py:_resolve_paths` (line 1122) — path resolution\n"
-        )
+    @pytest.mark.parametrize(
+        "consequences",
+        [
+            pytest.param(
+                "- `src/config.py:_resolve_paths` (line 1122) — path resolution\n",
+                id="test_single_line_citation_detected",
+            ),
+            pytest.param(
+                "- `src/foo.py` (lines 10-20) — something\n",
+                id="test_lines_range_citation_detected",
+            ),
+            pytest.param(
+                "- `src/foo.py` (lines 51 and 127) — something\n",
+                id="test_lines_and_citation_detected",
+            ),
+            # A digit-only 'symbol' like `src/foo.py:419` is a volatile line citation.
+            pytest.param(
+                "- `src/implement_phase.py:419` — implemented counter\n",
+                id="test_inline_line_number_in_symbol_position_detected",
+            ),
+            # Comma-separated line numbers like `src/foo.py:97,121` are detected.
+            pytest.param(
+                "- `src/triage_phase.py:97,121` — triaged counter\n",
+                id="test_inline_comma_separated_line_numbers_detected",
+            ),
+        ],
+    )
+    def test_line_citation_forms_detected(
+        self, validator: ADRPreValidator, consequences: str
+    ) -> None:
+        content = _valid_adr(consequences=consequences)
         result = validator.validate(content)
         codes = [i.code for i in result.issues]
         assert "volatile_line_citation" in codes
@@ -442,31 +469,6 @@ class TestCheckVolatileLineCitations:
         issue = next(i for i in result.issues if i.code == "volatile_line_citation")
         assert issue.fixable is True
 
-    def test_lines_range_citation_detected(self, validator: ADRPreValidator) -> None:
-        content = _valid_adr(consequences="- `src/foo.py` (lines 10-20) — something\n")
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "volatile_line_citation" in codes
-
-    def test_lines_and_citation_detected(self, validator: ADRPreValidator) -> None:
-        content = _valid_adr(
-            consequences="- `src/foo.py` (lines 51 and 127) — something\n"
-        )
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "volatile_line_citation" in codes
-
-    def test_inline_line_number_in_symbol_position_detected(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """A digit-only 'symbol' like `src/foo.py:419` is a volatile line citation."""
-        content = _valid_adr(
-            consequences="- `src/implement_phase.py:419` — implemented counter\n"
-        )
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "volatile_line_citation" in codes
-
     def test_inline_line_number_not_treated_as_phantom_symbol(
         self, validator: ADRPreValidator
     ) -> None:
@@ -477,17 +479,6 @@ class TestCheckVolatileLineCitations:
         result = validator.validate(content, repo_root=Path("/fake"))
         codes = [i.code for i in result.issues]
         assert "phantom_source_symbol" not in codes
-
-    def test_inline_comma_separated_line_numbers_detected(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """Comma-separated line numbers like `src/foo.py:97,121` are detected."""
-        content = _valid_adr(
-            consequences="- `src/triage_phase.py:97,121` — triaged counter\n"
-        )
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "volatile_line_citation" in codes
 
     def test_mixed_paren_and_inline_citations_counted_together(
         self, validator: ADRPreValidator
@@ -526,36 +517,46 @@ class TestCheckStaleAmendmentNotes:
         issue = next(i for i in result.issues if i.code == "stale_amendment_note")
         assert issue.fixable is True
 
-    def test_no_issue_when_referenced_adr_proposed(
-        self, validator: ADRPreValidator
+    @pytest.mark.parametrize(
+        "consequences,status",
+        [
+            # 'requires amending ADR-0021' is NOT stale when ADR-0021 is Proposed.
+            pytest.param(
+                "Accepting this ADR requires amending ADR-0021.\n",
+                "Proposed",
+                id="test_no_issue_when_referenced_adr_proposed",
+            ),
+            # ADR with no amendment notes produces no stale_amendment_note issue.
+            pytest.param(
+                "- ADR-0021 — amended to reflect repo-scoped paths.\n",
+                "Accepted",
+                id="test_no_amending_notes_passes",
+            ),
+            # Amendment note referencing an ADR not in all_adrs is skipped.
+            pytest.param(
+                "Accepting this ADR requires amending ADR-0099.\n",
+                "Accepted",
+                id="test_nonexistent_adr_gracefully_skipped",
+            ),
+            # 'requires amending ADR-0021' is NOT flagged when ADR-0021 is Superseded.
+            pytest.param(
+                "Accepting this ADR requires amending ADR-0021.\n",
+                "Superseded",
+                id="test_no_issue_when_referenced_adr_superseded",
+            ),
+            # 'requires amending ADR-0021' is NOT flagged when ADR-0021 is Deprecated.
+            pytest.param(
+                "Accepting this ADR requires amending ADR-0021.\n",
+                "Deprecated",
+                id="test_no_issue_when_referenced_adr_deprecated",
+            ),
+        ],
+    )
+    def test_no_stale_amendment_note(
+        self, validator: ADRPreValidator, consequences: str, status: str
     ) -> None:
-        """'requires amending ADR-0021' is NOT stale when ADR-0021 is Proposed."""
-        content = _valid_adr(
-            consequences="Accepting this ADR requires amending ADR-0021.\n"
-        )
-        all_adrs = [self._adr_entry(21, "Persistence", status="Proposed")]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "stale_amendment_note" not in codes
-
-    def test_no_amending_notes_passes(self, validator: ADRPreValidator) -> None:
-        """ADR with no amendment notes produces no stale_amendment_note issue."""
-        content = _valid_adr(
-            consequences="- ADR-0021 — amended to reflect repo-scoped paths.\n"
-        )
-        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "stale_amendment_note" not in codes
-
-    def test_nonexistent_adr_gracefully_skipped(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """Amendment note referencing an ADR not in all_adrs is skipped."""
-        content = _valid_adr(
-            consequences="Accepting this ADR requires amending ADR-0099.\n"
-        )
-        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
+        content = _valid_adr(consequences=consequences)
+        all_adrs = [self._adr_entry(21, "Persistence", status=status)]
         result = validator.validate(content, all_adrs)
         codes = [i.code for i in result.issues]
         assert "stale_amendment_note" not in codes
@@ -628,30 +629,6 @@ class TestCheckStaleAmendmentNotes:
                 "0021-persistence.md",
             )
         ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "stale_amendment_note" not in codes
-
-    def test_no_issue_when_referenced_adr_superseded(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """'requires amending ADR-0021' is NOT flagged when ADR-0021 is Superseded."""
-        content = _valid_adr(
-            consequences="Accepting this ADR requires amending ADR-0021.\n"
-        )
-        all_adrs = [self._adr_entry(21, "Persistence", status="Superseded")]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "stale_amendment_note" not in codes
-
-    def test_no_issue_when_referenced_adr_deprecated(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """'requires amending ADR-0021' is NOT flagged when ADR-0021 is Deprecated."""
-        content = _valid_adr(
-            consequences="Accepting this ADR requires amending ADR-0021.\n"
-        )
-        all_adrs = [self._adr_entry(21, "Persistence", status="Deprecated")]
         result = validator.validate(content, all_adrs)
         codes = [i.code for i in result.issues]
         assert "stale_amendment_note" not in codes
@@ -914,14 +891,51 @@ class TestMismatchedADRTitle:
 
 
 class TestCheckSourceFunctionRefs:
-    def test_valid_function_reference_passes(
-        self, validator: ADRPreValidator, tmp_path: Path
+    @pytest.mark.parametrize(
+        "source,symbol",
+        [
+            # A cited function that exists in the source file is not flagged.
+            pytest.param(
+                "def _resolve_paths():\n    pass\n",
+                "_resolve_paths",
+                id="test_valid_function_reference_passes",
+            ),
+            # A cited class name that exists in the source file is not flagged.
+            pytest.param(
+                "class HydraFlowConfig:\n    pass\n",
+                "HydraFlowConfig",
+                id="test_class_name_reference_passes",
+            ),
+            # An indented class method definition is correctly found (not a false positive).
+            pytest.param(
+                "class Foo:\n    def _resolve_paths(self):\n        pass\n",
+                "_resolve_paths",
+                id="test_indented_method_definition_passes",
+            ),
+            # A method nested inside a class inside another block is still found.
+            pytest.param(
+                "class Outer:\n"
+                "    class Inner:\n"
+                "        def deeply_nested(self):\n"
+                "            pass\n",
+                "deeply_nested",
+                id="test_deeply_indented_method_passes",
+            ),
+            # An async def function is found and not flagged as phantom.
+            pytest.param(
+                "async def fetch_data():\n    pass\n",
+                "fetch_data",
+                id="test_async_function_reference_passes",
+            ),
+        ],
+    )
+    def test_existing_symbol_reference_passes(
+        self, validator: ADRPreValidator, tmp_path: Path, source: str, symbol: str
     ) -> None:
-        """A cited function that exists in the source file is not flagged."""
         src = tmp_path / "src"
         src.mkdir()
-        (src / "config.py").write_text("def _resolve_paths():\n    pass\n")
-        content = _valid_adr(context="See `src/config.py:_resolve_paths` for details.")
+        (src / "config.py").write_text(source)
+        content = _valid_adr(context=f"See `src/config.py:{symbol}` for details.")
         result = validator.validate(content, repo_root=tmp_path)
         codes = [i.code for i in result.issues]
         assert "phantom_source_symbol" not in codes
@@ -942,32 +956,6 @@ class TestCheckSourceFunctionRefs:
         issue = next(i for i in result.issues if i.code == "phantom_source_symbol")
         assert "_namespace_repo_paths" in issue.message
         assert "config.py" in issue.message
-
-    def test_class_name_reference_passes(
-        self, validator: ADRPreValidator, tmp_path: Path
-    ) -> None:
-        """A cited class name that exists in the source file is not flagged."""
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "config.py").write_text("class HydraFlowConfig:\n    pass\n")
-        content = _valid_adr(context="See `src/config.py:HydraFlowConfig` for details.")
-        result = validator.validate(content, repo_root=tmp_path)
-        codes = [i.code for i in result.issues]
-        assert "phantom_source_symbol" not in codes
-
-    def test_indented_method_definition_passes(
-        self, validator: ADRPreValidator, tmp_path: Path
-    ) -> None:
-        """An indented class method definition is correctly found (not a false positive)."""
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "config.py").write_text(
-            "class Foo:\n    def _resolve_paths(self):\n        pass\n"
-        )
-        content = _valid_adr(context="See `src/config.py:_resolve_paths` for details.")
-        result = validator.validate(content, repo_root=tmp_path)
-        codes = [i.code for i in result.issues]
-        assert "phantom_source_symbol" not in codes
 
     def test_missing_source_file_skipped(
         self, validator: ADRPreValidator, tmp_path: Path
@@ -1039,35 +1027,6 @@ class TestCheckSourceFunctionRefs:
         """References to files outside src/ are not checked."""
         content = _valid_adr(context="See `docs/config.py:some_func` for details.")
         result = validator.validate(content, repo_root=Path("/fake"))
-        codes = [i.code for i in result.issues]
-        assert "phantom_source_symbol" not in codes
-
-    def test_deeply_indented_method_passes(
-        self, validator: ADRPreValidator, tmp_path: Path
-    ) -> None:
-        """A method nested inside a class inside another block is still found."""
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "config.py").write_text(
-            "class Outer:\n"
-            "    class Inner:\n"
-            "        def deeply_nested(self):\n"
-            "            pass\n"
-        )
-        content = _valid_adr(context="See `src/config.py:deeply_nested` for details.")
-        result = validator.validate(content, repo_root=tmp_path)
-        codes = [i.code for i in result.issues]
-        assert "phantom_source_symbol" not in codes
-
-    def test_async_function_reference_passes(
-        self, validator: ADRPreValidator, tmp_path: Path
-    ) -> None:
-        """An async def function is found and not flagged as phantom."""
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "config.py").write_text("async def fetch_data():\n    pass\n")
-        content = _valid_adr(context="See `src/config.py:fetch_data` for details.")
-        result = validator.validate(content, repo_root=tmp_path)
         codes = [i.code for i in result.issues]
         assert "phantom_source_symbol" not in codes
 

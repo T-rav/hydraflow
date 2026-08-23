@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from dashboard_routes._common import (
@@ -25,20 +27,18 @@ class TestParseCompatJsonObject:
     def test_returns_none_for_non_string(self) -> None:
         assert _parse_compat_json_object(42) is None  # type: ignore[arg-type]
 
-    def test_returns_none_for_empty_string(self) -> None:
-        assert _parse_compat_json_object("") is None
-
-    def test_returns_none_for_whitespace(self) -> None:
-        assert _parse_compat_json_object("   ") is None
-
-    def test_returns_none_for_invalid_json(self) -> None:
-        assert _parse_compat_json_object("{bad json") is None
-
-    def test_returns_none_for_json_array(self) -> None:
-        assert _parse_compat_json_object("[1, 2]") is None
-
-    def test_returns_none_for_json_string(self) -> None:
-        assert _parse_compat_json_object('"hello"') is None
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param("", id="test_returns_none_for_empty_string"),
+            pytest.param("   ", id="test_returns_none_for_whitespace"),
+            pytest.param("{bad json", id="test_returns_none_for_invalid_json"),
+            pytest.param("[1, 2]", id="test_returns_none_for_json_array"),
+            pytest.param('"hello"', id="test_returns_none_for_json_string"),
+        ],
+    )
+    def test_returns_none_for_non_object_string(self, raw: str) -> None:
+        assert _parse_compat_json_object(raw) is None
 
     def test_returns_dict_for_valid_json_object(self) -> None:
         result = _parse_compat_json_object('{"key": "value"}')

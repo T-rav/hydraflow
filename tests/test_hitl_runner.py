@@ -134,20 +134,57 @@ class TestBuildPrompt:
         assert "Fix the widget" in prompt
 
     @pytest.mark.asyncio
-    async def test_prompt_includes_correction_text(self, hitl_runner) -> None:
-        issue = IssueFactory.create(number=42)
-        prompt, _ = await hitl_runner._build_prompt_with_stats(
-            issue, "Mock the database layer", "CI failed"
-        )
-        assert "Mock the database layer" in prompt
-
-    @pytest.mark.asyncio
-    async def test_prompt_includes_cause(self, hitl_runner) -> None:
-        issue = IssueFactory.create(number=42)
-        prompt, _ = await hitl_runner._build_prompt_with_stats(
-            issue, "Fix it", "CI failed after 2 attempts"
-        )
-        assert "CI failed after 2 attempts" in prompt
+    @pytest.mark.parametrize(
+        ("issue_number", "correction", "cause", "expected_fragment"),
+        [
+            pytest.param(
+                42,
+                "Mock the database layer",
+                "CI failed",
+                "Mock the database layer",
+                id="test_prompt_includes_correction_text",
+            ),
+            pytest.param(
+                42,
+                "Fix it",
+                "CI failed after 2 attempts",
+                "CI failed after 2 attempts",
+                id="test_prompt_includes_cause",
+            ),
+            pytest.param(
+                42,
+                "Add logging",
+                "Insufficient issue detail for triage",
+                "comprehensive tests",
+                id="test_prompt_uses_needs_info_instructions",
+            ),
+            pytest.param(
+                99,
+                "Fix it",
+                "Unknown",
+                "#99",
+                id="test_prompt_includes_issue_number_in_commit_message",
+            ),
+            pytest.param(
+                42,
+                "Fix",
+                "CI failed",
+                "Do NOT push to remote",
+                id="test_prompt_includes_no_push_rule",
+            ),
+        ],
+    )
+    async def test_prompt_contains_expected_fragment(
+        self,
+        hitl_runner,
+        issue_number: int,
+        correction: str,
+        cause: str,
+        expected_fragment: str,
+    ) -> None:
+        issue = IssueFactory.create(number=issue_number)
+        prompt, _ = await hitl_runner._build_prompt_with_stats(issue, correction, cause)
+        assert expected_fragment in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_uses_ci_instructions_for_ci_cause(self, hitl_runner) -> None:
@@ -170,14 +207,6 @@ class TestBuildPrompt:
         assert "conflict" in prompt.lower()
 
     @pytest.mark.asyncio
-    async def test_prompt_uses_needs_info_instructions(self, hitl_runner) -> None:
-        issue = IssueFactory.create(number=42)
-        prompt, _ = await hitl_runner._build_prompt_with_stats(
-            issue, "Add logging", "Insufficient issue detail for triage"
-        )
-        assert "comprehensive tests" in prompt
-
-    @pytest.mark.asyncio
     async def test_prompt_uses_visual_instructions_for_visual_cause(
         self, hitl_runner
     ) -> None:
@@ -188,24 +217,6 @@ class TestBuildPrompt:
         assert "visual" in prompt.lower()
         assert "screenshot" in prompt.lower()
         assert "visual regression" in prompt.lower()
-
-    @pytest.mark.asyncio
-    async def test_prompt_includes_issue_number_in_commit_message(
-        self, hitl_runner
-    ) -> None:
-        issue = IssueFactory.create(number=99)
-        prompt, _ = await hitl_runner._build_prompt_with_stats(
-            issue, "Fix it", "Unknown"
-        )
-        assert "#99" in prompt
-
-    @pytest.mark.asyncio
-    async def test_prompt_includes_no_push_rule(self, hitl_runner) -> None:
-        issue = IssueFactory.create(number=42)
-        prompt, _ = await hitl_runner._build_prompt_with_stats(
-            issue, "Fix", "CI failed"
-        )
-        assert "Do NOT push to remote" in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_includes_memory_suggestion_block(self, hitl_runner) -> None:
