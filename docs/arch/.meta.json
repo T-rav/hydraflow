@@ -1,28 +1,25 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "bb64e273e051cce86e4102beb9f8143c64034db9836f329d7aa18ff4416f47a2"
+      "content_sha": "041a1e174e94ef68b54ef67e6cac8d60a33597bb71c8a6481789ae3585bf6833"
     },
     "adr-conformance.md": {
-      "content_sha": "94c124e719494262eb32ffa97f559e1d638f1cc91a96596eae65ab375be36b61"
+      "content_sha": "fe4a33ae9fd66012e4e2cc56cf1c063c3eed3e8a4cb8f491ebab0b6c45623154"
     },
     "adr-enforcement.md": {
-      "content_sha": "b2c2c8e82d5224ed76c3ce8ffe2295af9f96522e30f8d65969f111e31b7dcbe9"
+      "content_sha": "a20c6127b293485a7c3c21d0427516c7f76370bfebcdcc459c324cf6c54f30bb"
     },
     "adr-falsifiability.md": {
-      "content_sha": "f2b090c18467ca3f61b4d2b503beaa076b8d3b19d5bb7411b58feaf6d9f2a77d"
+      "content_sha": "7c7b8c276fd1b641f4cd57cdb13a77e544c6d92d3d2597ecdae8a13a900c7f80"
     },
     "adr_xref.md": {
-      "content_sha": "a10e3041410f5306b0547723919b4a9c608571cb78cb6d768a27269cb93445c7"
+      "content_sha": "6e8c45b6909b93d7b4727fa2d13c7f52ef846ce6b3f5ef065c4f196875a4f256"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
-    "changelog.md": {
-      "content_sha": "539be3bd095e7c10c01c69775a1cad87ff294a0e346c1aae14973280b030a958"
-    },
     "coverage_matrix.md": {
-      "content_sha": "a2f313db50a91f02f177d1a6c61824439da8050dd53ff8f42c9f4412dc43eaeb"
+      "content_sha": "a455e148e242c4fc13110ac6f6c1629fe2d8b996659a182f4172e1f21d3ffaf9"
     },
     "events.md": {
       "content_sha": "ba7fd543fef903f08d328dbf322559db7ffd6f75b554e7a168362098ac0cab01"
@@ -43,13 +40,10 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "48e3dea80bbc85f11316f0b2b3c166069bae5661ce020e867d5deb780d0cde98"
+      "content_sha": "636961b4bf1f5d1659a9da2055615ce6653ffac68067e08167762fa6a107d9fb"
     },
     "ports.md": {
       "content_sha": "3158aad6d49ec374e5260d2d289b2222b3942a7b10fc36a53d4177abd6a3f0e0"
-    },
-    "traceability_matrix.md": {
-      "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "bec384b2a00e8dd2ff7216babcfd67d509285117ccd1b800fd7ff7f8a11edcba"
@@ -61,5 +55,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "2ccb150c4d73490ccc9a526e24855dcd4c3d0be4e52cd5c173f0bef4a97138ed"
+  "content_sha": "d2d8ec2d250bc43b911c9d8b7556ae1d5dc2f520794b3a5cad3f3cb31c5c3652"
 }

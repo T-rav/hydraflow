@@ -39,7 +39,12 @@ def render_changelog(commits: list[CommitInfo]) -> str:
     for wk in sorted(by_week, reverse=True):
         chunks.append(f"## {wk}\n")
         for c in sorted(by_week[wk], key=lambda c: c.iso_date, reverse=True):
-            pr = f" (#{c.pr_number})" if c.pr_number else ""
+            # A squash-merge subject already ends in "(#N)", and GitHub adds a
+            # second "(#N)" when a PR that itself referenced a PR lands. Appending
+            # unconditionally produced "(#11656) (#11656)" -- 412 such entries in
+            # the published artifact. Only append a ref the subject lacks.
+            ref = f"(#{c.pr_number})" if c.pr_number else ""
+            pr = f" {ref}" if ref and ref not in c.subject else ""
             chunks.append(f"- `{c.sha[:7]}` — {c.subject}{pr} *({c.iso_date})*")
         chunks.append("")
     return _HEADER + _PREAMBLE + "\n".join(chunks) + _FOOTER
