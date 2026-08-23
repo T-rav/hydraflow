@@ -455,9 +455,12 @@ class FableDirector:
 
         Three gates, in this order and each for its own reason:
 
-        1. **the object exists** — under shadow mode there is no dispatcher at
-           all, so this returns before evaluating anything else and the shadow
-           path is byte-identical to #11537's;
+        1. **the seam is wired** — a director constructed without an actuator
+           (Classic and the deterministic controller build no director at all;
+           a hand-built one in a test may omit it) returns here before
+           evaluating anything else, so that path stays #11537's exactly. Under
+           a production ``fable_director`` build both are always present, and
+           what stops a dispatch is clause 2, not this one;
         2. **the boundary is covered** — one repository, phase ``PLAN``, read
            live so clearing the dial stops the next dispatch;
         3. **the repository's single brokered slot is free** — the issue's

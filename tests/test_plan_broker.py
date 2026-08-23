@@ -395,3 +395,42 @@ class TestOneActiveFableDirectedIssuePerRepository:
         latch.claim(101, now=now)
 
         assert latch.claim(202, now=now + timedelta(seconds=899)) is False
+
+
+class TestTheResolverIsTotal:
+    """It runs on a live dispatch path, so it must never raise.
+
+    ``ModelRequirement``'s validator rejects a family outside
+    ``LITERAL_FAMILIES``, and the capability arm builds one from the tier table
+    — so a table edit naming an unknown family would have raised out of a
+    dispatch instead of refusing it.
+    """
+
+    def test_a_capability_mapped_to_an_unknown_family_is_held_not_raised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.CAPABILITY_TIERS, "balanced", "claude-mythos")
+
+        decision = _resolve(
+            _request(kind=ModelRequirementKind.CAPABILITY, value="balanced")
+        )
+
+        assert decision.reason is PlanRouteReason.CAPABILITY_UNMAPPED
+
+    def test_an_unmapped_capability_is_held_rather_than_rejected(self) -> None:
+        # A hold, because the tier table is the fixable thing and the request
+        # was not inadmissible.
+        import plan_broker
+
+        original = dict(plan_broker.CAPABILITY_TIERS)
+        plan_broker.CAPABILITY_TIERS.clear()
+        try:
+            decision = _resolve(
+                _request(kind=ModelRequirementKind.CAPABILITY, value="balanced")
+            )
+        finally:
+            plan_broker.CAPABILITY_TIERS.update(original)
+
+        assert decision.outcome is PlanRouteOutcome.HELD

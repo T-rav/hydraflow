@@ -52,6 +52,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from driver_contracts import (
+    LITERAL_FAMILIES,
     WORKER_CATALOG,
     DriverPhase,
     ModelRequirement,
@@ -338,7 +339,12 @@ def resolve_plan_model(
         )
     elif requirement.kind is ModelRequirementKind.CAPABILITY:
         mapped = CAPABILITY_TIERS.get(requirement.value)
-        if mapped is None:
+        if mapped is None or mapped not in LITERAL_FAMILIES:
+            # ``mapped not in LITERAL_FAMILIES`` keeps this function TOTAL: the
+            # family becomes a ``ModelRequirement`` below, whose validator
+            # raises on an unknown value — and an exception on a live dispatch
+            # path is a routing incident rather than a refusal an operator can
+            # read.
             return _refusal(
                 echo, PlanRouteOutcome.HELD, PlanRouteReason.CAPABILITY_UNMAPPED
             )

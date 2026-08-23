@@ -739,9 +739,11 @@ CANARY_SLOT_TTL_SECONDS = 3600
 A backstop, not the normal release: the director frees the slot on the tick its
 issue leaves PLAN. This covers the abnormal exit — an exception between claim
 and release — so a crash cannot idle the canary for the process lifetime.
-Generous relative to a plan (``fable_plan_worker_timeout_seconds`` defaults to
-ten minutes for the whole batch), because reclaiming a slot that is still in
-use would produce the concurrent second director the latch exists to prevent.
+Generous relative to a batch (``fable_plan_worker_timeout_seconds`` defaults
+to four minutes and is capped at fifteen), because reclaiming a slot that is
+still in use would produce the concurrent second director the latch exists to
+prevent — so the backstop must sit well above the longest batch the dial can
+buy, not near it.
 """
 
 

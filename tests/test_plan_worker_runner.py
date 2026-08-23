@@ -822,3 +822,87 @@ class TestTheSeamsOwnSignalsAreRead:
             )
 
         assert len(runner.artifacts) == MAX_RETAINED_RECORDS
+
+
+class TestTheRefusalClassificationIsTotal:
+    """Every resolver reason is classified, and the set is derived not copied.
+
+    The first draft of ``_INADMISSIBLE_ROUTE_REASONS`` was hand-written string
+    literals: it contained a member that does not exist and omitted one that
+    does, and read as a working classification while classifying nothing.
+    """
+
+    def test_every_resolver_reason_is_classified(self) -> None:
+        from hydraflow_gateway.routing_policy import DecisionReason
+        from plan_worker_runner import (
+            _INADMISSIBLE_ROUTE_REASONS,
+            _OPERATIONAL_ROUTE_REASONS,
+        )
+
+        classified = _INADMISSIBLE_ROUTE_REASONS | _OPERATIONAL_ROUTE_REASONS
+
+        assert {reason.value for reason in DecisionReason} == classified
+
+    def test_the_two_classes_do_not_overlap(self) -> None:
+        from plan_worker_runner import (
+            _INADMISSIBLE_ROUTE_REASONS,
+            _OPERATIONAL_ROUTE_REASONS,
+        )
+
+        assert not (_INADMISSIBLE_ROUTE_REASONS & _OPERATIONAL_ROUTE_REASONS)
+
+    def test_a_policy_conflict_is_inadmissible(self) -> None:
+        # A retry against an unresolved conflict is an infinite one.
+        from plan_worker_runner import _INADMISSIBLE_ROUTE_REASONS
+
+        assert "policy-conflict" in _INADMISSIBLE_ROUTE_REASONS
+
+    def test_an_unclassified_reason_falls_back_to_retryable(self) -> None:
+        # Total by construction above, so this pins the default a future
+        # unmapped reason would take rather than leaving it to be discovered.
+        from plan_worker_runner import _refusal_for_spawn
+
+        assert (
+            _refusal_for_spawn({"refused": "something-nobody-wired-up"})
+            is RejectionReason.ROUTE_UNAVAILABLE
+        )
+
+
+class TestARefusedBatchCarriesNoBorrowedJoin:
+    """`refuse()` mints blank decisions, so it must mint a blank join too.
+
+    Found by a third review pass, and introduced by the second one's own fix:
+    ``dispatch()`` reset ``last_decision_ids`` and ``refuse()`` did not, so a
+    latch refusal inherited the *previous* batch's ids whenever a request id
+    repeated across issues — which it does, because a director names its
+    requests per turn rather than per issue. The field this canary added to make
+    the join real was recording a false one.
+    """
+
+    async def test_a_refusal_after_a_dispatch_carries_no_id(self, config, task) -> None:
+        runner = _runner(config, SpawnDouble())
+        await _dispatch(runner, task, [_request(request_id="req-1")])
+        dispatched_id = runner.last_decision_ids["req-1"]
+
+        runner.refuse(
+            [_request(request_id="req-1", key="other")],
+            RejectionReason.CANARY_SLOT_HELD,
+        )
+
+        assert dispatched_id
+        assert runner.last_decision_ids["req-1"] == ""
+
+    async def test_a_held_route_is_retryable_whatever_its_reason(
+        self, config, task
+    ) -> None:
+        # The outcome outranks the reason: ``capability-unmapped`` is emitted
+        # only as HELD, and a hold is right with something missing.
+        class Held(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                kwargs["spawn_out"]["refused"] = "capability-unmapped"
+                kwargs["spawn_out"]["refused_outcome"] = "held"
+                return SimpleResult(stderr="held", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, Held()), task, [_request()])
+
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE

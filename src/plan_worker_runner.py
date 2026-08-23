@@ -60,6 +60,7 @@ from driver_contracts import (
     WorkerTransport,
 )
 from exception_classify import reraise_on_credit_or_bug
+from hydraflow_gateway.routing_policy import DecisionReason
 from plan_broker import PlanRouteOutcome, PlanRouteReason, resolve_plan_model
 from runner_utils import run_lightweight_agent
 
@@ -114,17 +115,47 @@ _REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     ),
 }
 
-#: Routing-policy refusal reasons that mean *the request was inadmissible on
-#: this lane* rather than *something operational is missing*. The first maps to
-#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing and the operator
-#: must edit the policy; everything else is ROUTE_UNAVAILABLE, where a caretaker
-#: retry is right and the operator should look at the gateway.
+#: Routing-policy refusal reasons that mean *the request was inadmissible*
+#: rather than *something operational is missing*. These map to
+#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing and the thing to
+#: edit is the policy; every other reason is ROUTE_UNAVAILABLE, where a
+#: caretaker retry is right and the operator should look at the gateway.
+#:
+#: Built from the resolver's own enum rather than from string literals, because
+#: the first draft of this set contained a member that does not exist
+#: (``concrete-model-not-allowed``) and omitted one that does
+#: (``policy-conflict``) — a hand-written copy of another module's vocabulary
+#: drifts silently and reads as a working classification while classifying
+#: nothing. ``tests/test_plan_worker_runner.py`` requires every
+#: :class:`DecisionReason` member to be classified, so a new one fails there
+#: rather than defaulting to "retry it".
 _INADMISSIBLE_ROUTE_REASONS = frozenset(
     {
-        "literal-family-unsatisfiable",
-        "capability-unmapped",
-        "model-not-allowed",
-        "concrete-model-not-allowed",
+        DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
+        DecisionReason.CAPABILITY_UNMAPPED.value,
+        DecisionReason.MODEL_NOT_ALLOWED.value,
+        # Two policies claim the same rung: an operator must resolve it, and a
+        # retry against an unresolved conflict is an infinite one.
+        DecisionReason.POLICY_CONFLICT.value,
+    }
+)
+
+#: Reasons deliberately left retryable, and why — so the judgement is visible
+#: rather than implied by absence from the set above.
+_OPERATIONAL_ROUTE_REASONS = frozenset(
+    {
+        # The snapshot will be back; nothing about the request is wrong.
+        DecisionReason.SNAPSHOT_UNAVAILABLE.value,
+        # Collapses "no credential for this account" with "a provider lock
+        # excluded every account". The first is operational and the second is
+        # policy, and the resolver does not distinguish them here — so the
+        # conservative reading is the retryable one, which sends the operator
+        # to the gateway where both are visible.
+        DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
+        # Not refusals at all; present so the classification is total.
+        DecisionReason.MATCHED_POLICY.value,
+        DecisionReason.NO_POLICY_APPLIES.value,
+        DecisionReason.NO_LEGACY_ROUTE.value,
     }
 )
 
@@ -225,10 +256,16 @@ class PlanWorkerArtifact:
 class PlanWorkerRunner:
     """Dispatches admitted Plan requests as real children and mints receipts.
 
-    Constructed only at the ``build_services`` composition root and only when
-    the canary is armed for this repository, so an operator who has not named a
-    canary repository has no such object in their process — the same
-    object-graph standard #11535 and #11537 held themselves to.
+    Constructed at the ``build_services`` composition root and only under
+    ``execution_runtime=fable_director`` — so Classic and the deterministic
+    controller have no such object in their process at all.
+
+    Under a director it is built **unconditionally**, armed or not, and gated
+    only by ``plan_broker.plan_canary_covers``. Making construction conditional
+    on the dial read as a stronger default-off proof and was a bug: the dial is
+    live and empty by default, so a factory booted disarmed had nothing to arm
+    and naming a canary repository silently did nothing until a restart. Both
+    directions of a live dial have to work, or it is not live.
     """
 
     def __init__(
@@ -329,6 +366,14 @@ class PlanWorkerRunner:
         remembering it.
         """
         blank = _unresolved_decision(self._route_policy_revision)
+        # Reset the join too. Without this the refused receipts inherited the
+        # PREVIOUS batch's ids whenever a request id repeated across issues —
+        # which it does, because a director names its requests per turn rather
+        # than per issue. A blank decision must produce a blank join, or the
+        # field this canary added to make the join real records a false one.
+        self.last_decision_ids = dict.fromkeys(
+            (request.request_id for request in requests), ""
+        )
         return tuple(_refusal(request, reason, blank) for request in requests)
 
     # -- one child ----------------------------------------------------------
@@ -626,6 +671,14 @@ def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
     look at the gateway. For an inadmissible route that is wrong twice: the
     retry will never succeed, and the thing to edit is the policy.
     """
+    # The outcome outranks the reason. ``capability-unmapped`` is emitted only
+    # as a HELD decision, and mapping a hold to a terminal code would contradict
+    # the held/rejected distinction ADR-0141 D3 draws — a hold is right with
+    # something missing, and telling an operator it is inadmissible sends them
+    # to the wrong place. This is also what makes ``refused_outcome`` a field
+    # something reads rather than one the seam writes for nobody.
+    if str(spawn_out.get("refused_outcome", "") or "") == "held":
+        return RejectionReason.ROUTE_UNAVAILABLE
     reason = str(spawn_out.get("refused", "") or "")
     if reason in _INADMISSIBLE_ROUTE_REASONS:
         return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE

@@ -595,16 +595,26 @@ def _served_model(event: dict[str, Any]) -> str:
     with several, no single id served the request and answering with any of
     them would be a guess. Unknown shapes return ``""``, which the caller reads
     as "unobserved" rather than as a model.
+
+    ``modelUsage``'s **key is a billing key, not a model id**: the repo's own
+    recorded CLI stream carries ``"claude-opus-4-8[1m]"``, whose real id sits
+    one level down as ``canonicalModel``. The key satisfies a literal-family
+    check, so returning it would have passed every guard and quietly put a
+    context-window suffix into the receipt and into every join keyed on a model
+    id. The canonical field is preferred and the key is the last resort.
     """
     model = event.get("model")
     if isinstance(model, str) and model.strip():
         return model.strip()[:128]
     usage = event.get("modelUsage")
-    if isinstance(usage, dict) and len(usage) == 1:
-        only = next(iter(usage))
-        if isinstance(only, str) and only.strip():
-            return only.strip()[:128]
-    return ""
+    if not isinstance(usage, dict) or len(usage) != 1:
+        return ""
+    key, entry = next(iter(usage.items()))
+    if isinstance(entry, dict):
+        canonical = entry.get("canonicalModel")
+        if isinstance(canonical, str) and canonical.strip():
+            return canonical.strip()[:128]
+    return key.strip()[:128] if isinstance(key, str) and key.strip() else ""
 
 
 def _pick_usage_extractor(

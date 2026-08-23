@@ -64,12 +64,25 @@ def _dispatcher(orch):
     return None if director is None else director._dispatcher  # noqa: SLF001
 
 
+def _is_covered(orch, phase: DriverPhase) -> bool:
+    """Ask the predicate the ORCHESTRATOR actually built, not a fresh one.
+
+    Calling ``plan_canary_covers(config, ...)`` directly is a pure function of
+    the config and would pass with the whole composition root deleted. This
+    reads the closure ``build_services`` wired into the director, so the
+    assertion fails if that wiring goes away.
+    """
+    director = orch._svc.fable_director  # noqa: SLF001
+    assert director is not None, "no director was built"
+    return director._is_covered(phase)  # noqa: SLF001
+
+
 # --------------------------------------------------------------------------
 # Proof 1: default off is the object graph, not a flag
 # --------------------------------------------------------------------------
 
 
-class TestTheDispatcherIsNeverConstructedUnlessArmed:
+class TestNothingIsDispatchedUnlessArmed:
     def test_a_fresh_config_arms_nothing(self) -> None:
         assert HydraFlowConfig().fable_plan_canary_armed() is False
 
@@ -123,15 +136,30 @@ class TestTheDispatcherIsNeverConstructedUnlessArmed:
 
         assert _dispatcher(orch) is not None
 
+    def test_arming_a_running_factory_reaches_the_actuator(
+        self, tmp_path: Path
+    ) -> None:
+        # The direction the first draft got wrong. The actuator was built only
+        # when the dial was already set, and the dial is empty by default — so
+        # a factory booted disarmed had nothing to arm, and the settings screen
+        # called the dial live anyway.
+        config = _director_config(tmp_path)
+        orch = _orchestrator(config)
+        before = _is_covered(orch, DriverPhase.PLAN)
+
+        object.__setattr__(config, "fable_plan_canary_repo", CANARY_REPO)
+
+        assert (before, _is_covered(orch, DriverPhase.PLAN)) == (False, True)
+
     def test_naming_this_repository_covers_a_plan_boundary(
         self, tmp_path: Path
     ) -> None:
         # The mirror image, so the assertions above cannot pass by the feature
         # being broken rather than off.
         config = _director_config(tmp_path, fable_plan_canary_repo=CANARY_REPO)
-        _orchestrator(config)
+        orch = _orchestrator(config)
 
-        assert plan_canary_covers(config, phase=DriverPhase.PLAN) is True
+        assert _is_covered(orch, DriverPhase.PLAN) is True
 
     def test_arming_the_canary_adds_no_loop(self, tmp_path: Path) -> None:
         # The canary hangs off the driver's boundary like the observer does:

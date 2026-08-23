@@ -45,7 +45,7 @@ graph LR
     src -- "24" --> src_erosion
     src -- "9" --> src_escape
     src -- "5" --> src_flows
-    src -- "22" --> src_hydraflow_gateway
+    src -- "23" --> src_hydraflow_gateway
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
