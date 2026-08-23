@@ -147,11 +147,15 @@ _OPERATIONAL_ROUTE_REASONS = frozenset(
     {
         # The snapshot will be back; nothing about the request is wrong.
         DecisionReason.SNAPSHOT_UNAVAILABLE.value,
-        # Emitted only as a HELD decision, and the remedy is the policy's
-        # requirement map gaining an entry — an edit, after which the same
-        # request succeeds. Listing it as inadmissible made it a dead member:
-        # the classification would have been consulted for a reason the
-        # resolver never rejects on.
+        # Unreachable on THIS seam, and the reason is worth stating because
+        # an earlier comment here got it wrong: it is not that the resolver
+        # never rejects on a hold — ``enforce_canary_route`` raises on every
+        # non-SELECTED outcome, HELD included, which is the whole premise of
+        # classifying on the reason. It is that a brokered child's model is
+        # always a ``PLAN_TIER_CATALOG`` id, and ``requirement_for_model``
+        # returns CAPABILITY only for an *empty* model string — so the resolver
+        # cannot emit ``capability-unmapped`` for one of these spawns at all.
+        # Classified anyway, because the table is required to be total.
         DecisionReason.CAPABILITY_UNMAPPED.value,
         # Collapses "no credential for this account" with "a provider lock
         # excluded every account". The first is operational and the second is
@@ -159,7 +163,11 @@ _OPERATIONAL_ROUTE_REASONS = frozenset(
         # conservative reading is the retryable one, which sends the operator
         # to the gateway where both are visible.
         DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
-        # Not refusals at all; present so the classification is total.
+        # Reasons a *selected* decision carries. They reach a refusal only
+        # through ``enforce_canary_route``'s empty-effective-model guard, which
+        # a brokered child cannot trip (its legacy model is always the catalog
+        # id) — so "not a refusal" is nearly but not exactly right, and
+        # operational is the correct reading of the case that can occur.
         DecisionReason.MATCHED_POLICY.value,
         DecisionReason.NO_POLICY_APPLIES.value,
         DecisionReason.NO_LEGACY_ROUTE.value,
@@ -495,7 +503,16 @@ class PlanWorkerRunner:
             # The seam returned before it spawned anything — a CH-6 block or an
             # enforcement refusal. No inference happened, so there is no served
             # model to record and nothing to bill.
-            return _refusal(request, _refusal_for_spawn(spawn_out), decision)
+            refusal = _refusal_for_spawn(spawn_out)
+            logger.info(
+                "plan_worker_runner: #%d %s never spawned: %s/%s -> %s",
+                task.id,
+                request.worker_role.value,
+                spawn_out.get("refused_outcome") or "no-decision",
+                spawn_out.get("refused") or "no-reason",
+                refusal.value,
+            )
+            return _refusal(request, refusal, decision)
         if spawn_out.get("timed_out"):
             # A deadline, not a bad reply. The seam converts its own timeout
             # into a soft rc=-1, so without this signal a timed-out child would

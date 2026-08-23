@@ -172,11 +172,18 @@ class RejectionReason(StrEnum):
     ROUTE_UNAVAILABLE = "route_unavailable"
     """No route or credential could be obtained for an otherwise legal request.
 
-    The gateway was unreachable, refused the governed route, or minted nothing.
+    The gateway was unreachable, minted nothing, or **held** the route because
+    something it needs is missing — an account with no credential, a capability
+    class with no mapping. The request itself was admissible, so a caretaker
+    retry is the correct response once whatever is missing is supplied.
+
     Distinct from :attr:`ROUTE_POLICY_REVISION_STALE`, which means the director
-    worked from a routing view that had moved: this one means the route was
-    right and could not be obtained, so a caretaker retry is the correct
-    response and an operator should look at the gateway rather than the policy.
+    worked from a routing view that had moved, and from
+    :attr:`MODEL_REQUIREMENT_UNSATISFIABLE`, which means the request was
+    inadmissible and retrying it will never succeed. The remedy for a hold may
+    be a *policy* edit rather than a gateway one — an earlier draft of this
+    docstring said "look at the gateway rather than the policy", which was
+    right about the outage case and wrong about every other hold.
     """
 
     WORKER_TIMEOUT = "worker_timeout"

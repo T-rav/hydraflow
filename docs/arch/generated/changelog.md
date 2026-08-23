@@ -6,10 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `b7c29af` — refactor(mockworld,tests): follow the PRPort reach-through allowlist and tighten one cluster *(2026-08-22)*
-- `f7a79e2` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages *(2026-08-22)*
-- `cea4754` — fix(review pass 3): land the batch budget, blank the join on refuse, read the canonical model *(2026-08-22)*
-- `3255903` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11541) *(2026-08-22)*
+- `0fad28e` — fix(review pass 4): classify a routing refusal on its reason, not its outcome *(2026-08-22)*
+- `7fc6f77` — fix(review pass 3): land the batch budget, blank the join on refuse, read the canonical model *(2026-08-22)*
+- `c645c86` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11541) *(2026-08-22)*
+- `befb5a6` — refactor(mockworld,arch): close two latent gate holes and finish the cluster pass (#11659) (#11659) *(2026-08-22)*
 - `1dfa921` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) (#11658) *(2026-08-22)*
 - `822a2eb` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) (#11656) (#11656) *(2026-08-22)*
 - `d412796` — feat(director): Fable P3 — brokered Sonnet and Opus Plan canary (#11541) (#11655) (#11655) *(2026-08-22)*

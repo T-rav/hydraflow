@@ -309,7 +309,10 @@ intention:
   `tests/architecture/test_director_no_authority.py`. Arming dispatch is
   #11541's decision and `SchedulingPreset.director_dispatch_armed` is its
   separate flip — separate so that selecting the observer can never be mistaken
-  for trusting the actuator.
+  for trusting the actuator. (#11541 kept that separation and moved the flip
+  off the preset onto `config.fable_plan_canary_repo`, because a preset is
+  fleet-wide and a canary must be bounded to one repository. See the Plan
+  canary section below.)
 - **No convergence state is written.** The same architecture guard asserts the
   decision path never calls a ledger mutator. `ConvergenceLedger` remains the
   sole owner of convergence state, per the ADR-0094 narrowing (ii); the shadow
@@ -465,9 +468,9 @@ canary repository (live) remain two separate operator decisions, which is the
 distinction #11537 built that field to preserve.
 
 **The tier choice is explainable after the fact.**
-`plan_broker.resolve_plan_model` may depend on exactly three things — the
-requirement the director asked for, the role's catalogued entry, and whether
-this repository's lane can carry an Anthropic model — and returns a
+`plan_broker.resolve_plan_model` may depend on exactly two things — the
+requirement the director asked for and the role's catalogued entry — and
+returns a
 `PlanRouteDecision` carrying a content-addressed `decision_id`, the rule that
 fired, the source the tier came from, the catalog revision, the route-policy
 revision and the input echoed back. That is deliberately the same contract
@@ -485,10 +488,27 @@ on GLM** — `repo_provider` and the role dials are applied by
 one-shot seam a brokered child takes. The lock that can is a
 `provider_lock=zai-harness` routing policy, and it refuses at
 `route_enforcement.enforce_canary_route` — before `resolve_harness_env`, so
-with no credential in existence and zero upstream bytes — reaching the receipt
-as `MODEL_REQUIREMENT_UNSATISFIABLE` rather than as a retryable
-`ROUTE_UNAVAILABLE`, because retrying an inadmissible route never succeeds and
-the thing to edit is the policy.
+with no credential in existence and zero upstream bytes.
+
+How that refusal reaches the receipt is worth stating exactly, because it is
+narrower than it first looks. The resolver reports
+`literal-family-unsatisfiable` only when the lock excluded a lane that *was*
+otherwise eligible — which needs a non-Anthropic account in the pool to raise
+`ANTHROPIC_LANE_REQUIRED`. That reason is classified as inadmissible and
+reaches the receipt as `MODEL_REQUIREMENT_UNSATISFIABLE`, because retrying an
+inadmissible route never succeeds and the thing to edit is the policy. An
+all-Anthropic pool whose every member the lock excludes reports
+`no-eligible-account` instead, which the resolver does not split into "no
+credential" and "the lock took them all" — so it is classified as the retryable
+`ROUTE_UNAVAILABLE`, the conservative reading, and the operator finds the lock
+at the gateway where both are visible.
+
+**The classification is on the reason, never the outcome**, and getting that
+backwards is a real hazard rather than a hypothetical one: `on_unavailable`
+defaults to `HOLD`, so the ordinary lock refusal *arrives as a hold*, and a
+runtime that treated a hold as retryable would silently turn the flagship
+refusal back into a retry loop. The reason is a durable fact about the request;
+the outcome is a per-policy dial over what to do when a lane is unavailable.
 
 What the broker itself checks is the question it can answer: that
 `PLAN_TIER_CATALOG`'s answer satisfies the **family** it was resolved from —

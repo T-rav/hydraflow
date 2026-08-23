@@ -434,3 +434,42 @@ class TestTheResolverIsTotal:
             plan_broker.CAPABILITY_TIERS.update(original)
 
         assert decision.outcome is PlanRouteOutcome.HELD
+
+
+class TestTheBackstopSitsAboveTheLongestBatch:
+    """``CANARY_SLOT_TTL_SECONDS`` must stay well above the batch ceiling.
+
+    Both docstrings assert it and nothing pinned it: raising
+    ``fable_plan_worker_timeout_seconds``'s ``le=`` or lowering the constant
+    silently re-creates the coincidence where the latch's backstop can reclaim
+    a slot from a batch that is still running — which is the concurrent second
+    director the latch exists to prevent.
+    """
+
+    def test_the_maximum_batch_fits_inside_the_slot_ttl(self, tmp_path) -> None:
+        from config import HydraFlowConfig
+        from service_registry import CANARY_SLOT_TTL_SECONDS
+
+        ceiling = HydraFlowConfig.model_fields[
+            "fable_plan_worker_timeout_seconds"
+        ].metadata
+
+        largest = max(
+            constraint.le
+            for constraint in ceiling
+            if getattr(constraint, "le", None) is not None
+        )
+
+        assert largest * 2 <= CANARY_SLOT_TTL_SECONDS
+
+    def test_a_config_at_the_ceiling_still_fits(self, tmp_path) -> None:
+        # The same invariant read the way an operator would reach it.
+        from config import HydraFlowConfig
+        from service_registry import CANARY_SLOT_TTL_SECONDS
+
+        config = HydraFlowConfig(
+            state_file=tmp_path / "state.json",
+            fable_plan_worker_timeout_seconds=900,
+        )
+
+        assert config.fable_plan_worker_timeout_seconds < CANARY_SLOT_TTL_SECONDS

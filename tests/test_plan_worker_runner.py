@@ -382,17 +382,33 @@ class TestALiteralFamilyIsRefusedBeforeAnythingIsSpawned:
     and it reaches the receipt through ``spawn_out["refused"]``.
     """
 
-    async def test_a_policy_locked_lane_spawns_nothing(self, config, task) -> None:
-        # `EnforcementRefused` inside the seam: the prompt was never sent.
+    async def test_a_policy_locked_lane_is_reported_as_inadmissible(
+        self, config, task
+    ) -> None:
+        """``EnforcementRefused`` inside the seam: the prompt was never sent.
+
+        Asserted on the **reason code**. An earlier version asserted only
+        ``served_model is None``, which is true on every refusal path — it
+        passed with the whole classification stubbed to the retryable code, so
+        it could not tell the case it names from any other. The double writes
+        both fields because the seam always does, and ``held`` is the outcome
+        the default ``on_unavailable`` actually produces.
+        """
+
         class PolicyRefused(SpawnDouble):
             async def __call__(self, **kwargs: Any) -> SimpleResult:
                 kwargs["spawn_out"]["refused"] = "literal-family-unsatisfiable"
+                kwargs["spawn_out"]["refused_outcome"] = "held"
                 return SimpleResult(stderr="policy rejected", returncode=-1)
 
         spawn = PolicyRefused()
 
         receipts = await _dispatch(_runner(config, spawn), task, [_request()])
 
+        assert spawn.calls == []
+        assert (
+            receipts[0].reason_code is RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+        )
         assert receipts[0].served_model is None
 
     async def test_a_catalog_that_disagrees_with_the_requirement_is_rejected(
@@ -892,9 +908,34 @@ class TestTheRefusalClassificationIsTotal:
         from plan_worker_runner import _refusal_for_spawn
 
         assert (
-            _refusal_for_spawn({"refused": "something-nobody-wired-up"})
+            _refusal_for_spawn(
+                {
+                    "refused": "something-nobody-wired-up",
+                    "refused_outcome": "rejected",
+                }
+            )
             is RejectionReason.ROUTE_UNAVAILABLE
         )
+
+    def test_a_spawn_that_left_nothing_behind_is_retryable(self) -> None:
+        # The CH-6 gate's early return fills nothing at all.
+        from plan_worker_runner import _refusal_for_spawn
+
+        assert _refusal_for_spawn({}) is RejectionReason.ROUTE_UNAVAILABLE
+
+    def test_every_broker_refusal_reason_has_a_receipt_code(self) -> None:
+        """``_REFUSAL_CODES`` is indexed on the live dispatch path.
+
+        A ``KeyError`` there is a likely-bug exception, so
+        ``reraise_on_credit_or_bug`` would carry it out of the boundary
+        observer — breaking ADR-0137's "a shadow component must not be able to
+        fail what it observes". Its sibling table got a totality guard and this
+        one did not.
+        """
+        from plan_broker import PlanRouteReason
+        from plan_worker_runner import _REFUSAL_CODES
+
+        assert set(_REFUSAL_CODES) == set(PlanRouteReason) - {PlanRouteReason.NONE}
 
 
 class TestARefusedBatchCarriesNoBorrowedJoin:
