@@ -1,8 +1,8 @@
-comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene):
-  parametrize copies (identical bodies in one file) and cross-file duplicate tests.
-  The gate fails only when a count rises above its mark; falling is the point. Last
-  moved: test-hygiene batch 4 (#11548): collapsed 22 duplicate-test groups into parametrize
-  across 19 files, clearing the whole 5-member tail bar one cross-class group; no
-  cross-file duplicate deleted'
-cross_file_duplicates: 22
-parametrize_copies: 461
+comment: "High-water marks for structural test redundancy (erosion.suite_hygiene):\
+  \ parametrize copies (identical bodies in one file) and cross-file duplicate tests.\
+  \ The gate fails only when a count rises above its mark; falling is the point. Last\
+  \ moved: #11669: the path-membership registry properties and the T29 package regression\
+  \ are parametrized over live collections/package members by design \u2014 a hardcoded\
+  \ list there would rot the same way SELF_MODIFYING_PATHS did."
+cross_file_duplicates: 21
+parametrize_copies: 463

@@ -77,6 +77,10 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Protocol
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from path_membership import module_identities  # noqa: E402
+
 # The stdout token that means "run the entire suite" (rule e / conservative
 # fallback). Chosen so it can never collide with a real ``tests/…`` path.
 FULL_SUITE_SENTINEL = "__ALL__"
@@ -272,7 +276,13 @@ def _hard_full_suite_reason(path: str, basename: str) -> str | None:
     # and stay on the always-on architecture+smoke floor.
     if path.startswith(".claude/hooks/") or path == ".claude/settings.json":
         return f"{path}: Claude hook/settings changed -> full suite"
-    if path in HIGH_FANOUT_SRC or path.startswith("src/arch/"):
+    # Membership follows the MODULE (#11669). A bare ``path in HIGH_FANOUT_SRC``
+    # goes blind the day one of these is decomposed: ``src/config/_core.py``
+    # would fall through to name-mapping, and if a ``tests/test__core*.py`` ever
+    # existed the full-suite trigger would silently narrow to one file.
+    if any(i in HIGH_FANOUT_SRC for i in module_identities(path)) or path.startswith(
+        "src/arch/"
+    ):
         return f"{path}: high-fanout src -> full suite"
     return None
 
