@@ -13,6 +13,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 # Allow direct invocation (`python scripts/audit_prompts.py`) from the repo root:
@@ -82,45 +83,45 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     # Implement
     AuditTarget(
         "agent_build_prompt_first_attempt",
-        "agent.AgentRunner._build_prompt_with_stats",
+        "agent._prompts.AgentPromptMixin._build_prompt_with_stats",
         "tests/fixtures/prompts/agent_build_prompt_first_attempt.json",
         "Implement",
-        "src/agent.py:572",
+        "src/agent/_prompts.py:135",
     ),
     AuditTarget(
         "agent_build_prompt_with_review_feedback",
-        "agent.AgentRunner._build_prompt_with_stats",
+        "agent._prompts.AgentPromptMixin._build_prompt_with_stats",
         "tests/fixtures/prompts/agent_build_prompt_with_review_feedback.json",
         "Implement",
-        "src/agent.py:572",
+        "src/agent/_prompts.py:135",
     ),
     AuditTarget(
         "agent_build_prompt_with_prior_failure",
-        "agent.AgentRunner._build_prompt_with_stats",
+        "agent._prompts.AgentPromptMixin._build_prompt_with_stats",
         "tests/fixtures/prompts/agent_build_prompt_with_prior_failure.json",
         "Implement",
-        "src/agent.py:572",
+        "src/agent/_prompts.py:135",
     ),
     AuditTarget(
         "agent_quality_fix",
-        "agent.AgentRunner._build_quality_fix_prompt",
+        "agent._quality.AgentQualityMixin._build_quality_fix_prompt",
         "tests/fixtures/prompts/agent_quality_fix.json",
         "Implement",
-        "src/agent.py:877",
+        "src/agent/_quality.py:100",
     ),
     AuditTarget(
         "agent_pre_quality_review",
-        "agent.AgentRunner._build_pre_quality_review_prompt",
+        "agent._prequality.AgentPreQualityReviewMixin._build_pre_quality_review_prompt",
         "tests/fixtures/prompts/agent_pre_quality_review.json",
         "Implement",
-        "src/agent.py:903",
+        "src/agent/_prequality.py:64",
     ),
     AuditTarget(
         "agent_pre_quality_run_tool",
-        "agent.AgentRunner._build_pre_quality_run_tool_prompt",
+        "agent._prequality.AgentPreQualityReviewMixin._build_pre_quality_run_tool_prompt",
         "tests/fixtures/prompts/agent_pre_quality_run_tool.json",
         "Implement",
-        "src/agent.py:956",
+        "src/agent/_prequality.py:117",
     ),
     # Review
     AuditTarget(
@@ -552,10 +553,10 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     # convention and were renamed to conform per ADR-0116 §3.
     AuditTarget(
         "agent_tdd_subagent",
-        "agent.AgentRunner._build_tdd_subagent_prompt",
+        "agent._prompts.AgentPromptMixin._build_tdd_subagent_prompt",
         "tests/fixtures/prompts/agent_tdd_subagent.json",
         "Implement",
-        "src/agent.py:508",
+        "src/agent/_prompts.py:39",
     ),
     AuditTarget(
         "reviewer_precheck",
@@ -1398,6 +1399,38 @@ def _fake_discover_plugin_skills(plugins, cache_root=None) -> list:
     return [s for s in _audit_plugin_skills() if s.plugin in allowed]
 
 
+def _renderable_class(module: object, cls: Any) -> Any:
+    """The concrete class to instantiate when rendering *cls*'s builder.
+
+    A decomposed runner's prompt builder lives on a MIXIN
+    (``agent._prompts.AgentPromptMixin``), but the builder calls siblings that
+    only exist on the host inheriting every mixin — instantiating the mixin
+    alone AttributeErrors mid-render, which reads as "the prompt stopped
+    rendering". The registry still has to name the mixin's module, because
+    ``prompt_fitness.registered_modules`` credits coverage by dotted module,
+    so resolve the host from the package's re-exports instead of moving the
+    registration (Refs #11547).
+    """
+    if not cls.__name__.endswith("Mixin"):
+        return cls
+    package_name = getattr(module, "__name__", "").rsplit(".", 1)[0]
+    package = importlib.import_module(package_name)
+    hosts = sorted(
+        {
+            obj
+            for obj in vars(package).values()
+            if isinstance(obj, type) and obj is not cls and issubclass(obj, cls)
+        },
+        key=lambda host: host.__name__,
+    )
+    if len(hosts) != 1:
+        raise ValueError(
+            f"{cls.__name__} has {len(hosts)} concrete hosts re-exported from "
+            f"{package_name!r}; cannot pick one to render with"
+        )
+    return hosts[0]
+
+
 def render_target(target: AuditTarget) -> str:
     """Resolve qualname, load fixture, call the builder, return rendered text."""
     from tests.fixtures.prompts.fakes import get_fake  # noqa: PLC0415
@@ -1408,7 +1441,7 @@ def render_target(target: AuditTarget) -> str:
         callable_obj = getattr(module, attrs[0])
     elif len(attrs) == 2:
         cls_name, method_name = attrs
-        cls = getattr(module, cls_name)
+        cls = _renderable_class(module, getattr(module, cls_name))
         descriptor = inspect.getattr_static(cls, method_name)
         if isinstance(descriptor, staticmethod | classmethod):
             callable_obj = getattr(cls, method_name)

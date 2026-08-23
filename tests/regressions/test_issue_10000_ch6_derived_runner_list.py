@@ -35,10 +35,21 @@ from tests.test_prompt_gate_completeness import (
     _unlabeled_execute_calls,
 )
 
-# Every BaseRunner subclass module at the time of the fix. The seven entries
-# after hitl_runner.py are the ones the hand-maintained tuple missed.
+# Every BaseRunner subclass module at the time of the fix, ``src``-relative.
+# The seven entries after hitl_runner.py are the ones the hand-maintained tuple
+# missed. ``agent`` became a package in #11547 batch 4: each of its slices is a
+# BaseRunner subclass (they call ``self._execute``), and naming every one keeps
+# the floor as strict as it was for the single module it replaced.
 _ALL_RUNNER_MODULES = {
-    "agent.py",
+    "agent/_claude_md.py",
+    "agent/_commit.py",
+    "agent/_context.py",
+    "agent/_plan.py",
+    "agent/_prequality.py",
+    "agent/_prompts.py",
+    "agent/_quality.py",
+    "agent/_runner.py",
+    "agent/_skills.py",
     "planner.py",
     "research_runner.py",
     "reviewer.py",
@@ -74,7 +85,7 @@ class PoliteRunner(BaseRunner):
 
 class TestDerivedRunnerList:
     def test_derived_list_covers_every_baserunner_subclass_module(self) -> None:
-        """All 12 runner modules — including the 7 the old tuple missed."""
+        """Every runner module — including the 7 the old tuple missed."""
         assert set(_base_runner_modules()) >= _ALL_RUNNER_MODULES
 
     def test_synthetic_runner_omitting_kwarg_is_flagged(self, tmp_path: Path) -> None:

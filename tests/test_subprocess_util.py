@@ -479,20 +479,36 @@ class TestAuthenticationError:
         err = AuthenticationError("auth failed")
         assert isinstance(err, RuntimeError)
 
-    def test_is_auth_error_detects_401(self) -> None:
-        assert _is_auth_error("HTTP 401 Unauthorized") is True
-
-    def test_is_auth_error_detects_not_logged_in(self) -> None:
-        assert _is_auth_error("gh: not logged in to github.com") is True
-
-    def test_is_auth_error_detects_authentication_required(self) -> None:
-        assert _is_auth_error("authentication required") is True
-
-    def test_is_auth_error_detects_auth_token(self) -> None:
-        assert _is_auth_error("invalid auth token") is True
-
-    def test_is_auth_error_rejects_generic_error(self) -> None:
-        assert _is_auth_error("something else went wrong") is False
+    @pytest.mark.parametrize(
+        ("stderr", "expected"),
+        [
+            pytest.param(
+                "HTTP 401 Unauthorized", True, id="test_is_auth_error_detects_401"
+            ),
+            pytest.param(
+                "gh: not logged in to github.com",
+                True,
+                id="test_is_auth_error_detects_not_logged_in",
+            ),
+            pytest.param(
+                "authentication required",
+                True,
+                id="test_is_auth_error_detects_authentication_required",
+            ),
+            pytest.param(
+                "invalid auth token",
+                True,
+                id="test_is_auth_error_detects_auth_token",
+            ),
+            pytest.param(
+                "something else went wrong",
+                False,
+                id="test_is_auth_error_rejects_generic_error",
+            ),
+        ],
+    )
+    def test_is_auth_error_classifies_stderr(self, stderr: str, expected: bool) -> None:
+        assert _is_auth_error(stderr) is expected
 
     @pytest.mark.asyncio
     async def test_run_subprocess_raises_auth_error_on_401(self) -> None:

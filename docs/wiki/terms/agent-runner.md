@@ -3,7 +3,7 @@ id: "01KQV37D10M06PGF32CF77W6KA"
 name: "AgentRunner"
 kind: "runner"
 bounded_context: "builder"
-code_anchor: "src/agent.py:AgentRunner"
+code_anchor: "src/agent/_runner.py:AgentRunner"
 aliases: ["agent runner", "implement runner", "claude agent runner"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K8"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K9"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488G"}, {"kind": "implements", "target": "01KWDRENTS7VACCW9PDA7Y488G"}, {"kind": "depends_on", "target": "01KXV30G7W143XRZFQM9SCSX27"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}, {"kind": "depends_on", "target": "01KYM003P7D6GN4KSS1X9RBEXQ"}, {"kind": "depends_on", "target": "01KYW34KGZNXKF5N1TNB7VB731"}]
 evidence: ["01KQP0R43781VJFJ9HZRWQCZP8", "01KQP0XFBGMB32VFGNPV8GZ26X", "01KQRULESET2026B0PHASE2002", "01KYEF98BHWVZEC1S5YEBDJPK3", "implement-phase-half-state-on-skill-failure"]

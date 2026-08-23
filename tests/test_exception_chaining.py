@@ -150,7 +150,7 @@ class TestAgentRunnerExceptionChaining:
                 side_effect=RuntimeError("boom"),
             ),
             patch.object(runner, "_save_transcript"),
-            patch("agent.logger") as mock_logger,
+            patch("agent._runner.logger") as mock_logger,
         ):
             await runner.run(agent_task, tmp_path, "agent/issue-42")
 

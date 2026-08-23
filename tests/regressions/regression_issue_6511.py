@@ -212,17 +212,26 @@ class TestBareExceptPassBlocksHaveLogging:
         return violations
 
     def test_health_monitor_no_bare_except_pass(self) -> None:
-        """health_monitor_loop.py must not have bare except-pass blocks."""
-        import inspect
+        """No module of the health_monitor_loop package may bare-except-pass.
 
+        ``inspect.getsource`` on a PACKAGE returns only its ``__init__.py``, so
+        after the #11547 decomposition that would have scanned a docstring and
+        passed vacuously. Walk the package's own source files instead.
+        """
         import health_monitor_loop
 
-        source = inspect.getsource(health_monitor_loop)
-        violations = self._find_bare_except_pass_blocks(source)
+        pkg_dir = Path(health_monitor_loop.__file__).parent
+        violations: dict[str, list[tuple[int, str]]] = {}
+        for module in sorted(pkg_dir.glob("*.py")):
+            found = self._find_bare_except_pass_blocks(
+                module.read_text(encoding="utf-8")
+            )
+            if found:
+                violations[module.name] = found
 
         assert not violations, (
-            f"health_monitor_loop.py has {len(violations)} bare except-pass block(s) "
-            f"without logging: {violations}"
+            f"health_monitor_loop has bare except-pass block(s) without "
+            f"logging: {violations}"
         )
 
     def test_orchestrator_no_bare_except_pass(self) -> None:

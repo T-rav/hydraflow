@@ -75,7 +75,7 @@ Hexagonal port for agent runner operations used by infrastructure modules. Imple
 
 ## AgentRunner
 
-**Kind:** `runner` · **Context:** `builder` · **Anchor:** `src/agent.py:AgentRunner` · **Confidence:** `accepted`
+**Kind:** `runner` · **Context:** `builder` · **Anchor:** `src/agent/_runner.py:AgentRunner` · **Confidence:** `accepted`
 **Aliases:** `agent runner`, `implement runner`, `claude agent runner`
 
 Subprocess runner for the implement phase: launches a `claude -p` process inside an isolated git worktree to implement a GitHub issue. Builds the agent's self-check checklist (extended by recent review escalations), spec-match guidance, and requirements-gap context, then commits the agent's changes locally. Pushing the branch and creating the PR are deliberately left to other phases.

@@ -20,8 +20,19 @@ _KILL_RE = re.compile(r"HYDRAFLOW_DISABLE_[A-Z0-9_]+")
 
 
 def _module_for(path: Path, src_root: Path) -> str:
+    """Dotted module for *path*, collapsing a decomposed loop to its package.
+
+    A loop big enough to be decomposed lives in a package whose members are
+    ``_``-prefixed and private (``health_monitor_loop/_loop.py``). The
+    importable identity is the PACKAGE — that is what ``service_registry``
+    imports and what the registry keys on — so the private member collapses
+    to it, mirroring ``extractors/mockworld.py`` (Refs #11547).
+    """
     rel = path.relative_to(src_root.parent)  # repo-root-relative
-    return ".".join(rel.with_suffix("").parts)
+    parts = rel.with_suffix("").parts
+    if len(parts) > 1 and parts[-1].startswith("_"):
+        parts = parts[:-1]
+    return ".".join(parts)
 
 
 def _is_basebackgroundloop_subclass(cls: ast.ClassDef) -> bool:
@@ -177,9 +188,28 @@ def _adr_refs(cls: ast.ClassDef, module: ast.Module) -> list[str]:
     return sorted({f"ADR-{m}" for m in _ADR_RE.findall(doc)})
 
 
-def _event_subs(cls: ast.ClassDef) -> list[str]:
-    """Best-effort: pull EventType.X references from the class body."""
-    src = ast.unparse(cls)
+def _event_subs(cls: ast.ClassDef, path: Path, src_dir: Path) -> list[str]:
+    """Best-effort: pull EventType.X references from the loop's whole source.
+
+    For a single-module loop that is the class body. For a DECOMPOSED loop the
+    class body holds only the spine — its publishes live in the sibling mixin
+    modules — so the scan widens to the package, which for a ``*_loop/`` package
+    IS the loop. Reading only the class body dropped every
+    ``HealthMonitorLoop`` SYSTEM_ALERT off the event map (Refs #11547).
+    """
+    if path.parent != src_dir and path.parent.name.endswith("_loop"):
+        # ``ast.unparse`` per sibling, not raw text: unparsing drops comments,
+        # so a commented-out ``EventType.X`` cannot inflate the event map the
+        # way a regex over the file would.
+        sources = []
+        for sibling in sorted(path.parent.rglob("*.py")):
+            try:
+                sources.append(ast.unparse(ast.parse(sibling.read_text())))
+            except SyntaxError:
+                continue
+        src = "\n".join(sources)
+    else:
+        src = ast.unparse(cls)
     return sorted(set(re.findall(r"EventType\.([A-Z_]+)", src)))
 
 
@@ -193,7 +223,13 @@ def extract_loops(src_dir: Path) -> list[LoopInfo]:
     config_defaults = _load_config_defaults(src_dir)
     out: list[LoopInfo] = []
     for py in sorted(src_dir.rglob("*.py")):
-        if py.name.startswith("_"):
+        # ``_``-prefixed files are dunder/private module noise at the top level,
+        # but inside a package they are exactly where a decomposed loop's class
+        # lives (``health_monitor_loop/_loop.py``). Skipping them by name drops
+        # that loop off the registry map entirely (Refs #11547).
+        if py.name.startswith("__") or (
+            py.name.startswith("_") and py.parent == src_dir
+        ):
             continue
         try:
             source = py.read_text()
@@ -216,7 +252,7 @@ def extract_loops(src_dir: Path) -> list[LoopInfo]:
                     tick_interval_seconds=_tick_interval(
                         node, module_constants, config_defaults
                     ),
-                    event_subscriptions=_event_subs(node),
+                    event_subscriptions=_event_subs(node, py, src_dir),
                     kill_switch_var=_kill_switch(node, source),
                     adr_refs=_adr_refs(node, tree),
                 )

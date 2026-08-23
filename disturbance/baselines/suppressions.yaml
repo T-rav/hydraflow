@@ -43,7 +43,14 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ verbatim out of orchestrator.py and plan_phase.py into the extracted mixin modules\
   \ \u2014 net-zero move, total unchanged at 768 (+11 new keys, -11 resolved keys,\
   \ all inside the two touched families) and every untouched file byte-identical;\
-  \ no suppression was added, removed, widened, or rewritten."
+  \ no suppression was added, removed, widened, or rewritten. re-snapshot 2026-08-23:\
+  \ god-class decomposition batch 4 (Refs #11547) moved 36 suppressions verbatim out\
+  \ of agent.py and health_monitor_loop.py into the extracted package modules \u2014\
+  \ net MINUS ONE, 767 -> 766 (+11 new keys / 36 occurrences, -8 resolved keys / 37\
+  \ occurrences, all inside the two touched families) and every untouched file byte-identical.\
+  \ The -1 is agent.py's `# noqa: F401` re-export block, which became an explicit\
+  \ `__all__` in agent/__init__.py and needs no suppression; no other suppression\
+  \ was added, removed, widened, or rewritten."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -54,11 +61,10 @@ entries:
   src/adr_reviewer.py::noqa:PLC0415: 2
   src/adversarial_retry_loop.py::noqa:PLC0415: 4
   src/adversarial_retry_loop.py::noqa:S101: 4
-  src/agent.py::noqa:BLE001: 2
-  src/agent.py::noqa:F401: 1
-  "src/agent.py::noqa:F841\u2014usedinf-stringprompt": 1
-  src/agent.py::noqa:PLC0415: 4
-  src/agent.py::type-ignore[no-any-return]: 1
+  src/agent/_context.py::noqa:BLE001: 2
+  src/agent/_context.py::type-ignore[no-any-return]: 1
+  "src/agent/_prompts.py::noqa:F841\u2014usedinf-stringprompt": 1
+  src/agent/_prompts.py::noqa:PLC0415: 4
   src/arch/generators/coverage_matrix.py::noqa:BLE001: 1
   src/arch/generators/coverage_matrix.py::type-ignore[import-untyped]: 1
   src/arch/runner.py::noqa:PLC0415: 1
@@ -162,9 +168,13 @@ entries:
   src/goal_supervisor_runner.py::noqa:BLE001: 1
   src/harness_insights.py::noqa:BLE001: 4
   src/harness_insights.py::noqa:PLC0415: 5
-  src/health_monitor_loop.py::noqa:BLE001: 20
-  src/health_monitor_loop.py::noqa:PLC0415: 7
-  src/health_monitor_loop.py::noqa:PLR0911: 1
+  src/health_monitor_loop/_adjust.py::noqa:BLE001: 4
+  src/health_monitor_loop/_freshness.py::noqa:BLE001: 1
+  src/health_monitor_loop/_heavy.py::noqa:BLE001: 10
+  src/health_monitor_loop/_heavy.py::noqa:PLC0415: 7
+  src/health_monitor_loop/_hitl.py::noqa:BLE001: 2
+  src/health_monitor_loop/_stall.py::noqa:PLR0911: 1
+  src/health_monitor_loop/_trends.py::noqa:BLE001: 3
   src/hitl_phase.py::noqa:BLE001: 1
   src/hitl_phase.py::noqa:PLC0415: 3
   src/human_steering_loop.py::noqa:BLE001: 1

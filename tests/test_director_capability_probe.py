@@ -208,14 +208,24 @@ def _proof(**overrides: object) -> ProofResult:
     return ProofResult(**base)  # type: ignore[arg-type]
 
 
-def test_evidence_rejects_a_raw_secret_in_an_observation() -> None:
+@pytest.mark.parametrize(
+    "observations",
+    [
+        pytest.param(
+            {"note": "sk-live-AbC123XyZ"},
+            id="evidence_rejects_a_raw_secret_in_an_observation",
+        ),
+        pytest.param(
+            {"path": "/users/operator/.claude"},
+            id="evidence_rejects_a_host_home_path_in_an_observation",
+        ),
+    ],
+)
+def test_evidence_rejects_an_unsanitized_observation(
+    observations: dict[str, str],
+) -> None:
     with pytest.raises(ValidationError):
-        _proof(observations={"note": "sk-live-AbC123XyZ"})
-
-
-def test_evidence_rejects_a_host_home_path_in_an_observation() -> None:
-    with pytest.raises(ValidationError):
-        _proof(observations={"path": "/users/operator/.claude"})
+        _proof(observations=observations)
 
 
 def test_evidence_accepts_a_lowercase_shape_descriptor() -> None:
@@ -310,14 +320,60 @@ def test_committed_evidence_ran_every_proof() -> None:
     assert not_run == []
 
 
-def test_committed_evidence_proves_no_ambient_credential_reached_the_child() -> None:
+# One row per boolean observation the NO_AMBIENT_TOOLS_OR_CREDENTIALS proof has
+# to carry. The `id` is the name the case carried before it became a row here;
+# the rows below the divider came from the #11627 fresh-eyes pass.
+@pytest.mark.parametrize(
+    ("observation", "expected"),
+    [
+        pytest.param(
+            "ambient_credential_reached_child",
+            False,
+            id="committed_evidence_proves_no_ambient_credential_reached_the_child",
+        ),
+        # --- #11627 fresh-eyes findings ---
+        # The virtual key was present and the turn still never authenticated.
+        pytest.param(
+            "credential_turn_authenticated",
+            False,
+            id="committed_evidence_tested_the_runtime_credential_configuration",
+        ),
+        # S4 must never read an absent key as "empty".
+        pytest.param(
+            "tools_key_present_on_init",
+            True,
+            id="committed_evidence_confirms_the_tools_key_was_present",
+        ),
+        # The claim is "never observed to authenticate", not "cleanly refused" —
+        # the artifact must say which.
+        pytest.param(
+            "credential_turn_completed",
+            False,
+            id="committed_evidence_reports_the_credential_turn_did_not_complete",
+        ),
+        # A turn that never ran must not read as "the allow-list narrowed to zero".
+        pytest.param(
+            "allowlist_init_frame_seen",
+            True,
+            id="committed_evidence_records_whether_each_tool_turn_produced_a_frame",
+        ),
+        pytest.param(
+            "advertised_denial_init_frame_seen",
+            True,
+            id="committed_evidence_records_the_denied_turn_produced_a_frame",
+        ),
+    ],
+)
+def test_committed_evidence_no_ambient_observation(
+    observation: str, expected: bool
+) -> None:
     proof = next(
         p
         for p in _fixture().proofs
         if p.proof is ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS
     )
 
-    assert proof.observations["ambient_credential_reached_child"] is False
+    assert proof.observations[observation] is expected
 
 
 def test_committed_evidence_proves_the_tool_surface_reaches_empty() -> None:
@@ -376,20 +432,26 @@ def test_deny_list_covers_the_two_tools_the_cli_does_not_advertise() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_sanitizer_rejects_a_raw_lowercase_uuid_session_id() -> None:
-    # The exact value describe_id_shape exists to avoid recording.
+@pytest.mark.parametrize(
+    "shape",
+    [
+        # The exact value describe_id_shape exists to avoid recording.
+        pytest.param(
+            "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            id="sanitizer_rejects_a_raw_lowercase_uuid_session_id",
+        ),
+        pytest.param(
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            id="sanitizer_rejects_a_lowercase_hex_digest",
+        ),
+        pytest.param(
+            "ghp_abcdefghij0123456789", id="sanitizer_rejects_a_github_token_shape"
+        ),
+    ],
+)
+def test_sanitizer_rejects_a_raw_identifier(shape: str) -> None:
     with pytest.raises(ValidationError):
-        _proof(observations={"shape": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"})
-
-
-def test_sanitizer_rejects_a_lowercase_hex_digest() -> None:
-    with pytest.raises(ValidationError):
-        _proof(observations={"shape": "da39a3ee5e6b4b0d3255bfef95601890afd80709"})
-
-
-def test_sanitizer_rejects_a_github_token_shape() -> None:
-    with pytest.raises(ValidationError):
-        _proof(observations={"shape": "ghp_abcdefghij0123456789"})
+        _proof(observations={"shape": shape})
 
 
 def test_sanitizer_still_accepts_the_real_descriptors_the_probe_emits() -> None:
@@ -464,61 +526,6 @@ def test_committed_evidence_measured_the_incomplete_advertised_array() -> None:
     )
 
     assert int(proof.observations["tools_after_denying_every_advertised_name"]) > 0
-
-
-def test_committed_evidence_tested_the_runtime_credential_configuration() -> None:
-    # The virtual key was present and the turn still never authenticated.
-    proof = next(
-        p
-        for p in _fixture().proofs
-        if p.proof is ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS
-    )
-
-    assert proof.observations["credential_turn_authenticated"] is False
-
-
-def test_committed_evidence_confirms_the_tools_key_was_present() -> None:
-    # S4 must never read an absent key as "empty".
-    proof = next(
-        p
-        for p in _fixture().proofs
-        if p.proof is ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS
-    )
-
-    assert proof.observations["tools_key_present_on_init"] is True
-
-
-def test_committed_evidence_reports_the_credential_turn_did_not_complete() -> None:
-    # The claim is "never observed to authenticate", not "cleanly refused" —
-    # the artifact must say which.
-    proof = next(
-        p
-        for p in _fixture().proofs
-        if p.proof is ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS
-    )
-
-    assert proof.observations["credential_turn_completed"] is False
-
-
-def test_committed_evidence_records_whether_each_tool_turn_produced_a_frame() -> None:
-    # A turn that never ran must not read as "the allow-list narrowed to zero".
-    proof = next(
-        p
-        for p in _fixture().proofs
-        if p.proof is ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS
-    )
-
-    assert proof.observations["allowlist_init_frame_seen"] is True
-
-
-def test_committed_evidence_records_the_denied_turn_produced_a_frame() -> None:
-    proof = next(
-        p
-        for p in _fixture().proofs
-        if p.proof is ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS
-    )
-
-    assert proof.observations["advertised_denial_init_frame_seen"] is True
 
 
 def test_timed_out_turn_sentinel_is_distinguishable_from_a_real_exit_code() -> None:

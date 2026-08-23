@@ -51,7 +51,9 @@ SEED_RULES: list[Rule] = [
     Rule(
         id="background-loop-wiring",
         tool=ANY_TOOL,
-        trigger=FileChanged("src/*_loop.py"),
+        # Both shapes: a loop is one module until it is decomposed into a
+        # package (#11547), and the hint must survive that move.
+        trigger=FileChanged(("src/*_loop.py", "src/*_loop/*")),
         hint=(
             "You modified a background loop module. The wiring "
             "completeness test (tests/test_loop_wiring_completeness.py) "

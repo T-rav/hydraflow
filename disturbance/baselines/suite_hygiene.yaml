@@ -1,8 +1,8 @@
 comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene):
   parametrize copies (identical bodies in one file) and cross-file duplicate tests.
   The gate fails only when a count rises above its mark; falling is the point. Last
-  moved: test-hygiene batch 2 (#11548): collapsed 9 duplicate-test groups into parametrize
-  and deleted one cross-file duplicate. #11646 then removed the ungated total_tests
-  field — written, loaded, read by nobody, and rotted +1010 — leaving both marks untouched.'
+  moved: test-hygiene batch 4 (#11548): collapsed 22 duplicate-test groups into parametrize
+  across 19 files, clearing the whole 5-member tail bar one cross-class group; no
+  cross-file duplicate deleted'
 cross_file_duplicates: 22
-parametrize_copies: 650
+parametrize_copies: 461

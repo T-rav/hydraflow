@@ -350,128 +350,137 @@ class TestParseTaskLinks:
     def test_plain_body_no_links(self) -> None:
         assert parse_task_links("Fix the frobnicator widget so it works.") == []
 
-    # --- relates_to ---
-
-    def test_relates_to_pattern_relates_to(self) -> None:
-        links = parse_task_links("This relates to #12.")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.RELATES_TO
-        assert links[0].target_id == 12
-
-    def test_relates_to_pattern_related(self) -> None:
-        links = parse_task_links("Also related: #99")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.RELATES_TO
-        assert links[0].target_id == 99
-
-    def test_relates_to_case_insensitive(self) -> None:
-        links = parse_task_links("RELATES TO #7")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.RELATES_TO
-
-    # --- duplicates ---
-
-    def test_duplicates_pattern_duplicates(self) -> None:
-        links = parse_task_links("This duplicates #5.")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.DUPLICATES
-        assert links[0].target_id == 5
-
-    def test_duplicates_pattern_duplicate_of(self) -> None:
-        links = parse_task_links("duplicate of #5")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.DUPLICATES
-        assert links[0].target_id == 5
-
-    def test_duplicates_case_insensitive(self) -> None:
-        links = parse_task_links("DUPLICATE OF #10")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.DUPLICATES
-
-    # --- supersedes ---
-
-    def test_supersedes_pattern_supersedes(self) -> None:
-        links = parse_task_links("This supersedes #3.")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-        assert links[0].target_id == 3
-
-    def test_supersedes_pattern_replaces(self) -> None:
-        links = parse_task_links("This replaces #3.")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-        assert links[0].target_id == 3
-
-    def test_supersedes_case_insensitive(self) -> None:
-        links = parse_task_links("REPLACES #20")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-
-    def test_supersedes_pattern_supersede_base(self) -> None:
-        links = parse_task_links("will supersede #9")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-        assert links[0].target_id == 9
-
-    def test_supersedes_pattern_superseded(self) -> None:
-        links = parse_task_links("This superseded #5")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-        assert links[0].target_id == 5
-
-    def test_supersedes_pattern_superseding(self) -> None:
-        links = parse_task_links("superseding #12")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-        assert links[0].target_id == 12
-
-    def test_supersedes_uppercase_superseded(self) -> None:
-        links = parse_task_links("SUPERSEDED #7")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.SUPERSEDES
-        assert links[0].target_id == 7
-
-    # --- replies_to ---
-
-    def test_replies_to_pattern_replies_to(self) -> None:
-        links = parse_task_links("This replies to #8.")
+    # --- One link per body: every phrasing each kind recognises ---
+    #
+    # The `id` is the name the case carried before it became a row here.
+    @pytest.mark.parametrize(
+        ("body", "kind", "target_id"),
+        [
+            # relates_to
+            pytest.param(
+                "This relates to #12.",
+                TaskLinkKind.RELATES_TO,
+                12,
+                id="relates_to_pattern_relates_to",
+            ),
+            pytest.param(
+                "Also related: #99",
+                TaskLinkKind.RELATES_TO,
+                99,
+                id="relates_to_pattern_related",
+            ),
+            # duplicates
+            pytest.param(
+                "This duplicates #5.",
+                TaskLinkKind.DUPLICATES,
+                5,
+                id="duplicates_pattern_duplicates",
+            ),
+            pytest.param(
+                "duplicate of #5",
+                TaskLinkKind.DUPLICATES,
+                5,
+                id="duplicates_pattern_duplicate_of",
+            ),
+            # supersedes — every inflection of the verb, plus its "replaces" synonym
+            pytest.param(
+                "This supersedes #3.",
+                TaskLinkKind.SUPERSEDES,
+                3,
+                id="supersedes_pattern_supersedes",
+            ),
+            pytest.param(
+                "This replaces #3.",
+                TaskLinkKind.SUPERSEDES,
+                3,
+                id="supersedes_pattern_replaces",
+            ),
+            pytest.param(
+                "will supersede #9",
+                TaskLinkKind.SUPERSEDES,
+                9,
+                id="supersedes_pattern_supersede_base",
+            ),
+            pytest.param(
+                "This superseded #5",
+                TaskLinkKind.SUPERSEDES,
+                5,
+                id="supersedes_pattern_superseded",
+            ),
+            pytest.param(
+                "superseding #12",
+                TaskLinkKind.SUPERSEDES,
+                12,
+                id="supersedes_pattern_superseding",
+            ),
+            pytest.param(
+                "SUPERSEDED #7",
+                TaskLinkKind.SUPERSEDES,
+                7,
+                id="supersedes_uppercase_superseded",
+            ),
+            # replies_to
+            pytest.param(
+                "This replies to #8.",
+                TaskLinkKind.REPLIES_TO,
+                8,
+                id="replies_to_pattern_replies_to",
+            ),
+            pytest.param(
+                "reply to #8",
+                TaskLinkKind.REPLIES_TO,
+                8,
+                id="replies_to_pattern_reply_to",
+            ),
+            pytest.param(
+                "In response to #8, see here.",
+                TaskLinkKind.REPLIES_TO,
+                8,
+                id="replies_to_pattern_in_response_to",
+            ),
+        ],
+    )
+    def test_single_link_pattern(
+        self, body: str, kind: TaskLinkKind, target_id: int
+    ) -> None:
+        links = parse_task_links(body)
 
         assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.REPLIES_TO
-        assert links[0].target_id == 8
+        assert links[0].kind == kind
+        assert links[0].target_id == target_id
 
-    def test_replies_to_pattern_reply_to(self) -> None:
-        links = parse_task_links("reply to #8")
+    # --- Case insensitivity: kind only, deliberately not pinning the target ---
+
+    @pytest.mark.parametrize(
+        ("body", "kind"),
+        [
+            pytest.param(
+                "RELATES TO #7",
+                TaskLinkKind.RELATES_TO,
+                id="relates_to_case_insensitive",
+            ),
+            pytest.param(
+                "DUPLICATE OF #10",
+                TaskLinkKind.DUPLICATES,
+                id="duplicates_case_insensitive",
+            ),
+            pytest.param(
+                "REPLACES #20",
+                TaskLinkKind.SUPERSEDES,
+                id="supersedes_case_insensitive",
+            ),
+            pytest.param(
+                "IN RESPONSE TO #30",
+                TaskLinkKind.REPLIES_TO,
+                id="replies_to_case_insensitive",
+            ),
+        ],
+    )
+    def test_pattern_is_case_insensitive(self, body: str, kind: TaskLinkKind) -> None:
+        links = parse_task_links(body)
 
         assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.REPLIES_TO
-        assert links[0].target_id == 8
-
-    def test_replies_to_pattern_in_response_to(self) -> None:
-        links = parse_task_links("In response to #8, see here.")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.REPLIES_TO
-        assert links[0].target_id == 8
-
-    def test_replies_to_case_insensitive(self) -> None:
-        links = parse_task_links("IN RESPONSE TO #30")
-
-        assert len(links) == 1
-        assert links[0].kind == TaskLinkKind.REPLIES_TO
+        assert links[0].kind == kind
 
     # --- Multiple links ---
 

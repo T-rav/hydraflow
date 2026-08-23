@@ -8,11 +8,25 @@ and likely-bug exceptions (``TypeError``, ``KeyError``, ``AttributeError``,
 propagating them.
 
 Expected behaviour after fix:
-  - All three ``except Exception`` blocks call ``reraise_on_credit_or_bug(exc)``
-    before the log statement so that fatal/bug exceptions propagate.
+  - The ``except Exception`` blocks in the anchored methods call
+    ``reraise_on_credit_or_bug(exc)`` before the log statement so that
+    fatal/bug exceptions propagate.
 
-These tests assert the *correct* behaviour and are RED against the current
-(buggy) code.
+Anchored on the METHOD, not on a line number (#11664)
+-----------------------------------------------------
+
+The per-site assertion below used to filter whole-file handler line numbers to
+a ±15-line window around a line captured when the issue was filed. Both
+targets have since moved: ``_run_issue_reproductions`` was replaced by
+``_flow_reproduce`` (now at a completely different line), and
+``stale_issue_gc_loop``'s handlers drifted off their window too. The window
+matched an EMPTY set, and ``assert not []`` passed VACUOUSLY — green while
+asserting nothing.
+
+The anchors are now enclosing method names, resolved through
+``tests.regressions._handler_anchors.unguarded_handlers``, which RAISES if the
+method disappears. A rotted anchor is now a red test with a "lost its anchor"
+message, not a silent no-op. See ``_handler_anchors`` for the full rationale.
 """
 
 from __future__ import annotations
@@ -22,16 +36,35 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parent.parent.parent / "src"
+from tests.regressions._handler_anchors import (
+    RERAISE_GUARD,
+    SRC,
+    _except_exception_handlers,
+    _handler_calls_reraise_guard,
+    unguarded_handlers,
+)
 
 #: The function name that constitutes the required guard.
-REQUIRED_GUARD = "reraise_on_credit_or_bug"
+REQUIRED_GUARD = RERAISE_GUARD
 
-#: (filename, approximate line, short description) from the issue findings.
-KNOWN_UNGUARDED_SITES: list[tuple[str, int, str]] = [
-    ("triage_phase.py", 386, "_run_issue_reproductions broad except"),
-    ("stale_issue_gc_loop.py", 63, "issue list fetch broad except"),
-    ("stale_issue_gc_loop.py", 106, "per-issue processing broad except"),
+#: (filename, enclosing method, short description) from the issue findings.
+#:
+#: The issue's findings table listed three line-anchored sites. Two of them
+#: (``stale_issue_gc_loop.py:63`` — issue list fetch, and
+#: ``stale_issue_gc_loop.py:106`` — per-issue processing) are both handlers
+#: inside ``_do_work``, so they collapse to a single method anchor: scoping the
+#: scan to the method already checks *every* broad handler it contains, which
+#: is strictly stronger than two overlapping line windows.
+#:
+#: ``triage_phase.py:386`` named ``_run_issue_reproductions``, which no longer
+#: exists; ``_flow_reproduce`` is its successor and owns the handler.
+KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
+    ("triage_phase.py", "_flow_reproduce", "issue-reproduction broad except"),
+    (
+        "stale_issue_gc_loop.py",
+        "_do_work",
+        "issue list fetch + per-issue processing broad excepts",
+    ),
 ]
 
 
@@ -40,36 +73,16 @@ KNOWN_UNGUARDED_SITES: list[tuple[str, int, str]] = [
 # ---------------------------------------------------------------------------
 
 
-def _except_exception_handlers(tree: ast.Module) -> list[ast.ExceptHandler]:
-    """Return all ``except Exception`` handler nodes in *tree*."""
-    handlers: list[ast.ExceptHandler] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        if isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            handlers.append(node)
-    return handlers
+def _unguarded_handlers_in_file(
+    filepath: Path,
+) -> list[tuple[int, ast.ExceptHandler]]:
+    """Whole-file variant used by the file-wide sweep below.
 
-
-def _handler_calls_reraise_guard(handler: ast.ExceptHandler) -> bool:
-    """Return True if the handler body calls ``reraise_on_credit_or_bug``."""
-    for node in ast.walk(handler):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == REQUIRED_GUARD:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == REQUIRED_GUARD:
-            return True
-    return False
-
-
-def _unguarded_handlers(filepath: Path) -> list[tuple[int, ast.ExceptHandler]]:
-    """Return ``(lineno, handler)`` pairs for every ``except Exception``
-    that does **not** call ``reraise_on_credit_or_bug``.
+    The per-site tests use the method-scoped
+    :func:`~tests.regressions._handler_anchors.unguarded_handlers` instead —
+    only this file-wide sweep wants every handler in the module.
     """
-    source = filepath.read_text()
-    tree = ast.parse(source, filename=str(filepath))
+    tree = ast.parse(filepath.read_text(), filename=str(filepath))
     return [
         (h.lineno, h)
         for h in _except_exception_handlers(tree)
@@ -90,10 +103,24 @@ class TestExceptBlocksReraisGuard:
 
     @pytest.mark.parametrize(
         "filename",
-        ["triage_phase.py", "stale_issue_gc_loop.py"],
+        [
+            # This file-wide sweep is BROADER than the issue's findings table:
+            # triage_phase.py still carries an unguarded handler outside
+            # ``_flow_reproduce`` that #6766 never covered. Marked per-param
+            # rather than on the whole test, so the stale_issue_gc_loop case
+            # stays an honest green instead of a masked XPASS.
+            pytest.param(
+                "triage_phase.py",
+                marks=pytest.mark.xfail(
+                    reason="Residual unguarded ``except Exception`` in "
+                    "triage_phase.py outside the #6766 findings table — tracked by #11668",
+                    strict=False,
+                ),
+            ),
+            "stale_issue_gc_loop.py",
+        ],
         ids=lambda f: f.removesuffix(".py"),
     )
-    @pytest.mark.xfail(reason="Regression for issue #6766 — fix not yet landed", strict=False)
     def test_all_except_exception_blocks_have_reraise_guard(
         self, filename: str
     ) -> None:
@@ -104,7 +131,7 @@ class TestExceptBlocksReraisGuard:
         filepath = SRC / filename
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = _unguarded_handlers_in_file(filepath)
 
         assert not unguarded, (
             f"{filename} has {len(unguarded)} ``except Exception`` block(s) "
@@ -115,27 +142,27 @@ class TestExceptBlocksReraisGuard:
         )
 
     @pytest.mark.parametrize(
-        ("filename", "approx_line", "desc"),
+        ("filename", "method", "desc"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
     )
     def test_known_site_has_reraise_guard(
-        self, filename: str, approx_line: int, desc: str
+        self, filename: str, method: str, desc: str
     ) -> None:
-        """Each specific site from the issue's findings table must have
-        ``reraise_on_credit_or_bug`` within ±15 lines of the reported
-        location.
+        """Every ``except Exception`` inside the anchored method from the
+        issue's findings table must call ``reraise_on_credit_or_bug``.
+
+        ``unguarded_handlers`` raises if *method* is gone, so this can never
+        pass by matching nothing.
         """
         filepath = SRC / filename
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = [ln for ln, _ in unguarded_handlers(filepath, method)]
 
-        nearby = [lineno for lineno, _ in unguarded if abs(lineno - approx_line) <= 15]
-
-        assert not nearby, (
-            f"{filename}:{approx_line} ({desc}) — ``except Exception`` near "
-            f"line {nearby[0]} does not call reraise_on_credit_or_bug(). "
+        assert not unguarded, (
+            f"{filename}:{method}() ({desc}) — ``except Exception`` at line "
+            f"{unguarded[0]} does not call reraise_on_credit_or_bug(). "
             f"Auth failures and bug exceptions are silently swallowed "
             f"(issue #6766)."
         )

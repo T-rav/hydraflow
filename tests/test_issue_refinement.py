@@ -293,43 +293,43 @@ class TestParseDupVerdict:
         assert verdict.verdict == "distinct"
         assert verdict.confidence == "low"
 
-    def test_garbage_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_dup_verdict("not json at all, sorry")
-
-    def test_missing_key_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_dup_verdict('{"verdict": "exact_dup", "canonical": 1}')
-
-    def test_unknown_verdict_value_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_dup_verdict(
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param(
+                "not json at all, sorry", id="garbage_raises_verdict_parse_error"
+            ),
+            pytest.param(
+                '{"verdict": "exact_dup", "canonical": 1}',
+                id="missing_key_raises_verdict_parse_error",
+            ),
+            pytest.param(
                 '{"verdict": "maybe_dup", "canonical": 1, '
-                '"evidence": "x", "confidence": "high"}'
-            )
-
-    def test_unknown_confidence_value_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_dup_verdict(
+                '"evidence": "x", "confidence": "high"}',
+                id="unknown_verdict_value_raises_verdict_parse_error",
+            ),
+            pytest.param(
                 '{"verdict": "exact_dup", "canonical": 1, '
-                '"evidence": "x", "confidence": "certain"}'
-            )
-
-    def test_non_int_canonical_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_dup_verdict(
+                '"evidence": "x", "confidence": "certain"}',
+                id="unknown_confidence_value_raises_verdict_parse_error",
+            ),
+            pytest.param(
                 '{"verdict": "exact_dup", "canonical": "9665", '
-                '"evidence": "x", "confidence": "high"}'
-            )
-
-    def test_bool_canonical_raises_verdict_parse_error(self) -> None:
-        """``bool`` is a subclass of ``int`` in Python — ``True``/``False``
-        must still be rejected, not silently accepted as 1/0."""
-        with pytest.raises(VerdictParseError):
-            parse_dup_verdict(
+                '"evidence": "x", "confidence": "high"}',
+                id="non_int_canonical_raises_verdict_parse_error",
+            ),
+            # ``bool`` is a subclass of ``int`` in Python — ``True``/``False``
+            # must still be rejected, not silently accepted as 1/0.
+            pytest.param(
                 '{"verdict": "exact_dup", "canonical": true, '
-                '"evidence": "x", "confidence": "high"}'
-            )
+                '"evidence": "x", "confidence": "high"}',
+                id="bool_canonical_raises_verdict_parse_error",
+            ),
+        ],
+    )
+    def test_malformed_payload_raises_verdict_parse_error(self, raw: str) -> None:
+        with pytest.raises(VerdictParseError):
+            parse_dup_verdict(raw)
 
 
 class TestParsePriorityVerdict:
@@ -345,17 +345,24 @@ class TestParsePriorityVerdict:
 
         assert verdict.priority == "none"
 
-    def test_garbage_raises_verdict_parse_error(self) -> None:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param(
+                "<html>not json</html>", id="garbage_raises_verdict_parse_error"
+            ),
+            pytest.param(
+                '{"priority": "P1"}', id="missing_key_raises_verdict_parse_error"
+            ),
+            pytest.param(
+                '{"priority": "P5", "reason": "x"}',
+                id="unknown_priority_value_raises_verdict_parse_error",
+            ),
+        ],
+    )
+    def test_malformed_payload_raises_verdict_parse_error(self, raw: str) -> None:
         with pytest.raises(VerdictParseError):
-            parse_priority_verdict("<html>not json</html>")
-
-    def test_missing_key_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_priority_verdict('{"priority": "P1"}')
-
-    def test_unknown_priority_value_raises_verdict_parse_error(self) -> None:
-        with pytest.raises(VerdictParseError):
-            parse_priority_verdict('{"priority": "P5", "reason": "x"}')
+            parse_priority_verdict(raw)
 
 
 class TestPrompts:

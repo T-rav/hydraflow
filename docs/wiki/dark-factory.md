@@ -95,12 +95,35 @@ context for free) OR replicate explicitly:
 - **Never-raises contract**: every failure path returns a typed result
   (e.g., `PreflightSpawn(crashed=True, ...)`), never propagates a generic
   `RuntimeError`. The caretaker loop's outer handler shouldn't need to know
-  about subprocess internals.
+  about subprocess internals. **This bullet does NOT outrank the one above
+  it.** "Never raises" means never raises an *ordinary* failure; infra-fatal
+  errors still propagate. Read literally it says the opposite, and that
+  reading is what produced the #11666 sweep's largest finding:
+  `TranscriptSummarizer.summarize_and_comment` documented itself as "Never
+  raises — all errors are logged and swallowed" and duly buried
+  `CreditExhaustedError` from its own summarization spawn as `return False`.
+  A degraded result is only honest when the *next* call could succeed; after
+  credit exhaustion it cannot.
+- **Fix the whole chain, not the innermost site.** In that same finding, all
+  five callers of the summarizer re-swallowed on top of it — two via
+  `except (RuntimeError, OSError)`, which catches `CreditExhaustedError`
+  because it subclasses `RuntimeError`. Adding the guard only at the inner
+  site would have moved the swallow up one frame and looked fixed. Walk the
+  callers.
 
 The Auto-Agent partial-landing → wiring follow-up (PRs #8431 → #8439)
 exposed all four of these as load-bearing — the first runner cut missed
 auth-retry AND `reraise_on_credit_or_bug`, and both were caught only by
 fresh-eyes review.
+
+**The gate**: `tests/test_loop_credit_reraise_completeness.py` now ratchets
+this over **every module in `src/`**, not just `src/*_loop.py`, and its
+call graph resolves across a decomposed loop's sibling modules rather than
+one file at a time (#11666). Both grandfather lists are empty and must stay
+that way. Before #11664 the guard was believed present everywhere while the
+`#6855` site had none — its regression test was anchored to a line window
+that had drifted off the method, so it passed vacuously for months. Anchor
+structural tests on SYMBOLS, never on line numbers.
 
 ### 2.3 Audit-on-everything
 
@@ -282,7 +305,7 @@ rolling-24h speed) and recovery restores the pre-window operator intent.
 Six patterns pass `make quality-lite` locally but go red on the first CI
 round, each costing a heal round-trip. All are already CI-guarded — the win
 is pre-empting them at build time. The implementer prompt now carries these
-as a "Pre-push self-check" section (`src/agent.py:_SELF_CHECK_CHECKLIST`);
+as a "Pre-push self-check" section (`src/agent/_runner.py:_SELF_CHECK_CHECKLIST`);
 the same list, with the issue references that surfaced each, lives in
 [`gotchas.md`](gotchas.md) ("Pre-push self-check — six recurring avoidable CI reds").
 

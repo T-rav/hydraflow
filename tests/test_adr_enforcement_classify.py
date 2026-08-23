@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from adr_conformance import (
     EnforcementClass,
     adr_is_unattributed,
@@ -55,9 +57,42 @@ def _write(tmp_path: Path, rel: str, body: str) -> None:
     p.write_text(body)
 
 
-def test_bare_assert_is_not_tautological(tmp_path: Path):
-    _write(tmp_path, "tests/t.py", "def test_x():\n    assert 1 == 1\n")
-    assert not check_is_tautological(_pytest("tests/t.py::test_x"), tmp_path)
+@pytest.mark.parametrize(
+    "body,target",
+    [
+        pytest.param(
+            "def test_x():\n    assert 1 == 1\n",
+            "tests/t.py::test_x",
+            id="test_bare_assert_is_not_tautological",
+        ),
+        pytest.param(
+            "def test_x(mock):\n    mock.foo()\n    mock.assert_called_once()\n",
+            "tests/t.py::test_x",
+            id="test_mock_assert_call_counts_as_asserting",
+        ),
+        # A test that delegates its assertion to a `verify_*` helper must NOT be
+        # mis-flagged weak — the heuristic is biased toward STRONG.
+        pytest.param(
+            "def test_x():\n    verify_invariant(thing)\n",
+            "tests/t.py::test_x",
+            id="test_helper_idiom_call_counts_as_asserting",
+        ),
+        pytest.param(
+            "import pytest\n\n\ndef test_x():\n    with pytest.raises(ValueError):\n        boom()\n",
+            "tests/t.py::test_x",
+            id="test_pytest_raises_context_counts_as_asserting",
+        ),
+        # Any assert anywhere in the module makes a module-only citation strong.
+        pytest.param(
+            "def test_a():\n    pass\n\n\ndef test_b():\n    assert 2 == 2\n",
+            "tests/t.py",
+            id="test_module_only_citation_scans_whole_module",
+        ),
+    ],
+)
+def test_asserting_bodies_are_not_tautological(tmp_path: Path, body: str, target: str):
+    _write(tmp_path, "tests/t.py", body)
+    assert not check_is_tautological(_pytest(target), tmp_path)
 
 
 def test_import_only_test_is_tautological(tmp_path: Path):
@@ -65,31 +100,6 @@ def test_import_only_test_is_tautological(tmp_path: Path):
         tmp_path, "tests/t.py", "import os\n\n\ndef test_x():\n    import os  # noop\n"
     )
     assert check_is_tautological(_pytest("tests/t.py::test_x"), tmp_path)
-
-
-def test_mock_assert_call_counts_as_asserting(tmp_path: Path):
-    _write(
-        tmp_path,
-        "tests/t.py",
-        "def test_x(mock):\n    mock.foo()\n    mock.assert_called_once()\n",
-    )
-    assert not check_is_tautological(_pytest("tests/t.py::test_x"), tmp_path)
-
-
-def test_helper_idiom_call_counts_as_asserting(tmp_path: Path):
-    # A test that delegates its assertion to a `verify_*` helper must NOT be
-    # mis-flagged weak — the heuristic is biased toward STRONG.
-    _write(tmp_path, "tests/t.py", "def test_x():\n    verify_invariant(thing)\n")
-    assert not check_is_tautological(_pytest("tests/t.py::test_x"), tmp_path)
-
-
-def test_pytest_raises_context_counts_as_asserting(tmp_path: Path):
-    _write(
-        tmp_path,
-        "tests/t.py",
-        "import pytest\n\n\ndef test_x():\n    with pytest.raises(ValueError):\n        boom()\n",
-    )
-    assert not check_is_tautological(_pytest("tests/t.py::test_x"), tmp_path)
 
 
 def test_class_method_scoped_to_the_named_class(tmp_path: Path):
@@ -102,16 +112,6 @@ def test_class_method_scoped_to_the_named_class(tmp_path: Path):
     # The hollow one is TestA.test_x, NOT TestB.test_x (same method name).
     assert check_is_tautological(_pytest("tests/t.py::TestA::test_x"), tmp_path)
     assert not check_is_tautological(_pytest("tests/t.py::TestB::test_x"), tmp_path)
-
-
-def test_module_only_citation_scans_whole_module(tmp_path: Path):
-    _write(
-        tmp_path,
-        "tests/t.py",
-        "def test_a():\n    pass\n\n\ndef test_b():\n    assert 2 == 2\n",
-    )
-    # Any assert anywhere in the module makes a module-only citation strong.
-    assert not check_is_tautological(_pytest("tests/t.py"), tmp_path)
 
 
 def test_unresolvable_and_nonpytest_are_never_tautological(tmp_path: Path):

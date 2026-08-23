@@ -7,16 +7,28 @@ This silently swallows ``AuthenticationError`` and
 mechanism from learning about exhaustion from these paths.
 
 Affected sites:
-- ``src/transcript_summarizer.py:198`` — ``summarize_and_comment()``
-- ``src/metrics_manager.py:211`` — ``_build_snapshot()``
+- ``src/transcript_summarizer.py`` — ``summarize_and_comment()``
+- ``src/metrics_manager.py`` — ``_build_snapshot()``
 
 Expected behaviour after fix:
   - ``AuthenticationError`` and ``CreditExhaustedError`` propagate up
     from both sites so the orchestrator's credit-pause / auth-retry
     logic can handle them.
 
-These tests assert the *correct* behaviour and are RED against the
-current (buggy) code.
+Anchored on the METHOD, not on a line number (#11664)
+-----------------------------------------------------
+
+The per-site assertion below used to filter whole-file handler line numbers to
+a ±15-line window around ``transcript_summarizer.py:198`` /
+``metrics_manager.py:211``. Both methods had long since drifted off those
+windows (``summarize_and_comment`` now starts near line 189,
+``_build_snapshot`` near 162), so the filter matched an EMPTY set and
+``assert not []`` passed VACUOUSLY.
+
+The anchors are now enclosing method names, resolved through
+``tests.regressions._handler_anchors.unguarded_handlers``, which RAISES if the
+method disappears — a rotted anchor fails loudly instead of passing for free.
+See ``_handler_anchors`` for the full rationale.
 """
 
 from __future__ import annotations
@@ -30,58 +42,46 @@ import pytest
 from metrics_manager import MetricsManager
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from tests.helpers import ConfigFactory
+from tests.regressions._handler_anchors import (
+    RERAISE_GUARD,
+    SRC,
+    _except_exception_handlers,
+    _handler_calls_reraise_guard,
+    unguarded_handlers,
+)
 from transcript_summarizer import TranscriptSummarizer
 
-SRC = Path(__file__).resolve().parent.parent.parent / "src"
+REQUIRED_GUARD = RERAISE_GUARD
 
-REQUIRED_GUARD = "reraise_on_credit_or_bug"
-
-#: (file, approx_line, short description) from the issue findings.
-KNOWN_UNGUARDED_SITES: list[tuple[str, int, str]] = [
-    ("transcript_summarizer.py", 198, "summarize_and_comment except Exception handler"),
+#: (file, enclosing method, short description) from the issue findings.
+KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
+    (
+        "transcript_summarizer.py",
+        "summarize_and_comment",
+        "summarize_and_comment except Exception handler",
+    ),
     (
         "metrics_manager.py",
-        211,
+        "_build_snapshot",
         "_build_snapshot get_label_counts except Exception handler",
     ),
 ]
 
 
 # ---------------------------------------------------------------------------
-# AST helpers (shared with sibling regression tests)
+# AST helpers
 # ---------------------------------------------------------------------------
 
 
-def _except_exception_handlers(tree: ast.Module) -> list[ast.ExceptHandler]:
-    """Return all ``except Exception`` handler nodes in *tree*."""
-    handlers: list[ast.ExceptHandler] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        if isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            handlers.append(node)
-    return handlers
+def _unguarded_handlers_in_file(
+    filepath: Path,
+) -> list[tuple[int, ast.ExceptHandler]]:
+    """Whole-file variant used by the two file-wide sweeps below.
 
-
-def _handler_calls_reraise_guard(handler: ast.ExceptHandler) -> bool:
-    """Return True if the handler body calls ``reraise_on_credit_or_bug``."""
-    for node in ast.walk(handler):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == REQUIRED_GUARD:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == REQUIRED_GUARD:
-            return True
-    return False
-
-
-def _unguarded_handlers(filepath: Path) -> list[tuple[int, ast.ExceptHandler]]:
-    """Return ``(lineno, handler)`` pairs for every ``except Exception``
-    that does **not** call ``reraise_on_credit_or_bug``.
+    The per-site tests use the method-scoped
+    :func:`~tests.regressions._handler_anchors.unguarded_handlers` instead.
     """
-    source = filepath.read_text()
-    tree = ast.parse(source, filename=str(filepath))
+    tree = ast.parse(filepath.read_text(), filename=str(filepath))
     return [
         (h.lineno, h)
         for h in _except_exception_handlers(tree)
@@ -99,12 +99,11 @@ class TestTranscriptSummarizerExceptBlocksHaveReraise:
     must call ``reraise_on_credit_or_bug``.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     def test_all_except_exception_blocks_have_reraise_guard(self) -> None:
         filepath = SRC / "transcript_summarizer.py"
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = _unguarded_handlers_in_file(filepath)
 
         assert not unguarded, (
             f"transcript_summarizer.py has {len(unguarded)} ``except Exception`` "
@@ -123,7 +122,7 @@ class TestMetricsManagerExceptBlocksHaveReraise:
         filepath = SRC / "metrics_manager.py"
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = _unguarded_handlers_in_file(filepath)
 
         assert not unguarded, (
             f"metrics_manager.py has {len(unguarded)} ``except Exception`` "
@@ -137,22 +136,24 @@ class TestKnownSitesHaveReraiseGuard:
     """Parametrised check for each specific site from the issue findings."""
 
     @pytest.mark.parametrize(
-        ("filename", "approx_line", "desc"),
+        ("filename", "method", "desc"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
     )
     def test_known_site_has_reraise_guard(
-        self, filename: str, approx_line: int, desc: str
+        self, filename: str, method: str, desc: str
     ) -> None:
+        """``unguarded_handlers`` raises if *method* is gone, so this can never
+        pass by matching nothing.
+        """
         filepath = SRC / filename
         assert filepath.exists()
 
-        unguarded = _unguarded_handlers(filepath)
-        nearby = [ln for ln, _ in unguarded if abs(ln - approx_line) <= 15]
+        unguarded = [ln for ln, _ in unguarded_handlers(filepath, method)]
 
-        assert not nearby, (
-            f"{filename}:{approx_line} ({desc}) — ``except Exception`` "
-            f"near line {nearby[0]} does not call reraise_on_credit_or_bug(). "
+        assert not unguarded, (
+            f"{filename}:{method}() ({desc}) — ``except Exception`` at line "
+            f"{unguarded[0]} does not call reraise_on_credit_or_bug(). "
             f"Auth/credit failures are silently swallowed (issue #6814)."
         )
 
@@ -230,7 +231,6 @@ class TestSummarizeAndCommentAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError from inner summarize must not be silently caught."""
         summarizer, prs = _make_summarizer(tmp_path)
@@ -244,7 +244,6 @@ class TestSummarizeAndCommentAuthErrorPropagates:
             )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6814 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates(self, tmp_path: Path) -> None:
         """CreditExhaustedError from inner summarize must not be silently caught."""
         summarizer, prs = _make_summarizer(tmp_path)

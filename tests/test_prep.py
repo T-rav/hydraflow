@@ -721,65 +721,55 @@ class TestCheckGitHooks:
 
 
 class TestCheckLinting:
-    def test_ruff_toml(self, tmp_path: Path) -> None:
-        (tmp_path / "ruff.toml").write_text("[lint]\nselect = ['E']\n")
+    # One row per config file the linting probe recognises, and the tool name it
+    # must report; the `id` is the name the case carried before it became a row.
+    @pytest.mark.parametrize(
+        ("filename", "content", "expected_detail"),
+        [
+            pytest.param(
+                "ruff.toml", "[lint]\nselect = ['E']\n", "ruff", id="ruff_toml"
+            ),
+            # A dedicated file and a pyproject table are separate detections.
+            pytest.param(
+                "pyproject.toml",
+                "[tool.ruff]\nline-length = 100\n",
+                "ruff",
+                id="ruff_in_pyproject_toml",
+            ),
+            pytest.param(
+                ".eslintrc.json",
+                "{}\n",
+                "eslint",
+                id="check_linting_detects_eslintrc_file",
+            ),
+            # Legacy .eslintrc and flat eslint.config.js are separate detections.
+            pytest.param(
+                "eslint.config.js",
+                "export default [];\n",
+                "eslint",
+                id="check_linting_detects_flat_eslint_config",
+            ),
+            pytest.param("biome.json", "{}\n", "biome", id="biome_json"),
+            pytest.param(
+                "Makefile",
+                "lint-check:\n\t@echo ok\n",
+                "make lint target",
+                id="check_linting_detects_make_lint_target",
+            ),
+        ],
+    )
+    def test_detects_linting_config(
+        self, tmp_path: Path, filename: str, content: str, expected_detail: str
+    ) -> None:
+        (tmp_path / filename).write_text(content)
         config = ConfigFactory.create(repo_root=tmp_path)
         from prep import RepoAuditor
 
         auditor = RepoAuditor(config)
         check = auditor._check_linting()
+
         assert check.status == AuditCheckStatus.PRESENT
-        assert "ruff" in check.detail
-
-    def test_ruff_in_pyproject_toml(self, tmp_path: Path) -> None:
-        (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 100\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_linting()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "ruff" in check.detail
-
-    def test_check_linting_detects_eslintrc_file(self, tmp_path: Path) -> None:
-        (tmp_path / ".eslintrc.json").write_text("{}\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_linting()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "eslint" in check.detail
-
-    def test_check_linting_detects_flat_eslint_config(self, tmp_path: Path) -> None:
-        (tmp_path / "eslint.config.js").write_text("export default [];\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_linting()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "eslint" in check.detail
-
-    def test_biome_json(self, tmp_path: Path) -> None:
-        (tmp_path / "biome.json").write_text("{}\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_linting()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "biome" in check.detail
-
-    def test_check_linting_detects_make_lint_target(self, tmp_path: Path) -> None:
-        (tmp_path / "Makefile").write_text("lint-check:\n\t@echo ok\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_linting()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "make lint target" in check.detail
+        assert expected_detail in check.detail
 
     def test_check_linting_detects_package_json_lint_script(
         self, tmp_path: Path
@@ -829,35 +819,34 @@ class TestCheckLinting:
 
 
 class TestCheckTypeChecking:
-    def test_pyrightconfig_json(self, tmp_path: Path) -> None:
-        (tmp_path / "pyrightconfig.json").write_text("{}\n")
+    @pytest.mark.parametrize(
+        ("filename", "content", "expected_detail"),
+        [
+            pytest.param(
+                "pyrightconfig.json", "{}\n", "pyright", id="pyrightconfig_json"
+            ),
+            # A dedicated file and a pyproject table are separate detections.
+            pytest.param(
+                "pyproject.toml",
+                "[tool.pyright]\nvenvPath = '.'\n",
+                "pyright",
+                id="pyright_in_pyproject_toml",
+            ),
+            pytest.param("tsconfig.json", "{}\n", "tsconfig", id="tsconfig_json"),
+        ],
+    )
+    def test_detects_type_checking_config(
+        self, tmp_path: Path, filename: str, content: str, expected_detail: str
+    ) -> None:
+        (tmp_path / filename).write_text(content)
         config = ConfigFactory.create(repo_root=tmp_path)
         from prep import RepoAuditor
 
         auditor = RepoAuditor(config)
         check = auditor._check_type_checking()
+
         assert check.status == AuditCheckStatus.PRESENT
-        assert "pyright" in check.detail
-
-    def test_pyright_in_pyproject_toml(self, tmp_path: Path) -> None:
-        (tmp_path / "pyproject.toml").write_text("[tool.pyright]\nvenvPath = '.'\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_type_checking()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "pyright" in check.detail
-
-    def test_tsconfig_json(self, tmp_path: Path) -> None:
-        (tmp_path / "tsconfig.json").write_text("{}\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_type_checking()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "tsconfig" in check.detail
+        assert expected_detail in check.detail
 
     def test_no_type_checking_config(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path)
@@ -1007,55 +996,33 @@ class TestCheckCoveragePolicy:
 
 
 class TestCheckPackageManager:
-    def test_uv_lock(self, tmp_path: Path) -> None:
-        (tmp_path / "uv.lock").write_text("[[package]]\n")
+    # One row per lockfile, and the package manager it must be attributed to;
+    # the `id` is the name the case carried before it became a row here.
+    @pytest.mark.parametrize(
+        ("filename", "content", "expected_detail"),
+        [
+            pytest.param("uv.lock", "[[package]]\n", "uv", id="uv_lock"),
+            pytest.param(
+                "pnpm-lock.yaml", "lockfileVersion: 6\n", "pnpm", id="pnpm_lock"
+            ),
+            pytest.param("package-lock.json", "{}\n", "npm", id="package_lock_json"),
+            pytest.param("yarn.lock", "# yarn lockfile v1\n", "yarn", id="yarn_lock"),
+            # Same TOML body as uv.lock — the filename is what disambiguates.
+            pytest.param("poetry.lock", "[[package]]\n", "poetry", id="poetry_lock"),
+        ],
+    )
+    def test_detects_package_manager(
+        self, tmp_path: Path, filename: str, content: str, expected_detail: str
+    ) -> None:
+        (tmp_path / filename).write_text(content)
         config = ConfigFactory.create(repo_root=tmp_path)
         from prep import RepoAuditor
 
         auditor = RepoAuditor(config)
         check = auditor._check_package_manager()
+
         assert check.status == AuditCheckStatus.PRESENT
-        assert "uv" in check.detail
-
-    def test_pnpm_lock(self, tmp_path: Path) -> None:
-        (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: 6\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_package_manager()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "pnpm" in check.detail
-
-    def test_package_lock_json(self, tmp_path: Path) -> None:
-        (tmp_path / "package-lock.json").write_text("{}\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_package_manager()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "npm" in check.detail
-
-    def test_yarn_lock(self, tmp_path: Path) -> None:
-        (tmp_path / "yarn.lock").write_text("# yarn lockfile v1\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_package_manager()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "yarn" in check.detail
-
-    def test_poetry_lock(self, tmp_path: Path) -> None:
-        (tmp_path / "poetry.lock").write_text("[[package]]\n")
-        config = ConfigFactory.create(repo_root=tmp_path)
-        from prep import RepoAuditor
-
-        auditor = RepoAuditor(config)
-        check = auditor._check_package_manager()
-        assert check.status == AuditCheckStatus.PRESENT
-        assert "poetry" in check.detail
+        assert expected_detail in check.detail
 
     def test_no_lock_file(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path)

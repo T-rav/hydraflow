@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from prep_hooks import (
     detect_language,
 )
@@ -15,29 +17,50 @@ from prep_hooks import (
 
 
 class TestDetectLanguage:
-    def test_detects_python_from_pyproject_toml(self, tmp_path: Path) -> None:
-        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'foo'\n")
-        assert detect_language(tmp_path) == "python"
-
-    def test_detects_python_from_setup_py(self, tmp_path: Path) -> None:
-        (tmp_path / "setup.py").write_text("from setuptools import setup\n")
-        assert detect_language(tmp_path) == "python"
-
-    def test_detects_python_from_requirements_txt(self, tmp_path: Path) -> None:
-        (tmp_path / "requirements.txt").write_text("requests\n")
-        assert detect_language(tmp_path) == "python"
-
-    def test_detects_python_from_setup_cfg(self, tmp_path: Path) -> None:
-        (tmp_path / "setup.cfg").write_text("[metadata]\nname = foo\n")
-        assert detect_language(tmp_path) == "python"
+    @pytest.mark.parametrize(
+        ("marker_file", "content", "expected"),
+        [
+            pytest.param(
+                "pyproject.toml",
+                "[project]\nname = 'foo'\n",
+                "python",
+                id="test_detects_python_from_pyproject_toml",
+            ),
+            pytest.param(
+                "setup.py",
+                "from setuptools import setup\n",
+                "python",
+                id="test_detects_python_from_setup_py",
+            ),
+            pytest.param(
+                "requirements.txt",
+                "requests\n",
+                "python",
+                id="test_detects_python_from_requirements_txt",
+            ),
+            pytest.param(
+                "setup.cfg",
+                "[metadata]\nname = foo\n",
+                "python",
+                id="test_detects_python_from_setup_cfg",
+            ),
+            pytest.param(
+                "tsconfig.json",
+                "{}",
+                "typescript",
+                id="test_detects_typescript_from_tsconfig",
+            ),
+        ],
+    )
+    def test_detects_language_from_marker_file(
+        self, tmp_path: Path, marker_file: str, content: str, expected: str
+    ) -> None:
+        (tmp_path / marker_file).write_text(content)
+        assert detect_language(tmp_path) == expected
 
     def test_detects_javascript_from_package_json(self, tmp_path: Path) -> None:
         (tmp_path / "package.json").write_text(json.dumps({"name": "my-app"}))
         assert detect_language(tmp_path) == "javascript"
-
-    def test_detects_typescript_from_tsconfig(self, tmp_path: Path) -> None:
-        (tmp_path / "tsconfig.json").write_text("{}")
-        assert detect_language(tmp_path) == "typescript"
 
     def test_detects_typescript_from_package_json_with_ts_dep(
         self, tmp_path: Path

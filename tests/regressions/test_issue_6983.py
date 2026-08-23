@@ -7,22 +7,32 @@ consumed and logged as ordinary epic-level errors, rather than propagating to
 stop the ``EpicMonitorLoop``.
 
 Affected sites:
-- ``src/epic.py:1061`` — ``refresh_cache`` broad ``except Exception``
-- ``src/epic.py:1163`` — ``check_stale_epics`` ``post_comment`` handler
-- ``src/epic.py:1180`` — ``check_stale_epics`` ``bus.publish`` handler
+- ``src/epic.py`` — ``refresh_cache`` broad ``except Exception``
+- ``src/epic.py`` — ``check_stale_epics`` ``post_comment`` handler
+- ``src/epic.py`` — ``check_stale_epics`` ``bus.publish`` handler
 
 Expected behaviour after fix:
   - ``AuthenticationError`` and ``CreditExhaustedError`` propagate out of
     ``refresh_cache`` and ``check_stale_epics`` so the orchestrator's
     credit-pause / auth-retry logic can handle them.
 
-These tests assert the *correct* behaviour and are RED against the current
-(buggy) code.
+Anchored on the METHOD, not on a line number (#11664)
+-----------------------------------------------------
+
+The per-site assertion below used to filter whole-file handler line numbers to
+a ±15-line window around ``epic.py:1061`` / ``:1163`` / ``:1180``. ``epic.py``
+has grown since — ``refresh_cache`` now starts near 1142 and
+``check_stale_epics`` near 1286 — so every window matched an EMPTY set and
+``assert not []`` passed VACUOUSLY.
+
+The anchors are now enclosing method names, resolved through
+``tests.regressions._handler_anchors.unguarded_handlers``, which RAISES if the
+method disappears — a rotted anchor fails loudly instead of passing for free.
+See ``_handler_anchors`` for the full rationale.
 """
 
 from __future__ import annotations
 
-import ast
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,71 +40,40 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-SRC = Path(__file__).resolve().parent.parent.parent / "src"
+from tests.regressions._handler_anchors import (
+    RERAISE_GUARD,
+    SRC,
+    unguarded_handlers,
+)
+
 sys.path.insert(0, str(SRC))
 
-REQUIRED_GUARD = "reraise_on_credit_or_bug"
+REQUIRED_GUARD = RERAISE_GUARD
 
-#: (file, approx_line, short description) from the issue findings.
-KNOWN_UNGUARDED_SITES: list[tuple[str, int, str]] = [
+#: (file, enclosing method, short description) from the issue findings.
+#:
+#: The issue listed three line-anchored sites; the last two (``post_comment``
+#: and ``bus.publish``) are both handlers inside ``check_stale_epics``. They are
+#: kept as separate rows so each finding stays traceable, but note that the
+#: method-scoped scan checks every broad handler in the method — so the two rows
+#: assert the same (strictly stronger) property.
+KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
     (
         "epic.py",
-        1061,
+        "refresh_cache",
         "refresh_cache broad except Exception swallows AuthenticationError",
     ),
     (
         "epic.py",
-        1163,
+        "check_stale_epics",
         "check_stale_epics post_comment broad except Exception swallows fatal errors",
     ),
     (
         "epic.py",
-        1180,
+        "check_stale_epics",
         "check_stale_epics bus.publish broad except Exception swallows fatal errors",
     ),
 ]
-
-
-# ---------------------------------------------------------------------------
-# AST helpers
-# ---------------------------------------------------------------------------
-
-
-def _except_exception_handlers(tree: ast.Module) -> list[ast.ExceptHandler]:
-    """Return all ``except Exception`` handler nodes in *tree*."""
-    handlers: list[ast.ExceptHandler] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        if isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            handlers.append(node)
-    return handlers
-
-
-def _handler_calls_reraise_guard(handler: ast.ExceptHandler) -> bool:
-    """Return True if the handler body calls ``reraise_on_credit_or_bug``."""
-    for node in ast.walk(handler):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == REQUIRED_GUARD:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == REQUIRED_GUARD:
-            return True
-    return False
-
-
-def _unguarded_handlers(filepath: Path) -> list[tuple[int, ast.ExceptHandler]]:
-    """Return ``(lineno, handler)`` pairs for every ``except Exception``
-    that does **not** call ``reraise_on_credit_or_bug``.
-    """
-    source = filepath.read_text()
-    tree = ast.parse(source, filename=str(filepath))
-    return [
-        (h.lineno, h)
-        for h in _except_exception_handlers(tree)
-        if not _handler_calls_reraise_guard(h)
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -108,22 +87,24 @@ class TestEpicManagerExceptBlocksHaveReraise:
     """
 
     @pytest.mark.parametrize(
-        ("filename", "approx_line", "desc"),
+        ("filename", "method", "desc"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"{f}:{ln}" for f, ln, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}:{i}" for i, (f, m, _) in enumerate(KNOWN_UNGUARDED_SITES)],
     )
     def test_known_site_has_reraise_guard(
-        self, filename: str, approx_line: int, desc: str
+        self, filename: str, method: str, desc: str
     ) -> None:
+        """``unguarded_handlers`` raises if *method* is gone, so this can never
+        pass by matching nothing.
+        """
         filepath = SRC / filename
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
-        nearby = [ln for ln, _ in unguarded if abs(ln - approx_line) <= 15]
+        unguarded = [ln for ln, _ in unguarded_handlers(filepath, method)]
 
-        assert not nearby, (
-            f"{filename}:{approx_line} ({desc}) -- ``except Exception`` "
-            f"near line {nearby[0]} does not call reraise_on_credit_or_bug(). "
+        assert not unguarded, (
+            f"{filename}:{method}() ({desc}) -- ``except Exception`` at line "
+            f"{unguarded[0]} does not call reraise_on_credit_or_bug(). "
             f"Auth/credit failures are silently swallowed (issue #6983)."
         )
 

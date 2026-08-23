@@ -104,36 +104,49 @@ async def _poll_then_stop(
 
 
 class TestIsCreditExhaustion:
-    def test_detects_usage_limit_reached(self) -> None:
-        assert is_credit_exhaustion("Your usage limit reached") is True
-
-    def test_detects_credit_balance_too_low(self) -> None:
-        assert is_credit_exhaustion("Your credit balance is too low") is True
-
-    def test_does_not_detect_transient_rate_limit_as_credit_exhaustion(self) -> None:
-        # rate_limit_error is a per-minute API rate limit, not a credit exhaustion
-        assert is_credit_exhaustion("error: rate_limit_error") is False
-
-    def test_returns_false_for_normal_text(self) -> None:
-        assert is_credit_exhaustion("Everything is fine") is False
-
-    def test_detects_youve_hit_your_limit(self) -> None:
-        assert is_credit_exhaustion("You've hit your limit · resets 5am") is True
+    # One row per message shape the detector has to classify; the `id` is the
+    # name the case carried before it became a row here.
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            pytest.param(
+                "Your usage limit reached", True, id="detects_usage_limit_reached"
+            ),
+            pytest.param(
+                "Your credit balance is too low",
+                True,
+                id="detects_credit_balance_too_low",
+            ),
+            # rate_limit_error is a per-minute API rate limit, not credit exhaustion
+            pytest.param(
+                "error: rate_limit_error",
+                False,
+                id="does_not_detect_transient_rate_limit_as_credit_exhaustion",
+            ),
+            pytest.param(
+                "Everything is fine", False, id="returns_false_for_normal_text"
+            ),
+            pytest.param(
+                "You've hit your limit · resets 5am",
+                True,
+                id="detects_youve_hit_your_limit",
+            ),
+            # Exact message from the Claude CLI when quota is exhausted.
+            pytest.param(
+                "You've hit your usage limit. To get more access now, "
+                "send a request to your admin or try again at 3:29 PM.",
+                True,
+                id="detects_hit_your_usage_limit",
+            ),
+        ],
+    )
+    def test_classifies_message(self, text: str, expected: bool) -> None:
+        assert is_credit_exhaustion(text) is expected
 
     def test_is_case_insensitive(self) -> None:
         assert is_credit_exhaustion("USAGE LIMIT REACHED") is True
         assert is_credit_exhaustion("Credit Balance Is Too Low") is True
         assert is_credit_exhaustion("YOU'VE HIT YOUR LIMIT") is True
-
-    def test_detects_hit_your_usage_limit(self) -> None:
-        """Exact message from Claude CLI when quota is exhausted."""
-        assert (
-            is_credit_exhaustion(
-                "You've hit your usage limit. To get more access now, "
-                "send a request to your admin or try again at 3:29 PM."
-            )
-            is True
-        )
 
 
 # ===========================================================================
