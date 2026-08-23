@@ -55,6 +55,30 @@ reverts on the next spawn), then remove the slug here. Clearing this one first,
 or clearing only the HydraFlow dial, leaves that repository's gateway spawns
 failing **closed** at the mint — loudly, and in the safe direction.
 
+`GATEWAY_ACCOUNTS_FILE` (unset by default) names the server-owned document that
+declares accounts beyond ADR-0138's two compiled legacy ones (ADR-0142). Its
+absence is the pre-pool deployment exactly: those two accounts, one candidate
+per model, and nowhere for a fallback hop to go. It is **restart-required** — an
+account's credential and origin are deployment facts, and reloading them under
+live leases would let a key minted against one origin be served by another. The
+file never contains a credential: an account names the **variable** that
+configures it (`credential_env`), and that name must match
+`^GATEWAY_[A-Z0-9_]+$`. That constraint is load-bearing rather than cosmetic —
+the `GATEWAY_` namespace is what HydraFlow's worker-environment scrub
+(`subprocess_util.scrub_gateway_spawn_env`) strips, so a credential variable
+named outside it would be inherited by every routed worker. A document carrying
+an `api_key`, or a `credential_env` outside the namespace, is refused at load.
+
+`GATEWAY_ACCOUNT_STATE_DIR` (`.hydraflow/gateway/accounts` by default) is where
+the audited administrative overlay and its hash chain live. It needs the same
+durable, non-root-writable mount discipline as `GATEWAY_LEDGER_PATH`.
+
+`GATEWAY_MAX_FALLBACK_HOPS` (1 by default) is the hard ceiling on bounded
+fallback, and a ceiling rather than a target: the effective bound is always the
+smaller of this and the candidate list, so a pool can never be walked in a loop.
+`0` disables fallback entirely — every request is served by its first eligible
+candidate or fails there.
+
 ## Read-only account and route visibility (ADR-0138)
 
 Three authenticated GET endpoints sit behind the same control-token boundary

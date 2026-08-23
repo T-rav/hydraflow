@@ -306,6 +306,9 @@ def create_app(
     app.state.gateway_proxy = proxy
     app.state.gateway_active_routes = resolved_active_routes
     app.state.gateway_route_mint = route_mint
+    app.state.gateway_account_pool = resolved_pool
+    app.state.gateway_account_state = resolved_account_state
+    app.state.gateway_account_admin = resolved_admin
 
     @app.get("/healthz", include_in_schema=False)
     async def health() -> object:

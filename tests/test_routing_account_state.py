@@ -17,7 +17,7 @@ import threading
 import pytest
 from pydantic import SecretStr
 
-from hydraflow_gateway.accounts import AdministrativeState
+from hydraflow_gateway.accounts import AdministrativeState, CircuitStateName
 from hydraflow_gateway.models import ProviderBinding, legacy_account_id
 from hydraflow_gateway.routing_account_state import (
     CIRCUIT_COOLDOWN_SECONDS,
@@ -25,6 +25,7 @@ from hydraflow_gateway.routing_account_state import (
     AccountRuntimeState,
     AccountSelection,
     CircuitState,
+    live_facts,
     select_account,
 )
 from hydraflow_gateway.routing_accounts import (
@@ -408,3 +409,68 @@ def test_selection_is_the_same_answer_on_every_call() -> None:
         for _ in range(16)
     }
     assert answers == {_ZAI}
+
+
+# -- the two spellings of one circuit vocabulary -----------------------------
+
+
+def test_the_read_model_and_the_live_state_publish_one_circuit_vocabulary() -> None:
+    """Two enums, one wire contract, and a guard so they cannot drift apart.
+
+    ``accounts.CircuitStateName`` exists only so the read model stays a leaf the
+    live-state module can import; if the two ever publish different strings, a
+    dashboard renders a state the gateway never emits.
+    """
+    assert {state.value for state in CircuitState} == {
+        state.value for state in CircuitStateName
+    }
+
+
+def test_live_facts_publish_an_accounts_declared_ceilings() -> None:
+    pool = _pool(_account(lease_capacity=3, request_capacity=7))
+    facts = live_facts(pool=pool, state=AccountRuntimeState(pool.registry))
+
+    assert (
+        facts[_SECONDARY].lease_capacity,
+        facts[_SECONDARY].request_capacity,
+    ) == (3, 7)
+
+
+def test_live_facts_publish_an_open_circuit() -> None:
+    pool = _pool(_account())
+    state = AccountRuntimeState(pool.registry)
+    for _ in range(CIRCUIT_FAILURE_THRESHOLD):
+        state.record_terminal(_SECONDARY, condition=FallbackCondition.UNAVAILABLE)
+
+    facts = live_facts(pool=pool, state=state)
+
+    assert facts[_SECONDARY].circuit_state is CircuitStateName.OPEN
+
+
+def test_live_facts_cover_every_registered_account() -> None:
+    pool = _pool(_account())
+    facts = live_facts(pool=pool, state=AccountRuntimeState(pool.registry))
+
+    assert set(facts) == set(pool.registry.account_ids)
+
+
+def test_a_holder_that_already_has_a_slot_keeps_it_at_a_full_account() -> None:
+    """Re-reserving an existing holder is a no-op, never a spurious refusal.
+
+    Without the holder check the second call would count the holder's *own*
+    existing slot against the ceiling and answer False — turning an idempotent
+    reservation into a capacity failure for a key that is already inside the
+    limit. The dict keying alone does not catch this: it makes the *count*
+    idempotent, not the *answer*.
+    """
+    state = _state(_account(lease_capacity=1))
+    state.reserve_lease(_SECONDARY, holder="k0")
+
+    assert state.reserve_lease(_SECONDARY, holder="k0") is True
+
+
+def test_a_request_holder_that_already_has_a_slot_keeps_it_too() -> None:
+    state = _state(_account(request_capacity=1))
+    state.reserve_request(_SECONDARY, holder="r0")
+
+    assert state.reserve_request(_SECONDARY, holder="r0") is True

@@ -211,9 +211,11 @@ class GatewayProxy:
         """
         binding = identity.route_binding
         if binding is not None and self._pool is not None:
-            upstream = self._pool.upstream(binding.account_id)
-            if upstream is not None:
-                return upstream
+            # Fail closed rather than falling back to the lane. A key bound to
+            # one account served on another account's credential is the exact
+            # misattribution the binding exists to prevent — the request would
+            # succeed, and the spend would land on an account no decision named.
+            return self._pool.upstream(binding.account_id)
         return self._settings.upstreams.get(identity.provider_binding)
 
     def ensure_telemetry_healthy(self) -> None:
@@ -691,9 +693,18 @@ class GatewayProxy:
         # Recorded from the row this attempt actually committed to, and before
         # the ledger append: a persistence failure must not also cost the circuit
         # and the fallback authority the one observation they exist to hold.
-        self._record_terminal_evidence(
-            identity, status_code=status_code, status=request_status
-        )
+        #
+        # A request THIS gateway refused is excluded, and that exclusion is
+        # load-bearing. A request-capacity refusal is a 429 the gateway wrote
+        # itself; feeding it back as evidence about the upstream would let three
+        # of them trip the account's own circuit and license a hop off a failure
+        # the account never had — a phantom outage the gateway manufactured from
+        # its own admission control. Same reasoning as the client-abort
+        # exclusion: neither says anything about the upstream.
+        if refusal_reason is None:
+            self._record_terminal_evidence(
+                identity, status_code=status_code, status=request_status
+            )
         try:
             self._ledger.append(row)
         except OSError:

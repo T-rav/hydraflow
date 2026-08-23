@@ -6,14 +6,14 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 87
-- **REAL** (real asserting enforcement): 84 (96.6%)
+- **Accepted ADRs:** 88
+- **REAL** (real asserting enforcement): 85 (96.6%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 0
 - **Justified exemptions** (process-only, allow-listed): 3
-- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 87 = 0.0%**
+- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 88 = 0.0%**
 
-By declared `**Enforcement:**` kind: `enforced` 84 · `manual` 3 · `decision-of-record` 0.
+By declared `**Enforcement:**` kind: `enforced` 85 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -106,6 +106,7 @@ By declared `**Enforcement:**` kind: `enforced` 84 · `manual` 3 · `decision-of
 | ADR-0139 | REAL | — | enforced | `pytest:tests/test_routing_policy.py`, `pytest:tests/test_routing_store.py`, `pytest:tests/test_routing_audit.py`, `pytest:tests/test_route_shadow.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py`, `pytest:tests/scenarios/test_gateway_route_shadow_scenario.py` |
 | ADR-0140 | REAL | — | enforced | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 | ADR-0141 | REAL | — | enforced | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
+| ADR-0142 | REAL | — | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 
 ## Unenforced-decision debt
 

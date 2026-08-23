@@ -35,6 +35,7 @@ from hydraflow_gateway.proxy import (
     build_upstream_url,
     sanitized_request_path,
 )
+from hydraflow_gateway.routing_accounts import load_account_pool
 from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
@@ -1534,3 +1535,61 @@ class TestGovernedDataPlane:
             )
 
         assert seen == []
+
+
+async def test_a_bound_key_whose_account_has_no_upstream_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """ADR-0142: never serve a bound key on another account's credential.
+
+    Falling back to the lane's upstream would make the request *succeed* — and
+    put the spend on an account no decision ever named, which is precisely the
+    misattribution an immutable account binding exists to prevent. The honest
+    answer is 503.
+    """
+    reached: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        reached.append(str(request.url))
+        return httpx.Response(200)
+
+    settings = _settings(tmp_path)
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = VirtualKeyStore(max_ttl_seconds=600)
+    minted = store.mint_bound(
+        principal=Principal(kind="spawn", id="implementer", spawn_id="spawn-1"),
+        repo_slug="acme-hydraflow",
+        repo_class=RepoClass.HYDRAFLOW,
+        provider_binding=ProviderBinding.ZAI_HARNESS,
+        capture_bodies=False,
+        ttl_seconds=600,
+        route_binding=RouteBinding(
+            mint_decision_id="gwd_orphan",
+            route_decision_id="dec_orphan",
+            dispatch_id="disp-1",
+            # In the registry, but this process resolved no credential for it.
+            account_id="zai-secondary",
+            effective_model="glm-5.3",
+        ),
+    )
+    identity = store.resolve(minted.token)
+    proxy = GatewayProxy(
+        settings=settings,
+        client=upstream_client,
+        ledger=GatewayLedger(settings.ledger_path),
+        body_store=GatewayBodyStore(settings.body_dir),
+        pricing=load_pricing(),
+        account_pool=load_account_pool(settings, {}),
+        request_id_factory=lambda: "request-orphan",
+    )
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    try:
+        with pytest.raises(HTTPException) as excinfo:
+            await proxy.forward(_streaming_request(receive), identity)
+    finally:
+        await upstream_client.aclose()
+
+    assert (excinfo.value.status_code, reached) == (503, [])
