@@ -6,25 +6,15 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `910b8b5` — fix(review pass 8): give a reaped child its lineage, and stop three constants lying *(2026-08-23)*
-- `4327307` — fix(director): the Plan canary's worker tree said a child did not run while its receipt said accepted (#11541) (#11541) *(2026-08-23)*
+- `ee851eb` — fix(review pass 5): make the sandbox-pin gate actually bite *(2026-08-23)*
+- `4b07057` — fix(review pass 4): share the route-refusal classifier, close a divergent copy *(2026-08-23)*
+- `b30e17a` — fix(rebase): port #11657's P3 review findings into the implement path *(2026-08-23)*
+- `d47e9c0` — fix(review pass 3): point three cross-references at where the code now lives *(2026-08-23)*
+- `1024178` — fix(review pass 2): split the director's actuator half, register the worker prompt *(2026-08-23)*
+- `e020f08` — fix(review pass 1): scope hibernation to the implement fence, close 5 mutation gaps *(2026-08-23)*
+- `41f3b4c` — feat(director): Fable P4 — fenced implementation and correction workers (#11542) (#11542) *(2026-08-23)*
+- `e865bb4` — fix(director): the Plan canary's worker tree contradicted its own receipts (#11541) (#11662) (#11662) *(2026-08-23)*
 - `0dec4e5` — fix(path-membership): make module-path gates follow a module into a package, and close the class (#11669) (#11672) (#11672) *(2026-08-23)*
-- `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) (#11670) *(2026-08-23)*
-- `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) (#11665) *(2026-08-22)*
-- `bb626bf` — fix(review-advisor,gates): three pass-2 findings — a ninth glob hole, a vacuous ratchet, an xfail that ate its own tripwire *(2026-08-23)*
-- `9103ea5` — refactor(health-monitor,agent): decompose two god classes into mixin packages *(2026-08-23)*
-- `c4de186` — fix(rebase): port #11657's P3 review findings into the implement path *(2026-08-23)*
-- `b3142aa` — fix(review pass 3): point three cross-references at where the code now lives *(2026-08-23)*
-- `853215d` — fix(review pass 2): split the director's actuator half, register the worker prompt *(2026-08-23)*
-- `fe8f440` — fix(review pass 1): scope hibernation to the implement fence, close 5 mutation gaps *(2026-08-23)*
-- `d13caa2` — feat(director): Fable P4 — fenced implementation and correction workers (#11542) (#11542) *(2026-08-23)*
-- `6301ae5` — fix(review pass 5): make the sandbox-pin gate actually bite *(2026-08-23)*
-- `e190e5f` — fix(review pass 4): share the route-refusal classifier, close a divergent copy *(2026-08-23)*
-- `08ba8d9` — fix(rebase): port #11657's P3 review findings into the implement path *(2026-08-23)*
-- `a8d8d73` — fix(review pass 3): point three cross-references at where the code now lives *(2026-08-23)*
-- `21917fb` — fix(review pass 2): split the director's actuator half, register the worker prompt *(2026-08-23)*
-- `7588a59` — fix(review pass 1): scope hibernation to the implement fence, close 5 mutation gaps *(2026-08-23)*
-- `044dcec` — feat(director): Fable P4 — fenced implementation and correction workers (#11542) (#11542) *(2026-08-23)*
 - `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) (#11670) *(2026-08-23)*
 - `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) (#11665) *(2026-08-22)*
 - `73b0565` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11657) (#11657) *(2026-08-22)*
