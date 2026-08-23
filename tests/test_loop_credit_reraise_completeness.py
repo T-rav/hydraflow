@@ -400,6 +400,67 @@ def test_ratchet_ignores_a_broad_except_that_never_reaches_a_spawn() -> None:
     )
 
 
+_ISINSTANCE_GUARD_PEP604 = """
+from runner_utils import run_lightweight_agent
+
+
+def spawn():
+    try:
+        return await run_lightweight_agent(
+            runner=get_default_runner(), config=None,
+            tool="claude", model="sonnet", prompt="x", source="y",
+        )
+    except Exception as exc:
+        if isinstance(exc, AuthenticationError | CreditExhaustedError | OSError):
+            raise
+        logger.warning("soft failure")
+        return None
+"""
+
+_ISINSTANCE_GUARD_WRONG_TYPES = """
+from runner_utils import run_lightweight_agent
+
+
+def spawn():
+    try:
+        return await run_lightweight_agent(
+            runner=get_default_runner(), config=None,
+            tool="claude", model="sonnet", prompt="x", source="y",
+        )
+    except Exception as exc:
+        if isinstance(exc, TimeoutError):
+            raise
+        logger.warning("soft failure")
+        return None
+"""
+
+
+def test_ratchet_accepts_isinstance_guard_in_pep604_form() -> None:
+    """`if isinstance(exc, Auth | Credit | OSError): raise` is protected.
+
+    The PEP 604 spelling is what `diagnostic_loop.py` and
+    `post_merge_handler.py` actually use, so the detector must parse it.
+    """
+    assert not find_violations_in_source(_ISINSTANCE_GUARD_PEP604), (
+        "an isinstance guard naming BOTH fatal types with a bare `raise` "
+        "intercepts credit/auth before the soft path — not a violation"
+    )
+
+
+def test_ratchet_flags_isinstance_guard_on_unrelated_types() -> None:
+    """The narrow read: re-raising some OTHER type is not a credit guard.
+
+    Before the #11664 review this returned True for ANY `if isinstance(...):
+    raise`, so this handler — which swallows credit on every path where the
+    check is false — read as protected.
+    """
+    assert find_violations_in_source(_ISINSTANCE_GUARD_WRONG_TYPES), (
+        "`if isinstance(exc, TimeoutError): raise` does not intercept "
+        "CreditExhaustedError/AuthenticationError; the handler still swallows "
+        "them and must be flagged"
+    )
+
+
 # --- "First action" shapes that do NOT swallow ---------------------------
 #
 # Both were live false positives when this audit was first run outside the loop

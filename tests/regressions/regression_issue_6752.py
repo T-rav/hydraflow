@@ -69,11 +69,27 @@ from tests.regressions._handler_anchors import (  # noqa: E402
 #: there is no site left for this row to anchor onto. Re-pointing it would mean
 #: picking a method in a successor module that the #6752 findings table never
 #: examined — a new claim, not a preserved one. Dropped rather than faked.
-KNOWN_UNGUARDED_SITES: list[tuple[str, str]] = [
+#: Marked per-PARAM, not per-test. A blanket ``xfail`` on the test function
+#: turns every already-fixed site into an XPASS, and an XPASS is invisible:
+#: if someone later deletes the guard from ``_post_review_transcript``, the
+#: param would slide back to XFAIL and the suite would stay green. That is the
+#: same "marker hides reality" failure the line anchors caused (#11664), so
+#: fixed sites carry no mark and go red the moment they regress.
+_STILL_UNFIXED = pytest.mark.xfail(
+    reason="Issue #6752 is genuinely UNFIXED at this site — the handler still "
+    "swallows likely-bug exceptions. The anchor is method-based as of #11664, "
+    "so this failure is the real defect, no longer line-anchor rot. "
+    "Tracked by #11668.",
+    strict=False,
+)
+
+KNOWN_UNGUARDED_SITES = [
+    # Guarded as of #11664's transcript-summary chain fix — no mark, so a
+    # future removal of that guard fails loudly instead of silently xfailing.
     ("review_phase/_phase.py", "_post_review_transcript"),
-    ("review_phase/_phase.py", "_review_one_inner"),
-    ("diagnostic_runner.py", "diagnose"),
-    ("diagnostic_loop.py", "_run_fix"),
+    pytest.param("review_phase/_phase.py", "_review_one_inner", marks=_STILL_UNFIXED),
+    pytest.param("diagnostic_runner.py", "diagnose", marks=_STILL_UNFIXED),
+    pytest.param("diagnostic_loop.py", "_run_fix", marks=_STILL_UNFIXED),
 ]
 
 
@@ -107,26 +123,23 @@ class TestExceptBlocksBugClassification:
             # T36 — ``review_phase`` is now a package; the ``ReviewPhase``
             # class (which held the original anchored ``except Exception``
             # sites) lives in ``review_phase/_phase.py``.
-            "review_phase/_phase.py",
-            "diagnostic_runner.py",
-            "diagnostic_loop.py",
+            pytest.param("review_phase/_phase.py", marks=_STILL_UNFIXED),
+            pytest.param("diagnostic_runner.py", marks=_STILL_UNFIXED),
+            pytest.param("diagnostic_loop.py", marks=_STILL_UNFIXED),
             # #11547 split ``plan_phase`` into ``plan_phase_flow`` /
             # ``_prepass`` / ``_disposition`` / …; what remains here is
-            # construction + queue draining and carries no broad handlers.
+            # construction + queue draining and carries no broad handlers, so
+            # this sweep passes cleanly. Unmarked on purpose: if a broad
+            # handler is ever added back here, this must go red.
             "plan_phase.py",
             # ``implement_phase`` is likewise a package now. The old
             # ``implement_phase.py`` path stopped existing, so this param used
             # to die on ``assert filepath.exists()`` — a failure the non-strict
-            # xfail swallowed, meaning the file went unswept entirely.
+            # xfail swallowed, meaning the file went unswept entirely. It is
+            # clean today, so it stays unmarked and guards itself.
             "implement_phase/_phase.py",
         ],
         ids=lambda f: f.removesuffix(".py").replace("/", "_"),
-    )
-    @pytest.mark.xfail(
-        reason="Issue #6752 is genuinely UNFIXED for several of these modules. "
-        "Paths and anchors are current as of #11664, so a failure here is the "
-        "real defect, no longer path/line rot. Tracked by #11668.",
-        strict=False,
     )
     def test_all_except_exception_blocks_call_bug_classifier(
         self, filename: str
@@ -151,13 +164,6 @@ class TestExceptBlocksBugClassification:
     @pytest.mark.parametrize(
         ("filename", "method"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"{f}:{m}" for f, m in KNOWN_UNGUARDED_SITES],
-    )
-    @pytest.mark.xfail(
-        reason="Issue #6752 is genuinely UNFIXED for several of these methods. "
-        "Anchors are method-based as of #11664, so a failure here is the real "
-        "defect, no longer line-anchor rot. Tracked by #11668.",
-        strict=False,
     )
     def test_known_site_has_bug_classifier(self, filename: str, method: str) -> None:
         """Every ``except Exception`` inside the anchored method from the

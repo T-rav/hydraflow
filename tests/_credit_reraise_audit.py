@@ -275,16 +275,46 @@ def _expr_calls_reraise_helper(expr: ast.Expr) -> bool:
     return name == _RERAISE_HELPER
 
 
+def _isinstance_type_names(node: ast.expr) -> list[str]:
+    """Flatten ``A``, ``(A, B)`` and ``A | B`` into their type names."""
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.Attribute):
+        return [node.attr]
+    if isinstance(node, ast.Tuple):
+        return [name for elt in node.elts for name in _isinstance_type_names(elt)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _isinstance_type_names(node.left) + _isinstance_type_names(node.right)
+    return []
+
+
 def _if_is_isinstance_credit_auth_guard(if_stmt: ast.If) -> bool:
-    """True for `if isinstance(exc, (AuthenticationError, CreditExhaustedError)): raise`."""
+    """True for `if isinstance(exc, (AuthenticationError, CreditExhaustedError)): raise`.
+
+    Both the TYPES and the bareness of the ``raise`` are checked. Accepting any
+    ``if isinstance(...): raise`` shape — the previous behaviour — let a handler
+    that re-raises some UNRELATED type read as protected while still swallowing
+    credit on every path where the check is false. Harmless while this audit
+    only covered the loop layer; a real hole now that it covers all of ``src/``
+    (#11664 fresh-eyes review finding).
+
+    Accepts the tuple and PEP 604 (``A | B``) spellings, both of which are live
+    in ``src/`` (``diagnostic_loop.py``, ``post_merge_handler.py``).
+    """
     test = if_stmt.test
-    return (
+    if not (
         isinstance(test, ast.Call)
         and isinstance(test.func, ast.Name)
         and test.func.id == "isinstance"
+        and len(test.args) == 2
         and len(if_stmt.body) == 1
-        and isinstance(if_stmt.body[0], ast.Raise)
-    )
+    ):
+        return False
+    body = if_stmt.body[0]
+    if not (isinstance(body, ast.Raise) and body.exc is None):
+        return False
+    # Must cover BOTH fatal types — re-raising only one still swallows the other.
+    return set(_isinstance_type_names(test.args[1])) >= _CREDIT_AUTH_NAMES
 
 
 def _significant_body(handler: ast.ExceptHandler) -> list[ast.stmt]:

@@ -12,6 +12,7 @@ fans out to.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -280,45 +281,70 @@ class HealthMonitorHeavyPassMixin:
             raw_suggestions = (
                 suggestions_path.read_text(encoding="utf-8").strip().splitlines()
             )
-            for line in raw_suggestions:
-                try:
-                    rec = json.loads(line)
-                    principle = rec.get("suggestion", rec.get("title", ""))
-                    rationale = (
-                        f"Detected from {rec.get('occurrences', 0)} pipeline"
-                        f" failures in category {rec.get('category', 'unknown')}"
+            consumed = 0
+            try:
+                for line in raw_suggestions:
+                    await self._file_one_harness_suggestion(
+                        line, file_memory_suggestion
                     )
-                    failure_mode = (
-                        f"Pipeline failure pattern: {rec.get('title', 'Unknown')}"
+                    consumed += 1
+            finally:
+                # Drop exactly what this pass consumed and keep the rest.
+                # On the happy path that empties the file. When a credit/auth
+                # error escapes mid-batch it preserves only the un-filed tail:
+                # `file_memory_suggestion` mints a fresh uuid per call and does
+                # not dedup, so leaving the whole file in place would re-file
+                # every suggestion already stored once the loop resumes.
+                # OSError is suppressed so a failed write cannot replace the
+                # in-flight credit error and strand the loop unpaused.
+                tail = raw_suggestions[consumed:]
+                with contextlib.suppress(OSError):
+                    suggestions_path.write_text(
+                        "".join(f"{entry}\n" for entry in tail), encoding="utf-8"
                     )
-                    transcript = (
-                        "MEMORY_SUGGESTION_START\n"
-                        f"principle: {principle}\n"
-                        f"rationale: {rationale}\n"
-                        f"failure_mode: {failure_mode}\n"
-                        "scope: hydraflow\n"
-                        "MEMORY_SUGGESTION_END"
-                    )
-                    await file_memory_suggestion(
-                        transcript,
-                        "harness_insight",
-                        "health_monitor",
-                        self._config,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # A credit/auth failure is not "this one suggestion is
-                    # malformed" — it means every subsequent iteration would
-                    # spawn against an exhausted account. Let it out so the
-                    # orchestrator's pause handler sees it (#6855, #11664).
-                    reraise_on_credit_or_bug(exc)
-                    continue
-            # Clear processed suggestions so they are not re-ingested
-            suggestions_path.write_text("", encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             # Outer guard: also the path a credit error re-raised by the
-            # per-item handler above takes on its way out of the loop.
+            # per-item handler takes on its way out of the loop.
             reraise_on_credit_or_bug(exc)
             logger.debug("Harness suggestion ingestion failed", exc_info=True)
+
+    async def _file_one_harness_suggestion(
+        self, line: str, file_memory_suggestion: Any
+    ) -> None:
+        """File one harness-suggestion JSONL *line* as a tribal-memory item.
+
+        A malformed or unusable suggestion is dropped so one bad record cannot
+        stall the batch, but credit/auth exhaustion is let out: it means every
+        remaining iteration would spawn against a dead account (#6855, #11664).
+        """
+        try:
+            rec = json.loads(line)
+            principle = rec.get("suggestion", rec.get("title", ""))
+            rationale = (
+                f"Detected from {rec.get('occurrences', 0)} pipeline"
+                f" failures in category {rec.get('category', 'unknown')}"
+            )
+            failure_mode = f"Pipeline failure pattern: {rec.get('title', 'Unknown')}"
+            transcript = (
+                "MEMORY_SUGGESTION_START\n"
+                f"principle: {principle}\n"
+                f"rationale: {rationale}\n"
+                f"failure_mode: {failure_mode}\n"
+                "scope: hydraflow\n"
+                "MEMORY_SUGGESTION_END"
+            )
+            await file_memory_suggestion(
+                transcript,
+                "harness_insight",
+                "health_monitor",
+                self._config,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # A credit/auth failure is not "this one suggestion is malformed" —
+            # it means every subsequent iteration would spawn against an
+            # exhausted account. Let it out so the orchestrator's pause handler
+            # sees it (#6855, #11664).
+            reraise_on_credit_or_bug(exc)
 
     def _run_proposal_verification_cycle(self) -> None:
         """Enqueue proposal verification or run inline fallback."""

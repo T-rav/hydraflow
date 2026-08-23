@@ -52,31 +52,100 @@ editing this file:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from tests.regressions._handler_anchors import unguarded_handlers
+from tests.regressions._handler_anchors import (
+    _except_exception_handlers,
+    method_node,
+    unguarded_handlers,
+)
 
 SRC = Path(__file__).resolve().parent.parent.parent / "src"
 
 REQUIRED_GUARD = "reraise_on_credit_or_bug"
 
-#: The method that owned both sites in the issue findings, and the file it
-#: lives in today. One entry per (module, method) — the two handlers inside it
-#: are checked together, since both must carry the guard.
-INGESTION_SITE = (
-    "health_monitor_loop/_heavy.py",
-    "_run_harness_suggestion_ingestion_cycle",
-)
+_INGESTION_MODULE = "health_monitor_loop/_heavy.py"
+
+#: The method that owns the OUTER handler from the issue findings.
+INGESTION_SITE = (_INGESTION_MODULE, "_run_harness_suggestion_ingestion_cycle")
 
 #: Every known site from the issue, as (module, enclosing method, description).
+#:
+#: The issue named two handlers in ONE method. Salvaging the un-filed tail on a
+#: credit pause (fresh-eyes review on #11664) split the per-item handler out
+#: into ``_file_one_harness_suggestion``, so a single anchor no longer covers
+#: both. Method-scoped anchors are only rot-proof while they still enclose the
+#: handlers they were written for — an extraction moves the target just as
+#: surely as a line window drifts off it. Both methods are listed explicitly so
+#: neither guard can be removed without a red test.
 KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
     (
         *INGESTION_SITE,
-        "except Exception blocks in harness suggestion ingestion",
+        "outer except Exception wrapping harness suggestion ingestion",
+    ),
+    (
+        _INGESTION_MODULE,
+        "_file_one_harness_suggestion",
+        "per-item except Exception around file_memory_suggestion",
     ),
 ]
+
+
+class TestSiteAnchorsStillResolve:
+    """The anti-vacuity tripwire, deliberately UNMARKED.
+
+    Landed by #11665 while the checks below were still ``xfail``: ``xfail``
+    swallows EVERY exception in a marked test body, including the
+    ``AssertionError`` ``method_node`` raises when an anchor is gone. The guard
+    written to stop this file passing vacuously would itself have been unable to
+    turn the suite red — the same failure mode, one layer up.
+
+    The markers are gone now that the fix has landed, but this stays: it is the
+    check that fails when an anchor stops pointing at real code, independent of
+    whatever the assertions below happen to conclude. It earned its keep during
+    #11664 — extracting ``_file_one_harness_suggestion`` moved a handler out of
+    the anchored method, exactly the drift
+    ``test_the_anchor_still_encloses_broad_handlers`` exists to catch.
+    """
+
+    @pytest.mark.parametrize(
+        ("filename", "method"),
+        [(f, m) for f, m, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
+    )
+    def test_site_module_and_method_exist(self, filename: str, method: str) -> None:
+        filepath = SRC / filename
+        assert filepath.exists(), (
+            f"{filename} does not exist — the #6855 checks below are anchored "
+            "at a path that moved, and would report nothing. Re-point them."
+        )
+        # Raises a descriptive AssertionError if the method is gone.
+        assert method_node(filepath, method) is not None
+
+    @pytest.mark.parametrize(
+        ("filename", "method"),
+        [(f, m) for f, m, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
+    )
+    def test_the_anchor_still_encloses_broad_handlers(
+        self, filename: str, method: str
+    ) -> None:
+        """Each anchored method must still CONTAIN a broad handler.
+
+        Existing is not enough: if an ``except Exception`` block is refactored
+        out of its anchored method, the guard checks below find zero handlers
+        and read as "guarded" when nothing was verified.
+        """
+        handlers = _except_exception_handlers(method_node(SRC / filename, method))
+        assert handlers, (
+            f"{method}() no longer contains any ``except Exception`` block. "
+            "Either the handler moved (re-point the anchor, or add the new "
+            "enclosing method to KNOWN_UNGUARDED_SITES) or this entry is stale "
+            "— either way the guard checks below are now vacuous for it."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +271,84 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
         _patch_file_memory_suggestion(monkeypatch, ConnectionError("transient"))
 
         await loop_with_suggestion._run_harness_suggestion_ingestion_cycle()
+
+
+class TestCreditPauseDoesNotDuplicateAlreadyFiledSuggestions:
+    """Letting the error out must not turn into re-filing on resume.
+
+    ``file_memory_suggestion`` mints a fresh uuid per call and never dedups, so
+    if the cycle aborts mid-batch and leaves the whole JSONL in place, the next
+    heavy pass re-files every suggestion that already landed. Found by the
+    fresh-eyes review on #11664: the guard fixed the swallow but introduced
+    duplicate work on the resume path.
+    """
+
+    @pytest.mark.asyncio()
+    async def test_only_the_unfiled_tail_survives_a_credit_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        from subprocess_util import CreditExhaustedError
+
+        loop = _make_health_monitor(tmp_path)
+        memory_dir = loop._config.repo_memory_dir
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        path = memory_dir / "harness_suggestions.jsonl"
+        path.write_text(
+            "".join(
+                f'{{"suggestion":"s{n}","title":"t{n}","occurrences":1,'
+                f'"category":"c"}}\n'
+                for n in range(4)
+            ),
+            encoding="utf-8",
+        )
+
+        # First two file fine; the third hits an exhausted account.
+        import phase_utils
+
+        monkeypatch.setattr(
+            phase_utils,
+            "file_memory_suggestion",
+            AsyncMock(side_effect=[None, None, CreditExhaustedError("dry"), None]),
+            raising=True,
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._run_harness_suggestion_ingestion_cycle()
+
+        remaining = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln]
+        assert [json.loads(ln)["suggestion"] for ln in remaining] == ["s2", "s3"], (
+            "the two suggestions already filed must be dropped and only the "
+            "un-filed tail kept — otherwise the next heavy pass re-files s0/s1 "
+            "as fresh memory items with new uuids"
+        )
+
+    @pytest.mark.asyncio()
+    async def test_file_is_emptied_when_the_whole_batch_succeeds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Happy path unchanged: a clean pass still consumes the whole file."""
+        from unittest.mock import AsyncMock
+
+        loop = _make_health_monitor(tmp_path)
+        memory_dir = loop._config.repo_memory_dir
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        path = memory_dir / "harness_suggestions.jsonl"
+        path.write_text(
+            '{"suggestion":"s0","title":"t0","occurrences":1,"category":"c"}\n',
+            encoding="utf-8",
+        )
+
+        import phase_utils
+
+        monkeypatch.setattr(
+            phase_utils, "file_memory_suggestion", AsyncMock(), raising=True
+        )
+
+        await loop._run_harness_suggestion_ingestion_cycle()
+
+        assert path.read_text(encoding="utf-8").strip() == ""
 
 
 # ---------------------------------------------------------------------------
