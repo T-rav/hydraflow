@@ -60,7 +60,7 @@ from driver_contracts import (
     RejectionReason,
     WorkerRole,
 )
-from hydraflow_gateway.routing_policy import canonicalize_repo
+from hydraflow_gateway.routing_policy import DecisionReason, canonicalize_repo
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -232,6 +232,110 @@ REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
         RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
     ),
 }
+
+
+# --- how a spawn that never ran is classified ------------------------------
+#
+# Lifted here from ``plan_worker_runner`` by #11542 for the reason
+# ``REFUSAL_CODES`` was: two actuators, one vocabulary. The copy that phase
+# first made was not merely duplicated but *divergent* — hand-written string
+# literals, two of which ("concrete-model-not-approved",
+# "policy-forbids-principal") matched no ``DecisionReason`` member at all,
+# while ``MODEL_NOT_ALLOWED`` and ``POLICY_CONFLICT`` were missing and would
+# have been reported as retryable. #11657 had already hit exactly that and
+# written the totality test; copying the idea rather than the code
+# reintroduced it one module over. One definition makes that test cover both.
+#: Routing-policy refusal reasons that mean *the request was inadmissible*
+#: rather than *something operational is missing*. These map to
+#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing, whatever an
+#: operator edits; every other reason is ROUTE_UNAVAILABLE, where a caretaker
+#: retry is right once whatever is missing is supplied. The remedy for a hold
+#: may be a policy edit rather than a gateway one, so this does not say "look
+#: at the gateway" — an earlier version did, and it was wrong for every hold
+#: except an outage.
+#:
+#: Built from the resolver's own enum rather than from string literals, because
+#: the first draft of this set contained a member that does not exist
+#: (``concrete-model-not-allowed``) and omitted one that does
+#: (``policy-conflict``) — a hand-written copy of another module's vocabulary
+#: drifts silently and reads as a working classification while classifying
+#: nothing. ``tests/test_plan_worker_runner.py`` requires every
+#: :class:`DecisionReason` member to be classified, so a new one fails there
+#: rather than defaulting to "retry it".
+INADMISSIBLE_ROUTE_REASONS = frozenset(
+    {
+        DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
+        DecisionReason.MODEL_NOT_ALLOWED.value,
+        # Two policies claim the same rung: an operator must resolve it, and a
+        # retry against an unresolved conflict is an infinite one.
+        DecisionReason.POLICY_CONFLICT.value,
+    }
+)
+
+#: Reasons deliberately left retryable, and why — so the judgement is visible
+#: rather than implied by absence from the set above.
+OPERATIONAL_ROUTE_REASONS = frozenset(
+    {
+        # The snapshot will be back; nothing about the request is wrong.
+        DecisionReason.SNAPSHOT_UNAVAILABLE.value,
+        # Unreachable on THIS seam, and the reason is worth stating because
+        # an earlier comment here got it wrong: it is not that the resolver
+        # never rejects on a hold — ``enforce_canary_route`` raises on every
+        # non-SELECTED outcome, HELD included, which is the whole premise of
+        # classifying on the reason. It is that a brokered child's model is
+        # always a ``PLAN_TIER_CATALOG`` id, and ``requirement_for_model``
+        # returns CAPABILITY only for an *empty* model string — so the resolver
+        # cannot emit ``capability-unmapped`` for one of these spawns at all.
+        # Classified anyway, because the table is required to be total.
+        DecisionReason.CAPABILITY_UNMAPPED.value,
+        # Collapses "no credential for this account" with "a provider lock
+        # excluded every account". The first is operational and the second is
+        # policy, and the resolver does not distinguish them here — so the
+        # conservative reading is the retryable one, which sends the operator
+        # to the gateway where both are visible.
+        DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
+        # Reasons a *selected* decision carries. They reach a refusal only
+        # through ``enforce_canary_route``'s empty-effective-model guard, which
+        # a brokered child cannot trip (its legacy model is always the catalog
+        # id) — so "not a refusal" is nearly but not exactly right, and
+        # operational is the correct reading of the case that can occur.
+        DecisionReason.MATCHED_POLICY.value,
+        DecisionReason.NO_POLICY_APPLIES.value,
+        # NOT one of those two, and an earlier comment here swept it in with
+        # them: ``_legacy_decision`` emits it HELD, so it raises at the outcome
+        # check rather than at the empty-model guard. It is unreachable for a
+        # different reason — ``route_shadow.build_route_context`` always
+        # constructs a ``LegacyRoute``, so ``context.legacy_route`` is never
+        # ``None`` on this path. Operational either way: nothing about the
+        # request is wrong.
+        DecisionReason.NO_LEGACY_ROUTE.value,
+    }
+)
+
+
+def refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
+    """Why a spawn that never ran did not run, in the receipt's vocabulary.
+
+    The seam collapses a routing-policy refusal and a transport failure onto
+    the same soft ``rc=-1``, so without the reason it left behind, both would
+    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator the request was
+    fine and to retry once whatever is missing is supplied. For an inadmissible
+    route that is wrong: the retry will never succeed, and the thing to edit is
+    the policy.
+    """
+    # Classified on the REASON alone, deliberately. A previous draft short-
+    # circuited on ``refused_outcome == held`` first, reasoning that a hold is
+    # retryable whatever its reason — and that silently reversed the one code
+    # this canary is named after: ``RoutingAction.on_unavailable`` defaults to
+    # HOLD, so the ordinary ``provider_lock=zai-harness`` refusal arrives as
+    # HELD with ``literal-family-unsatisfiable``, and the guard turned it back
+    # into a retryable ``ROUTE_UNAVAILABLE``. The reason is the durable fact
+    # about the request; the outcome is a per-policy *dial* over what to do
+    # when a lane is unavailable, and it is the wrong axis to classify on.
+    reason = str(spawn_out.get("refused", "") or "")
+    if reason in INADMISSIBLE_ROUTE_REASONS:
+        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    return RejectionReason.ROUTE_UNAVAILABLE
 
 
 @dataclass(frozen=True, slots=True)

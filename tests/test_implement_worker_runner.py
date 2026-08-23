@@ -416,6 +416,43 @@ class TestOneRequestBecomesOneChild:
             RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
         )
 
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            pytest.param("model-not-allowed", id="model-not-allowed"),
+            pytest.param("policy-conflict", id="policy-conflict"),
+        ],
+    )
+    async def test_the_other_inadmissible_reasons_are_not_retryable_either(
+        self, tmp_path: Path, reason: str
+    ) -> None:
+        """The two a hand-written copy of this set missed.
+
+        The first port of this classifier invented its reason strings instead of
+        reading ``DecisionReason``: two of the four matched no member at all,
+        and these two — the ones that matter — were absent, so both would have
+        been reported as retryable. ``POLICY_CONFLICT`` especially: a retry
+        against an unresolved conflict is an infinite one. The set is now shared
+        with the Plan actuator and covered by its totality test, and these pin
+        the classification through *this* actuator so the sharing cannot be
+        quietly undone.
+        """
+
+        class RefusedSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                kwargs["spawn_out"].update(
+                    {"refused": reason, "refused_outcome": "rejected"}
+                )
+                return SimpleResult(stderr="refused", returncode=-1)
+
+        runner, _git = _build(tmp_path, spawn=RefusedSpawn())
+
+        receipts = await _dispatch(runner, [_request()])
+
+        assert receipts[0].reason_code is (
+            RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+        )
+
     async def test_a_transport_failure_stays_retryable(self, tmp_path: Path) -> None:
         # The contrast, and the reason the classifier reads the REASON rather
         # than the outcome: a HELD outcome with no policy reason is a transport

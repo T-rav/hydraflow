@@ -89,6 +89,7 @@ from plan_broker import (
     PlanRouteReason,
     PlanRouteRule,
     PlanRouteSource,
+    refusal_for_spawn,
 )
 from runner_utils import run_lightweight_agent
 
@@ -662,7 +663,7 @@ class ImplementWorkerRunner:
             # bill and no served model to record. Which of the two it was decides
             # whether a retry can ever work, so it is classified rather than
             # collapsed onto ROUTE_UNAVAILABLE (#11657).
-            refusal = _refusal_for_spawn(spawn_out)
+            refusal = refusal_for_spawn(spawn_out)
             logger.info(
                 "implement_worker_runner: #%d %s never spawned: %s/%s -> %s",
                 task.id,
@@ -899,17 +900,6 @@ def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:
     )
 
 
-_INADMISSIBLE_ROUTE_REASONS = frozenset(
-    {
-        "literal-family-unsatisfiable",
-        "concrete-model-not-approved",
-        "capability-unmapped",
-        "policy-forbids-principal",
-    }
-)
-"""Routing-policy reasons a retry can never fix. Mirrors the Plan actuator's set."""
-
-
 def _served_model(spawn_out: dict[str, object]) -> tuple[str, bool]:
     """The model that served, and whether the CLI actually said so.
 
@@ -923,26 +913,6 @@ def _served_model(spawn_out: dict[str, object]) -> tuple[str, bool]:
     observed = str(spawn_out.get("served_model", "") or "")
     requested = str(spawn_out.get("model", "") or "")
     return (observed or requested), bool(observed)
-
-
-def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
-    """Why a spawn that never ran did not run, in the receipt's vocabulary.
-
-    The seam collapses a routing-policy refusal and a transport failure onto the
-    same soft ``rc=-1``, so without the reason it leaves behind both are filed as
-    ``ROUTE_UNAVAILABLE`` — whose own contract says a caretaker retry is correct
-    and an operator should look at the gateway. For an inadmissible route both
-    halves are wrong: the retry never succeeds and the thing to edit is a policy.
-
-    Classified on the REASON alone, never on the outcome: ``on_unavailable``
-    defaults to HOLD, so the ordinary ``provider_lock=zai-harness`` refusal
-    arrives HELD with ``literal-family-unsatisfiable``, and short-circuiting on
-    the outcome would turn it back into a retryable code (#11657).
-    """
-    reason = str(spawn_out.get("refused", "") or "")
-    if reason in _INADMISSIBLE_ROUTE_REASONS:
-        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    return RejectionReason.ROUTE_UNAVAILABLE
 
 
 def _digest(text: str) -> str:

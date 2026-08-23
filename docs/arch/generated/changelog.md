@@ -13,6 +13,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) (#11665) *(2026-08-22)*
 - `bb626bf` — fix(review-advisor,gates): three pass-2 findings — a ninth glob hole, a vacuous ratchet, an xfail that ate its own tripwire *(2026-08-23)*
 - `9103ea5` — refactor(health-monitor,agent): decompose two god classes into mixin packages *(2026-08-23)*
+- `c4de186` — fix(rebase): port #11657's P3 review findings into the implement path *(2026-08-23)*
 - `b3142aa` — fix(review pass 3): point three cross-references at where the code now lives *(2026-08-23)*
 - `853215d` — fix(review pass 2): split the director's actuator half, register the worker prompt *(2026-08-23)*
 - `fe8f440` — fix(review pass 1): scope hibernation to the implement fence, close 5 mutation gaps *(2026-08-23)*

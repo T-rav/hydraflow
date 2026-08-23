@@ -781,6 +781,31 @@ carries — so nothing here needs to cite a lineage it no longer has. Building
 that driver stays #11544's, with the citation protocol ADR-0142 already
 enforces at the gateway.
 
+**#11657's corrections arrived here as corrections, not as a merge.** That
+phase's review passes finished after #11655 had auto-merged, and this phase had
+already copied the patterns they found wrong. Seven of its findings applied
+verbatim to the implement path and are fixed here with the tests that catch
+them: conditional construction that made *arming* need a restart while only
+disarming was live; a lane fence reading dials that never govern a one-shot
+spawn; a timed-out child recorded `ACCEPTED` because the seam returns `rc=-1`
+rather than raising; a served model echoed rather than read back, so the
+re-check could not fail by default; a policy refusal reported as retryable; two
+unbounded accumulators; and a content-addressed decision id carried by nothing.
+
+Two more surfaced only in the port. The decision join read the Plan actuator
+unconditionally — valid only while construction was conditional, and silently
+empty for an IMPLEMENT boundary once both actuators always exist. And
+`fable_implement_worker_timeout_seconds` had been set to 900s/3600s against
+Plan's 240s/900s on the reasoning that a correction worker reads a diff rather
+than a goal: true, and not a licence to spend it on the allocator tick. This
+ADR makes moving dispatch off that tick the precondition for the batch growing,
+and this phase did not build it, so the dial matches Plan's exactly.
+
+The refusal table is now `plan_broker.REFUSAL_CODES`, one table for one
+vocabulary. Two tables over one shared enum is precisely what broke: adding two
+IMPLEMENT members reddened the Plan actuator's own totality test, and a table
+per consumer would have handed the same trap to #11543.
+
 **Rollback is one field, and it is the same shape as #11541's.**
 `fable_implement_canary_repo` is live, empty by default, and deliberately not
 an environment override for ADR-0141 D5's reason. Clearing it stops the next

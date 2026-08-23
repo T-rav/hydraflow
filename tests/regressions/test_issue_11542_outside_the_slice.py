@@ -1139,6 +1139,48 @@ class TestThePlanCanarysBehaviourIsUnchanged:
         )
 
 
+class TestTheDecisionJoinNamesTheActuatorThatMadeIt:
+    """The content-addressed tier decision is joinable to the receipt it
+    authorised — from the actuator that actually ran.
+
+    Reading ``self._dispatcher.last_decision_ids`` unconditionally was valid
+    only while construction was conditional on the dial. #11657 removed that
+    (it made *arming* need a restart), so both actuators now always exist and
+    "whichever is not None" stopped being a way to ask which one ran: an
+    IMPLEMENT boundary would have joined its receipts against the **Plan**
+    runner's map, found nothing, and silently emptied the join the id exists
+    for. Mutation testing found this test missing after the port.
+    """
+
+    async def test_an_implement_boundary_joins_against_the_implement_actuator(
+        self, tmp_path: Path
+    ) -> None:
+        built, log, _spawn, _git = _assemble(
+            tmp_path, name="join", canary=CANARY_REPO, wired=True
+        )
+
+        await _observe(built)
+        actuator = built._implement_dispatcher  # noqa: SLF001
+
+        assert actuator is not None
+        assert [row["route_decision_id"] for row in _rows(log)[0]["dispatched"]] == [
+            actuator.last_decision_ids["req-1"]
+        ]
+
+    async def test_the_joined_id_is_a_real_decision_not_an_empty_string(
+        self, tmp_path: Path
+    ) -> None:
+        # Non-vacuity: joining against the wrong actuator yields "" for every
+        # receipt, which would satisfy an equality against another empty map.
+        built, log, _spawn, _git = _assemble(
+            tmp_path, name="join-real", canary=CANARY_REPO, wired=True
+        )
+
+        await _observe(built)
+
+        assert _rows(log)[0]["dispatched"][0]["route_decision_id"].startswith("plan_")
+
+
 class TestAcceptedWorkBecomesEvidenceNotAuthority:
     async def test_an_accepted_receipt_carries_a_served_model_and_a_cost(
         self, tmp_path: Path
