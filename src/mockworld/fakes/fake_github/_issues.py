@@ -5,8 +5,10 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's
-side of ``pr_manager_issues.PRManagerIssuesMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's, so the fake and the thing it
+doubles read alike. This module is the fake's side of:
+
+    pr_manager_issues.PRManagerIssuesMixin
 
 One concern: the issue side of the GitHub surface — closing (with the #10394
 dispatchable-label strip), reopening, creating, body edits, the state/label/body

@@ -205,8 +205,28 @@ def _scan_fake_classes(fake_dir: Path) -> dict[str, ast.ClassDef]:
             continue
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.ClassDef):
-                classes.setdefault(node.name, node)
+                # Last file wins on a duplicate class name, matching the
+                # pre-package scan's overwrite semantics. No duplicates today.
+                classes[node.name] = node
     return classes
+
+
+def _is_marked_fake(node: ast.ClassDef) -> bool:
+    """True when *node* carries the ``_is_fake_adapter = True`` marker.
+
+    The same marker the MockWorld-map extractor keys on. A class carrying it
+    is a fake in its own right, never a slice of one.
+    """
+    for stmt in node.body:
+        targets: list[ast.expr] = []
+        if isinstance(stmt, ast.Assign):
+            targets = list(stmt.targets)
+        elif isinstance(stmt, ast.AnnAssign):
+            targets = [stmt.target]
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id == "_is_fake_adapter":
+                return True
+    return False
 
 
 def _own_and_inherited_methods(
@@ -272,14 +292,19 @@ def catalog_fake_methods(
     if not fake_dir.exists():
         return catalog
     classes = _scan_fake_classes(fake_dir)
-    # A class another scanned class inherits is a slice of that host, not a
-    # fake of its own — cataloguing it separately would move its methods out
-    # of the host's audited surface and into an entry no cassette map covers.
+    # An UNMARKED class another scanned class inherits is a slice of that host,
+    # not a fake of its own — cataloguing it separately would move its methods
+    # out of the host's audited surface and into an entry no cassette map
+    # covers. The ``_is_fake_adapter`` guard keeps the rule narrow: subclassing
+    # a real fake (``class FakeFooV2(FakeFoo)``) must never delete ``FakeFoo``
+    # from the audit, only a mixin slice is ever hidden.
     inherited = {
         base.id
         for node in classes.values()
         for base in node.bases
-        if isinstance(base, ast.Name) and base.id in classes
+        if isinstance(base, ast.Name)
+        and base.id in classes
+        and not _is_marked_fake(classes[base.id])
     }
     for name, node in sorted(classes.items()):
         if not name.startswith("Fake") or name in inherited:

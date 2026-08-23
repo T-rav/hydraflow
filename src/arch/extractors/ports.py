@@ -151,6 +151,9 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
     src_class_by_name: dict[str, ast.ClassDef] = {}
     for _apath, acls in src_classes:
         src_class_by_name.setdefault(acls.name, acls)
+    fake_class_by_name: dict[str, ast.ClassDef] = {}
+    for _fpath, fcls_ in fake_classes:
+        fake_class_by_name.setdefault(fcls_.name, fcls_)
 
     ports: list[PortInfo] = []
     for path, cls in src_classes:
@@ -201,7 +204,14 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
             for fpath, fcls in fake_classes:
                 if not fcls.name.startswith("Fake"):
                     continue
-                if not port_methods.issubset(set(_public_methods(fcls))):
+                # Match against the fake's FULL surface, bases included — the
+                # same ``_methods_with_bases`` adapter matching already uses.
+                # A fake decomposed into mixins (Refs #11547) keeps its methods
+                # in sibling classes, so an own-body-only superset test would
+                # stop matching the host and start matching one of its slices.
+                if not port_methods.issubset(
+                    _methods_with_bases(fcls, fake_class_by_name)
+                ):
                     continue
                 fake = PortAdapterInfo(
                     name=fcls.name,

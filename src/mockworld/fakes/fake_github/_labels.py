@@ -5,8 +5,10 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's
-side of ``pr_manager_labels.PRManagerLabelsMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's, so the fake and the thing it
+doubles read alike. This module is the fake's side of:
+
+    pr_manager_labels.PRManagerLabelsMixin
 
 One concern: adding and removing labels on issues and PRs, including the
 ``swap_pipeline_labels`` stage transition that ADR-0002's label state machine

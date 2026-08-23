@@ -5,8 +5,10 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's
-side of ``pr_manager_pr_queries.PRManagerPRQueriesMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's, so the fake and the thing it
+doubles read alike. This module is the fake's side of:
+
+    pr_manager_pr_queries.PRManagerPRQueriesMixin
 
 One concern: what a caller can ask ABOUT a pull request — its labels, diff,
 diff stats, changed file names, commit messages and recent commit diffs, HEAD

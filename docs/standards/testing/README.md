@@ -92,7 +92,7 @@ wrong. Canonicalised here so the generator slice and future audits agree.
 - **Fakes live in `src/mockworld/fakes/`**, not `tests/scenarios/fakes/`.
   Per [ADR-0047](../../adr/0047-fake-adapter-contract-testing-cassettes.md)
   and codebase inspection, the Fake adapter implementations are production
-  test-support code under `src/mockworld/fakes/` (e.g. `fake_github.py`,
+  test-support code under `src/mockworld/fakes/` (e.g. `fake_github/`,
   `fake_docker.py`). Any "Fake adapter" column in the coverage matrix must
   point there.
 - **Fake naming strips the `Port` suffix: `Fake<base>`, not `Fake<PortName>`.**
