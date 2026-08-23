@@ -134,13 +134,17 @@ def authenticate_operator(
     if not expected:
         return None
     presented = _bearer_token(authorization)
-    # Compared as BYTES. ``compare_digest`` on ``str`` requires both sides to be
-    # ASCII-only and raises ``TypeError`` otherwise, so a bearer header carrying
-    # one non-ASCII character would surface as an unhandled 500 rather than the
-    # 401 it is — and a 500 on an auth path is both a worse answer and a signal
-    # an attacker can probe with.
+    # Compared as BYTES, and encoded with ``surrogateescape`` on BOTH sides.
+    # ``compare_digest`` on ``str`` requires ASCII and raises ``TypeError``
+    # otherwise, so a non-ASCII bearer header would surface as an unhandled 500
+    # rather than the 401 it is — a worse answer, and a signal an attacker can
+    # probe with. Plain ``encode`` closes only half of it: ``os.environ`` decodes
+    # with ``surrogateescape``, so a token whose bytes are not valid UTF-8 yields
+    # lone surrogates that ``encode`` refuses on the *expected* side. The
+    # error handler is lossless in both directions, so equality is unchanged.
     if presented is None or not secrets.compare_digest(
-        presented.encode("utf-8"), expected.encode("utf-8")
+        presented.encode("utf-8", "surrogateescape"),
+        expected.encode("utf-8", "surrogateescape"),
     ):
         return None
     return OperatorIdentity(

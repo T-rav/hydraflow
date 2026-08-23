@@ -53,6 +53,7 @@ an authenticated identity.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from enum import StrEnum
@@ -63,6 +64,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from file_util import atomic_write, file_lock
 from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.routing_audit import (
+    GENESIS_HASH,
     AuditChainError,
     AuditRecord,
     RoutingAuditLog,
@@ -148,8 +150,15 @@ class AccountAdminStore:
         self._audit = RoutingAuditLog(directory / ACCOUNT_ADMIN_AUDIT_FILENAME)
         self._head_path = directory / ACCOUNT_ADMIN_HEAD_FILENAME
         self._lock_path = directory / ACCOUNT_ADMIN_LOCK_FILENAME
-        self._cached_head: str | None = None
-        self._cached_view: AccountStateView | None = None
+        # ONE attribute, holding the head hash and the view it belongs to as a
+        # pair. Two attributes would be two rebinds, and this object is now read
+        # from the event loop (the mint path) and from a worker thread (the
+        # audit read and every mutation, both moved off the loop in D5). A
+        # reader interleaving between those two rebinds would see a head that
+        # matched and a view that did not — the stale overlay served under a
+        # fresh head's name. Rebinding one tuple is atomic under the GIL, so the
+        # pair is always internally consistent.
+        self._cache: tuple[str, AccountStateView] | None = None
 
     @property
     def audit(self) -> RoutingAuditLog:
@@ -163,15 +172,32 @@ class AccountAdminStore:
         overlay rather than an exception, because this is called on the live mint
         path: the caller holds the attempt, and an exception thrown there is a
         routing incident rather than an answer.
+
+        **A corrupt verdict is confirmed by a second read, and that is not
+        papering over it.** A reader does not take the writer's file lock — it
+        must not, because this runs on the event loop and a mint would then queue
+        behind an operator's ten-second lock. So a read that lands in the middle
+        of an append can see a torn final line, which is indistinguishable from
+        damage in one look and completely distinguishable in two: a mid-flight
+        append resolves within a syscall, and real corruption does not. Exactly
+        one retry, so a genuinely broken chain still holds the mint on the very
+        next attempt rather than spinning.
         """
+        first = self._read_once()
+        if first.state is not SnapshotState.CORRUPT:
+            return first
+        return self._read_once()
+
+    def _read_once(self) -> AccountStateView:
         try:
             head = self._audit.head()
         except AuditChainError:
             return _corrupt()
         if head is None:
-            return AccountStateView(state=SnapshotState.ABSENT, revision=0, states={})
-        if self._cached_head == head.record_hash and self._cached_view is not None:
-            return self._cached_view
+            return self._empty_view()
+        cached = self._cache
+        if cached is not None and cached[0] == head.record_hash:
+            return cached[1]
         try:
             records = self._trusted_records(head)
         except AuditChainError:
@@ -183,8 +209,7 @@ class AccountAdminStore:
             revision=head.seq + 1,
             states=_fold(records),
         )
-        self._cached_head = head.record_hash
-        self._cached_view = view
+        self._cache = (head.record_hash, view)
         return view
 
     def set_state(
@@ -254,6 +279,20 @@ class AccountAdminStore:
 
     # -- internals ----------------------------------------------------------
 
+    def _empty_view(self) -> AccountStateView:
+        """What a chain with no records means — checked against the anchor.
+
+        An EMPTY chain is a rollback too, and the cheaper of the two: truncating
+        the file to nothing needs no line-precise edit. Without this check it read
+        as ``ABSENT`` — every account enabled, ``chain_verified: true``, and the
+        mint waved through, because only ``CORRUPT`` holds. That is exactly the
+        outcome the anchor exists to refuse, reached by the easier tamper.
+        """
+        anchor = self._read_anchor()
+        if anchor is not None and anchor[0] > 0:
+            return _corrupt()
+        return AccountStateView(state=SnapshotState.ABSENT, revision=0, states={})
+
     def _trusted_records(self, head: AuditRecord) -> tuple[AuditRecord, ...] | None:
         """The chain's records, or ``None`` when it may not be trusted.
 
@@ -282,6 +321,18 @@ class AccountAdminStore:
         if head.seq + 1 < records:
             return False
         return head.seq + 1 != records or head.record_hash == head_hash
+
+    def _ensure_anchor(self) -> None:
+        """Write the empty anchor if this store has never written one."""
+        if self._read_anchor() is None:
+            atomic_write(
+                self._head_path,
+                json.dumps(
+                    {"records": 0, "head_hash": GENESIS_HASH},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
 
     def _read_anchor(self) -> tuple[int, str] | None:
         try:
@@ -323,6 +374,14 @@ class AccountAdminStore:
             # unverifiable chain must refuse EVERY mutation, or the first write
             # after tampering would extend a chain nobody can trust and make the
             # damage permanent.
+            # The cache is keyed on the HEAD hash, so an edit to any earlier
+            # record leaves the key intact and a warm reader would skip both the
+            # chain verification and the anchor check. That is tolerable for a
+            # read (a cold reader catches it, and the mint holds) and not
+            # tolerable here: a write onto a chain nobody can trust extends it
+            # and makes the damage permanent. Dropped inside the lock, so this
+            # mutation pays exactly one fold and decides from the file.
+            self._cache = None
             current = self.read()
             if current.state is SnapshotState.CORRUPT:
                 # The store's own verdict, which covers BOTH a chain whose links
@@ -356,16 +415,29 @@ class AccountAdminStore:
                 "actor_authenticated_by": _AUTHENTICATED_BY,
                 **effect,
             }
+            # An empty anchor first, if there is none yet. A reader does NOT
+            # take this lock, so between the append and the anchor write it sees
+            # a chain one record ahead of its anchor — which is accepted, but
+            # only because an anchor exists to be ahead OF. On the very first
+            # commit there would be none, and "records but no anchor" is the
+            # deleted-anchor tamper signal, so a concurrent reader would briefly
+            # and wrongly read the overlay as corrupt.
+            self._ensure_anchor()
             record = self._audit.append(payload, recorded_at=recorded_at)
             # After the append, deliberately. A crash between the two leaves the
             # chain one record AHEAD of its anchor, which reads as intact and is
             # re-anchored by the next commit; the reverse order would leave an
             # anchor ahead of the chain, which is indistinguishable from the
             # truncation the anchor exists to catch.
-            self._write_anchor(record)
-        # Outside the lock: the cache is invalidated by the head hash, so the
-        # worst a concurrent reader sees is one extra fold.
-        self._cached_head = None
+            #
+            # And suppressed, for the same reason. The append has already
+            # committed by this point: a full disk here would otherwise raise
+            # past the caller as "the mutation did not commit" on a mutation that
+            # did — the wrong direction of ambiguity for an emergency disable.
+            # The state this leaves behind is the accepted crash window, and the
+            # next commit re-anchors it.
+            with contextlib.suppress(OSError):
+                self._write_anchor(record)
         view = self.read()
         return AdminMutationResult(revision=view.revision, record=record, view=view)
 

@@ -10,6 +10,7 @@ every mutation and reports the overlay as untrustworthy rather than as empty.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ from hydraflow_gateway.routing_account_admin import (
     audit_view,
 )
 from hydraflow_gateway.routing_accounts import build_account_registry
+from hydraflow_gateway.routing_audit import AuditChainError
 from hydraflow_gateway.routing_policy import SnapshotState
 
 _ZAI = legacy_account_id(ProviderBinding.ZAI_HARNESS)
@@ -429,3 +431,249 @@ def test_an_unrecognised_administrative_state_is_read_as_disabled(
     folded = _fold(fresh.audit.read_all())
 
     assert folded[_ZAI] is AdministrativeState.DISABLED
+
+
+def test_a_reader_never_sees_an_overlay_that_disagrees_with_its_revision(
+    tmp_path: Path,
+) -> None:
+    """The property the single-tuple cache exists for, asserted on the CONTENT.
+
+    Four threads read while a writer alternates one account between draining and
+    enabled. Every sampled overlay must match what the chain said at the revision
+    the same read reported — a stale view served under a fresh head's name is a
+    pair that disagrees, which is what two separate rebinds would allow.
+    Asserting only on ``state`` cannot see it: the stale view is a valid ``OK``.
+    """
+    store = _store(tmp_path)
+    samples: list[tuple[int, AdministrativeState]] = []
+    stop = threading.Event()
+
+    def reader() -> None:
+        while not stop.is_set():
+            view = store.read()
+            if view.state is SnapshotState.OK:
+                samples.append((view.revision, view.administrative(_ZAI)))
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    try:
+        for revision in range(8):
+            store.set_state(
+                _ZAI,
+                AdministrativeState.DRAINING
+                if revision % 2 == 0
+                else AdministrativeState.ENABLED,
+                expected_revision=revision,
+                actor=_ACTOR,
+                recorded_at=_AT,
+                registry=_REGISTRY,
+            )
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join()
+
+    # Revision N was written by record N-1, whose state alternates on parity.
+    def expected(revision: int) -> AdministrativeState:
+        return (
+            AdministrativeState.DRAINING
+            if (revision - 1) % 2 == 0
+            else AdministrativeState.ENABLED
+        )
+
+    assert all(state is expected(revision) for revision, state in samples)
+
+
+def test_a_read_reports_the_overlay_its_own_revision_implies(tmp_path: Path) -> None:
+    """Non-vacuity for the sweep above: it must sample a real, checkable pair."""
+    store = _store(tmp_path)
+    _disable(store)
+    view = store.read()
+
+    assert (view.revision, view.administrative(_ZAI)) == (
+        1,
+        AdministrativeState.DISABLED,
+    )
+
+
+def test_a_reader_never_sees_a_transient_corrupt_verdict(tmp_path: Path) -> None:
+    """What the seeded anchor and the confirming re-read buy, together."""
+    store = _store(tmp_path)
+    seen: list[SnapshotState] = []
+    stop = threading.Event()
+
+    def reader() -> None:
+        while not stop.is_set():
+            seen.append(store.read().state)
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    try:
+        for revision in range(6):
+            store.set_state(
+                _ZAI,
+                AdministrativeState.DRAINING,
+                expected_revision=revision,
+                actor=_ACTOR,
+                recorded_at=_AT,
+                registry=_REGISTRY,
+            )
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join()
+
+    assert SnapshotState.CORRUPT not in seen
+
+
+def test_a_genuinely_broken_chain_survives_the_confirming_re_read(
+    tmp_path: Path,
+) -> None:
+    """One retry distinguishes a torn append from damage; it does not excuse it."""
+    assert _truncate(tmp_path).read().state is SnapshotState.CORRUPT
+
+
+def test_a_read_that_lands_mid_append_is_retried_rather_than_believed(
+    tmp_path: Path,
+) -> None:
+    """Deterministic stand-in for the race the concurrency test only samples.
+
+    A read that catches the chain mid-append sees a torn final line and raises;
+    one look cannot tell that from damage, and two can.
+    """
+    store = _store(tmp_path)
+    _disable(store)
+    fresh = _store(tmp_path)
+    intact = fresh.audit.head
+    calls = {"n": 0}
+
+    def torn_once():  # noqa: ANN202 - the store's own return type
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise AuditChainError("unreadable audit record: torn append")
+        return intact()
+
+    fresh.audit.head = torn_once  # type: ignore[method-assign]
+
+    assert fresh.read().administrative(_ZAI) is AdministrativeState.DISABLED
+
+
+def test_the_retry_is_exactly_one(tmp_path: Path) -> None:
+    """A chain that will not read twice holds the mint rather than spinning."""
+    store = _store(tmp_path)
+    _disable(store)
+    fresh = _store(tmp_path)
+    calls = {"n": 0}
+
+    def always_torn():  # noqa: ANN202 - the store's own return type
+        calls["n"] += 1
+        raise AuditChainError("unreadable audit record")
+
+    fresh.audit.head = always_torn  # type: ignore[method-assign]
+    state = fresh.read().state
+
+    assert (state, calls["n"]) == (SnapshotState.CORRUPT, 2)
+
+
+def test_a_warm_cache_never_lets_a_mutation_land_on_a_broken_chain(
+    tmp_path: Path,
+) -> None:
+    """The cache is keyed on the HEAD hash, so an earlier record can be edited.
+
+    A reader that hit the cache would skip both the chain verification and the
+    anchor check, and a *write* accepted on that basis extends the broken chain
+    and makes the damage permanent. The mutation drops the cache inside the lock
+    precisely so it decides from the file.
+    """
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    store.set_state(
+        _ZAI,
+        AdministrativeState.DRAINING,
+        expected_revision=2,
+        actor=_ACTOR,
+        recorded_at=_AT,
+        registry=_REGISTRY,
+    )
+    store.read()  # warm the cache on the current head
+    chain = tmp_path / "accounts" / ACCOUNT_ADMIN_AUDIT_FILENAME
+    records = chain.read_text(encoding="utf-8").splitlines()
+    records[0] = records[0].replace('"disabled"', '"enabled"')
+    chain.write_text("".join(f"{line}\n" for line in records), encoding="utf-8")
+
+    with pytest.raises(AccountAdminRejected) as excinfo:
+        store.set_state(
+            _ZAI,
+            AdministrativeState.ENABLED,
+            expected_revision=3,
+            actor=_ACTOR,
+            recorded_at=_AT,
+            registry=_REGISTRY,
+        )
+
+    assert excinfo.value.rejection is AdminRejection.AUDIT_CHAIN_BROKEN
+
+
+def test_a_warm_cache_never_lets_a_mutation_extend_a_broken_chain(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    store.read()
+    chain = tmp_path / "accounts" / ACCOUNT_ADMIN_AUDIT_FILENAME
+    records = chain.read_text(encoding="utf-8").splitlines()
+    records[0] = records[0].replace('"disabled"', '"enabled"')
+    chain.write_text("".join(f"{line}\n" for line in records), encoding="utf-8")
+    with pytest.raises(AccountAdminRejected):
+        _disable(store, revision=2)
+
+    assert len(chain.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def _emptied(tmp_path: Path) -> AccountAdminStore:
+    """Truncate the chain to nothing — the cheapest rollback there is."""
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    (tmp_path / "accounts" / ACCOUNT_ADMIN_AUDIT_FILENAME).write_text(
+        "", encoding="utf-8"
+    )
+    return _store(tmp_path)
+
+
+def test_a_chain_truncated_to_nothing_is_corrupt_rather_than_absent(
+    tmp_path: Path,
+) -> None:
+    """Only CORRUPT holds the mint; ABSENT would wave every account through."""
+    assert _emptied(tmp_path).read().state is SnapshotState.CORRUPT
+
+
+def test_a_chain_truncated_to_nothing_never_re_enables_its_accounts(
+    tmp_path: Path,
+) -> None:
+    assert _emptied(tmp_path).read().states == {}
+
+
+def test_a_chain_truncated_to_nothing_refuses_every_mutation(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(AccountAdminRejected) as excinfo:
+        _disable(_emptied(tmp_path), revision=0)
+    assert excinfo.value.rejection is AdminRejection.AUDIT_CHAIN_BROKEN
+
+
+def test_a_chain_truncated_to_nothing_reports_itself_unverified(
+    tmp_path: Path,
+) -> None:
+    assert audit_view(_emptied(tmp_path), limit=10).chain_verified is False
+
+
+def test_a_gateway_that_never_mutated_is_still_plainly_absent(
+    tmp_path: Path,
+) -> None:
+    """The contrast: no chain and no anchor is a fresh install, not a rollback."""
+    assert _store(tmp_path).read().state is SnapshotState.ABSENT

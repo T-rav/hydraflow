@@ -291,12 +291,7 @@ def _refusals(
         or cited.effective_model != effective_model
     ):
         yield FallbackRefusal.LINEAGE_MISMATCH
-    if lease_held:
-        # Revoke-then-remint, enforced rather than documented: while the prior
-        # key can still reach an upstream, a successor is a second live lease for
-        # one dispatch and both of them can spend.
-        yield FallbackRefusal.LEASE_STILL_HELD
-    if not advance:
+    if not advance and evidence is not None:
         # A supersede recovers a mint response that was LOST, and the gateway can
         # tell: terminal evidence for the cited decision proves its key reached
         # an upstream, which proves the caller received the credential. Without
@@ -304,8 +299,19 @@ def _refusals(
         # pins every successor to a position chosen against a pool state that may
         # be long gone — including past an account an operator has since
         # re-enabled.
-        if evidence is not None:
-            yield FallbackRefusal.RESPONSE_WAS_NOT_LOST
+        #
+        # Yielded BEFORE the lease check, because it is a rejection and that is a
+        # hold. Every rejection precedes every hold, or a citation that is
+        # inadmissible on its face would first be answered with a transient a
+        # retry loop hammers, and only turn into a rejection once the transient
+        # cleared.
+        yield FallbackRefusal.RESPONSE_WAS_NOT_LOST
+    if lease_held:
+        # Revoke-then-remint, enforced rather than documented: while the prior
+        # key can still reach an upstream, a successor is a second live lease for
+        # one dispatch and both of them can spend.
+        yield FallbackRefusal.LEASE_STILL_HELD
+    if not advance:
         return
     if evidence is None or evidence.condition is None:
         yield FallbackRefusal.NOT_AUTHORISED
