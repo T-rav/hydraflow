@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `edc2dbd` — refactor(mockworld,tests): follow the PRPort reach-through allowlist and tighten one cluster *(2026-08-22)*
+- `b7c29af` — refactor(mockworld,tests): follow the PRPort reach-through allowlist and tighten one cluster *(2026-08-22)*
 - `f7a79e2` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages *(2026-08-22)*
 - `822a2eb` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) (#11656) (#11656) *(2026-08-22)*
 - `d412796` — feat(director): Fable P3 — brokered Sonnet and Opus Plan canary (#11541) (#11655) (#11655) *(2026-08-22)*

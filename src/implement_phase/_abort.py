@@ -10,7 +10,7 @@ One concern: the decisions that end an attempt *without* spending (or after
 refusing to spend) another build — the no-progress abort (#10659/#10616), the
 post-build zero-commit route to diagnose (#11568), the per-issue attempt cap,
 and the #11457 "resolved elsewhere" gate — plus the HITL/diagnose escalations
-each of them fires.
+each of them fires and the transcript tail they carry.
 """
 
 from __future__ import annotations
@@ -50,12 +50,6 @@ class ImplementAbortMixin:
     _state: StateTracker
     _transitioner: TaskTransitioner
 
-    if TYPE_CHECKING:
-
-        def _transcript_tail(
-            self, result: WorkerResult
-        ) -> str | None: ...  # provided by _screen
-
     def _hitl_cause(self, issue: Task, reason: str) -> str:
         """Build a HITL cause string, prefixing with epic context if applicable."""
         epic_child_labels = {lbl.lower() for lbl in self._config.epic_child_label}
@@ -67,6 +61,13 @@ class ImplementAbortMixin:
         if match:
             return f"Epic child (#{match.group(1)}): {reason}"
         return f"Epic child: {reason}"
+
+    def _transcript_tail(self, result: WorkerResult) -> str | None:
+        """Last ``error_output_max_chars`` of the run transcript, or ``None``."""
+        transcript = result.transcript or ""
+        if not transcript:
+            return None
+        return transcript[-self._config.error_output_max_chars :]
 
     def _should_abort_no_progress(self, issue: Task) -> bool:
         """Return ``True`` when *issue* is thrashing and should abort to HITL.

@@ -2,11 +2,12 @@
 
 ``_run_gh`` and ``_repo`` are private implementation details of
 ``pr_manager.PRManager`` (and its ``pr_manager_promotion`` mixin) and the
-``FakeGitHub`` test double (its ``_gh_cli`` / ``_fake`` slices). Reaching through a ``PRPort``-typed collaborator
-to call ``self._prs._run_gh(...)`` or read ``self._prs._repo`` bypasses the
-hexagonal ``PRPort`` boundary: the read becomes a raw ``gh api`` string
-FakeGitHub's generic dispatcher must string-match rather than a Protocol
-method the fake's coverage is checked against (#11418). Four such
+``FakeGitHub`` test double (its ``_gh_cli`` / ``_fake`` slices). Reaching
+through a ``PRPort``-typed collaborator to call ``self._prs._run_gh(...)`` or
+read ``self._prs._repo`` bypasses the hexagonal ``PRPort`` boundary: the read
+becomes a raw ``gh api`` string FakeGitHub's generic dispatcher must
+string-match rather than a Protocol method the fake's coverage is checked
+against (#11418). Four such
 reach-throughs — two in ``StaleIssueLoop``'s branch-GC, one each in
 ``ReportIssueLoop._verify_issue`` and ``service_registry``'s fitness
 fetcher — were promoted to first-class ``PRPort`` methods

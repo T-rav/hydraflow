@@ -9,8 +9,8 @@ still lands.
 One concern: classifying what a finished build actually delivered, and the two
 failure shapes that never push — zero commits and null delivery (a diff of
 planner diagrams / generated artifacts only, #9480). Each writes its own issue
-comment and marks the attempt failed so the attempt cap retries with corrective
-context.
+comment and marks the attempt failed so the attempt cap retries with
+corrective context.
 """
 
 from __future__ import annotations
@@ -145,10 +145,3 @@ class ImplementScreeningMixin:
         )
         self._state.mark_issue(issue.id, "failed")
         return result
-
-    def _transcript_tail(self, result: WorkerResult) -> str | None:
-        """Last ``error_output_max_chars`` of the run transcript, or ``None``."""
-        transcript = result.transcript or ""
-        if not transcript:
-            return None
-        return transcript[-self._config.error_output_max_chars :]

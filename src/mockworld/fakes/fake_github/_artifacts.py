@@ -5,8 +5,10 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's
-side of ``pr_manager_artifacts.PRManagerArtifactsMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's, so the fake and the thing it
+doubles read alike. This module is the fake's side of:
+
+    pr_manager_artifacts.PRManagerArtifactsMixin
 
 One concern: what the fake records when the pipeline publishes something — the
 ADR-0011 tag and release pair (plus the inspectors scenarios assert on) and the
