@@ -21,10 +21,10 @@ into the dial arms nothing, and a slug-derived repository cannot fall into an
 armed canary.
 
 **The tier choice.** :func:`resolve_plan_model` is where the broker starts
-making a real model choice, and the whole of what it may depend on is three
-things: the requirement the director asked for, the role's catalogued entry,
-and whether this repository's lane can serve an Anthropic model at all. Not the
-issue text, not the time of day, not a previous decision. The answer is a
+making a real model choice, and the whole of what it may depend on is two
+things: the requirement the director asked for and the role's catalogued entry.
+Not the issue text, not the time of day, not a previous decision — and not the
+lane, which it deliberately does not ask about (see that function's docstring). The answer is a
 :class:`PlanRouteDecision` carrying a content-addressed id, the rule that fired,
 the source the tier came from, both revisions it was made against, and the input
 echoed back — the same contract ``hydraflow_gateway.routing_policy.explain``
@@ -52,11 +52,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from driver_contracts import (
+    LITERAL_FAMILIES,
     WORKER_CATALOG,
     DriverPhase,
+    ModelRequirement,
     ModelRequirementKind,
     WorkerRole,
-    has_anthropic_provenance,
 )
 from hydraflow_gateway.routing_policy import canonicalize_repo
 
@@ -169,14 +170,18 @@ class PlanRouteReason(StrEnum):
     PHASE_NOT_PLAN = "phase-not-plan"
     ROLE_NOT_CATALOGUED_FOR_PLAN = "role-not-catalogued-for-plan"
     LITERAL_FAMILY_UNSATISFIABLE = "literal-family-unsatisfiable"
-    """This repository's lane cannot serve an Anthropic model at all.
+    """The catalogued id does not satisfy the requirement it was resolved from.
 
     A **rejection**, not a hold, and the distinction is the one ADR-0141 D3
     draws: a held route is right with something operational missing, and would
-    send an operator to fix a credential. A z.ai-locked repository asked for a
-    literal Opus is not missing a credential — the request is inadmissible on
-    that lane, and reporting it as a hold would send the operator to edit a
-    policy that was never wrong.
+    send an operator to fix a credential. This one is inadmissible — the tier
+    table and the requirement disagree, which is a code defect rather than an
+    operational gap, and retrying changes nothing.
+
+    The *other* way a literal family becomes unsatisfiable — a
+    ``provider_lock=zai-harness`` routing policy — is refused by the resolver
+    at the spawn, on the far side of the trust boundary, and reaches the
+    receipt through ``plan_worker_runner._refusal_for_spawn``.
     """
 
     CAPABILITY_UNMAPPED = "capability-unmapped"
@@ -289,7 +294,6 @@ def resolve_plan_model(
     *,
     phase: DriverPhase,
     route_policy_revision: str,
-    lane_serves_anthropic: bool,
 ) -> PlanRouteDecision:
     """Resolve one dispatch's model tier. Pure, total, and first-match-wins.
 
@@ -297,11 +301,23 @@ def resolve_plan_model(
     dispatch path and an exception thrown here is a routing incident rather than
     a refusal an operator can read.
 
-    *lane_serves_anthropic* is the one fact from outside the contracts, and it
-    is passed rather than read so this stays pure: it is whether the transport
-    this repository's Plan workers actually use can carry an Anthropic model.
-    A repository pinned to the z.ai harness cannot, and that is the case AC 4
-    is written for.
+    **It deliberately does not ask which lane will serve the child.** An earlier
+    draft took a ``lane_serves_anthropic`` argument and the caller answered it
+    from ``repo_provider`` / ``planner_provider``, which was wrong in both
+    directions: those dials are applied by ``repo_backend.apply_repo_provider``
+    at the two *agentic* seams and never at the one-shot seam a brokered child
+    takes, so a z.ai-pinned repository would have had every worker refused
+    although its gateway lane serves Anthropic fine — and the lock that
+    genuinely matters, a ``provider_lock=zai-harness`` routing policy, was never
+    consulted at all.
+
+    The honest division is: a brokered child is pinned to the gateway and the
+    gateway derives the account from the model, so **no legacy dial can put one
+    on GLM**. The only thing that can is a routing policy, and that refuses at
+    ``route_enforcement.enforce_canary_route`` — before ``resolve_harness_env``,
+    so with no credential in existence and zero upstream bytes. What remains
+    here is the check this layer *can* answer: that the tier catalog's own
+    answer satisfies the requirement it was resolved from.
     """
     echo = _echo(request, phase, route_policy_revision)
 
@@ -323,7 +339,12 @@ def resolve_plan_model(
         )
     elif requirement.kind is ModelRequirementKind.CAPABILITY:
         mapped = CAPABILITY_TIERS.get(requirement.value)
-        if mapped is None:
+        if mapped is None or mapped not in LITERAL_FAMILIES:
+            # ``mapped not in LITERAL_FAMILIES`` keeps this function TOTAL: the
+            # family becomes a ``ModelRequirement`` below, whose validator
+            # raises on an unknown value — and an exception on a live dispatch
+            # path is a routing incident rather than a refusal an operator can
+            # read.
             return _refusal(
                 echo, PlanRouteOutcome.HELD, PlanRouteReason.CAPABILITY_UNMAPPED
             )
@@ -337,11 +358,16 @@ def resolve_plan_model(
             echo, PlanRouteOutcome.REJECTED, PlanRouteReason.CONCRETE_MODEL_REQUESTED
         )
 
-    # Both arms land on an Anthropic family, so the lane check applies to both.
-    # Exempting the capability arm would reopen the substitution path one
-    # requirement kind over from the one the invariant is written about.
+    # Checked against the FAMILY the table resolved to, never against the
+    # incoming requirement. Two reasons, and the second was found by a test:
+    # ``satisfied_by`` is the stronger predicate than ``has_anthropic_provenance``
+    # (a catalog edit mapping ``claude-opus`` to a Sonnet id passes provenance
+    # and would SELECT) — and on a CAPABILITY requirement ``satisfied_by``
+    # returns True unconditionally, by design, so asking the requirement would
+    # have left the capability arm with no fence at all and a table edit could
+    # have answered ``high-reasoning`` with GLM.
     served = PLAN_TIER_CATALOG.get(family, "")
-    if not lane_serves_anthropic or not has_anthropic_provenance(served):
+    if not _family_requirement(family).satisfied_by(served):
         return _refusal(
             echo,
             PlanRouteOutcome.REJECTED,
@@ -369,9 +395,15 @@ class PlanCanaryLatch:
     is also the true state (nothing is dispatching). The TTL covers the other
     direction: a hold abandoned *within* a run — an exception between claim and
     release — expires rather than wedging the canary for the process lifetime.
+
+    ``ttl_seconds`` is **required**. It had a default, and the default came to
+    equal the batch budget's ceiling — recreating the coincidence that makes the
+    backstop able to reclaim a slot from a batch still running. A backstop whose
+    value can silently drift into the thing it is a backstop *for* is not one,
+    so there is nothing to drift: the composition root states it.
     """
 
-    def __init__(self, *, ttl_seconds: int = 900) -> None:
+    def __init__(self, *, ttl_seconds: int) -> None:
         self._ttl_seconds = ttl_seconds
         self._holder: int | None = None
         self._claimed_at: datetime | None = None
@@ -407,6 +439,11 @@ class PlanCanaryLatch:
         if self._claimed_at is None:
             return True
         return (now - self._claimed_at).total_seconds() > self._ttl_seconds
+
+
+def _family_requirement(family: str) -> ModelRequirement:
+    """The literal-family requirement a resolved tier must satisfy."""
+    return ModelRequirement(kind=ModelRequirementKind.LITERAL_FAMILY, value=family)
 
 
 def _echo(

@@ -64,12 +64,25 @@ def _dispatcher(orch):
     return None if director is None else director._dispatcher  # noqa: SLF001
 
 
+def _is_covered(orch, phase: DriverPhase) -> bool:
+    """Ask the predicate the ORCHESTRATOR actually built, not a fresh one.
+
+    Calling ``plan_canary_covers(config, ...)`` directly is a pure function of
+    the config and would pass with the whole composition root deleted. This
+    reads the closure ``build_services`` wired into the director, so the
+    assertion fails if that wiring goes away.
+    """
+    director = orch._svc.fable_director  # noqa: SLF001
+    assert director is not None, "no director was built"
+    return director._is_covered(phase)  # noqa: SLF001
+
+
 # --------------------------------------------------------------------------
 # Proof 1: default off is the object graph, not a flag
 # --------------------------------------------------------------------------
 
 
-class TestTheDispatcherIsNeverConstructedUnlessArmed:
+class TestNothingIsDispatchedUnlessArmed:
     def test_a_fresh_config_arms_nothing(self) -> None:
         assert HydraFlowConfig().fable_plan_canary_armed() is False
 
@@ -87,33 +100,66 @@ class TestTheDispatcherIsNeverConstructedUnlessArmed:
 
         assert orch._svc.fable_director is None  # noqa: SLF001
 
-    def test_a_shadow_director_with_no_canary_repo_builds_no_dispatcher(
+    def test_a_shadow_director_with_no_canary_repo_dispatches_nothing(
         self, tmp_path: Path
     ) -> None:
-        # The load-bearing one. Selecting the director is #11537's decision;
-        # naming a canary repository is #11541's, and an operator who has made
-        # only the first must have no actuator in their process at all.
+        """Selecting the director is #11537's decision; naming a canary
+        repository is #11541's, and an operator who has made only the first
+        must never have a worker dispatched.
+
+        Asserted on the **predicate**, not on the dispatcher being absent. The
+        first version of this file asserted the absence, and that absence was a
+        bug rather than a proof: the dial is live and empty by default, so a
+        factory booted disarmed had no dispatcher to arm and naming a
+        repository did nothing until a restart. The behavioural proof lives in
+        ``tests/regressions/test_issue_11541_outside_the_slice.py``, which runs
+        the fully wired director over an uncovered boundary and requires
+        byte-identical evidence and zero spawns.
+        """
+        config = _director_config(tmp_path)
+        _orchestrator(config)
+
+        assert plan_canary_covers(config, phase=DriverPhase.PLAN) is False
+
+    def test_naming_another_repository_dispatches_nothing(self, tmp_path: Path) -> None:
+        config = _director_config(tmp_path, fable_plan_canary_repo="acme/other")
+        _orchestrator(config)
+
+        assert plan_canary_covers(config, phase=DriverPhase.PLAN) is False
+
+    def test_a_director_is_built_with_its_actuator_ready_but_inert(
+        self, tmp_path: Path
+    ) -> None:
+        # It exists so that arming the live dial can reach it. What stops it
+        # is the predicate above, and only that.
         orch = _orchestrator(_director_config(tmp_path))
 
-        assert _dispatcher(orch) is None
+        assert _dispatcher(orch) is not None
 
-    def test_naming_another_repository_builds_no_dispatcher(
+    def test_arming_a_running_factory_reaches_the_actuator(
         self, tmp_path: Path
     ) -> None:
-        orch = _orchestrator(
-            _director_config(tmp_path, fable_plan_canary_repo="acme/other")
-        )
+        # The direction the first draft got wrong. The actuator was built only
+        # when the dial was already set, and the dial is empty by default — so
+        # a factory booted disarmed had nothing to arm, and the settings screen
+        # called the dial live anyway.
+        config = _director_config(tmp_path)
+        orch = _orchestrator(config)
+        before = _is_covered(orch, DriverPhase.PLAN)
 
-        assert _dispatcher(orch) is None
+        object.__setattr__(config, "fable_plan_canary_repo", CANARY_REPO)
 
-    def test_naming_this_repository_builds_one(self, tmp_path: Path) -> None:
-        # The mirror image, so the four assertions above cannot pass by the
-        # feature being broken rather than off.
-        orch = _orchestrator(
-            _director_config(tmp_path, fable_plan_canary_repo=CANARY_REPO)
-        )
+        assert (before, _is_covered(orch, DriverPhase.PLAN)) == (False, True)
 
-        assert _dispatcher(orch) is not None
+    def test_naming_this_repository_covers_a_plan_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        # The mirror image, so the assertions above cannot pass by the feature
+        # being broken rather than off.
+        config = _director_config(tmp_path, fable_plan_canary_repo=CANARY_REPO)
+        orch = _orchestrator(config)
+
+        assert _is_covered(orch, DriverPhase.PLAN) is True
 
     def test_arming_the_canary_adds_no_loop(self, tmp_path: Path) -> None:
         # The canary hangs off the driver's boundary like the observer does:
@@ -232,4 +278,56 @@ class TestClearingOneFieldIsTheWholeRollback:
         assert (
             plan_canary_armed(_director_config(tmp_path, fable_plan_canary_repo=""))
             is False
+        )
+
+
+class TestOperatorStatusTellsTheTruthAboutArming:
+    """`director_dispatch_armed` is read off the config, not off the preset.
+
+    ``SchedulingPreset.director_dispatch_armed`` is False on every preset and
+    always will be, because arming is per-repository. Reporting it here would
+    tell an operator with an armed canary that dispatch was not armed — the one
+    confusion this endpoint exists to prevent.
+    """
+
+    def test_a_shadow_director_reports_dispatch_unarmed(self, tmp_path: Path) -> None:
+        from dashboard_routes._scheduling_routes import _desired
+
+        desired = _desired(_director_config(tmp_path))
+
+        assert desired["director_dispatch_armed"] is False
+
+    def test_an_armed_canary_reports_dispatch_armed(self, tmp_path: Path) -> None:
+        from dashboard_routes._scheduling_routes import _desired
+
+        desired = _desired(
+            _director_config(tmp_path, fable_plan_canary_repo=CANARY_REPO)
+        )
+
+        assert desired["director_dispatch_armed"] is True
+
+    def test_the_canary_repository_is_surfaced(self, tmp_path: Path) -> None:
+        from dashboard_routes._scheduling_routes import _desired
+
+        desired = _desired(
+            _director_config(tmp_path, fable_plan_canary_repo=CANARY_REPO)
+        )
+
+        assert desired["plan_canary_repo"] == CANARY_REPO
+
+    def test_the_canary_dial_is_reported_as_not_needing_a_restart(
+        self, tmp_path: Path
+    ) -> None:
+        # The runtime dials do need one and the canary dial does not; a single
+        # restart_required flag over both would be false half the time.
+        from dashboard_routes._scheduling_routes import _desired
+
+        desired = _desired(_director_config(tmp_path))
+
+        assert (
+            desired["restart_required"],
+            desired["plan_canary_restart_required"],
+        ) == (
+            True,
+            False,
         )

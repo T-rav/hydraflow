@@ -60,6 +60,7 @@ from driver_contracts import (
     WorkerTransport,
 )
 from exception_classify import reraise_on_credit_or_bug
+from hydraflow_gateway.routing_policy import DecisionReason
 from plan_broker import PlanRouteOutcome, PlanRouteReason, resolve_plan_model
 from runner_utils import run_lightweight_agent
 
@@ -78,6 +79,14 @@ logger = logging.getLogger("plan_worker_runner")
 
 MAX_ARTIFACT_CHARS = 20000
 """How much of a child's reply is retained. A receipt is evidence, not a store."""
+
+MAX_RETAINED_RECORDS = 50
+"""How many recent decisions and artifacts this runner keeps for diagnosis.
+
+Bounded for the same reason :data:`MAX_DISPATCHED_KEYS` is. These are
+diagnostics read by a human or a test; the durable evidence is the receipt on
+the shadow log, and a canary that had to keep every artifact in memory to be
+auditable would be one whose evidence lived in the wrong place."""
 
 MAX_DISPATCHED_KEYS = 2000
 """How many spent idempotency keys the replay fence remembers.
@@ -98,16 +107,82 @@ _REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
         RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
     ),
-    PlanRouteReason.CAPABILITY_UNMAPPED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
+    # A hold, not a rejection: the tier table is the fixable thing and the
+    # request was not inadmissible. Mapping it to the terminal code — which an
+    # earlier draft did — put two holds for the same reason under opposite
+    # receipt codes inside one module.
+    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
     PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
         RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
     ),
 }
 
-_ZAI_LANES = frozenset({"zai", "kimi", "openrouter"})
-"""Legacy provider dials that cannot carry an Anthropic model at all."""
+#: Routing-policy refusal reasons that mean *the request was inadmissible*
+#: rather than *something operational is missing*. These map to
+#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing, whatever an
+#: operator edits; every other reason is ROUTE_UNAVAILABLE, where a caretaker
+#: retry is right once whatever is missing is supplied. The remedy for a hold
+#: may be a policy edit rather than a gateway one, so this does not say "look
+#: at the gateway" — an earlier version did, and it was wrong for every hold
+#: except an outage.
+#:
+#: Built from the resolver's own enum rather than from string literals, because
+#: the first draft of this set contained a member that does not exist
+#: (``concrete-model-not-allowed``) and omitted one that does
+#: (``policy-conflict``) — a hand-written copy of another module's vocabulary
+#: drifts silently and reads as a working classification while classifying
+#: nothing. ``tests/test_plan_worker_runner.py`` requires every
+#: :class:`DecisionReason` member to be classified, so a new one fails there
+#: rather than defaulting to "retry it".
+_INADMISSIBLE_ROUTE_REASONS = frozenset(
+    {
+        DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
+        DecisionReason.MODEL_NOT_ALLOWED.value,
+        # Two policies claim the same rung: an operator must resolve it, and a
+        # retry against an unresolved conflict is an infinite one.
+        DecisionReason.POLICY_CONFLICT.value,
+    }
+)
+
+#: Reasons deliberately left retryable, and why — so the judgement is visible
+#: rather than implied by absence from the set above.
+_OPERATIONAL_ROUTE_REASONS = frozenset(
+    {
+        # The snapshot will be back; nothing about the request is wrong.
+        DecisionReason.SNAPSHOT_UNAVAILABLE.value,
+        # Unreachable on THIS seam, and the reason is worth stating because
+        # an earlier comment here got it wrong: it is not that the resolver
+        # never rejects on a hold — ``enforce_canary_route`` raises on every
+        # non-SELECTED outcome, HELD included, which is the whole premise of
+        # classifying on the reason. It is that a brokered child's model is
+        # always a ``PLAN_TIER_CATALOG`` id, and ``requirement_for_model``
+        # returns CAPABILITY only for an *empty* model string — so the resolver
+        # cannot emit ``capability-unmapped`` for one of these spawns at all.
+        # Classified anyway, because the table is required to be total.
+        DecisionReason.CAPABILITY_UNMAPPED.value,
+        # Collapses "no credential for this account" with "a provider lock
+        # excluded every account". The first is operational and the second is
+        # policy, and the resolver does not distinguish them here — so the
+        # conservative reading is the retryable one, which sends the operator
+        # to the gateway where both are visible.
+        DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
+        # Reasons a *selected* decision carries. They reach a refusal only
+        # through ``enforce_canary_route``'s empty-effective-model guard, which
+        # a brokered child cannot trip (its legacy model is always the catalog
+        # id) — so "not a refusal" is nearly but not exactly right, and
+        # operational is the correct reading of the case that can occur.
+        DecisionReason.MATCHED_POLICY.value,
+        DecisionReason.NO_POLICY_APPLIES.value,
+        # NOT one of those two, and an earlier comment here swept it in with
+        # them: ``_legacy_decision`` emits it HELD, so it raises at the outcome
+        # check rather than at the empty-model guard. It is unreachable for a
+        # different reason — ``route_shadow.build_route_context`` always
+        # constructs a ``LegacyRoute``, so ``context.legacy_route`` is never
+        # ``None`` on this path. Operational either way: nothing about the
+        # request is wrong.
+        DecisionReason.NO_LEGACY_ROUTE.value,
+    }
+)
 
 
 class PlanWorkerSpawn(Protocol):
@@ -189,16 +264,33 @@ class PlanWorkerArtifact:
     request_id: str
     role: str
     served_model: str
+    model_observed: bool
+    """True when the CLI named the model; False when the requested id stands in.
+
+    Recorded rather than assumed, because "the served model" is the claim this
+    canary is judged on and an unobserved one is weaker evidence than an
+    observed one. Collapsing the two would make the weaker claim invisible.
+    """
+
+    decision_id: str
+    """The tier decision that authorised this child. The join back to *why*."""
+
     text: str
 
 
 class PlanWorkerRunner:
     """Dispatches admitted Plan requests as real children and mints receipts.
 
-    Constructed only at the ``build_services`` composition root and only when
-    the canary is armed for this repository, so an operator who has not named a
-    canary repository has no such object in their process — the same
-    object-graph standard #11535 and #11537 held themselves to.
+    Constructed at the ``build_services`` composition root and only under
+    ``execution_runtime=fable_director`` — so Classic and the deterministic
+    controller have no such object in their process at all.
+
+    Under a director it is built **unconditionally**, armed or not, and gated
+    only by ``plan_broker.plan_canary_covers``. Making construction conditional
+    on the dial read as a stronger default-off proof and was a bug: the dial is
+    live and empty by default, so a factory booted disarmed had nothing to arm
+    and naming a canary repository silently did nothing until a restart. Both
+    directions of a live dial have to work, or it is not live.
     """
 
     def __init__(
@@ -233,8 +325,16 @@ class PlanWorkerRunner:
         # exists to catch.
         self._dispatched_keys: set[str] = set()
         self._dispatched_order: deque[str] = deque()
-        self.decisions: list[PlanRouteDecision] = []
-        self.artifacts: list[PlanWorkerArtifact] = []
+        # Bounded for the same reason the replay fence is: this object lives
+        # for the whole run, and an unbounded list on one is a leak with no
+        # ceiling. Both are diagnostics — the durable record is the receipt.
+        self.decisions: deque[PlanRouteDecision] = deque(maxlen=MAX_RETAINED_RECORDS)
+        # request_id -> decision_id for the batch just dispatched. Batch-local
+        # and therefore bounded by MAX_DISPATCH_BATCH: it exists so the
+        # receipt row can carry the join back to the tier decision, and a
+        # run-lifetime version of it would be a third accumulator.
+        self.last_decision_ids: dict[str, str] = {}
+        self.artifacts: deque[PlanWorkerArtifact] = deque(maxlen=MAX_RETAINED_RECORDS)
 
     @property
     def spawn(self) -> PlanWorkerSpawn:
@@ -270,6 +370,7 @@ class PlanWorkerRunner:
         deadline = time.monotonic() + float(
             self._config.fable_plan_worker_timeout_seconds
         )
+        self.last_decision_ids = {}
         receipts: list[WorkerReceipt] = []
         for request in requests:
             receipts.append(
@@ -290,6 +391,14 @@ class PlanWorkerRunner:
         remembering it.
         """
         blank = _unresolved_decision(self._route_policy_revision)
+        # Reset the join too. Without this the refused receipts inherited the
+        # PREVIOUS batch's ids whenever a request id repeated across issues —
+        # which it does, because a director names its requests per turn rather
+        # than per issue. A blank decision must produce a blank join, or the
+        # field this canary added to make the join real records a false one.
+        self.last_decision_ids = dict.fromkeys(
+            (request.request_id for request in requests), ""
+        )
         return tuple(_refusal(request, reason, blank) for request in requests)
 
     # -- one child ----------------------------------------------------------
@@ -307,9 +416,9 @@ class PlanWorkerRunner:
             request,
             phase=phase,
             route_policy_revision=self._route_policy_revision,
-            lane_serves_anthropic=self._lane_serves_anthropic(),
         )
         self.decisions.append(decision)
+        self.last_decision_ids[request.request_id] = decision.decision_id
         if decision.outcome is not PlanRouteOutcome.SELECTED:
             logger.info(
                 "plan_worker_runner: #%d %s refused before spawn (%s)",
@@ -399,12 +508,37 @@ class PlanWorkerRunner:
             )
             return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
 
-        served = str(spawn_out.get("model", "") or "")
-        if not served:
+        requested = str(spawn_out.get("model", "") or "")
+        if not requested:
             # The seam returned before it spawned anything — a CH-6 block or an
             # enforcement refusal. No inference happened, so there is no served
             # model to record and nothing to bill.
-            return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
+            refusal = _refusal_for_spawn(spawn_out)
+            logger.info(
+                "plan_worker_runner: #%d %s never spawned: %s/%s -> %s",
+                task.id,
+                request.worker_role.value,
+                spawn_out.get("refused_outcome") or "no-decision",
+                spawn_out.get("refused") or "no-reason",
+                refusal.value,
+            )
+            return _refusal(request, refusal, decision)
+        if spawn_out.get("timed_out"):
+            # A deadline, not a bad reply. The seam converts its own timeout
+            # into a soft rc=-1, so without this signal a timed-out child would
+            # be recorded ACCEPTED with an unusable artifact — which is exactly
+            # what the acceptance criteria call an EXPIRED worker.
+            return _refusal(
+                request,
+                RejectionReason.WORKER_TIMEOUT,
+                decision,
+                status=ReceiptStatus.EXPIRED,
+            )
+        # The model the CLI *reported*, when it reported one. When it did not,
+        # the requested id is recorded and ``model_observed`` says so rather
+        # than the receipt implying an observation it never made.
+        observed = str(spawn_out.get("served_model", "") or "")
+        served = observed or requested
         if not request.model_requirement.satisfied_by(served):
             logger.warning(
                 "plan_worker_runner: #%d %s asked for %s and was served %r; "
@@ -424,6 +558,8 @@ class PlanWorkerRunner:
                 request_id=request.request_id,
                 role=request.worker_role.value,
                 served_model=served,
+                model_observed=bool(observed),
+                decision_id=decision.decision_id,
                 text=text,
             )
         )
@@ -462,22 +598,6 @@ class PlanWorkerRunner:
         self._dispatched_order.append(key)
         while len(self._dispatched_order) > MAX_DISPATCHED_KEYS:
             self._dispatched_keys.discard(self._dispatched_order.popleft())
-
-    def _lane_serves_anthropic(self) -> bool:
-        """Whether this repository's legacy dials can carry an Anthropic model.
-
-        The gateway's own resolver refuses a ``provider_lock=zai-harness``
-        policy meeting a literal Opus with ``literal-family-unsatisfiable``
-        (ADR-0139 D4), so this is the *legacy* half of the same invariant: a
-        repository pinned to the z.ai harness by ``repo_provider`` or by the
-        planner's own role dial cannot serve one either, and finding that out
-        after the spawn would mean paying for the discovery.
-        """
-        dials = (
-            str(getattr(self._config, "repo_provider", "") or ""),
-            str(getattr(self._config, "planner_provider", "") or ""),
-        )
-        return not any(dial.strip().lower() in _ZAI_LANES for dial in dials)
 
 
 def build_plan_worker_prompt(
@@ -574,6 +694,31 @@ def _refusal(
         route_policy_revision=decision.route_policy_revision,
         output_contract_ok=False,
     )
+
+
+def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
+    """Why a spawn that never ran did not run, in the receipt's vocabulary.
+
+    The seam collapses a routing-policy refusal and a transport failure onto
+    the same soft ``rc=-1``, so without the reason it left behind, both would
+    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator the request was
+    fine and to retry once whatever is missing is supplied. For an inadmissible
+    route that is wrong: the retry will never succeed, and the thing to edit is
+    the policy.
+    """
+    # Classified on the REASON alone, deliberately. A previous draft short-
+    # circuited on ``refused_outcome == held`` first, reasoning that a hold is
+    # retryable whatever its reason — and that silently reversed the one code
+    # this canary is named after: ``RoutingAction.on_unavailable`` defaults to
+    # HOLD, so the ordinary ``provider_lock=zai-harness`` refusal arrives as
+    # HELD with ``literal-family-unsatisfiable``, and the guard turned it back
+    # into a retryable ``ROUTE_UNAVAILABLE``. The reason is the durable fact
+    # about the request; the outcome is a per-policy *dial* over what to do
+    # when a lane is unavailable, and it is the wrong axis to classify on.
+    reason = str(spawn_out.get("refused", "") or "")
+    if reason in _INADMISSIBLE_ROUTE_REASONS:
+        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    return RejectionReason.ROUTE_UNAVAILABLE
 
 
 def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:

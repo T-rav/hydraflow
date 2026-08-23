@@ -16,9 +16,10 @@ them independently:
 * the dial was cleared while the process was running (the one-action rollback,
   taking effect on the next boundary rather than the next restart).
 
-Two non-vacuity tests sit beside them: the same director *inside* the bound
-does dispatch, and does record a receipt. Without those, deleting the feature
-would pass every assertion above.
+Three non-vacuity tests sit beside them: the same director *inside* the bound
+does dispatch, does record a receipt, and records evidence the uncovered arms
+can be told apart from. Without those, deleting the feature would pass every
+assertion above.
 """
 
 from __future__ import annotations

@@ -15,12 +15,21 @@ that is not:
   can read ``fable_director`` while effective honestly reports that nothing is
   observing.
 * **hypothetical worker tree** is what the director would have dispatched at
-  recent boundaries. Every node carries ``dispatched: false``, and the summary
-  carries ``workers_dispatched: 0``, because in shadow mode that is not a
-  status — it is the invariant.
+  recent boundaries. Every node carries ``dispatched: false``, and while the
+  Plan canary is disarmed the summary carries ``workers_dispatched: 0`` —
+  which is then an invariant rather than a status.
 
-Read-only. Nothing here can change a dial; the dials are restart-required
-settings and live on the settings screen.
+#11541 armed dispatch for one repository at ``PLAN``, and two things here
+follow from that. ``workers_dispatched`` is now **counted** rather than
+asserted, so it stops reading zero exactly when it stops being true; and
+``director_dispatch_armed`` is read off the *config*, not off
+``SchedulingPreset``, whose field is False on every preset and always will be
+— arming is per-repository and live, and reporting the preset's field would
+tell an operator with an armed canary that dispatch was not armed.
+
+Read-only. Nothing here can change a dial; the dials live on the settings
+screen, where the runtime dials are restart-required and the canary dial is
+not.
 """
 
 from __future__ import annotations
@@ -50,10 +59,19 @@ def _desired(config: HydraFlowConfig) -> dict[str, Any]:
         "execution_runtime": config.execution_runtime.value,
         "uses_issue_driver": preset.uses_issue_driver,
         "uses_fable_director": preset.uses_fable_director,
-        # Always false in this phase. Surfaced rather than omitted so an
-        # operator can see that selecting the director did not arm it.
-        "director_dispatch_armed": preset.director_dispatch_armed,
+        # Read off the CONFIG, not off the preset (#11541). Arming is per-repo
+        # and live, so the preset's field is False on every preset and always
+        # will be — reporting it here would tell an operator with an armed
+        # canary that dispatch is not armed, which is the one thing this
+        # endpoint exists to stop happening.
+        "director_dispatch_armed": config.fable_plan_canary_armed(),
+        "plan_canary_repo": str(config.fable_plan_canary_repo or ""),
+        # The two dials above differ in liveness and an operator has to know
+        # which: selecting the runtime needs a restart, arming the canary does
+        # not, and a single restart_required flag over both would be false half
+        # the time.
         "restart_required": True,
+        "plan_canary_restart_required": False,
     }
 
 

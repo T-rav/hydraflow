@@ -70,7 +70,6 @@ def _resolve(request: WorkerDispatchRequest, **kwargs: object):
     defaults: dict[str, object] = {
         "phase": DriverPhase.PLAN,
         "route_policy_revision": ROUTE_REVISION,
-        "lane_serves_anthropic": True,
     }
     defaults.update(kwargs)
     return resolve_plan_model(request, **defaults)  # type: ignore[arg-type]
@@ -272,28 +271,49 @@ class TestTheDecisionExplainsItselfAfterTheFact:
 
 
 class TestALiteralFamilyHoldsOrRejectsRatherThanSubstituting:
-    def test_a_lane_that_cannot_serve_anthropic_rejects_a_literal_family(self) -> None:
-        # The z.ai-locked repository. "Resolve literally or hold/reject; never
-        # substitute GLM" — asserted on the outcome, not on the served model,
-        # because a served model of "" proves nothing on its own.
-        decision = _resolve(_request(), lane_serves_anthropic=False)
+    """What this layer can answer, and what it deliberately leaves to the policy.
+
+    ``resolve_plan_model`` used to take a ``lane_serves_anthropic`` argument the
+    caller answered from ``repo_provider``. That dial does not govern a brokered
+    child — it is applied at the agentic seams, and a brokered child takes the
+    one-shot seam pinned to the gateway — so the argument was answering a
+    question nobody had asked. The lock that matters is a ``provider_lock``
+    routing policy, refused at the resolver before any credential exists.
+
+    What is left here is the check this layer owns: the catalogued id must
+    satisfy the requirement it was resolved from.
+    """
+
+    def test_a_catalog_id_that_does_not_satisfy_its_family_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
+
+        decision = _resolve(_request())
 
         assert decision.outcome is PlanRouteOutcome.REJECTED
         assert decision.reason is PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE
 
-    def test_a_rejected_decision_names_no_served_model(self) -> None:
-        decision = _resolve(_request(), lane_serves_anthropic=False)
+    def test_a_rejected_decision_names_no_served_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
 
-        assert decision.served_model == ""
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
 
-    def test_a_capability_class_also_rejects_on_a_non_anthropic_lane(self) -> None:
-        # The tier table answers a capability with an Anthropic model, so a
-        # lane that cannot serve one cannot serve this either. Letting the
-        # capability arm through would be the substitution path reopened one
-        # requirement kind over.
+        assert _resolve(_request()).served_model == ""
+
+    def test_the_capability_arm_is_checked_the_same_way(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-sonnet", "glm-5.3")
+
         decision = _resolve(
-            _request(kind=ModelRequirementKind.CAPABILITY, value="balanced"),
-            lane_serves_anthropic=False,
+            _request(kind=ModelRequirementKind.CAPABILITY, value="balanced")
         )
 
         assert decision.outcome is PlanRouteOutcome.REJECTED
@@ -375,3 +395,88 @@ class TestOneActiveFableDirectedIssuePerRepository:
         latch.claim(101, now=now)
 
         assert latch.claim(202, now=now + timedelta(seconds=899)) is False
+
+
+class TestTheResolverIsTotal:
+    """It runs on a live dispatch path, so it must never raise.
+
+    ``ModelRequirement``'s validator rejects a family outside
+    ``LITERAL_FAMILIES``, and the capability arm builds one from the tier table
+    — so a table edit naming an unknown family would have raised out of a
+    dispatch instead of refusing it.
+    """
+
+    def test_a_capability_mapped_to_an_unknown_family_is_held_not_raised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.CAPABILITY_TIERS, "balanced", "claude-mythos")
+
+        decision = _resolve(
+            _request(kind=ModelRequirementKind.CAPABILITY, value="balanced")
+        )
+
+        assert decision.reason is PlanRouteReason.CAPABILITY_UNMAPPED
+
+    def test_an_unmapped_capability_is_held_rather_than_rejected(self) -> None:
+        # A hold, because the tier table is the fixable thing and the request
+        # was not inadmissible.
+        import plan_broker
+
+        original = dict(plan_broker.CAPABILITY_TIERS)
+        plan_broker.CAPABILITY_TIERS.clear()
+        try:
+            decision = _resolve(
+                _request(kind=ModelRequirementKind.CAPABILITY, value="balanced")
+            )
+        finally:
+            plan_broker.CAPABILITY_TIERS.update(original)
+
+        assert decision.outcome is PlanRouteOutcome.HELD
+
+
+class TestTheBackstopSitsAboveTheLongestBatch:
+    """``CANARY_SLOT_TTL_SECONDS`` must stay well above the batch ceiling.
+
+    Both docstrings assert it and nothing pinned it: raising
+    ``fable_plan_worker_timeout_seconds``'s ``le=`` or lowering the constant
+    silently re-creates the coincidence where the latch's backstop can reclaim
+    a slot from a batch that is still running — which is the concurrent second
+    director the latch exists to prevent.
+    """
+
+    def test_the_maximum_batch_fits_inside_the_slot_ttl(self, tmp_path) -> None:
+        from config import HydraFlowConfig
+        from service_registry import CANARY_SLOT_TTL_SECONDS
+
+        bounds = [
+            constraint.le
+            for constraint in HydraFlowConfig.model_fields[
+                "fable_plan_worker_timeout_seconds"
+            ].metadata
+            if getattr(constraint, "le", None) is not None
+        ]
+
+        # Asserted, not assumed: reading the bound out of the field's metadata
+        # is only a guard while a bound exists. Removing ``le=`` entirely would
+        # otherwise make ``max()`` raise, which is loud but says the wrong
+        # thing — the failure an operator needs to see is "the ceiling is gone",
+        # not "a test helper blew up".
+        assert bounds, "fable_plan_worker_timeout_seconds has no le= bound"
+
+        # Twice over rather than merely under: a backstop that sits just above
+        # the longest batch is one rounding decision away from sitting at it.
+        assert max(bounds) * 2 <= CANARY_SLOT_TTL_SECONDS
+
+    def test_a_config_at_the_ceiling_still_fits(self, tmp_path) -> None:
+        # The same invariant read the way an operator would reach it.
+        from config import HydraFlowConfig
+        from service_registry import CANARY_SLOT_TTL_SECONDS
+
+        config = HydraFlowConfig(
+            state_file=tmp_path / "state.json",
+            fable_plan_worker_timeout_seconds=900,
+        )
+
+        assert config.fable_plan_worker_timeout_seconds < CANARY_SLOT_TTL_SECONDS

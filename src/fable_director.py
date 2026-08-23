@@ -80,7 +80,7 @@ from plan_broker import CANARY_PHASE
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from director_broker import BrokerVerdict, ShadowDispatchBroker
@@ -191,9 +191,14 @@ class FableDirector:
         )
         self._is_enabled = is_enabled
         self._ceiling_announced = False
-        # The canary half (#11541). All three are ``None`` under shadow mode and
-        # nothing below reads any of them, so an operator who has not named a
-        # canary repository runs exactly the object graph #11537 shipped.
+        # The canary half (#11541). All three are ``None`` only for a director
+        # hand-built without them — a test, or #11537's shape. A production
+        # ``fable_director`` build always passes all three, because making
+        # construction conditional on the dial made arming restart-required.
+        # What keeps a disarmed operator's boundary inert is ``is_covered``,
+        # not their absence; ``_dispatcher`` and ``_latch`` are read on EVERY
+        # boundary regardless of arming (the decision join in ``_record``, the
+        # slot release in ``_release_slot_if_moved_on``).
         # ``is_covered`` is a callable rather than a captured boolean for the
         # same reason the kill switch is: the dial is live, and clearing it must
         # stop the NEXT dispatch rather than the next restart.
@@ -433,6 +438,9 @@ class FableDirector:
             command=command,
             verdict=verdict,
             receipts=receipts,
+            decisions=(
+                None if self._dispatcher is None else self._dispatcher.last_decision_ids
+            ),
         )
 
     # -- the canary's actuator ---------------------------------------------
@@ -452,9 +460,12 @@ class FableDirector:
 
         Three gates, in this order and each for its own reason:
 
-        1. **the object exists** — under shadow mode there is no dispatcher at
-           all, so this returns before evaluating anything else and the shadow
-           path is byte-identical to #11537's;
+        1. **the seam is wired** — a director constructed without an actuator
+           (Classic and the deterministic controller build no director at all;
+           a hand-built one in a test may omit it) returns here before
+           evaluating anything else, so that path stays #11537's exactly. Under
+           a production ``fable_director`` build both are always present, and
+           what stops a dispatch is clause 2, not this one;
         2. **the boundary is covered** — one repository, phase ``PLAN``, read
            live so clearing the dial stops the next dispatch;
         3. **the repository's single brokered slot is free** — the issue's
@@ -689,6 +700,7 @@ class FableDirector:
         command: DirectorCommand | None = None,
         verdict: BrokerVerdict | None = None,
         receipts: tuple[WorkerReceipt, ...] = (),
+        decisions: Mapping[str, str] | None = None,
     ) -> None:
         """Write one observation. A failed turn records **no** hypothetical work.
 
@@ -717,7 +729,7 @@ class FableDirector:
                 if verdict is None
                 else tuple(reason.value for reason in verdict.rejection_reasons),
                 route_revisions=0 if verdict is None else verdict.route_revisions,
-                dispatched=tuple(_receipt_row(r) for r in receipts),
+                dispatched=tuple(_receipt_row(r, decisions) for r in receipts),
                 # The parent turn's spend plus every child's. Keeping them in
                 # one number is what makes the aggregate ceiling a real ceiling
                 # now that a boundary can cost more than one turn.
@@ -746,13 +758,19 @@ def _admitted_requests(
     )
 
 
-def _receipt_row(receipt: WorkerReceipt) -> dict[str, object]:
+def _receipt_row(
+    receipt: WorkerReceipt, decisions: Mapping[str, str] | None
+) -> dict[str, object]:
     """One receipt as the operator status and the evidence log render it.
 
     Never the artifact and never a credential: a receipt is the *fact* that a
-    child ran, on which model, at what cost, under whose lineage.
+    child ran, on which model, at what cost, under whose lineage — and under
+    which tier decision. ``plan_broker`` content-addresses that decision so a
+    receipt can be joined back to *why* the model was chosen; a row that did
+    not carry the id would leave the join unbuilt and the id decorative.
     """
     return {
+        "route_decision_id": (decisions or {}).get(receipt.request_id, ""),
         "request_id": receipt.request_id,
         "role": receipt.worker_role.value,
         "status": receipt.status.value,

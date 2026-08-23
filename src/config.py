@@ -1461,14 +1461,23 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     fable_plan_worker_timeout_seconds: int = Field(
-        default=600,
+        default=240,
         ge=30,
-        le=3600,
+        le=900,
         description=(
-            "Wall-clock budget for one brokered Plan worker. A child that "
-            "exceeds it is killed with its process group and its receipt is "
-            "EXPIRED. Ignored unless fable_plan_canary_repo names this "
-            "repository."
+            "Wall-clock budget for one brokered Plan BATCH, shared by its "
+            "children. Each child is given whatever the batch has left, and a "
+            "child that exceeds it is killed with its process group and its "
+            "receipt is EXPIRED. It bounds the BATCH rather than each child, "
+            "and its ceiling is deliberately low, because the dispatch is "
+            "awaited inside the allocator tick: this figure is exactly how "
+            "long one armed PLAN boundary can delay every other driver, and a "
+            "per-child budget would multiply it by MAX_DISPATCH_BATCH. The "
+            "default is of the same order as director_turn_timeout_seconds, "
+            "which the shadow director already spends on that tick, and the "
+            "ceiling sits well below CANARY_SLOT_TTL_SECONDS so the latch's "
+            "backstop cannot reclaim a slot from a batch still running. "
+            "Ignored unless fable_plan_canary_repo names this repository."
         ),
     )
 

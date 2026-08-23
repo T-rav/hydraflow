@@ -710,21 +710,24 @@ def _build_fable_director(
         usd_ceiling=lambda: config.director_shadow_usd_ceiling,
         is_enabled=lambda: config.director_shadow_enabled,
         # --- the Plan canary (#11541) ------------------------------------
-        # The actuator exists only when this repository is the named canary
-        # repository. Not "constructed and dormant": an operator who has not
-        # armed the dial has no dispatcher in their process at all, which is
-        # the same object-graph standard #11535 and #11537 held themselves to.
-        dispatcher=(
-            _build_plan_worker_runner(
-                config=config, subprocess_runner=subprocess_runner
-            )
-            if config.fable_plan_canary_armed()
-            else None
+        # Built whenever a director is selected, and gated only by the live
+        # predicate below. Making construction conditional on the dial looked
+        # like a stronger default-off proof and was in fact a *bug*: the dial
+        # is live and empty by default, so a factory booted disarmed — the
+        # documented starting state — would have had no dispatcher to arm, and
+        # naming a canary repository would have silently done nothing until a
+        # restart. Both directions of a live dial have to work, or it is not
+        # live. Default-off is proven where it is actually true: under Classic
+        # and under the deterministic controller there is no director and
+        # therefore no dispatcher at all, and under a director with the dial
+        # empty nothing is ever dispatched (proven differentially, not by an
+        # absent object).
+        dispatcher=_build_plan_worker_runner(
+            config=config, subprocess_runner=subprocess_runner
         ),
-        # Live, so clearing the dial stops the NEXT dispatch rather than the
-        # next restart. The dispatcher object surviving a rollback is harmless
-        # precisely because this predicate, not its existence, is what lets it
-        # run — and re-arming then needs nothing re-authored.
+        # Live, so arming reaches the NEXT boundary and clearing stops it —
+        # with no restart in either direction. This predicate, not the
+        # dispatcher's existence, is what lets a worker run.
         is_covered=lambda phase: plan_canary_covers(config, phase=phase),
         latch=PlanCanaryLatch(ttl_seconds=CANARY_SLOT_TTL_SECONDS),
     )
@@ -736,9 +739,11 @@ CANARY_SLOT_TTL_SECONDS = 3600
 A backstop, not the normal release: the director frees the slot on the tick its
 issue leaves PLAN. This covers the abnormal exit — an exception between claim
 and release — so a crash cannot idle the canary for the process lifetime.
-Generous relative to a plan (``fable_plan_worker_timeout_seconds`` defaults to
-ten minutes for the whole batch), because reclaiming a slot that is still in
-use would produce the concurrent second director the latch exists to prevent.
+Generous relative to a batch (``fable_plan_worker_timeout_seconds`` defaults
+to four minutes and is capped at fifteen), because reclaiming a slot that is
+still in use would produce the concurrent second director the latch exists to
+prevent — so the backstop must sit well above the longest batch the dial can
+buy, not near it.
 """
 
 
