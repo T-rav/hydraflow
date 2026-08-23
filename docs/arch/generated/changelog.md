@@ -64,6 +64,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
 - `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
 - `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
+- `9ada8c2` — fix(arch): stop .meta.json tracking the branch's commit graph *(2026-08-23)*
+- `e865bb4` — fix(director): the Plan canary's worker tree contradicted its own receipts (#11541) (#11662) *(2026-08-23)*
 - `0dec4e5` — fix(path-membership): make module-path gates follow a module into a package, and close the class (#11669) (#11672) *(2026-08-23)*
 - `b184aea` — fix(credit-guard): land the missing #6855 guard, make the credit audit package-aware, and sweep the class (#11670) *(2026-08-23)*
 - `ed1d8f4` — refactor(health-monitor,agent): decompose two god classes into mixin packages (#11665) *(2026-08-22)*
