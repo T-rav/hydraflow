@@ -2,9 +2,6 @@ classes:
   src/adr_reviewer.py:ADRCouncilReviewer:
     loc: 833
     methods: 29
-  src/agent.py:AgentRunner:
-    loc: 1388
-    methods: 42
   src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop:
     loc: 644
     methods: 18
@@ -19,9 +16,6 @@ classes:
     methods: 23
   src/epic.py:EpicManager:
     loc: 898
-    methods: 36
-  src/health_monitor_loop.py:HealthMonitorLoop:
-    loc: 1506
     methods: 36
   src/issue_store.py:IssueStore:
     loc: 726
@@ -70,12 +64,11 @@ comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC o
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: decomposed ImplementPhase and FakeGitHub into per-surface mixin\
-  \ packages (batch 3, Refs #11547)"
+  \ PR. Last moved: decomposed HealthMonitorLoop and AgentRunner into mixin packages\
+  \ (#11547 batch 4)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109
-  src/health_monitor_loop.py: 1753
   src/models.py: 2950
   src/repo_wiki.py: 1594
   src/service_registry.py: 1782

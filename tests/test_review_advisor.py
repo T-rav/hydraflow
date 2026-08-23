@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ from review_advisor import (
     PreFlightAdvisor,
     PreFlightInput,
     ReviewPlan,
+    _matches_critical,
     build_surface_config,
     compute_blast_radius,
     is_advisor_enabled,
@@ -225,6 +227,67 @@ class TestShouldPreFlight:
     def test_review_phase_self_modification_critical(self):
         assert "src/review_phase.py" in CRITICAL_PATHS
         assert "src/review_advisor.py" in CRITICAL_PATHS
+
+    @pytest.mark.parametrize(
+        ("entry", "member"),
+        [
+            pytest.param(
+                "src/review_phase.py",
+                "src/review_phase/_ci.py",
+                id="exact-entry-that-became-a-package",
+            ),
+            pytest.param(
+                "src/*_loop.py",
+                "src/health_monitor_loop/_heavy.py",
+                id="loop-glob-entry-that-became-a-package",
+            ),
+        ],
+    )
+    def test_a_decomposed_module_keeps_its_critical_classification(
+        self, entry: str, member: str
+    ) -> None:
+        """A critical module stays critical after it is split into a package.
+
+        This is the ratchet's blind spot, and it has already cost twice.
+        ``CRITICAL_PATHS_EXACT`` still lists ``src/review_phase.py``, which
+        stopped existing when that module became a package — the entry matched
+        NOTHING and the module quietly dropped to "not critical". The batch-4
+        decomposition (#11547) then did the same to 11 of
+        ``health_monitor_loop``'s 12 modules; only ``_loop.py`` survived, by
+        accident of ending in ``_loop.py``.
+
+        Nothing reddened either time: blast radius fell from high to low,
+        ``min_review_passes_for_blast_radius`` dropped 3 passes to 1, and
+        pre-flight stopped being forced. Membership must follow the MODULE, so
+        a package member classifies exactly as its single-file self did.
+        """
+        del entry  # named in the ids so a reader sees which entry is at stake
+        assert _matches_critical(member), (
+            f"{member} no longer classifies as a critical path. A module on "
+            "the critical list must keep its blast radius when it is "
+            "decomposed into a package — otherwise the decomposition silently "
+            "downgrades how hard the machine reviews it."
+        )
+
+    def test_every_exact_critical_path_resolves_on_disk(self) -> None:
+        """No entry may name a path that does not exist, in either shape.
+
+        A stale entry is not inert — it is a critical module that stopped
+        being treated as one, with no failing test to say so. Accepting either
+        shape (``src/x.py`` or the package ``src/x/``) is what lets the list
+        keep naming the MODULE while the layout moves under it.
+        """
+        src_root = Path(__file__).resolve().parent.parent / "src"
+        missing = sorted(
+            entry
+            for entry in CRITICAL_PATHS
+            if not (src_root.parent / entry).is_file()
+            and not (src_root.parent / entry).with_suffix("").is_dir()
+        )
+        assert not missing, (
+            f"CRITICAL_PATHS_EXACT entries that resolve to nothing: {missing}. "
+            "Each must be a real module — a file, or the package it became."
+        )
 
     def test_composite_trigger_delegates_to_should_pre_flight(self, monkeypatch):
         monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)

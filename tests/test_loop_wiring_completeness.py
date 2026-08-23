@@ -1,6 +1,7 @@
 """Factory validation: every BaseBackgroundLoop subclass is properly wired.
 
-Auto-discovers loop classes from ``src/*_loop.py``
+Auto-discovers loop classes from every loop unit under ``src/`` — a
+``*_loop.py`` module OR a ``*_loop/`` package (``tests.loop_module_scan``) —
 and verifies they appear in:
 
 1. ``orchestrator.py`` ``bg_loop_registry`` dict
@@ -19,6 +20,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+from tests.loop_module_scan import loop_classes, loop_text, loop_units
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 
@@ -44,30 +47,32 @@ _CONSTANTS_JS_SKIP: set[str] = set()
 def _discover_loops() -> dict[str, str]:
     """Return {worker_name: class_name} for all BaseBackgroundLoop subclasses.
 
-    Scans ``src/*_loop.py`` for classes extending ``BaseBackgroundLoop``,
-    then extracts the ``worker_name=`` string from the ``super().__init__()`` call.
-    """
-    loop_files = sorted(SRC.glob("*_loop.py"))
+    Walks every loop unit (module or package) for classes extending
+    ``BaseBackgroundLoop``, then extracts the ``worker_name=`` string from the
+    ``super().__init__()`` call.
 
-    result: dict[str, str] = {}
-    class_re = re.compile(r"class\s+(\w+)\s*\(.*BaseBackgroundLoop.*\)")
+    Class discovery is AST-based via ``loop_classes``: the old single-line
+    ``class X(...BaseBackgroundLoop...)`` regex cannot match a decomposed loop,
+    whose class header spans several lines because it lists its mixins — it
+    would silently yield zero entries and pass without enforcing anything.
+    """
     # Widened from ``\w+`` to ``[\w-]+`` so hyphenated worker_name values
-    # (e.g. legacy ``diagram-loop``) are not silently skipped by discovery —
-    # a regex that didn't match would yield zero entries for that loop and
-    # the test would pass without enforcing any of the four wiring sites.
+    # (e.g. legacy ``diagram-loop``) are not silently skipped by discovery.
     # See PR #8449 (PricingRefreshLoop) for the catch.
     worker_re = re.compile(r'worker_name\s*=\s*["\']([\w-]+)["\']')
 
-    for path in loop_files:
-        text = path.read_text()
-        class_match = class_re.search(text)
-        worker_match = worker_re.search(text)
-        if class_match and worker_match:
+    result: dict[str, str] = {}
+    for unit in loop_units(SRC):
+        classes = loop_classes(unit)
+        if not classes:
+            continue
+        worker_match = worker_re.search(loop_text(unit))
+        if worker_match:
             # Normalise hyphens → underscores so callers can match against
             # the underscore-canonical registry keys regardless of which
             # convention a particular loop adopted in its worker_name.
             worker_name = worker_match.group(1).replace("-", "_")
-            result[worker_name] = class_match.group(1)
+            result[worker_name] = classes[0].node.name
 
     return result
 

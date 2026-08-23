@@ -368,7 +368,7 @@ The plan->implement->review pipeline driving each issue from hydraflow-ready thr
 **Module globs**
 
 - `src/orchestrator.py`
-- `src/agent.py`
+- `src/agent/`
 - `src/planner.py`
 - `src/reviewer.py`
 - `src/triage_phase.py`

@@ -282,7 +282,7 @@ rolling-24h speed) and recovery restores the pre-window operator intent.
 Six patterns pass `make quality-lite` locally but go red on the first CI
 round, each costing a heal round-trip. All are already CI-guarded — the win
 is pre-empting them at build time. The implementer prompt now carries these
-as a "Pre-push self-check" section (`src/agent.py:_SELF_CHECK_CHECKLIST`);
+as a "Pre-push self-check" section (`src/agent/_runner.py:_SELF_CHECK_CHECKLIST`);
 the same list, with the issue references that surfaced each, lives in
 [`gotchas.md`](gotchas.md) ("Pre-push self-check — six recurring avoidable CI reds").
 

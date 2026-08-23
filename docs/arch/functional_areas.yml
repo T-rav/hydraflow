@@ -261,7 +261,7 @@ areas:
       orchestrator.py rather than as separate BaseBackgroundLoop subclasses.
     modules:
       - src/orchestrator.py
-      - src/agent.py
+      - src/agent/
       - src/planner.py
       - src/reviewer.py
       - src/triage_phase.py

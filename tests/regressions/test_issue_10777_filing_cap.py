@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.loop_module_scan import loop_text, loop_units
+
 _SRC = Path(__file__).resolve().parents[2] / "src"
 
 # The single canonical issue-creation Port method (``ports.py`` / ``pr_manager``);
@@ -55,25 +57,25 @@ _CAP_MARKERS = (
 # list is permanent (unlike the ratchet below); a loop leaves it only if its
 # filing shape changes.
 _PROVABLY_BOUNDED: dict[str, str] = {
-    "branch_protection_auditor_loop.py": "single create_issue, no loop; deduped on one drift report",
-    "ci_monitor_loop.py": "single create_issue guarded by the _open_issue once-flag",
-    "cost_budget_watcher_loop.py": "single create_issue on a fixed title, deduped",
-    "diagram_loop.py": "single create_issue; all unassigned items folded into one body",
-    "fail_open_monitor_loop.py": "files at most the one latest breach day, deduped by fingerprint",
-    "fake_coverage_auditor_loop.py": "iterates the fixed Fake* class roster; rolled into one body per (fake,kind)",
-    "gate_activator_loop.py": "single create_issue; all proposals folded into one body, deduped",
-    "health_monitor_loop.py": "iterates the fixed background-loop registry; per-site dedup + restart-first",
-    "issue_refinement_loop.py": "single rolling digest issue, create-once dedup",
-    "live_corpus_replay_loop.py": "at most 2 rolling issues (drift rollup + escalation), never a per-finding loop",
-    "pricing_refresh_loop.py": "at most one issue/tick (parse OR bounds), violations folded into one body",
-    "rails_drift_caretaker_loop.py": "iterates the fixed 3-class finding taxonomy (missing-layer/coverage-floor/missing-gate-script) per repo, each deduped by (repo, finding_class)",
-    "rc_budget_loop.py": "signals are a subset of {median, spike}, so <=2 create_issue/tick",
-    "report_issue_loop.py": "processes exactly one peeked report per tick; budget sweep is one deduped call",
-    "retrospective_loop.py": "bounded by the fixed review-category taxonomy, per-category dedup",
-    "second_order_vitals_loop.py": "at most one alarm, filed only on the transition into diverging",
-    "staging_bisect_loop.py": "one red SHA processed per tick; mutually-exclusive filing branches",
-    "staging_promotion_loop.py": "one promotion PR per tick; rolling issue + streak escalation, both deduped",
-    "trust_fleet_sanity_loop.py": "bounded by fixed fleet topology x anomaly kinds, per-anomaly dedup",
+    "branch_protection_auditor_loop": "single create_issue, no loop; deduped on one drift report",
+    "ci_monitor_loop": "single create_issue guarded by the _open_issue once-flag",
+    "cost_budget_watcher_loop": "single create_issue on a fixed title, deduped",
+    "diagram_loop": "single create_issue; all unassigned items folded into one body",
+    "fail_open_monitor_loop": "files at most the one latest breach day, deduped by fingerprint",
+    "fake_coverage_auditor_loop": "iterates the fixed Fake* class roster; rolled into one body per (fake,kind)",
+    "gate_activator_loop": "single create_issue; all proposals folded into one body, deduped",
+    "health_monitor_loop": "iterates the fixed background-loop registry; per-site dedup + restart-first",
+    "issue_refinement_loop": "single rolling digest issue, create-once dedup",
+    "live_corpus_replay_loop": "at most 2 rolling issues (drift rollup + escalation), never a per-finding loop",
+    "pricing_refresh_loop": "at most one issue/tick (parse OR bounds), violations folded into one body",
+    "rails_drift_caretaker_loop": "iterates the fixed 3-class finding taxonomy (missing-layer/coverage-floor/missing-gate-script) per repo, each deduped by (repo, finding_class)",
+    "rc_budget_loop": "signals are a subset of {median, spike}, so <=2 create_issue/tick",
+    "report_issue_loop": "processes exactly one peeked report per tick; budget sweep is one deduped call",
+    "retrospective_loop": "bounded by the fixed review-category taxonomy, per-category dedup",
+    "second_order_vitals_loop": "at most one alarm, filed only on the transition into diverging",
+    "staging_bisect_loop": "one red SHA processed per tick; mutually-exclusive filing branches",
+    "staging_promotion_loop": "one promotion PR per tick; rolling issue + streak escalation, both deduped",
+    "trust_fleet_sanity_loop": "bounded by fixed fleet topology x anomaly kinds, per-anomaly dedup",
 }
 
 # Ratchet: loops KNOWN to file per-finding with no per-tick cap as of #10777 that
@@ -84,27 +86,47 @@ _PROVABLY_BOUNDED: dict[str, str] = {
 # is removed (enforced below), not left to linger.
 _GRANDFATHERED_UNCAPPED: frozenset[str] = frozenset(
     {
-        "adr_conformance_loop.py",
-        "corpus_learning_loop.py",
-        "flake_tracker_loop.py",
+        "adr_conformance_loop",
+        "corpus_learning_loop",
+        "flake_tracker_loop",
     }
 )
 
 
 def _iter_loop_files() -> list[Path]:
-    return sorted(_SRC.glob("*_loop.py"))
+    """Every background loop, as the unit that identifies it.
+
+    Units, not files: a decomposed loop (``src/foo_loop/``) has its filing
+    sites spread across mixins, and a ``*_loop.py`` glob would drop it from
+    this audit entirely — the loop would read as "not a filing loop" and its
+    ``_PROVABLY_BOUNDED`` entry would go stale.
+    """
+    return loop_units(_SRC)
 
 
 def _is_filing_loop(path: Path) -> bool:
-    return _CREATE_ISSUE_CALL in path.read_text(encoding="utf-8")
+    return _CREATE_ISSUE_CALL in loop_text(path)
 
 
 def _iter_filing_loops() -> list[Path]:
     return [p for p in _iter_loop_files() if _is_filing_loop(p)]
 
 
+def _unit_for(name: str) -> Path | None:
+    """Resolve a loop NAME to its unit, whatever shape that loop has on disk.
+
+    The allowlists are keyed by loop name, and a name is not a path: a
+    decomposed loop is a directory, so ``_SRC / name`` is neither its module
+    nor its package. Building the path by hand yields something that does not
+    exist, and ``loop_text`` on a missing directory returns "" rather than
+    raising — which turned the shrink-only half of this ratchet into an
+    unconditional pass. Resolve through discovery instead.
+    """
+    return {unit.stem: unit for unit in _iter_loop_files()}.get(name)
+
+
 def _has_cap(path: Path) -> bool:
-    text = path.read_text(encoding="utf-8")
+    text = loop_text(path)
     return any(marker in text for marker in _CAP_MARKERS)
 
 
@@ -112,7 +134,7 @@ def test_every_filing_loop_is_capped_or_provably_bounded() -> None:
     """No filing loop may be uncapped unless it is documented-bounded/grandfathered."""
     offenders: list[str] = []
     for path in _iter_filing_loops():
-        name = path.name
+        name = path.stem
         if _has_cap(path):
             continue
         if name in _PROVABLY_BOUNDED:
@@ -136,7 +158,7 @@ def test_every_filing_loop_is_capped_or_provably_bounded() -> None:
 
 def test_provably_bounded_allowlist_has_no_stale_entries() -> None:
     """Every allowlisted loop must still exist and still be a filing loop."""
-    filing = {p.name for p in _iter_filing_loops()}
+    filing = {p.stem for p in _iter_filing_loops()}
     stale = sorted(set(_PROVABLY_BOUNDED) - filing)
     assert not stale, (
         f"{stale} are on `_PROVABLY_BOUNDED` but no longer call create_issue "
@@ -146,14 +168,21 @@ def test_provably_bounded_allowlist_has_no_stale_entries() -> None:
 
 def test_grandfathered_loops_stay_uncapped_until_removed() -> None:
     """Ratchet-down: a grandfathered loop that gains a cap must leave the list."""
-    filing = {p.name for p in _iter_filing_loops()}
+    filing = {p.stem for p in _iter_filing_loops()}
     stale = sorted(_GRANDFATHERED_UNCAPPED - filing)
     assert not stale, (
         f"{stale} are grandfathered but no longer call create_issue. Remove "
         "them from `_GRANDFATHERED_UNCAPPED`."
     )
+    units = {name: _unit_for(name) for name in _GRANDFATHERED_UNCAPPED}
+    unresolved = sorted(name for name, unit in units.items() if unit is None)
+    assert not unresolved, (
+        f"{unresolved} are grandfathered but no loop of that name exists — "
+        "this check cannot see them and would pass vacuously. Remove the "
+        "stale entries, or fix the name."
+    )
     now_capped = sorted(
-        name for name in _GRANDFATHERED_UNCAPPED if _has_cap(_SRC / name)
+        name for name, unit in units.items() if unit is not None and _has_cap(unit)
     )
     assert not now_capped, (
         f"{now_capped} now carry a per-tick filing cap — remove them from "
@@ -171,9 +200,12 @@ def test_bounded_and_grandfathered_lists_are_disjoint() -> None:
 
 def test_audit_finds_the_known_filing_loop_population() -> None:
     """Sanity floor: the scan must still see the filing-loop fleet (not 0)."""
-    filing = {p.name for p in _iter_filing_loops()}
+    filing = {p.stem for p in _iter_filing_loops()}
     # WikiRotDetectorLoop is the #10767 exemplar and must always be captured.
-    assert "wiki_rot_detector_loop.py" in filing
+    # health_monitor_loop is the decomposed-package exemplar: it files from a
+    # mixin, so a file-glob scan would drop it and this floor would not notice.
+    assert "wiki_rot_detector_loop" in filing
+    assert "health_monitor_loop" in filing
     assert len(filing) >= 30, (
         f"only {len(filing)} filing loops detected — the create_issue scan may "
         "have regressed; expected the full ~34-loop fleet."

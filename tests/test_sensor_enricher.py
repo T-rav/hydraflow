@@ -65,6 +65,26 @@ class TestFileChangedTrigger:
         trigger = FileChanged("src/*.py")
         assert not trigger.matches(raw_output="", changed_files=[])
 
+    def test_tuple_pattern_matches_any_member(self) -> None:
+        """One concern, several shapes: a loop is a module AND a package.
+
+        ``src/*_loop.py`` alone stops firing the moment a loop is decomposed
+        (#11547), which is silent — the hint just never appears again.
+        """
+        trigger = FileChanged(("src/*_loop.py", "src/*_loop/*"))
+        assert trigger.matches(
+            raw_output="",
+            changed_files=[Path("src/log_ingest_loop.py")],
+        )
+        assert trigger.matches(
+            raw_output="",
+            changed_files=[Path("src/health_monitor_loop/_heavy.py")],
+        )
+        assert not trigger.matches(
+            raw_output="",
+            changed_files=[Path("src/models.py")],
+        )
+
     def test_posix_path_conversion(self) -> None:
         """Windows-style paths should still match POSIX globs."""
         trigger = FileChanged("src/models.py")

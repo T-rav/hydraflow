@@ -54,19 +54,24 @@ class FileChanged(RuleTrigger):
     """Fire when any changed file matches a glob pattern.
 
     Patterns are matched against forward-slash POSIX paths so globs work
-    consistently on Windows and *nix. Use ``src/*_loop.py`` for background
-    loop modules, ``src/models.py`` for exact files, etc.
+    consistently on Windows and *nix. Use ``src/models.py`` for exact files.
+
+    *pattern* accepts a tuple when one concern spans more than one shape — a
+    background loop is ``src/*_loop.py`` as a single module and
+    ``src/*_loop/*`` once decomposed into a package (#11547), and a rule that
+    names only the first silently stops firing for the second.
     """
 
-    pattern: str
+    pattern: str | tuple[str, ...]
 
     def matches(self, *, raw_output: str, changed_files: Sequence[Path]) -> bool:
         del raw_output  # unused for this trigger type
-        for path in changed_files:
-            posix = path.as_posix()
-            if fnmatch.fnmatch(posix, self.pattern):
-                return True
-        return False
+        patterns = (self.pattern,) if isinstance(self.pattern, str) else self.pattern
+        return any(
+            fnmatch.fnmatch(path.as_posix(), pattern)
+            for path in changed_files
+            for pattern in patterns
+        )
 
 
 @dataclass(frozen=True)

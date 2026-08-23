@@ -12,12 +12,11 @@ shrink. See docs/superpowers/specs/2026-06-30-loop-fitness-scorecard-design.md.
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src"
+from tests.loop_module_scan import all_loop_classes
 
-_CLASS_RE = re.compile(r"class\s+(\w+)\s*\(.*BaseBackgroundLoop.*\)")
+SRC = Path(__file__).resolve().parent.parent / "src"
 
 # Pre-existing loops awaiting real fitness. Populate from Step 3. SHRINKS only.
 _GRANDFATHERED: frozenset[str] = frozenset(
@@ -70,31 +69,14 @@ _GRANDFATHERED: frozenset[str] = frozenset(
 
 def _loops_missing_fitness() -> list[str]:
     missing: list[str] = []
-    for path in sorted(SRC.glob("*_loop.py")):
-        text = path.read_text()
-        if not _CLASS_RE.search(text):
-            continue
-        tree = ast.parse(text)
-        loop_classes = [
-            node
-            for node in tree.body
-            if isinstance(node, ast.ClassDef)
-            and any(
-                base_id == "BaseBackgroundLoop"
-                for base_id in (
-                    getattr(b, "id", None) or getattr(b, "attr", None)
-                    for b in node.bases
-                )
-            )
-        ]
-        for cls in loop_classes:
-            has_fitness = any(
-                isinstance(n, ast.AsyncFunctionDef | ast.FunctionDef)
-                and n.name == "loop_fitness"
-                for n in cls.body
-            )
-            if not has_fitness:
-                missing.append(path.stem)
+    for cls in all_loop_classes(SRC):
+        has_fitness = any(
+            isinstance(n, ast.AsyncFunctionDef | ast.FunctionDef)
+            and n.name == "loop_fitness"
+            for n in cls.node.body
+        )
+        if not has_fitness:
+            missing.append(cls.loop_name)
     return [m for m in missing if m not in _GRANDFATHERED]
 
 

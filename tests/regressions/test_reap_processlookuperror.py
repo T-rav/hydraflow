@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.loop_module_scan import loop_source_files
+
 SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"
 sys.path.insert(0, str(SRC_DIR))
 
@@ -199,7 +201,7 @@ class _UnguardedProcKillFinder(ast.NodeVisitor):
 
 def test_no_loop_reaps_proc_kill_outside_processlookup_suppress() -> None:
     offenders: dict[str, list[int]] = {}
-    for path in sorted(SRC_DIR.rglob("*_loop.py")):
+    for path in loop_source_files(SRC_DIR):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         finder = _UnguardedProcKillFinder()
         finder.visit(tree)

@@ -15,7 +15,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from pydantic import BaseModel, Field
@@ -243,7 +243,6 @@ CRITICAL_PATHS_EXACT: frozenset[str] = frozenset(
     {
         "src/orchestrator.py",
         "src/service_registry.py",
-        "src/coordinator.py",
         "src/review_phase.py",
         "src/review_advisor.py",
     }
@@ -253,16 +252,46 @@ CRITICAL_PATH_GLOBS: tuple[str, ...] = (
     "src/persistence/*",
     "src/state/*",
     "src/*_loop.py",
+    # A loop decomposed into a package (#11547) is the same blast radius it
+    # was as one file. ``fnmatch``'s ``*`` crosses ``/``, so this also covers
+    # arbitrarily nested members.
+    "src/*_loop/*",
     # The orchestrator's surfaces moved into a mixin family (#11547); a change
     # there is the same blast radius it was when it lived in orchestrator.py.
     "src/orchestrator_*.py",
 )
 
 
+def _module_identities(path: str) -> tuple[str, ...]:
+    """*path* plus the single-file paths it would have had before decomposition.
+
+    ``src/review_phase/_ci.py`` yields ``src/review_phase.py``;
+    ``src/health_monitor_loop/_heavy.py`` yields
+    ``src/health_monitor_loop.py``. Walking every ancestor keeps nested
+    packages covered too.
+
+    Without this, a module listed as critical stops being critical the moment
+    it is split into a package, and NOTHING goes red — the loop simply gets
+    reviewed less hard than the day before. That has now happened twice:
+    ``src/review_phase.py`` has matched nothing since it became a package, and
+    the batch-4 decomposition took 11 of ``health_monitor_loop``'s 12 modules
+    with it (only ``_loop.py`` still matched ``src/*_loop.py``, by accident of
+    its name). Membership follows the MODULE, not the file layout.
+    """
+    identities = [path]
+    parent = PurePosixPath(path).parent
+    while parent.name and parent.as_posix() != "src":
+        identities.append(f"{parent.as_posix()}.py")
+        parent = parent.parent
+    return tuple(identities)
+
+
 def _matches_critical(path: str) -> bool:
-    if path in CRITICAL_PATHS_EXACT:
-        return True
-    return any(fnmatch.fnmatch(path, glob) for glob in CRITICAL_PATH_GLOBS)
+    return any(
+        candidate in CRITICAL_PATHS_EXACT
+        or any(fnmatch.fnmatch(candidate, glob) for glob in CRITICAL_PATH_GLOBS)
+        for candidate in _module_identities(path)
+    )
 
 
 # Re-exported for tests / external membership checks.

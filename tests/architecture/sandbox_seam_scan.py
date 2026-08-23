@@ -28,6 +28,8 @@ from pathlib import Path
 # Call names that spawn an LLM or subprocess. ``run_subprocess_result`` is
 # subprocess_util's non-raising twin of ``run_subprocess`` — same spawn class,
 # included so switching a caller between the two cannot dodge the guard.
+from tests.loop_module_scan import loop_source_files
+
 SPAWN_PRIMITIVES: frozenset[str] = frozenset(
     {
         "run_lightweight_agent",
@@ -43,13 +45,17 @@ SPAWN_PRIMITIVES: frozenset[str] = frozenset(
 def spawn_target_files(repo_root: Path) -> list[Path]:
     """Enumerate the loop + runner modules the guard scans.
 
-    Scope per #10012: ``src/*_loop.py``, ``src/*_runner.py``, and everything
+    Scope per #10012: every background loop, ``src/*_runner.py``, and everything
     under ``src/runners/``. Non-recursive at the ``src`` top level, so
     ``src/mockworld/**`` (the Fakes — sandbox-side seam machinery itself)
     stays out of scope.
+
+    A loop is enumerated as a UNIT: a decomposed loop (``src/foo_loop/``) still
+    contributes all of its files, so relocating a spawn call into a mixin
+    cannot walk it out of this guard's scope.
     """
     src = repo_root / "src"
-    files: set[Path] = set(src.glob("*_loop.py"))
+    files: set[Path] = set(loop_source_files(src))
     files.update(src.glob("*_runner.py"))
     files.update(p for p in (src / "runners").glob("**/*.py"))
     return sorted(files)
@@ -89,6 +95,30 @@ class _SpawnCallVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def _distinct_owner(first: str, second: str) -> bool:
+    """True when two paths sharing a seam key are genuinely different modules.
+
+    Two private members of the SAME package legitimately share the package's
+    key — that is the point of ``seam_key``, not a collision.
+    """
+    return Path(first).parent != Path(second).parent
+
+
+def seam_key(rel_path: str) -> str:
+    """The SANDBOX_SEAMS key namespace for a repo-relative source path.
+
+    Normally the module stem. A module that is a PRIVATE member of a package
+    (``health_monitor_loop/_freshness.py``, or the package ``__init__``) keys on
+    the PACKAGE instead: after a god-class decomposition the loop's spawn sites
+    scatter across its mixins, but the thing that declares a seam is still the
+    loop, and ``__init__`` alone is not even a unique name (Refs #11547).
+    """
+    path = Path(rel_path)
+    if path.stem == "__init__" or path.stem.startswith("_"):
+        return path.parent.name
+    return path.stem
+
+
 def scan_spawn_signatures(repo_root: Path) -> dict[str, int]:
     """Return ``{signature: count}`` for every spawn call site in scope.
 
@@ -101,8 +131,12 @@ def scan_spawn_signatures(repo_root: Path) -> dict[str, int]:
     stems_seen: dict[str, str] = {}
     for path in spawn_target_files(repo_root):
         rel = path.relative_to(repo_root).as_posix()
-        stem = path.stem
-        if stem in stems_seen and stems_seen[stem] != rel:
+        stem = seam_key(rel)
+        if (
+            stem in stems_seen
+            and stems_seen[stem] != rel
+            and _distinct_owner(stems_seen[stem], rel)
+        ):
             msg = (
                 f"module stem collision: {stems_seen[stem]} vs {rel} — "
                 "SANDBOX_SEAMS keys are module stems and must stay unique"
@@ -245,7 +279,7 @@ def scan_runner_constructions(repo_root: Path) -> dict[str, int]:
 
 def signature_module(signature: str) -> str:
     """Module stem for a signature (the SANDBOX_SEAMS key namespace)."""
-    return Path(signature.split("::", 1)[0]).stem
+    return seam_key(signature.split("::", 1)[0])
 
 
 def undeclared_signatures(
