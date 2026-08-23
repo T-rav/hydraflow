@@ -87,10 +87,20 @@ class _PoolOrigin:
     def __init__(self) -> None:
         self.hosts: list[str] = []
         self.rate_limited: set[str] = set()
+        self.pool_timeout: set[str] = set()
+        self.unreachable: set[str] = set()
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
         host = urlsplit(str(request.url)).netloc
         await request.aread()
+        if host in self.pool_timeout:
+            # The gateway's OWN connection pool, exhausted before any upstream
+            # was asked — so the origin records nothing.
+            raise httpx.PoolTimeout("no connection slot available")
+        if host in self.unreachable:
+            # A genuine transport failure reaching the upstream. Also recorded
+            # as un-reached, but it IS a fact about the account.
+            raise httpx.ConnectError("upstream refused the connection")
         self.hosts.append(host)
         if host in self.rate_limited:
             # A real 429, forwarded verbatim: the proxy never retries it, and the
@@ -454,3 +464,63 @@ async def test_a_real_upstream_failure_does_open_the_circuit(pool: _Pool) -> Non
     )
 
     assert served["circuit_state"] == "open"
+
+
+async def test_the_gateways_own_connection_pool_exhaustion_is_not_upstream_evidence(
+    pool: _Pool,
+) -> None:
+    """A pool timeout is THIS gateway running out of slots, not the account failing.
+
+    Left as evidence, a client that opens enough concurrent streams could
+    manufacture the ``unavailable`` row that licenses a fallback hop — and open
+    the account's circuit while it was at it. The upstream is never asked, so
+    the origin records nothing.
+    """
+    pool.origin.pool_timeout.add(_PRIMARY_HOST)
+    minted = await pool.mint("attempt-pool")
+    token = str(minted["token"])
+
+    statuses = [await pool.turn(token) for _ in range(3)]
+    accounts = await pool.accounts()
+    served = next(
+        account
+        for account in accounts["accounts"]
+        if account["account_id"] == _PRIMARY_ID
+    )
+
+    assert (statuses, served["circuit_state"], pool.origin.hosts) == (
+        [503, 503, 503],
+        "closed",
+        [],
+    )
+
+
+async def test_a_pool_timeout_licenses_no_fallback_hop(pool: _Pool) -> None:
+    pool.origin.pool_timeout.add(_PRIMARY_HOST)
+    first = await pool.mint("attempt-pool")
+    await pool.turn(str(first["token"]))
+    await pool.revoke(str(first["key_id"]))
+
+    second = await pool.mint(
+        "attempt-2",
+        retry_of_mint_decision_id=first["decision"]["mint_decision_id"],
+    )
+
+    assert second["decision"]["reason"] == "fallback-not-authorised"
+
+
+async def test_a_genuine_connect_failure_is_still_upstream_evidence(
+    pool: _Pool,
+) -> None:
+    """The contrast: an upstream that cannot be reached IS what fallback is for."""
+    pool.origin.unreachable.add(_PRIMARY_HOST)
+    first = await pool.mint("attempt-connect")
+    await pool.turn(str(first["token"]))
+    await pool.revoke(str(first["key_id"]))
+
+    second = await pool.mint(
+        "attempt-2",
+        retry_of_mint_decision_id=first["decision"]["mint_decision_id"],
+    )
+
+    assert second["decision"]["account_id"] == _SECONDARY_ID

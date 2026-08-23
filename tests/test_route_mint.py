@@ -968,10 +968,17 @@ def test_an_unknown_citation_holds_rather_than_starting_over() -> None:
     assert response.decision.reason == FallbackRefusal.LINEAGE_UNKNOWN.value
 
 
+def _lost_response(store: RouteMintStore, key_store: VirtualKeyStore) -> str:
+    """Mint, revoke, and record NO terminal outcome — a response that never arrived."""
+    first = store.resolve_and_mint(_request())
+    key_store.revoke(str(first.key_id))
+    return first.decision.mint_decision_id
+
+
 def test_a_supersede_re_mints_on_the_same_account() -> None:
     """Lost-response recovery is a replacement, not a hop."""
-    store, _state, terminals, key_store = _hop_setup()
-    cited = _first_hop(store, terminals, key_store, condition=None)
+    store, _state, _terminals, key_store = _hop_setup()
+    cited = _lost_response(store, key_store)
 
     second = store.resolve_and_mint(
         _request(mint_attempt_id="att-2", supersedes_mint_decision_id=cited)
@@ -980,10 +987,23 @@ def test_a_supersede_re_mints_on_the_same_account() -> None:
     assert second.decision.account_id == legacy_account_id(ProviderBinding.ZAI_HARNESS)
 
 
+def test_a_supersede_of_a_decision_that_reached_an_upstream_is_refused() -> None:
+    """Terminal evidence proves the response was not lost, so nothing to recover."""
+    store, _state, terminals, key_store = _hop_setup()
+    cited = _first_hop(store, terminals, key_store, condition=None)
+
+    second = store.resolve_and_mint(
+        _request(mint_attempt_id="att-2", supersedes_mint_decision_id=cited)
+    )
+
+    assert second.decision.reason == FallbackRefusal.RESPONSE_WAS_NOT_LOST.value
+
+
 def test_a_supersede_before_the_prior_key_is_revoked_is_refused() -> None:
     """Revoke-then-remint: never two live leases for one dispatch."""
-    store, _state, terminals, key_store = _hop_setup()
-    cited = _first_hop(store, terminals, key_store, condition=None, release=False)
+    store, _state, _terminals, key_store = _hop_setup()
+    del key_store
+    cited = store.resolve_and_mint(_request()).decision.mint_decision_id
 
     second = store.resolve_and_mint(
         _request(mint_attempt_id="att-2", supersedes_mint_decision_id=cited)

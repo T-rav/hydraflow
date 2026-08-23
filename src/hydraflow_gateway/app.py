@@ -89,16 +89,31 @@ _ADMIN_REJECTION_STATUS: dict[AdminRejection, int] = {
 }
 
 
-def _administer(mutate: Callable[[], _AdminResult]) -> _AdminResult:
-    """Run one administrative mutation, mapping its refusal onto a status code."""
+async def _administer(mutate: Callable[[], _AdminResult]) -> _AdminResult:
+    """Run one administrative mutation OFF the loop, mapping refusals to statuses.
+
+    ``asyncio.to_thread`` for the same reason ADR-0140's policy mutation uses it:
+    the write takes a file lock with a ten-second timeout whose poll is a
+    blocking ``time.sleep``, then folds and re-hashes the chain, then fsyncs an
+    append. On the loop, a contended lock would stall every in-flight LLM stream
+    this gateway is proxying — the frequency of admin mutations bounds how often
+    that happens, not how long it lasts.
+    """
     try:
-        return mutate()
+        return await asyncio.to_thread(mutate)
     except AccountAdminRejected as exc:
         raise HTTPException(
             status_code=_ADMIN_REJECTION_STATUS.get(
                 exc.rejection, status.HTTP_422_UNPROCESSABLE_CONTENT
             ),
             detail=exc.rejection.value,
+        ) from exc
+    except OSError as exc:
+        # A lock timeout or an unwritable chain. The mutation did not commit, and
+        # the caller can retry — which is a 503, not a 500 with a stack trace.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="account-state-storage-unavailable",
         ) from exc
 
 
@@ -402,7 +417,7 @@ def create_app(
         # matching ADR-0140's policy workspace: one convention for "the revision
         # I composed this against" across the whole routing control plane, and
         # the stale case is a 409 with no partial write either way.
-        result = _administer(
+        result = await _administer(
             lambda: resolved_admin.set_state(
                 account_id,
                 payload.administrative_state,
@@ -428,7 +443,7 @@ def create_app(
         # The revocation happens *inside* the audited mutation, after its
         # revision check: a stale request must revoke nothing, and a committed
         # one must record the ids it actually ended.
-        result = _administer(
+        result = await _administer(
             lambda: resolved_admin.record_revocation(
                 account_id,
                 expected_revision=payload.expected_revision,
@@ -448,7 +463,9 @@ def create_app(
     async def read_account_audit(
         limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
     ) -> AccountAdminAuditView:
-        return audit_view(resolved_admin, limit=limit)
+        # Off the loop too: this is the console's 30-second poll, and a cache
+        # miss walks and re-hashes the whole chain.
+        return await asyncio.to_thread(audit_view, resolved_admin, limit=limit)
 
     @app.get("/control/v2/routes/active", response_model=ActiveRoutesView)
     async def read_active_routes() -> ActiveRoutesView:

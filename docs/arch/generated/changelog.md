@@ -7,6 +7,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W34
 
 - `c21a5c0` — wip(director): Fable P3 checkpoint before make quality *(2026-08-22)*
+- `964ea09` — docs(adr-0142): cite the receipt the Divergence line rests on (P1.17) *(2026-08-22)*
 - `b36bf59` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) *(2026-08-22)*
 - `f714ecf` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) (#11653) (#11653) *(2026-08-22)*
 - `1363268` — fix(erosion): stop mass.yaml's numbers rotting — targeted --only regen, method-axis growth, and drop the field nobody read (#11652) (#11652) *(2026-08-22)*

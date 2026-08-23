@@ -134,7 +134,14 @@ def authenticate_operator(
     if not expected:
         return None
     presented = _bearer_token(authorization)
-    if presented is None or not secrets.compare_digest(presented, expected):
+    # Compared as BYTES. ``compare_digest`` on ``str`` requires both sides to be
+    # ASCII-only and raises ``TypeError`` otherwise, so a bearer header carrying
+    # one non-ASCII character would surface as an unhandled 500 rather than the
+    # 401 it is — and a 500 on an auth path is both a worse answer and a signal
+    # an attacker can probe with.
+    if presented is None or not secrets.compare_digest(
+        presented.encode("utf-8"), expected.encode("utf-8")
+    ):
         return None
     return OperatorIdentity(
         actor=(environment.get(OPERATOR_ID_ENV, "").strip() or DEFAULT_OPERATOR_ID)[:64]

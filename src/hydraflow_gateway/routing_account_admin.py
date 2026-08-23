@@ -22,6 +22,19 @@ Two behaviours follow from that and are worth stating rather than inferring:
   the chain has moved, so an old browser tab cannot silently undo an emergency
   disable. The refusal is total: nothing is appended, so a rejected mutation
   leaves no trace of having half-happened.
+* **The chain is anchored, so truncating it is not a rollback.** A hash chain
+  verified from the genesis hash forward is intact after its last N records are
+  deleted — the shorter chain links perfectly. That is tolerable for a log and
+  not tolerable for a *state*: dropping the trailing record would re-enable the
+  account an operator disabled, and report the overlay as verified while doing
+  it. Each commit therefore also writes a tiny anchor (record count and head
+  hash). A chain shorter than its anchor, or one whose head disagrees with it,
+  is :attr:`SnapshotState.CORRUPT`. The anchor is **not** a second copy of the
+  state — it holds no account and no administrative value, only a monotonicity
+  witness — so the single-writer property above is untouched, and the crash
+  window runs the safe way: the anchor is written *after* the append, so a crash
+  leaves the chain one record *ahead* of its anchor, which is accepted and
+  re-anchored by the next commit.
 * **A broken chain fails closed, and closed means *hold*.** ADR-0139 made a
   corrupt policy snapshot produce a held decision rather than a route, and the
   same reasoning applies with more force here: if the record of "which accounts
@@ -40,13 +53,14 @@ an authenticated identity.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from file_util import file_lock
+from file_util import atomic_write, file_lock
 from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.routing_audit import (
     AuditChainError,
@@ -62,6 +76,7 @@ if TYPE_CHECKING:
     from hydraflow_gateway.routing_accounts import AccountRegistry
 
 ACCOUNT_ADMIN_AUDIT_FILENAME = "account-admin-audit.jsonl"
+ACCOUNT_ADMIN_HEAD_FILENAME = "account-admin-head.json"
 ACCOUNT_ADMIN_LOCK_FILENAME = "account-admin.lock"
 ACCOUNT_ADMIN_RECORD_KIND = "account-admin"
 
@@ -131,6 +146,7 @@ class AccountAdminStore:
     def __init__(self, directory: Path) -> None:
         self._dir = directory
         self._audit = RoutingAuditLog(directory / ACCOUNT_ADMIN_AUDIT_FILENAME)
+        self._head_path = directory / ACCOUNT_ADMIN_HEAD_FILENAME
         self._lock_path = directory / ACCOUNT_ADMIN_LOCK_FILENAME
         self._cached_head: str | None = None
         self._cached_view: AccountStateView | None = None
@@ -156,17 +172,11 @@ class AccountAdminStore:
             return AccountStateView(state=SnapshotState.ABSENT, revision=0, states={})
         if self._cached_head == head.record_hash and self._cached_view is not None:
             return self._cached_view
-        # Verified on every *re-fold*, not merely before a mutation. A reader
-        # that trusted the chain it was about to fold would publish exactly the
-        # overlay an attacker edited into it — and this overlay's whole job is to
-        # say which accounts an operator withdrew. The cache is what keeps that
-        # from being an O(chain) cost per poll: an unchanged head is served
-        # without re-reading, and the head itself is a bounded tail read.
-        if not self._audit.verify().ok:
-            return _corrupt()
         try:
-            records = self._audit.read_all()
+            records = self._trusted_records(head)
         except AuditChainError:
+            return _corrupt()
+        if records is None:
             return _corrupt()
         view = AccountStateView(
             state=SnapshotState.OK,
@@ -244,6 +254,52 @@ class AccountAdminStore:
 
     # -- internals ----------------------------------------------------------
 
+    def _trusted_records(self, head: AuditRecord) -> tuple[AuditRecord, ...] | None:
+        """The chain's records, or ``None`` when it may not be trusted.
+
+        Both checks run on every *re-fold*, not merely before a mutation. A
+        reader that trusted the chain it was about to fold would publish exactly
+        the overlay an attacker edited into it — and this overlay's whole job is
+        to say which accounts an operator withdrew. The cache is what keeps that
+        from being an O(chain) cost per poll: an unchanged head is served without
+        re-reading, and the head itself is a bounded tail read.
+        """
+        if not self._audit.verify().ok or not self._anchored(head):
+            return None
+        return self._audit.read_all()
+
+    def _anchored(self, head: AuditRecord) -> bool:
+        """Whether the chain is at least as long as the anchor it last wrote.
+
+        A chain with records but no anchor is refused outright: this store has
+        written an anchor on every commit since it existed, so the only way to
+        reach that state is for one of the two files to have been removed.
+        """
+        anchor = self._read_anchor()
+        if anchor is None:
+            return False
+        records, head_hash = anchor
+        if head.seq + 1 < records:
+            return False
+        return head.seq + 1 != records or head.record_hash == head_hash
+
+    def _read_anchor(self) -> tuple[int, str] | None:
+        try:
+            raw = json.loads(self._head_path.read_text(encoding="utf-8"))
+            return int(raw["records"]), str(raw["head_hash"])
+        except (OSError, ValueError, TypeError, KeyError):
+            return None
+
+    def _write_anchor(self, record: AuditRecord) -> None:
+        atomic_write(
+            self._head_path,
+            json.dumps(
+                {"records": record.seq + 1, "head_hash": record.record_hash},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+
     def _commit(
         self,
         *,
@@ -267,13 +323,19 @@ class AccountAdminStore:
             # unverifiable chain must refuse EVERY mutation, or the first write
             # after tampering would extend a chain nobody can trust and make the
             # damage permanent.
-            verification = self._audit.verify()
-            if not verification.ok:
+            current = self.read()
+            if current.state is SnapshotState.CORRUPT:
+                # The store's own verdict, which covers BOTH a chain whose links
+                # do not hold and one that was truncated back to a shorter valid
+                # prefix. Checked before the revision so a rolled-back chain is
+                # reported as the integrity failure it is rather than as a stale
+                # revision the caller could "fix" by re-reading — and checked at
+                # all because a write onto an untrustworthy chain would extend it
+                # and make the damage permanent.
                 raise AccountAdminRejected(
                     AdminRejection.AUDIT_CHAIN_BROKEN,
                     "the account administration chain does not verify",
                 )
-            current = self.read()
             if current.revision != expected_revision:
                 raise AccountAdminRejected(
                     AdminRejection.STALE_REVISION,
@@ -295,6 +357,12 @@ class AccountAdminStore:
                 **effect,
             }
             record = self._audit.append(payload, recorded_at=recorded_at)
+            # After the append, deliberately. A crash between the two leaves the
+            # chain one record AHEAD of its anchor, which reads as intact and is
+            # re-anchored by the next commit; the reverse order would leave an
+            # anchor ahead of the chain, which is indistinguishable from the
+            # truncation the anchor exists to catch.
+            self._write_anchor(record)
         # Outside the lock: the cache is invalidated by the head hash, so the
         # worst a concurrent reader sees is one extra fold.
         self._cached_head = None
@@ -377,9 +445,12 @@ def audit_view(store: AccountAdminStore, *, limit: int) -> AccountAdminAuditView
     not verify returns **no entries**: rendering records from a log whose links
     are broken would present tampered history as history.
     """
-    verification = store.audit.verify()
     view = store.read()
-    if not verification.ok:
+    if view.state is SnapshotState.CORRUPT:
+        # The store's own verdict, not `verify()` alone: a chain truncated back
+        # to a shorter valid prefix verifies, and publishing `chain_verified`
+        # from that would tell an operator the record is intact while showing
+        # them the overlay someone rolled back.
         return AccountAdminAuditView(
             revision=view.revision, chain_verified=False, entries=()
         )
@@ -445,9 +516,13 @@ def _fold(records: Sequence[AuditRecord]) -> dict[str, AdministrativeState]:
         try:
             states[account_id] = AdministrativeState(raw)
         except ValueError:
-            # A record naming a state this build does not know is skipped rather
-            # than crashing the fold: a downgrade must not turn an older
-            # operator's audited action into an unreadable overlay. The account
-            # falls back to enabled, and the record is still in the chain.
-            continue
+            # A state this build does not know is read as DISABLED rather than
+            # crashing the fold or falling back to enabled. Every value this enum
+            # has ever held is a *withdrawal* of some strength, so an unknown one
+            # is far more likely to be a narrower withdrawal from a newer build
+            # than a permission — and resurrecting an account an operator took
+            # out is the one outcome this overlay exists to prevent. A downgrade
+            # therefore over-withdraws, loudly and reversibly, instead of
+            # silently re-enabling.
+            states[account_id] = AdministrativeState.DISABLED
     return states

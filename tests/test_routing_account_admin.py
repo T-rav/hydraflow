@@ -9,6 +9,7 @@ every mutation and reports the overlay as untrustworthy rather than as empty.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -17,10 +18,13 @@ from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.models import ProviderBinding, legacy_account_id
 from hydraflow_gateway.routing_account_admin import (
     ACCOUNT_ADMIN_AUDIT_FILENAME,
+    ACCOUNT_ADMIN_HEAD_FILENAME,
     AccountAdminRejected,
     AccountAdminStore,
     AdminMutationKind,
     AdminRejection,
+    _fold,
+    audit_view,
 )
 from hydraflow_gateway.routing_accounts import build_account_registry
 from hydraflow_gateway.routing_policy import SnapshotState
@@ -327,3 +331,101 @@ def test_a_tampered_chain_never_reports_the_tampered_state(tmp_path: Path) -> No
 def test_an_untampered_chain_is_read_by_a_fresh_process(tmp_path: Path) -> None:
     _disable(_store(tmp_path))
     assert _store(tmp_path).read().administrative(_ZAI) is AdministrativeState.DISABLED
+
+
+# -- the head anchor: truncation is a rollback, not a shorter valid chain -----
+
+
+def _truncate(tmp_path: Path, *, lines: int = 1) -> AccountAdminStore:
+    """Disable two accounts, delete trailing records, and read afresh.
+
+    A hash chain verified forward from genesis is *intact* after its tail is
+    removed, which is exactly why the anchor exists.
+    """
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    chain = tmp_path / "accounts" / ACCOUNT_ADMIN_AUDIT_FILENAME
+    kept = chain.read_text(encoding="utf-8").splitlines()[:-lines]
+    chain.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+    return _store(tmp_path)
+
+
+def test_a_truncated_chain_still_verifies_as_a_chain(tmp_path: Path) -> None:
+    """The premise: forward verification alone cannot see a missing tail."""
+    assert _truncate(tmp_path).audit.verify().ok is True
+
+
+def test_a_truncated_chain_is_nonetheless_reported_as_corrupt(tmp_path: Path) -> None:
+    assert _truncate(tmp_path).read().state is SnapshotState.CORRUPT
+
+
+def test_a_truncated_chain_never_resurrects_the_account_it_dropped(
+    tmp_path: Path,
+) -> None:
+    """The whole point: dropping a record must not re-enable what it disabled."""
+    assert _truncate(tmp_path).read().states == {}
+
+
+def test_a_truncated_chain_refuses_every_further_mutation(tmp_path: Path) -> None:
+    with pytest.raises(AccountAdminRejected) as excinfo:
+        _disable(_truncate(tmp_path), revision=1)
+    assert excinfo.value.rejection is AdminRejection.AUDIT_CHAIN_BROKEN
+
+
+def test_a_deleted_anchor_is_refused_rather_than_trusted(tmp_path: Path) -> None:
+    """This store anchors on every commit, so a chain with none was tampered with."""
+    store = _store(tmp_path)
+    _disable(store)
+    (tmp_path / "accounts" / ACCOUNT_ADMIN_HEAD_FILENAME).unlink()
+
+    assert _store(tmp_path).read().state is SnapshotState.CORRUPT
+
+
+def test_a_chain_ahead_of_its_anchor_is_accepted(tmp_path: Path) -> None:
+    """The crash window runs the safe way: the anchor is written after the append."""
+    store = _store(tmp_path)
+    _disable(store)
+    _disable(store, revision=1, account=_ANTHROPIC)
+    anchor = tmp_path / "accounts" / ACCOUNT_ADMIN_HEAD_FILENAME
+    stale = json.loads(anchor.read_text(encoding="utf-8"))
+    stale["records"] = 1
+    anchor.write_text(json.dumps(stale), encoding="utf-8")
+
+    assert _store(tmp_path).read().state is SnapshotState.OK
+
+
+def test_the_audit_view_reports_a_rolled_back_chain_as_unverified(
+    tmp_path: Path,
+) -> None:
+    """Never tell an operator the record is intact while showing them a rollback."""
+    assert audit_view(_truncate(tmp_path), limit=10).chain_verified is False
+
+
+def test_the_audit_view_reports_an_intact_chain_as_verified(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _disable(store)
+
+    assert audit_view(_store(tmp_path), limit=10).chain_verified is True
+
+
+# -- an unknown administrative state is a withdrawal, not a permission -------
+
+
+def test_an_unrecognised_administrative_state_is_read_as_disabled(
+    tmp_path: Path,
+) -> None:
+    """A downgrade must over-withdraw, never resurrect what an operator took out."""
+    store = _store(tmp_path)
+    _disable(store)
+    chain = tmp_path / "accounts" / ACCOUNT_ADMIN_AUDIT_FILENAME
+    tampered = chain.read_text(encoding="utf-8").replace(
+        '"disabled"', '"quarantined-in-a-newer-build"'
+    )
+    chain.write_text(tampered, encoding="utf-8")
+    fresh = _store(tmp_path)
+    # The edit breaks the hash chain, so read the fold directly rather than
+    # through the (correctly) corrupt view.
+    folded = _fold(fresh.audit.read_all())
+
+    assert folded[_ZAI] is AdministrativeState.DISABLED

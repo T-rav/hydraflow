@@ -287,9 +287,14 @@ def parse_account_definitions(document: str) -> tuple[GatewayAccount, ...]:
         )
     unknown = set(loaded) - {"schema_version", "accounts"}
     if unknown:
+        # The COUNT, never the names. This is the one place the module could
+        # quote document content back into a startup log, and a mistyped
+        # credential pasted as a YAML key is exactly the content that must not
+        # travel — the module's rule is "never quotes a value", and a key is
+        # close enough to one to be worth not testing the distinction.
         raise AccountRegistryError(
-            f"the account registry document declares extra keys: "
-            f"{','.join(sorted(unknown))}"
+            f"the account registry document declares {len(unknown)} extra "
+            "top-level key(s); only schema_version and accounts are permitted"
         )
     if loaded.get("schema_version") != ACCOUNT_REGISTRY_SCHEMA_VERSION:
         raise AccountRegistryError(

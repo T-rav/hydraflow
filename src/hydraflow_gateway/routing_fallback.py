@@ -66,12 +66,16 @@ class FallbackRefusal(StrEnum):
     LEASE_STILL_HELD = "fallback-lease-still-held"
     NOT_AUTHORISED = "fallback-not-authorised"
     BUDGET_EXHAUSTED = "fallback-budget-exhausted"
+    RESPONSE_WAS_NOT_LOST = "fallback-response-was-not-lost"
 
 
 FALLBACK_REJECTIONS: frozenset[FallbackRefusal] = frozenset(
     {
         FallbackRefusal.LINEAGE_MISMATCH,
         FallbackRefusal.CITED_DECISION_NOT_SELECTED,
+        # The cited decision demonstrably produced a response, so "I lost it" is
+        # not a claim about the world that could later become true.
+        FallbackRefusal.RESPONSE_WAS_NOT_LOST,
     }
 )
 """Refusals that are the caller's error, and therefore rejections.
@@ -293,6 +297,15 @@ def _refusals(
         # one dispatch and both of them can spend.
         yield FallbackRefusal.LEASE_STILL_HELD
     if not advance:
+        # A supersede recovers a mint response that was LOST, and the gateway can
+        # tell: terminal evidence for the cited decision proves its key reached
+        # an upstream, which proves the caller received the credential. Without
+        # this clause a supersede is an unbounded, evidence-free re-mint that
+        # pins every successor to a position chosen against a pool state that may
+        # be long gone — including past an account an operator has since
+        # re-enabled.
+        if evidence is not None:
+            yield FallbackRefusal.RESPONSE_WAS_NOT_LOST
         return
     if evidence is None or evidence.condition is None:
         yield FallbackRefusal.NOT_AUTHORISED

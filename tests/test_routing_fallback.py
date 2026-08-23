@@ -295,14 +295,20 @@ def test_a_refusal_reports_the_disposition_its_kind_implies(
 
 def test_a_supersede_re_mints_at_the_same_position() -> None:
     verdict = _authorise(
-        cited=_cited(fallback_position=1, fallback_hops=1), advance=False, max_hops=1
+        cited=_cited(fallback_position=1, fallback_hops=1),
+        advance=False,
+        evidence=None,
+        max_hops=1,
     )
     assert verdict.start_position == 1
 
 
 def test_a_supersede_spends_no_hop_budget() -> None:
     verdict = _authorise(
-        cited=_cited(fallback_position=1, fallback_hops=1), advance=False, max_hops=0
+        cited=_cited(fallback_position=1, fallback_hops=1),
+        advance=False,
+        evidence=None,
+        max_hops=0,
     )
     assert verdict.authorised is True
 
@@ -312,7 +318,7 @@ def test_a_supersede_needs_no_terminal_evidence() -> None:
 
 
 def test_a_supersede_still_requires_the_prior_lease_to_be_gone() -> None:
-    assert _authorise(advance=False, lease_held=True).refusal is (
+    assert _authorise(advance=False, evidence=None, lease_held=True).refusal is (
         FallbackRefusal.LEASE_STILL_HELD
     )
 
@@ -324,8 +330,36 @@ def test_a_zero_hop_ceiling_still_permits_lost_response_recovery() -> None:
     that has switched fallback off entirely can still recover a mint whose
     response was lost.
     """
-    assert _authorise(advance=False, max_hops=0).authorised is True
+    assert _authorise(advance=False, evidence=None, max_hops=0).authorised is True
 
 
 def test_a_zero_hop_ceiling_refuses_an_ordinary_hop() -> None:
     assert _authorise(max_hops=0).refusal is FallbackRefusal.BUDGET_EXHAUSTED
+
+
+def test_a_supersede_of_a_decision_that_did_reach_an_upstream_is_refused() -> None:
+    """A supersede recovers a LOST response, and terminal evidence proves it was not.
+
+    Without this, a supersede is an unbounded, evidence-free re-mint that pins
+    every successor to a position chosen against a pool state that may be long
+    gone — including past an account an operator has since re-enabled.
+    """
+    assert _authorise(advance=False, evidence=_qualifying()).refusal is (
+        FallbackRefusal.RESPONSE_WAS_NOT_LOST
+    )
+
+
+def test_a_supersede_of_a_successful_decision_is_refused_too() -> None:
+    """Evidence of ANY terminal outcome proves the caller got its credential."""
+    verdict = _authorise(
+        advance=False,
+        evidence=TerminalEvidence(account_id="a", condition=None, recorded_epoch=1.0),
+    )
+
+    assert verdict.refusal is FallbackRefusal.RESPONSE_WAS_NOT_LOST
+
+
+def test_claiming_a_response_was_lost_when_it_was_not_is_the_callers_error() -> None:
+    assert outcome_for(FallbackRefusal.RESPONSE_WAS_NOT_LOST) is (
+        DecisionOutcome.REJECTED
+    )

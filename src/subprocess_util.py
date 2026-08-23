@@ -590,6 +590,7 @@ _GATEWAY_PROVIDER_ROUTING_ENV_KEYS: frozenset[str] = frozenset(
 _GATEWAY_CREDENTIAL_SUFFIXES: tuple[str, ...] = (
     "_API_KEY",
     "_AUTH_TOKEN",
+    "_CONTROL_TOKEN",
     "_OAUTH_TOKEN",
     "_ACCESS_TOKEN",
     "_SESSION_TOKEN",

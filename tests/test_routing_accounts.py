@@ -386,3 +386,24 @@ def test_a_registry_file_that_cannot_be_read_fails_closed(tmp_path: Path) -> Non
     settings = _settings(accounts_file=tmp_path / "absent.yaml")
     with pytest.raises(AccountRegistryError, match="could not be read"):
         load_account_pool(settings, {})
+
+
+def test_an_unknown_key_refusal_reports_a_count_rather_than_the_key() -> None:
+    """The one path that could quote document content back into a startup log.
+
+    A mistyped credential pasted as a YAML key is exactly the content that must
+    not travel, and the module's rule is that it never quotes a value.
+    """
+    document = (
+        "schema_version: 1\naccounts: []\n"
+        "sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: 1\n"
+    )
+    with pytest.raises(AccountRegistryError) as excinfo:
+        parse_account_definitions(document)
+
+    assert "sk-ant-" not in str(excinfo.value)
+
+
+def test_an_unknown_key_refusal_still_says_how_many_there_were() -> None:
+    with pytest.raises(AccountRegistryError, match="2 extra"):
+        parse_account_definitions("schema_version: 1\naccounts: []\na: 1\nb: 2\n")

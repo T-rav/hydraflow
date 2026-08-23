@@ -29,6 +29,7 @@ from hydraflow_gateway.models import (
     ProviderBinding,
     RepoClass,
     RouteBinding,
+    legacy_account_id,
 )
 from hydraflow_gateway.proxy import (
     GatewayProxy,
@@ -1581,6 +1582,117 @@ async def test_a_bound_key_whose_account_has_no_upstream_fails_closed(
         pricing=load_pricing(),
         account_pool=load_account_pool(settings, {}),
         request_id_factory=lambda: "request-orphan",
+    )
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    try:
+        with pytest.raises(HTTPException) as excinfo:
+            await proxy.forward(_streaming_request(receive), identity)
+    finally:
+        await upstream_client.aclose()
+
+    assert (excinfo.value.status_code, reached) == (503, [])
+
+
+async def test_a_poolless_proxy_still_serves_a_legacy_bound_key(
+    tmp_path: Path,
+) -> None:
+    """The lane IS the account for a reserved legacy id, so this is not a guess.
+
+    The sibling test above pins the other half: a *declared* account with no
+    pool wired resolves to nothing rather than to the lane's credential.
+    """
+    reached: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        reached.append(str(request.url))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=_ChunkStream([b"data: {}\n\n"]),
+        )
+
+    settings = _settings(tmp_path)
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = VirtualKeyStore(max_ttl_seconds=600)
+    minted = store.mint_bound(
+        principal=Principal(kind="spawn", id="implementer", spawn_id="spawn-1"),
+        repo_slug="acme-hydraflow",
+        repo_class=RepoClass.HYDRAFLOW,
+        provider_binding=ProviderBinding.ZAI_HARNESS,
+        capture_bodies=False,
+        ttl_seconds=600,
+        route_binding=RouteBinding(
+            mint_decision_id="gwd_legacy",
+            route_decision_id="dec_legacy",
+            dispatch_id="disp-1",
+            account_id=legacy_account_id(ProviderBinding.ZAI_HARNESS),
+            effective_model="glm-5.3",
+        ),
+    )
+    identity = store.resolve(minted.token)
+    proxy = GatewayProxy(
+        settings=settings,
+        client=upstream_client,
+        ledger=GatewayLedger(settings.ledger_path),
+        body_store=GatewayBodyStore(settings.body_dir),
+        pricing=load_pricing(),
+        request_id_factory=lambda: "request-legacy",
+    )
+
+    async def receive() -> Message:
+        return {
+            "type": "http.request",
+            "body": b'{"model":"glm-5.3"}',
+            "more_body": False,
+        }
+
+    try:
+        response = await proxy.forward(_streaming_request(receive), identity)
+        async for _chunk in response.body_iterator:
+            pass
+    finally:
+        await upstream_client.aclose()
+
+    assert reached == ["https://zai.test/v1/messages"]
+
+
+async def test_a_poolless_proxy_refuses_a_declared_bound_key(tmp_path: Path) -> None:
+    """A declared account this proxy cannot reach is a 503, never the lane's key."""
+    reached: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        reached.append(str(request.url))
+        return httpx.Response(200)
+
+    settings = _settings(tmp_path)
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = VirtualKeyStore(max_ttl_seconds=600)
+    minted = store.mint_bound(
+        principal=Principal(kind="spawn", id="implementer", spawn_id="spawn-1"),
+        repo_slug="acme-hydraflow",
+        repo_class=RepoClass.HYDRAFLOW,
+        provider_binding=ProviderBinding.ZAI_HARNESS,
+        capture_bodies=False,
+        ttl_seconds=600,
+        route_binding=RouteBinding(
+            mint_decision_id="gwd_declared",
+            route_decision_id="dec_declared",
+            dispatch_id="disp-1",
+            account_id="zai-secondary",
+            effective_model="glm-5.3",
+        ),
+    )
+    identity = store.resolve(minted.token)
+    proxy = GatewayProxy(
+        settings=settings,
+        client=upstream_client,
+        ledger=GatewayLedger(settings.ledger_path),
+        body_store=GatewayBodyStore(settings.body_dir),
+        pricing=load_pricing(),
+        request_id_factory=lambda: "request-declared",
     )
 
     async def receive() -> Message:
