@@ -35,7 +35,6 @@ from implement_worker_runner import (
     ImplementWorkerRunner,
     WorktreeMeasurement,
     build_implement_worker_prompt,
-    hibernation_refusal,
 )
 from models import Task
 from scheduling_model import ExecutionRuntime, SchedulingModel
@@ -325,6 +324,43 @@ class TestOneRequestBecomesOneChild:
             RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
         )
 
+    async def test_a_seam_that_never_spawned_reports_no_route(
+        self, tmp_path: Path
+    ) -> None:
+        """A CH-6 block or an enforcement refusal returns before any inference.
+
+        ``run_lightweight_agent`` collapses both to its soft-failure contract
+        and leaves ``spawn_out`` empty, so there is no served model and nothing
+        to bill. That must read as ``ROUTE_UNAVAILABLE`` — a state an operator
+        can fix — rather than as a model substitution, which is what the empty
+        string would be classified as if the guard were gone. Mutation testing
+        found nothing covered this.
+        """
+
+        class SilentSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                # Deliberately does NOT populate ``spawn_out``.
+                return SimpleResult(stderr="blocked before spawn", returncode=-1)
+
+        runner, _git = _build(tmp_path, spawn=SilentSpawn())
+
+        receipts = await _dispatch(runner, [_request()])
+
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+
+    async def test_a_seam_that_never_spawned_records_no_artifact(
+        self, tmp_path: Path
+    ) -> None:
+        class SilentSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                return SimpleResult(stderr="blocked before spawn", returncode=-1)
+
+        runner, _git = _build(tmp_path, spawn=SilentSpawn())
+
+        await _dispatch(runner, [_request()])
+
+        assert runner.artifacts == []
+
     async def test_a_refused_receipt_names_no_served_model(
         self, tmp_path: Path
     ) -> None:
@@ -559,11 +595,47 @@ class TestAnUnarmableFenceRefusesBeforeAnySpawn:
 
 
 class TestWritersSerializeAndReadersFanOut:
-    async def test_two_writers_in_one_batch_run_one_after_the_other(
+    async def test_two_writers_hold_the_lease_one_after_the_other(
         self, tmp_path: Path
     ) -> None:
-        # Sequential, so each takes the lease the previous one released. Running
-        # them together would deadlock the second against the first.
+        """Sequential, and the LEASE is what makes it sequential.
+
+        The first draft asserted only that both receipts came back ACCEPTED,
+        which a plain ``for`` loop delivers with the lease deleted entirely —
+        nothing else contends in this scenario. What distinguishes the two is
+        who holds the worktree *while each child runs*: the second writer can
+        only be holding it because the first released it, which is the whole of
+        "run sequentially in one issue worktree". Mutation testing killed the
+        acquire and the release on other tests; this is the one that names the
+        property.
+        """
+        leases = WriterLeaseRegistry()
+        holders: list[str | None] = []
+        runner, _git = _build(
+            tmp_path,
+            leases=leases,
+            spawn=SpawnRecorder(while_running=lambda: holders.append(leases.holder(7))),
+        )
+
+        await _dispatch(
+            runner,
+            [
+                _request(request_id="req-1", key="key-1"),
+                _request(
+                    request_id="req-2",
+                    key="key-2",
+                    role=WorkerRole.DEBUGGER,
+                    kind=ModelRequirementKind.CAPABILITY,
+                    value="high-reasoning",
+                ),
+            ],
+        )
+
+        assert holders == ["req-1", "req-2"]
+
+    async def test_two_writers_in_one_batch_are_both_accepted(
+        self, tmp_path: Path
+    ) -> None:
         spawn = SpawnRecorder()
         runner, _git = _build(tmp_path, spawn=spawn)
 
@@ -878,15 +950,25 @@ class TestAFencedWorkerIsNeverRetriedInPlace:
     async def test_a_superseded_child_is_not_re_dispatched(
         self, tmp_path: Path
     ) -> None:
+        """One attempt, and the outcome that makes the count mean something.
+
+        ``len(spawn.calls) == 1`` alone is true for any single-request dispatch
+        whether or not the fence exists — there is no retry path for any
+        outcome. Pairing it with the status is what distinguishes "the fence
+        rejected it and stopped" from "the fence was never consulted".
+        """
         git = GitScript()
         spawn = SpawnRecorder(
             while_running=lambda: git.answers.__setitem__("diff", "moved")
         )
         runner, _git = _build(tmp_path, git=git, spawn=spawn)
 
-        await _dispatch(runner, [_request()])
+        receipts = await _dispatch(runner, [_request()])
 
-        assert len(spawn.calls) == 1
+        assert (len(spawn.calls), receipts[0].status) == (
+            1,
+            ReceiptStatus.SUPERSEDED,
+        )
 
     async def test_a_credit_exhaustion_signal_is_not_converted_into_a_refusal(
         self, tmp_path: Path
@@ -959,19 +1041,3 @@ class TestTheWorkerIsToldItsBound:
         )
 
         assert "no uncommitted or committed change" in rendered
-
-
-class TestTheHibernationAdapterSpeaksOneCode:
-    @pytest.mark.parametrize(
-        "waiting",
-        [
-            pytest.param("PARKED", id="ci"),
-            pytest.param("DIAGNOSE", id="diagnostic"),
-            pytest.param("HITL_WAIT", id="human"),
-        ],
-    )
-    def test_every_wait_reports_the_same_deterministic_code(self, waiting: str) -> None:
-        assert hibernation_refusal(waiting) is RejectionReason.HIBERNATING
-
-    def test_a_working_driver_reports_nothing(self) -> None:
-        assert hibernation_refusal("READY") is None

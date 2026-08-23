@@ -231,15 +231,37 @@ class TestClearingTheWriterDialIsTheWholeRollback:
 
         assert plan_canary_covers(settings, phase=DriverPhase.PLAN) is True
 
-    def test_rolling_back_leaves_the_director_observing(self, tmp_path: Path) -> None:
-        # Rolling back returns the repository to shadow mode, not to Classic:
-        # the evidence keeps accruing while nothing is dispatched, which is the
-        # state an operator wants after a rollback.
+    def test_rolling_back_returns_the_repository_to_shadow_mode(
+        self, tmp_path: Path
+    ) -> None:
+        """Both halves of "rollback lands in shadow, not in Classic".
+
+        The first draft asserted only ``has_observer is True``, which is
+        independent of this dial: it is set once at construction and cleared
+        only by a preflight failure, so the entire rollback mechanism could
+        have been deleted and it would still have passed. The load-bearing
+        half is the dial's own predicate; the observer half means something
+        only beside the contrast below, where it is genuinely ``False``.
+        """
         settings = _directed(tmp_path, fable_implement_canary_repo=CANARY_REPO)
         orchestrator = _orchestrator_for(settings)
         object.__setattr__(settings, "fable_implement_canary_repo", "")
 
-        assert orchestrator._svc.driver_manager.has_observer is True  # noqa: SLF001
+        assert (
+            implement_canary_covers(settings, phase=DriverPhase.IMPLEMENT),
+            orchestrator._svc.driver_manager.has_observer,  # noqa: SLF001
+        ) == (False, True)
+
+    def test_a_directorless_controller_has_no_observer_at_all(
+        self, tmp_path: Path
+    ) -> None:
+        # The contrast that makes ``has_observer is True`` above a statement
+        # rather than a constant.
+        orchestrator = _orchestrator_for(
+            _config(tmp_path, scheduling_model=SchedulingModel.ISSUE_CONTROLLER)
+        )
+
+        assert orchestrator._svc.driver_manager.has_observer is False  # noqa: SLF001
 
     @pytest.mark.parametrize(
         "typed",

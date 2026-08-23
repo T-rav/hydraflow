@@ -422,14 +422,46 @@ class TestABrokeredImplementReachesTheClassicOutcome:
 
         assert brokered["implementer"].implemented == [ISSUE_BROKERED]
 
-    async def test_the_classic_arm_starts_no_child_and_reads_no_git(
+    async def test_an_actuator_armed_elsewhere_starts_nothing_here(
+        self, seeded_issues, tmp_path
+    ) -> None:
+        """The bound refusing, with the actuator fully wired behind it.
+
+        The first draft asserted this against the ``canary=None`` arm, where
+        ``_build`` never constructs an actuator at all — so the empty lists were
+        guaranteed by the test harness's own branching rather than by
+        ``implement_canary_covers``. Arming for *another* repository builds the
+        real actuator, wires the real subprocess boundary into it, and leaves
+        only the bound to stop it.
+        """
+        elsewhere = await _run(
+            seeded_issues,
+            tmp_path,
+            name="elsewhere",
+            issue=ISSUE_BROKERED,
+            canary="acme/other",
+        )
+
+        assert (elsewhere["boundary"].spawns, elsewhere["boundary"].git_reads) == (
+            [],
+            [],
+        )
+
+    async def test_an_actuator_armed_elsewhere_still_reaches_the_same_outcome(
         self, seeded_issues, tmp_path
     ) -> None:
         classic = await _run(
-            seeded_issues, tmp_path, name="none", issue=ISSUE_CLASSIC, canary=None
+            seeded_issues, tmp_path, name="classic-2", issue=ISSUE_CLASSIC, canary=None
+        )
+        elsewhere = await _run(
+            seeded_issues,
+            tmp_path,
+            name="elsewhere-2",
+            issue=ISSUE_BROKERED,
+            canary="acme/other",
         )
 
-        assert (classic["boundary"].spawns, classic["boundary"].git_reads) == ([], [])
+        assert elsewhere["outcome"] == classic["outcome"]
 
 
 # --------------------------------------------------------------------------

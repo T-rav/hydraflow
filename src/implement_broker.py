@@ -497,6 +497,23 @@ def hibernation_reason(driver_state: str) -> Hibernation | None:
     return HIBERNATION_STATES.get(driver_state)
 
 
+def hibernation_refusal(driver_state: str) -> RejectionReason | None:
+    """``HIBERNATING`` when *driver_state* is a wait, else ``None``.
+
+    A one-line adapter beside :func:`hibernation_reason` rather than in the
+    actuator, because the director consults it and the director must not import
+    the one module that can reach a process — a runtime import from the
+    decision path into the actuator is the earliest visible sign that the two
+    are merging. Two vocabularies, one predicate behind both:
+    :func:`hibernation_reason` answers *which* wait, which is what an operator
+    wants in a log, and this answers the single deterministic code a receipt
+    carries.
+    """
+    if hibernation_reason(driver_state) is None:
+        return None
+    return RejectionReason.HIBERNATING
+
+
 def writer_lease_for(
     lease: DriverLease, state: WorktreeState, *, holder_request_id: str | None = None
 ) -> WriterLease:

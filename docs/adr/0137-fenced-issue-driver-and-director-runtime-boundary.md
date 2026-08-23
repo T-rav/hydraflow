@@ -666,6 +666,25 @@ boundary: an absent reading reads as *unverified*, never as *unchanged*.
 Without that clause two unmeasured sides compare equal and a fence that
 measured nothing would verify everything — the fail-open shape F2 condemns.
 
+**What the two lease objects each fence, stated because they are easy to
+conflate.** `driver_contracts.WriterLease` is the contract object handed to
+`admit_dispatch`, and that function fences on its **identity, epoch and
+holder** — the holder folded forward within a batch, which is what stops an
+implementer and a debugger being admitted together. It never reads the digest
+fields. The digests are fenced by `check_worker_fence`, which compares two
+`WorktreeState` readings, because a frozen contract object cannot re-measure
+itself. Filling them in with a real measurement is what ADR-0137 asked of this
+phase: the object stops describing a tree nobody looked at, and a regression
+test observes the measurement arriving at the broker with the disarmed
+contrast beside it, because no behaviour changes if it stops.
+
+The stateful single-writer enforcement is `WriterLeaseRegistry`, in the
+actuator. There is deliberately **one** decision per fact: the director does
+not re-check "the fence could not be armed" before handing a batch to the
+runner, because a second copy would be a guard no test could kill — the same
+redundancy #11541's mutation testing had to delete from
+`enforce_director_route`.
+
 **Two refusal codes exist because the criterion names two failures.**
 `WORKTREE_DIGEST_STALE` and `BRANCH_MISMATCH` are separate members: a moved
 digest is work happening, and a moved branch is the worktree having been reused
@@ -688,7 +707,14 @@ deadlocking against the first.
 `hibernation_reason` names the three waits C6 already releases *capacity* for —
 `PARKED` (CI and barriers), `DIAGNOSE`, `HITL_WAIT` — and the director revokes
 the issue's writer lease on the tick it enters one, refuses any admitted batch
-with `HIBERNATING`, and takes **no worktree measurement at all**. That last
+with `HIBERNATING`, and takes **no worktree measurement at all**.
+
+It is scoped to the IMPLEMENT fence rather than applied to both canaries. A
+hibernating driver has no business holding a *worktree*, which is what this
+phase's workers take; a read-only Plan worker takes nothing, and refusing one
+would have changed #11541's behaviour for an operator who never armed this
+phase's dial — the exact thing the second dial exists to prevent. #11543 may
+widen it, deliberately. That last
 clause is not tidiness: a driver waiting on a human is ticked for as long as
 the human takes, so measuring it would put three `git` reads on a path the
 allocator reaches every poll interval — the same hot-path defect #11537 had to

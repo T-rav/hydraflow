@@ -77,9 +77,9 @@ from driver_contracts import (
 from exception_classify import reraise_on_credit_or_bug
 from implement_broker import (
     hibernation_reason,
+    hibernation_refusal,
     writer_lease_for,
 )
-from implement_worker_runner import hibernation_refusal
 from issue_driver import AdvanceOutcome
 from issue_driver_policy import phase_for_state
 from plan_broker import CANARY_PHASE
@@ -606,7 +606,13 @@ class FableDirector:
                 driver.driver_state,
             )
             return dispatcher.refuse(admitted, blocked)
-        if measured is None or not measured.state.measured:
+        if measured is None:
+            # Narrowing, not a second decision. ``_measure_worktree`` returns
+            # ``None`` only for the cases the two clauses above already
+            # refused, so this is unreachable - and a duplicate of the
+            # runner's own "the fence could not be armed" check would be a
+            # guard no test could kill, which #11541's mutation testing had to
+            # delete once already. The runner owns that decision.
             return dispatcher.refuse(admitted, RejectionReason.WORKTREE_UNMEASURED)
         receipts = await dispatcher.dispatch(
             admitted,
@@ -615,7 +621,12 @@ class FableDirector:
             phase=phase,
             measured=measured,
             fence=self._pre_spawn_fence(
-                driver, lease, phase, live_label, self._implement_is_covered
+                driver,
+                lease,
+                phase,
+                live_label,
+                self._implement_is_covered,
+                hibernates=True,
             ),
             driver_facts=self._driver_facts(driver, phase),
         )
@@ -630,11 +641,12 @@ class FableDirector:
 
         ``None`` everywhere else, and that is what keeps a shadow-mode or
         Plan-only host byte-identical: no dispatcher means no probe, no git
-        subprocess and no change to the evidence recorded. Measured *before*
-        the broker admits rather than inside the runner, because the writer
-        lease the broker judges against has to carry the digests a worker will
-        be fenced on — a lease minted from one reading and checked against
-        another is two fences that agree only by luck.
+        subprocess and no change to the evidence recorded.
+
+        Measured **once**, here, and then carried: the lease handed to the
+        broker and the ``minted`` side of every worker's fence are the same
+        reading. Measuring again inside the runner would make them two readings
+        from two moments, which agree only by luck.
 
         **A hibernating driver is not measured**, and that is the difference
         between hibernating and merely refusing. A driver waiting on a human is
@@ -659,6 +671,16 @@ class FableDirector:
         Real digests inside the Implement canary; ``UNOBSERVED_DIGEST`` outside
         it, exactly as #11537 shipped. Stating the absence rather than
         fabricating a sha is the same rule in both directions.
+
+        Precisely what each half does, because the two are easy to conflate.
+        ``admit_dispatch`` fences on the lease's **identity, epoch and holder**
+        — the holder is folded forward within a batch, which is what stops an
+        implementer and a debugger being admitted together. It never reads the
+        digest fields. The digests are fenced by
+        :func:`implement_broker.check_worker_fence`, which compares two
+        ``WorktreeState`` readings, because a frozen contract object cannot
+        re-measure itself. Filling them in is what ADR-0137 asked of this
+        phase: the object stops describing a tree nobody looked at.
         """
         if measured is None:
             return _unheld_writer_lease(lease)
@@ -753,6 +775,8 @@ class FableDirector:
         phase: DriverPhase,
         live_label: str,
         is_covered: Callable[[DriverPhase | None], bool] | None,
+        *,
+        hibernates: bool = False,
     ) -> Callable[[], RejectionReason | None]:
         """Everything that can move between admission and a spawn, re-read.
 
@@ -787,8 +811,15 @@ class FableDirector:
                 # The driver entered a wait between the broker's admission and
                 # this spawn. Its own code rather than DRAINING: the canary is
                 # still accepting work, this issue just stopped having any.
+                # Scoped to the IMPLEMENT fence rather than applied to both.
+                # A hibernating driver has no business holding a *worktree*,
+                # which is what this phase's workers take; a read-only Plan
+                # worker takes nothing, and refusing one here would have
+                # changed #11541's behaviour for an operator who never armed
+                # this phase's dial - the exact thing the second dial exists
+                # to prevent. #11543 may widen it, deliberately.
                 (
-                    hibernation_reason(driver.driver_state) is not None,
+                    hibernates and hibernation_reason(driver.driver_state) is not None,
                     RejectionReason.HIBERNATING,
                 ),
                 (driver.epoch != lease.epoch, RejectionReason.STALE_EPOCH),

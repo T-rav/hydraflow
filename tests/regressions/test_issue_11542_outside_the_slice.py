@@ -103,12 +103,16 @@ class ScriptedTurn:
     """
 
     def __init__(
-        self, role: str = "implementer", family: str = "claude-sonnet"
+        self,
+        role: str = "implementer",
+        family: str = "claude-sonnet",
+        requesting_spawn_id: str | None = None,
     ) -> None:
         self.cli_version = "2.1.239"
         self.turns = 0
         self._role = role
         self._family = family
+        self._requesting_spawn_id = requesting_spawn_id
 
     async def preflight(self) -> str:
         return self.cli_version
@@ -134,7 +138,8 @@ class ScriptedTurn:
                     "task_contract": "say where the double increment is",
                     "reason": "the review found a double increment",
                     "expected_route_policy_revision": ROUTE_REVISION,
-                    "idempotency_key": f"key-{lease['issue_number']}",
+                    "idempotency_key": f"key-{lease['issue_number']}-{self.turns}",
+                    "requesting_spawn_id": self._requesting_spawn_id,
                 }
             ],
         }
@@ -620,16 +625,42 @@ class TestAWaitingDriverHoldsNoWriterAuthority:
         assert leases.holder(7) is None
 
     async def test_a_working_driver_keeps_its_lease(self, tmp_path: Path) -> None:
-        # Non-vacuity: revoking unconditionally would pass all three above.
+        """Non-vacuity for the three above, and the contrast is the STATE.
+
+        The first draft held a lease for issue 9 and observed issue 7, which
+        proved only that the revoke is keyed on an issue — ``revoke(7)`` on a
+        registry that never held 7 is a no-op, and 9 is untouched either way.
+        It would have passed with the hibernation gate deleted entirely, which
+        is precisely the vacuity it exists to rule out. Same issue, same lease,
+        working state: the lease survives.
+        """
         leases = WriterLeaseRegistry()
-        leases.acquire(9, "req-elsewhere")
+        leases.acquire(7, "req-from-before")
         built, _log, _spawn, _git = _assemble(
             tmp_path, name="working", canary=CANARY_REPO, wired=True, leases=leases
         )
 
         await _observe(built, state="READY", issue=7)
 
-        assert leases.holder(9) == "req-elsewhere"
+        assert leases.holder(7) == "req-from-before"
+
+    async def test_a_working_driver_refuses_the_arriving_writer_instead(
+        self, tmp_path: Path
+    ) -> None:
+        # The other half of the same fact: a held lease on a working driver is
+        # honoured, so the arriving request is refused rather than the
+        # incumbent displaced.
+        leases = WriterLeaseRegistry()
+        leases.acquire(7, "req-from-before")
+        built, log, _spawn, _git = _assemble(
+            tmp_path, name="contended", canary=CANARY_REPO, wired=True, leases=leases
+        )
+
+        await _observe(built, state="READY", issue=7)
+
+        assert [row["reason"] for row in _rows(log)[0]["dispatched"]] == [
+            "writer_lease_held"
+        ]
 
     async def test_a_wait_dispatches_no_writer(self, tmp_path: Path) -> None:
         built, log, spawn, _git = _assemble(
@@ -743,6 +774,364 @@ class TestIndependentReviewCannotBePerformedByTheImplementer:
         recorded = _rows(log)[0]["dispatched"][0]["child_spawn_id"]
 
         assert built._implementer_spawns[7] == frozenset({recorded})  # noqa: SLF001
+
+
+class RecordingBroker:
+    """The real broker, with what it was handed kept for inspection.
+
+    A wrapper rather than a subclass, because
+    ``tests/architecture/test_director_no_authority.py`` pins the broker's
+    public surface as exactly ``{"admit"}`` and a test that widened it would be
+    reaching around the guard it stands next to.
+    """
+
+    def __init__(self) -> None:
+        self._real = ShadowDispatchBroker()
+        self.writer_leases: list[Any] = []
+        self.implementer_spawn_ids: list[frozenset[str]] = []
+
+    def admit(self, command, **kwargs):
+        self.writer_leases.append(kwargs["writer_lease"])
+        self.implementer_spawn_ids.append(
+            kwargs.get("implementer_spawn_ids", frozenset())
+        )
+        return self._real.admit(command, **kwargs)
+
+
+def _director_with(tmp_path: Path, *, broker, canary: str | None, turn=None):
+    """One director over a recording broker, armed or not."""
+    actuator = None
+    covered = None
+    if canary is not None:
+        settings = _settings(tmp_path, canary)
+        actuator = ImplementWorkerRunner(
+            config=settings,
+            route_policy_revision=ROUTE_REVISION,
+            runner=GitScript(),  # type: ignore[arg-type]
+            leases=WriterLeaseRegistry(),
+            base_ref="origin/staging",
+            spawn=SpawnCounter(),
+        )
+        covered = lambda phase: implement_canary_covers(settings, phase=phase)  # noqa: E731
+    return FableDirector(
+        runner=turn or ScriptedTurn(),  # type: ignore[arg-type]
+        broker=broker,  # type: ignore[arg-type]
+        shadow_log=ShadowObservationLog(tmp_path / "recording-shadow.jsonl"),
+        evidence=EVIDENCE,
+        repo_slug=CANARY_REPO,
+        route_policy_revision=ROUTE_REVISION,
+        stage_labels=STAGE_LABELS,
+        usd_budget_per_boundary=5.0,
+        implement_dispatcher=actuator,
+        implement_is_covered=covered,
+    )
+
+
+class TestTheBrokerIsHandedAMeasuredLease:
+    """ADR-0137 left ``WriterLease`` carrying the literal ``"unobserved"`` and
+    named real digests as #11542's job. Replacing them is worth something only
+    if the measurement reaches the component that judges the batch, and nothing
+    else in this file would notice if it stopped: ``admit_dispatch``'s writer
+    arm reads identity, epoch and the holder, never the digest fields, so this
+    cannot be pinned through a behaviour change. It is pinned by observing the
+    contract object at the seam — with the disarmed contrast beside it, so the
+    assertions cannot pass by the digests being unmeasured everywhere.
+
+    Mutation testing found this: replacing the measured lease with #11537's
+    placeholder changed no test.
+    """
+
+    async def _handed(self, tmp_path: Path, *, canary: str | None):
+        broker = RecordingBroker()
+        await _observe(_director_with(tmp_path, broker=broker, canary=canary))
+        return broker.writer_leases[0]
+
+    async def test_an_armed_boundary_hands_over_the_measured_head(
+        self, tmp_path: Path
+    ) -> None:
+        assert (
+            await self._handed(tmp_path, canary=CANARY_REPO)
+        ).worktree_head_digest == HEAD
+
+    async def test_an_armed_boundary_hands_over_the_measured_base(
+        self, tmp_path: Path
+    ) -> None:
+        assert (
+            await self._handed(tmp_path, canary=CANARY_REPO)
+        ).worktree_base_digest == BASE
+
+    async def test_a_disarmed_boundary_still_says_it_looked_at_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        from fable_director import UNOBSERVED_DIGEST
+
+        handed = await self._handed(tmp_path, canary=None)
+
+        assert handed.worktree_head_digest == UNOBSERVED_DIGEST
+
+    async def test_the_lease_keeps_the_drivers_own_identity(
+        self, tmp_path: Path
+    ) -> None:
+        # A writer lease at another identity or epoch is what ``admit_dispatch``
+        # reports as ownership theft or ``LEASE_EXPIRED``, so minting one from a
+        # measurement must not lose the fence it is minted against.
+        handed = await self._handed(tmp_path, canary=CANARY_REPO)
+
+        assert (handed.driver_id, handed.epoch) == ("drv-7", 0)
+
+
+class TestTheImplementersLineageReachesTheBroker:
+    """#11542's seventh acceptance criterion, end to end.
+
+    ``admit_dispatch`` has carried a ``SELF_REVIEW_FORBIDDEN`` arm since #11533
+    and it could never fire, because nothing populated ``implementer_spawn_ids``.
+    The class above proves the director *records* them; this proves it *passes*
+    them, and that the fence they feed actually refuses — which is the only
+    version of the claim that is worth anything.
+
+    Mutation testing found this too: passing an empty set instead changed no
+    test.
+    """
+
+    async def test_a_later_boundary_is_told_who_implemented(
+        self, tmp_path: Path
+    ) -> None:
+        broker = RecordingBroker()
+        director = _director_with(tmp_path, broker=broker, canary=CANARY_REPO)
+
+        await _observe(director)
+        await _observe(director, phase=DriverPhase.REVIEW, state="REVIEW")
+
+        assert broker.implementer_spawn_ids[1] == director._implementer_spawns[7]  # noqa: SLF001
+
+    async def test_the_first_boundary_knows_of_no_implementer_yet(
+        self, tmp_path: Path
+    ) -> None:
+        # The contrast: the set is genuinely empty before a writer has run, so
+        # the assertion above is not satisfied by a constant.
+        broker = RecordingBroker()
+
+        await _observe(_director_with(tmp_path, broker=broker, canary=CANARY_REPO))
+
+        assert broker.implementer_spawn_ids[0] == frozenset()
+
+    async def test_a_reviewer_from_the_implementers_lineage_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The fence firing, which is the whole point of carrying the lineage.
+
+        A REVIEW boundary is used because ``WORKER_CATALOG`` catalogues the
+        reviewer there and nowhere else — at IMPLEMENT the capsule's role
+        allow-list would refuse first and the test could not tell the two
+        apart, which is the masking #11541's mutation testing caught twice.
+        """
+        broker = RecordingBroker()
+        director = _director_with(tmp_path, broker=broker, canary=CANARY_REPO)
+        await _observe(director)
+        implementer_spawn = next(iter(director._implementer_spawns[7]))  # noqa: SLF001
+
+        director._runner = ScriptedTurn(  # noqa: SLF001
+            role="reviewer",
+            family="claude-opus",
+            requesting_spawn_id=implementer_spawn,
+        )
+        await _observe(director, phase=DriverPhase.REVIEW, state="REVIEW")
+
+        assert broker.writer_leases  # the second turn really was judged
+        assert (
+            "self_review_forbidden"
+            in _rows(director.shadow_log)[-1]["rejection_reasons"]
+        )
+
+    async def test_a_reviewer_from_no_lineage_is_admitted(self, tmp_path: Path) -> None:
+        # Non-vacuity: without this, a reviewer refused for any other reason
+        # would satisfy the test above.
+        broker = RecordingBroker()
+        director = _director_with(tmp_path, broker=broker, canary=CANARY_REPO)
+        await _observe(director)
+
+        director._runner = ScriptedTurn(role="reviewer", family="claude-opus")  # noqa: SLF001
+        await _observe(director, phase=DriverPhase.REVIEW, state="REVIEW")
+
+        assert (
+            "self_review_forbidden"
+            not in _rows(director.shadow_log)[-1]["rejection_reasons"]
+        )
+
+
+class TestAnUnmeasurableWorktreeRefusesAtTheDirector:
+    """The wiring between "the fence cannot be armed" and a receipt.
+
+    The runner owns the decision; this proves the director actually routes a
+    boundary whose worktree cannot be read into it, rather than crashing or
+    dispatching blind. Mutation testing found the director's own duplicate of
+    this check was unkillable, and it has been deleted in favour of the one
+    below.
+    """
+
+    async def test_a_missing_worktree_produces_a_receipt(self, tmp_path: Path) -> None:
+        settings = _settings(tmp_path, CANARY_REPO)
+        # The one thing an operator can do that this fence exists for.
+        import shutil
+
+        shutil.rmtree(settings.workspace_path_for_issue(7))
+        spawn = SpawnCounter()
+        director = FableDirector(
+            runner=ScriptedTurn(),  # type: ignore[arg-type]
+            broker=ShadowDispatchBroker(),
+            shadow_log=ShadowObservationLog(tmp_path / "unmeasured-shadow.jsonl"),
+            evidence=EVIDENCE,
+            repo_slug=CANARY_REPO,
+            route_policy_revision=ROUTE_REVISION,
+            stage_labels=STAGE_LABELS,
+            usd_budget_per_boundary=5.0,
+            implement_dispatcher=ImplementWorkerRunner(
+                config=settings,
+                route_policy_revision=ROUTE_REVISION,
+                runner=GitScript(),  # type: ignore[arg-type]
+                leases=WriterLeaseRegistry(),
+                base_ref="origin/staging",
+                spawn=spawn,
+            ),
+            implement_is_covered=lambda phase: implement_canary_covers(
+                settings, phase=phase
+            ),
+        )
+
+        await _observe(director)
+
+        assert [
+            row["reason"] for row in _rows(director.shadow_log)[0]["dispatched"]
+        ] == ["worktree_unmeasured"]
+
+    async def test_a_missing_worktree_starts_nothing(self, tmp_path: Path) -> None:
+        settings = _settings(tmp_path, CANARY_REPO)
+        import shutil
+
+        shutil.rmtree(settings.workspace_path_for_issue(7))
+        spawn = SpawnCounter()
+        director = FableDirector(
+            runner=ScriptedTurn(),  # type: ignore[arg-type]
+            broker=ShadowDispatchBroker(),
+            shadow_log=ShadowObservationLog(tmp_path / "unmeasured2-shadow.jsonl"),
+            evidence=EVIDENCE,
+            repo_slug=CANARY_REPO,
+            route_policy_revision=ROUTE_REVISION,
+            stage_labels=STAGE_LABELS,
+            usd_budget_per_boundary=5.0,
+            implement_dispatcher=ImplementWorkerRunner(
+                config=settings,
+                route_policy_revision=ROUTE_REVISION,
+                runner=GitScript(),  # type: ignore[arg-type]
+                leases=WriterLeaseRegistry(),
+                base_ref="origin/staging",
+                spawn=spawn,
+            ),
+            implement_is_covered=lambda phase: implement_canary_covers(
+                settings, phase=phase
+            ),
+        )
+
+        await _observe(director)
+
+        assert spawn.calls == []
+
+
+class TestThePlanCanarysBehaviourIsUnchanged:
+    """#11541 must run exactly as it ran, and one line here could have changed it.
+
+    The pre-spawn fence is shared by both actuators, so the hibernation arm
+    added by this phase applied to Plan boundaries too until it was scoped. A
+    wait suspends *worktree* authority — which is what an IMPLEMENT worker
+    takes and a read-only Plan worker does not — so refusing a Plan worker
+    during a wait would be this phase reaching back into the phase before it,
+    for an operator who never armed this phase's dial. That is the exact thing
+    the second dial exists to prevent.
+
+    Mutation testing found this: removing the scoping changed no test.
+    """
+
+    async def _plan_only_director(self, tmp_path: Path, spawn: SpawnCounter):
+        from config import HydraFlowConfig
+        from plan_broker import PlanCanaryLatch, plan_canary_covers
+        from plan_worker_runner import PlanWorkerRunner
+
+        settings = HydraFlowConfig(
+            state_file=tmp_path / "plan-only-state.json",
+            repo=CANARY_REPO,
+            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+            # Only the Plan dial. No implement dispatcher exists at all, which
+            # is the configuration an operator running #11541 today has.
+            fable_plan_canary_repo=CANARY_REPO,
+        )
+        return FableDirector(
+            runner=ScriptedTurn(role="planner"),  # type: ignore[arg-type]
+            broker=ShadowDispatchBroker(),
+            shadow_log=ShadowObservationLog(tmp_path / "plan-only-shadow.jsonl"),
+            evidence=EVIDENCE,
+            repo_slug=CANARY_REPO,
+            route_policy_revision=ROUTE_REVISION,
+            stage_labels=STAGE_LABELS,
+            usd_budget_per_boundary=5.0,
+            dispatcher=PlanWorkerRunner(
+                config=settings,
+                route_policy_revision=ROUTE_REVISION,
+                runner=GitScript(),  # type: ignore[arg-type]
+                spawn=spawn,
+            ),
+            is_covered=lambda phase: plan_canary_covers(settings, phase=phase),
+            latch=PlanCanaryLatch(ttl_seconds=900),
+        )
+
+    @pytest.mark.parametrize(
+        "waiting",
+        [
+            pytest.param("PARKED", id="ci-wait"),
+            pytest.param("DIAGNOSE", id="diagnostic"),
+            pytest.param("HITL_WAIT", id="human"),
+        ],
+    )
+    async def test_a_plan_worker_still_runs_while_the_driver_waits(
+        self, tmp_path: Path, waiting: str
+    ) -> None:
+        spawn = SpawnCounter()
+        director = await self._plan_only_director(tmp_path, spawn)
+
+        await _observe(director, phase=DriverPhase.PLAN, state=waiting)
+
+        assert len(spawn.calls) == 1
+
+    async def test_a_plan_worker_runs_on_an_ordinary_boundary_too(
+        self, tmp_path: Path
+    ) -> None:
+        # Non-vacuity: without this, a Plan canary that dispatched nothing ever
+        # would satisfy all three above.
+        spawn = SpawnCounter()
+        director = await self._plan_only_director(tmp_path, spawn)
+
+        await _observe(director, phase=DriverPhase.PLAN, state="PLAN")
+
+        assert len(spawn.calls) == 1
+
+    async def test_an_implement_worker_is_refused_in_the_same_state(
+        self, tmp_path: Path
+    ) -> None:
+        # The contrast that makes the scoping a decision rather than an
+        # oversight: the same wait, the other canary, the opposite answer.
+        built, log, spawn, _git = _assemble(
+            tmp_path, name="scoped", canary=CANARY_REPO, wired=True
+        )
+
+        await _observe(built, state="PARKED")
+
+        assert (
+            spawn.calls,
+            [row["reason"] for row in _rows(log)[0]["dispatched"]],
+        ) == (
+            [],
+            ["hibernating"],
+        )
 
 
 class TestAcceptedWorkBecomesEvidenceNotAuthority:

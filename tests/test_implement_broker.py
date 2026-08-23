@@ -14,7 +14,6 @@ the breach it expects rather than merely asserting that something went wrong.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -39,6 +38,7 @@ from implement_broker import (
     WriterLeaseRegistry,
     check_worker_fence,
     hibernation_reason,
+    hibernation_refusal,
     implement_canary_armed,
     implement_canary_covers,
     implement_roles_for_implement_phase,
@@ -50,9 +50,6 @@ from implement_broker import (
     writer_lease_for,
 )
 from plan_broker import PlanRouteOutcome, PlanRouteReason, PlanRouteSource
-
-if TYPE_CHECKING:
-    pass
 
 READY_LABEL = "hydraflow-ready"
 BRANCH = "agent/issue-7"
@@ -139,11 +136,28 @@ def _request(
 
 
 class TestTheBoundIsOnePredicate:
-    def test_an_empty_dial_covers_nothing(self) -> None:
+    @pytest.mark.parametrize(
+        "repo",
+        [
+            pytest.param("acme/widgets", id="a-real-repository"),
+            pytest.param("", id="an-unidentifiable-repository"),
+        ],
+    )
+    def test_an_empty_dial_covers_nothing(self, repo: str) -> None:
+        """The armed clause, and the second case is the one that isolates it.
+
+        With a real repository, deleting ``if armed is None: return False``
+        still answers ``False`` — via the repo comparison, which is ``False``
+        for its own reason. The clause is invisible behind it. With a
+        repository whose own identity is *also* unparseable, deleting the
+        clause leaves ``canonicalize_repo("") == None``, i.e. ``None == None``,
+        i.e. **True**: a disarmed dial covering every boundary. That is the
+        failure the clause exists to prevent, and only the second case can see
+        it. Found by mutation testing, which killed the first case and
+        survived on nothing else.
+        """
         assert (
-            implement_canary_covers(
-                _Dials("acme/widgets", ""), phase=DriverPhase.IMPLEMENT
-            )
+            implement_canary_covers(_Dials(repo, ""), phase=DriverPhase.IMPLEMENT)
             is False
         )
 
@@ -324,14 +338,24 @@ class TestEveryBreachCarriesADeterministicCode:
         ("breach", "code"),
         [
             pytest.param(
-                FenceBreach.BRANCH_MISMATCH,
-                RejectionReason.BRANCH_MISMATCH,
-                id="branch",
+                FenceBreach.DRIVER_REPLACED,
+                RejectionReason.DRIVER_IDENTITY_MISMATCH,
+                id="driver",
             ),
             pytest.param(
-                FenceBreach.HEAD_MOVED,
-                RejectionReason.WORKTREE_DIGEST_STALE,
-                id="head",
+                FenceBreach.EPOCH_SUPERSEDED,
+                RejectionReason.STALE_EPOCH,
+                id="epoch",
+            ),
+            pytest.param(
+                FenceBreach.PHASE_ATTEMPT_SUPERSEDED,
+                RejectionReason.STALE_PHASE_ATTEMPT,
+                id="phase-attempt",
+            ),
+            pytest.param(
+                FenceBreach.LIVE_LABEL_CHANGED,
+                RejectionReason.LIVE_LABEL_CHANGED,
+                id="label",
             ),
             pytest.param(
                 FenceBreach.UNMEASURED,
@@ -339,13 +363,28 @@ class TestEveryBreachCarriesADeterministicCode:
                 id="unmeasured",
             ),
             pytest.param(
-                FenceBreach.EPOCH_SUPERSEDED,
-                RejectionReason.STALE_EPOCH,
-                id="epoch",
+                FenceBreach.BRANCH_MISMATCH,
+                RejectionReason.BRANCH_MISMATCH,
+                id="branch",
+            ),
+            pytest.param(
+                FenceBreach.BASE_MOVED,
+                RejectionReason.WORKTREE_DIGEST_STALE,
+                id="base",
+            ),
+            pytest.param(
+                FenceBreach.HEAD_MOVED,
+                RejectionReason.WORKTREE_DIGEST_STALE,
+                id="head",
+            ),
+            pytest.param(
+                FenceBreach.DIFF_DIGEST_STALE,
+                RejectionReason.WORKTREE_DIGEST_STALE,
+                id="diff",
             ),
         ],
     )
-    def test_the_named_breaches_keep_their_codes(
+    def test_every_breach_keeps_its_code(
         self, breach: FenceBreach, code: RejectionReason
     ) -> None:
         # #11542's fifth acceptance criterion names stale digest and branch
@@ -431,6 +470,14 @@ class TestTheMeasurementIsPureAndTotal:
 
     def test_different_diffs_digest_differently(self) -> None:
         assert worktree_diff_digest("one") != worktree_diff_digest("two")
+
+    def test_the_digest_names_the_algorithm_that_made_it(self) -> None:
+        # Distinctness alone is satisfied by any deterministic hash. The
+        # prefixed, fixed-width form is what makes a digest on a receipt
+        # comparable to one in a prompt or a log without a decoder ring.
+        digest = worktree_diff_digest("--- a\n+++ b\n")
+
+        assert digest.startswith("sha256:") and len(digest) == len("sha256:") + 32
 
 
 class TestTheMintedLeaseCarriesTheMeasurement:
@@ -590,6 +637,22 @@ class TestHibernationNamesTheThreeWaits:
         # ``HITL_APPLY`` is the interesting one: it shares a label with
         # ``HITL_WAIT`` and means the opposite — work is happening.
         assert hibernation_reason(working) is None
+
+
+class TestTheHibernationAdapterSpeaksOneCode:
+    @pytest.mark.parametrize(
+        "waiting",
+        [
+            pytest.param("PARKED", id="ci"),
+            pytest.param("DIAGNOSE", id="diagnostic"),
+            pytest.param("HITL_WAIT", id="human"),
+        ],
+    )
+    def test_every_wait_reports_the_same_deterministic_code(self, waiting: str) -> None:
+        assert hibernation_refusal(waiting) is RejectionReason.HIBERNATING
+
+    def test_a_working_driver_reports_nothing(self) -> None:
+        assert hibernation_refusal("READY") is None
 
 
 # --------------------------------------------------------------------------

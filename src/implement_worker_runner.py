@@ -76,7 +76,6 @@ from implement_broker import (
     FenceBreach,
     WorktreeState,
     check_worker_fence,
-    hibernation_reason,
     needs_writer_lease,
     resolve_implement_model,
     worktree_probes,
@@ -674,21 +673,6 @@ class ImplementWorkerRunner:
         self._dispatched_order.append(key)
         while len(self._dispatched_order) > MAX_DISPATCHED_KEYS:
             self._dispatched_keys.discard(self._dispatched_order.popleft())
-
-
-def hibernation_refusal(driver_state: str) -> RejectionReason | None:
-    """``HIBERNATING`` when *driver_state* is a wait, else ``None``.
-
-    A one-line adapter kept here rather than in the pure module because
-    ``implement_broker.hibernation_reason`` answers *which* wait — which is what
-    an operator wants in a log — while the receipt carries a single
-    deterministic code. Two vocabularies, one predicate behind both.
-    """
-    return (
-        None
-        if hibernation_reason(driver_state) is None
-        else RejectionReason.HIBERNATING
-    )
 
 
 def build_implement_worker_prompt(
