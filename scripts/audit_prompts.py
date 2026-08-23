@@ -582,6 +582,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Adjacent",
         "src/director_turn_runner.py",
     ),
+    # #11541: the brokered Plan worker's whole input. Registered for the same
+    # reason the capsule is — this prompt is the entire contract between a
+    # director's task_contract and a real Sonnet/Opus child, and an
+    # under-specified one produces an off-contract artifact that the receipt
+    # would faithfully record as a success.
+    AuditTarget(
+        "plan_worker_task",
+        "plan_worker_runner.build_plan_worker_prompt",
+        "tests/fixtures/prompts/plan_worker_task.json",
+        "Plan",
+        "src/plan_worker_runner.py",
+    ),
     AuditTarget(
         "prompt_refiner_refine",
         "prompt_refiner.build_refine_prompt",

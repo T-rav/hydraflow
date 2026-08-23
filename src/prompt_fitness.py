@@ -296,6 +296,12 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     # director's capsule prompt was written against the rubric rather than
     # baselined against its own first draft, which is what the rubric is for.
     "director_capsule_turn": frozenset(),
+    # #11541, and held to the same standard: written against the rubric rather
+    # than baselined against its own first draft. That draft failed criteria 5
+    # and 8 — it stated an output shape without an output *contract*, and named
+    # no edge cases — and both were real gaps for a prompt whose whole job is to
+    # produce one bounded artifact a receipt will vouch for.
+    "plan_worker_task": frozenset(),
     "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),
     "agent_build_prompt_with_prior_failure": frozenset({1}),

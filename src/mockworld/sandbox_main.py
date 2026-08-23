@@ -205,6 +205,19 @@ SANDBOX_SEAMS: dict[str, str] = {
     # just never re-audits. The full sample→audit→cross-link path is covered by
     # the Tier-1 MockWorld scenario with an injected fake auditor (#10370).
     "sampled_audit_loop": "config_disable",
+    # The Fable Plan canary's actuator (#11541) — a real
+    # ``run_lightweight_agent`` (``claude``) spawn per admitted worker, the same
+    # wedge class as the two rows above. Two independent pins hold it: the
+    # runner is only constructed under ``execution_runtime=fable_director``,
+    # which ``_apply_sandbox_config_overrides`` forces to ``stage_subprocess``,
+    # AND ``fable_plan_canary_repo`` is cleared there, so even a director that
+    # somehow existed would find every boundary outside the canary's bound. The
+    # ``SubprocessRunner`` it hands the seam is injected at the composition
+    # root, so the sandbox's ``FakeSubprocessRunner`` replaces the spawn if it
+    # ever did run. Scenario cover is the MockWorld canary
+    # (tests/scenarios/test_fable_plan_canary_scenario.py) with an injected
+    # spawn double.
+    "plan_worker_runner": "config_disable",
 }
 
 
@@ -344,6 +357,12 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # cover for the shadow path injects a scripted turn runner
     # (tests/scenarios/test_fable_director_shadow_scenario.py).
     object.__setattr__(config, "execution_runtime", ExecutionRuntime.STAGE_SUBPROCESS)
+    # The Fable Plan canary (#11541). Defence in depth rather than duplication:
+    # the line above already stops a director being constructed, and this stops
+    # the *actuator* independently, so re-arming ``execution_runtime`` for a
+    # future scenario cannot silently arm real Sonnet/Opus spawns on the
+    # air-gapped network as a side effect.
+    object.__setattr__(config, "fable_plan_canary_repo", "")
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

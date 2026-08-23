@@ -523,6 +523,27 @@ async def renew_gateway_key_if_needed(
     return renewed
 
 
+def bound_model_for(harness_env: dict[str, str]) -> str:
+    """The model a route-bound lease binds this spawn to, or ``""`` (#11541).
+
+    A governed key is bound to one effective model and the gateway's data plane
+    refuses any body naming another (``governed_preflight.check_governed_body``),
+    so a caller that builds its own argv has to know which model the mint it
+    just performed committed it to. Reading it off the lease rather than
+    re-deriving it is the point: the mint and the spawn cannot disagree about
+    the binding if only one of them decides it.
+
+    Empty for a v1 (unbound) lease and for a non-gateway env, which is what
+    keeps an unrouted spawn's argv exactly what it was.
+    """
+    if not isinstance(harness_env, _RoutedHarnessEnv):
+        return ""
+    lease = harness_env._gateway_lease
+    if lease is None or not isinstance(lease.request, GatewayMintV2Request):
+        return ""
+    return lease.request.effective_model
+
+
 async def revoke_gateway_key(harness_env: dict[str, str]) -> None:
     """Best-effort close of a per-spawn gateway lease; TTL remains fallback."""
 

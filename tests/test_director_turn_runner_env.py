@@ -31,11 +31,13 @@ class SpawnRecorder:
     def __init__(self, stdout: str = "") -> None:
         self.envs: list[dict[str, str]] = []
         self.cwds: list[str | None] = []
+        self.argvs: list[list[str]] = []
         self._stdout = stdout
 
     async def run_simple(self, cmd: Sequence[str], **kwargs: Any) -> SimpleResult:
         self.envs.append(dict(kwargs.get("env") or {}))
         self.cwds.append(kwargs.get("cwd"))
+        self.argvs.append(list(cmd))
         return SimpleResult(stdout=self._stdout, stderr="", returncode=0)
 
 
@@ -245,3 +247,66 @@ class TestTheProductionPathReadsTheRealEnvironment:
         await runner.run_turn("hi")
 
         assert spawner.envs[0]["PATH"] == "/changed/after/construction"
+
+
+class TestABoundLeaseMakesTheTurnNameItsModel:
+    """#11541 / ADR-0141 §D1: the director's own key is now route-bound.
+
+    A route-bound key commits its spawn to exactly one model — the gateway's
+    data plane refuses any body naming another — so a bound turn must pass
+    ``--model``. An *unbound* turn must not, or every host with the canary
+    disarmed would silently start pinning a model it never pinned before.
+    """
+
+    async def test_an_unbound_turn_names_no_model(self) -> None:
+        spawner = SpawnRecorder()
+
+        await DirectorTurnRunner(
+            runner=spawner,  # type: ignore[arg-type]
+            mint_credential=_mint,
+        ).run_turn("hi")
+
+        assert "--model" not in spawner.argvs[0]
+
+    async def test_a_lease_that_reports_no_binding_names_no_model(self) -> None:
+        # ``bound_model_for`` returns "" for a v1 lease, and that must read as
+        # "unbound" rather than as an empty ``--model`` argument.
+        spawner = SpawnRecorder()
+
+        await DirectorTurnRunner(
+            runner=spawner,  # type: ignore[arg-type]
+            mint_credential=_mint,
+            bound_model=lambda _env: "",
+        ).run_turn("hi")
+
+        assert "--model" not in spawner.argvs[0]
+
+    async def test_a_bound_turn_spawns_on_the_binding_s_model(self) -> None:
+        spawner = SpawnRecorder()
+
+        await DirectorTurnRunner(
+            runner=spawner,  # type: ignore[arg-type]
+            mint_credential=_mint,
+            bound_model=lambda _env: "claude-sonnet-4-6",
+        ).run_turn("hi")
+
+        argv = spawner.argvs[0]
+        assert argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
+
+    async def test_the_binding_is_read_from_the_turns_own_credential(self) -> None:
+        # Not from config and not from a captured value: the mint and the spawn
+        # must not be able to disagree about the binding, so only one of them
+        # decides it and the other reads it off the lease.
+        seen: list[dict[str, str]] = []
+
+        def _bound(env: dict[str, str]) -> str:
+            seen.append(dict(env))
+            return "claude-opus-4-7"
+
+        await DirectorTurnRunner(
+            runner=SpawnRecorder(),  # type: ignore[arg-type]
+            mint_credential=_mint,
+            bound_model=_bound,
+        ).run_turn("hi")
+
+        assert seen[0]["ANTHROPIC_AUTH_TOKEN"] == "hf-virtual-key"

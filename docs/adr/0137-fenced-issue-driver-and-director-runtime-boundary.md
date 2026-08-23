@@ -27,6 +27,11 @@ pytest:tests/test_dashboard_routes_scheduling.py
 pytest:tests/architecture/test_director_no_authority.py
 pytest:tests/regressions/test_issue_11537_shadow_safety.py
 pytest:tests/regressions/test_issue_11537_shadow_idle_spin.py
+pytest:tests/test_plan_broker.py
+pytest:tests/test_plan_worker_runner.py
+pytest:tests/test_plan_canary_default_off.py
+pytest:tests/regressions/test_issue_11541_outside_the_slice.py
+pytest:tests/scenarios/test_fable_plan_canary_scenario.py
 
 **Precedent:** Fenced leases over a durable log — the epoch/fencing-token discipline for a single-writer owner whose liveness cannot be trusted (Chubby, Burrows 2006; Kafka's producer epoch; Lamport's "the lease holder may already be dead").
 **Divergence:** classical fencing assumes the shared store enforces the token, but HydraFlow's durable store is the GitHub label set, which has no compare-and-swap and whose swap primitive is add-first-then-best-effort-remove (`src/pr_manager.py:PRManager.swap_pipeline_labels`), so the fence is enforced at the *admission* boundary instead and multi-label crash states are reconciled against a transition intent recorded before the swap rather than prevented — priority-based reconciliation alone silently reverts backward transitions (receipt: #11533, and the adversarial panel on #10038).
@@ -406,6 +411,116 @@ Two honest gaps this phase does **not** close:
   batch, so the single-writer property holds over what would have been
   dispatched. Real digests and real lease enforcement remain #11542's.
 
+### The Plan canary (#11541)
+
+The **third phase** armed dispatch, for one repository and one phase. Under
+`issue_controller + fable_director` with `config.fable_plan_canary_repo` naming
+this exact repository, a `PLAN` boundary's admitted dispatches become real
+child processes; every other repository, every other phase and every host with
+the dial empty runs the shadow path #11537 shipped, byte for byte.
+
+**The bound is one predicate.** `plan_broker.plan_canary_covers` demands all
+three of: the dial names one canonical `owner/repo` (ADR-0139 D2's lossy-slug
+refusal reused in both directions), this repository is exactly it, and the
+phase is `PLAN`. "Implement, review and HITL remain Classic" is therefore a
+property of that function rather than of every caller remembering to check.
+`tests/regressions/test_issue_11541_outside_the_slice.py` proves it
+differentially — the same director over the same boundary, actuator fully
+wired, records byte-identical evidence to a director with no actuator at all,
+for an empty dial, another repository, and each later phase — with two
+non-vacuity tests so deleting the feature would not pass.
+
+**The rollback is one field**, and the same field. `fable_plan_canary_repo` is
+live (`settings_registry`), empty by default, and deliberately **not** an env
+override for ADR-0141 D5's reason: an env row applies whenever a field is at
+its default and the disarmed value *is* the default, so an env var would mean
+clearing the dial disarmed nothing. Its absence is pinned with the reason.
+Rolling back returns the repository to shadow mode rather than to Classic, so
+the evidence keeps accruing while nothing is dispatched.
+
+**Arming lives on the config, not on the preset.**
+`SchedulingPreset.director_dispatch_armed` stays `False` on every preset and no
+code reads it as permission, because a preset is fleet-wide: one that armed
+dispatch would arm every repository the factory touches, which is the opposite
+of a bounded slice. Selecting the director (restart-required) and naming the
+canary repository (live) remain two separate operator decisions, which is the
+distinction #11537 built that field to preserve.
+
+**The tier choice is explainable after the fact.**
+`plan_broker.resolve_plan_model` may depend on exactly three things — the
+requirement the director asked for, the role's catalogued entry, and whether
+this repository's lane can carry an Anthropic model — and returns a
+`PlanRouteDecision` carrying a content-addressed `decision_id`, the rule that
+fired, the source the tier came from, the catalog revision, the route-policy
+revision and the input echoed back. That is deliberately the same contract
+`routing_policy.explain` holds itself to; a looser one produces a canary whose
+choices cannot be explained afterwards. `PLAN_TIER_CATALOG` is code-owned like
+`WORKER_CATALOG`, and a test pins that every id in it has Anthropic provenance
+and satisfies its own family, so an edit putting `glm-5.3` under `claude-opus`
+fails at test time rather than at a receipt.
+
+**A literal family resolves literally or refuses, before anything is spawned.**
+A lane pinned to the z.ai harness rejects with `literal-family-unsatisfiable`
+rather than substituting, and the capability arm is refused on the same lane
+rather than exempted — exempting it would reopen the substitution path one
+requirement kind over. After the spawn, the **served** model is read back off
+the seam (`run_lightweight_agent`'s new `spawn_out`) and re-checked against the
+requirement, because asserting on the *requested* tier would be blind to
+exactly the failure the invariant is named after.
+
+**One issue per repository.** `plan_broker.PlanCanaryLatch` holds the issue's
+first acceptance criterion as a fence. It is in-memory and per-run: a durable
+latch would outlive the process that took it and idle the canary after a crash,
+while a per-run one is empty after a restart, which is also the true state. A
+TTL covers a hold abandoned *within* a run, and the director releases the slot
+on the tick its issue leaves `PLAN`.
+
+**The canary adds workers, not authority.** The observation seam still returns
+nothing, so a brokered worker's output cannot move a label. The deterministic
+`PLAN` phase still runs, still validates, and still commits; the brokered
+children produce artifacts and receipts beside it. That is the honest scope of
+a canary at this rung — B5's bar is about dispatch safety and receipt coverage,
+not about a brokered plan replacing a validated one — and it is what keeps
+"GitHub labels, IssueDriver epoch, plan validation, constitution and cohort
+gates remain authoritative" literally true. Letting a brokered artifact *become*
+the plan is #11542's decision, and it needs the writer lease #11542 also owns.
+
+**Three refusal codes were added to the contract module**, additively:
+`ROUTE_UNAVAILABLE` (no route or credential could be obtained for an otherwise
+legal request), `WORKER_TIMEOUT` (the child outlived its own wall-clock budget)
+and `CANARY_SLOT_HELD` (another issue holds this repository's one slot). None
+of the three can occur while nothing is dispatched, which is why none existed
+before; folding them into `FANOUT_OVERFLOW` or `BUDGET_EXHAUSTED` would make
+the evidence B5's bar is read from unreadable.
+`DRIVER_CONTRACTS_SCHEMA_VERSION` stays `1` — the members are additive and no
+field changed.
+
+**The pre-spawn fence is re-read with no `await` between the check and the
+claim.** The broker admitted against a snapshot; a stop, an epoch bump, a
+dragged label, a moved policy revision or a cleared dial can all arrive between
+that admission and the spawn — including *between two children of one batch*,
+because the second starts after the first finishes. The idempotency key is
+claimed before the process starts, so a replay can never produce a second child
+for one key. The label arm reads the driver's own post-boundary view rather
+than issuing a fresh GitHub read: C1 makes that view a cache of the label the
+driver re-read at this boundary, and giving an observer its own port would hand
+authority to the component that must not have any.
+
+**S2's credential proof is converted, and D2's request is answered.** The
+director's per-turn key now mints through the same bound v2 path as every other
+governed spawn (ADR-0141 §D1, closed by this phase), so the canary
+repository can run the enforcement canary and the Fable director together —
+they were mutually exclusive while the director minted unbound. A bound turn
+spawns with `--model <effective_model>` because the gateway's data plane
+refuses a body naming any other model; an unbound turn's argv is unchanged.
+
+Two things this phase deliberately did **not** do: no default flip (B5's bar is
+unmet and its window has not been measured), and no sandbox e2e — the actuator
+adds no docker path and no UI page, is covered by two independent air-gap seams
+(`SANDBOX_SEAMS["plan_worker_runner"] = "config_disable"` plus a cleared dial in
+`_apply_sandbox_config_overrides`) and by the MockWorld scenario, and the honest
+e2e is the canary itself, which needs a live factory rather than a scenario.
+
 ## Source-file citations
 
 - `src/driver_contracts.py`: `WorkerRole`, `ModelRequirement`, `DriverLease`, `WriterLease`, `DirectorCapsule`, `DirectorCommand`, `WorkerDispatchRequest`, `WorkerReceipt`, `DriverCheckpoint`, `WorkerLineage`, `WorkerCatalogEntry`, `WORKER_CATALOG`, `RejectionReason`, `admit_dispatch`, `DriverPhase`.
@@ -429,4 +544,9 @@ Two honest gaps this phase does **not** close:
 - `src/fable_director.py`: `FableDirector`, `OBSERVABLE_OUTCOMES` — the shadow observer, its capsule reconstruction, its fail-closed boundary, and the real-boundaries-only rule that keeps the agreement rate uncontaminated.
 - `src/director_shadow_log.py`: `ShadowObservationLog`, `ShadowObservation`, `ShadowAgreement`, `TurnFailure`, `classify_agreement` — the comparison record B5's bar is measured from.
 - `src/dashboard_routes/_scheduling_routes.py`: `GET /api/scheduling/status` — desired vs effective scheduling mode and the hypothetical worker tree.
+- `src/plan_broker.py`: `PLAN_TIER_CATALOG`, `CAPABILITY_TIERS`, `PLAN_TIER_CATALOG_REVISION`, `DIRECTOR_TURN_FAMILY`, `PlanRouteDecision`, `PlanRouteOutcome`, `PlanRouteRule`, `PlanRouteSource`, `PlanRouteReason`, `resolve_plan_model`, `plan_canary_repo`, `plan_canary_armed`, `plan_canary_covers`, `plan_roles_for_plan_phase`, `PlanCanaryLatch` — the canary's pure decision layer (#11541).
+- `src/plan_worker_runner.py`: `PlanWorkerRunner`, `build_plan_worker_prompt`, `_spawn_plan_worker` — the one place a brokered child is started, seam-declared in `SANDBOX_SEAMS`.
+- `src/route_enforcement.py`: `enforce_director_route`, `DIRECTOR_PRINCIPAL` — ADR-0141 §D1's named gap, closed.
+- `src/gateway_mint_client.py`: `bound_model_for` — which model a route-bound lease commits its spawn to.
+- `src/config.py`: `HydraFlowConfig.fable_plan_canary_repo` (the one-action switch), `fable_plan_worker_timeout_seconds`, `fable_plan_canary_armed`.
 - `scripts/director_capability_probe.py` — the probe; `tests/fixtures/director/director_capability_probe_evidence.json` — its sanitized evidence.
