@@ -27,27 +27,32 @@ from adr_utils import (
 
 
 class TestIsAdrIssueTitle:
-    def test_matches_standard_adr_prefix(self) -> None:
-        assert is_adr_issue_title("[ADR] Use event sourcing for state") is True
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            pytest.param(
+                "[ADR] Use event sourcing for state",
+                True,
+                id="matches_standard_adr_prefix",
+            ),
+            pytest.param(
+                "  [ADR] leading spaces", True, id="matches_with_leading_whitespace"
+            ),
+            pytest.param("Fix broken tests", False, id="rejects_non_adr_title"),
+            # The prefix has to open the title, not merely appear in it.
+            pytest.param(
+                "Issue about [ADR] formatting", False, id="rejects_adr_not_at_start"
+            ),
+            pytest.param("", False, id="rejects_empty_string"),
+            pytest.param("[AD] not quite", False, id="rejects_partial_prefix"),
+        ],
+    )
+    def test_title_classification(self, title: str, expected: bool) -> None:
+        assert is_adr_issue_title(title) is expected
 
     def test_matches_case_insensitive(self) -> None:
         assert is_adr_issue_title("[adr] lowercase prefix") is True
         assert is_adr_issue_title("[Adr] mixed case") is True
-
-    def test_matches_with_leading_whitespace(self) -> None:
-        assert is_adr_issue_title("  [ADR] leading spaces") is True
-
-    def test_rejects_non_adr_title(self) -> None:
-        assert is_adr_issue_title("Fix broken tests") is False
-
-    def test_rejects_adr_not_at_start(self) -> None:
-        assert is_adr_issue_title("Issue about [ADR] formatting") is False
-
-    def test_rejects_empty_string(self) -> None:
-        assert is_adr_issue_title("") is False
-
-    def test_rejects_partial_prefix(self) -> None:
-        assert is_adr_issue_title("[AD] not quite") is False
 
 
 # ---------------------------------------------------------------------------
@@ -56,32 +61,33 @@ class TestIsAdrIssueTitle:
 
 
 class TestNormalizeAdrTopic:
-    def test_strips_memory_prefix(self) -> None:
-        assert (
-            normalize_adr_topic("[Memory] ADR test policy — only structural tests")
-            == "adr test policy only structural tests"
-        )
-
-    def test_strips_adr_draft_prefix(self) -> None:
-        assert (
-            normalize_adr_topic(
-                "[ADR] Draft decision from memory #123: Worker topology shift"
-            )
-            == "worker topology shift"
-        )
-
-    def test_lowercases_and_normalizes(self) -> None:
-        assert normalize_adr_topic("Use Event Sourcing") == "use event sourcing"
-
-    def test_strips_non_alphanumeric(self) -> None:
-        assert normalize_adr_topic("foo--bar__baz") == "foo bar baz"
-
-    def test_empty_string(self) -> None:
-        assert normalize_adr_topic("") == ""
-
-    def test_only_prefix(self) -> None:
-        result = normalize_adr_topic("[Memory]")
-        assert result == ""
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param(
+                "[Memory] ADR test policy — only structural tests",
+                "adr test policy only structural tests",
+                id="strips_memory_prefix",
+            ),
+            # The draft prefix carries a memory issue number that must go too.
+            pytest.param(
+                "[ADR] Draft decision from memory #123: Worker topology shift",
+                "worker topology shift",
+                id="strips_adr_draft_prefix",
+            ),
+            pytest.param(
+                "Use Event Sourcing",
+                "use event sourcing",
+                id="lowercases_and_normalizes",
+            ),
+            pytest.param("foo--bar__baz", "foo bar baz", id="strips_non_alphanumeric"),
+            pytest.param("", "", id="empty_string"),
+            # A title that is nothing but a prefix normalizes to nothing.
+            pytest.param("[Memory]", "", id="only_prefix"),
+        ],
+    )
+    def test_topic_normalization(self, raw: str, expected: str) -> None:
+        assert normalize_adr_topic(raw) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -104,29 +110,35 @@ class TestAdrValidationReasons:
         reasons = adr_validation_reasons(body)
         assert any("too short" in r for r in reasons)
 
-    def test_missing_context_heading(self) -> None:
-        body = (
-            "## Decision\n\nWe will do Y.\n\n"
-            "## Consequences\n\nThis changes Z.\n" + "x" * 120
-        )
+    # Each body omits exactly one required heading and is padded past the
+    # minimum length, so "too short" cannot be what produced the reason.
+    @pytest.mark.parametrize(
+        ("body", "missing"),
+        [
+            pytest.param(
+                "## Decision\n\nWe will do Y.\n\n"
+                "## Consequences\n\nThis changes Z.\n" + "x" * 120,
+                "## Context",
+                id="missing_context_heading",
+            ),
+            pytest.param(
+                "## Context\n\nWe need to decide.\n\n"
+                "## Consequences\n\nThis changes Z.\n" + "x" * 120,
+                "## Decision",
+                id="missing_decision_heading",
+            ),
+            pytest.param(
+                "## Context\n\nWe need to decide.\n\n"
+                "## Decision\n\nWe will do Y.\n" + "x" * 120,
+                "## Consequences",
+                id="missing_consequences_heading",
+            ),
+        ],
+    )
+    def test_missing_heading_is_reported(self, body: str, missing: str) -> None:
         reasons = adr_validation_reasons(body)
-        assert any("## Context" in r for r in reasons)
 
-    def test_missing_decision_heading(self) -> None:
-        body = (
-            "## Context\n\nWe need to decide.\n\n"
-            "## Consequences\n\nThis changes Z.\n" + "x" * 120
-        )
-        reasons = adr_validation_reasons(body)
-        assert any("## Decision" in r for r in reasons)
-
-    def test_missing_consequences_heading(self) -> None:
-        body = (
-            "## Context\n\nWe need to decide.\n\n"
-            "## Decision\n\nWe will do Y.\n" + "x" * 120
-        )
-        reasons = adr_validation_reasons(body)
-        assert any("## Consequences" in r for r in reasons)
+        assert any(missing in r for r in reasons)
 
     def test_multiple_failures(self) -> None:
         body = "Short"
@@ -352,37 +364,47 @@ class TestCheckAdrDuplicate:
 
 
 class TestExtractAdrSection:
-    def test_extracts_decision_section(self) -> None:
-        body = (
-            "## Context\n\nSome context.\n\n"
-            "## Decision\n\nWe will use X for Y reasons.\n\n"
-            "## Consequences\n\nThis means Z.\n"
-        )
-        result = extract_adr_section(body, "decision")
-        assert result == "We will use X for Y reasons."
-
-    def test_extracts_context_section(self) -> None:
-        body = "## Context\n\nBackground info here.\n\n## Decision\n\nWe decided.\n"
-        result = extract_adr_section(body, "context")
-        assert result == "Background info here."
-
-    def test_returns_empty_for_missing_section(self) -> None:
-        body = "## Context\n\nSome context.\n"
-        result = extract_adr_section(body, "decision")
-        assert result == ""
-
-    def test_case_insensitive_heading_match(self) -> None:
-        body = "## DECISION\n\nAll caps heading content.\n\n## Consequences\n\nEnd.\n"
-        result = extract_adr_section(body, "decision")
-        assert result == "All caps heading content."
-
-    def test_extracts_last_section_at_eof(self) -> None:
-        body = "## Context\n\nCtx.\n\n## Consequences\n\nFinal section content.\n"
-        result = extract_adr_section(body, "consequences")
-        assert result == "Final section content."
-
-    def test_empty_body(self) -> None:
-        assert extract_adr_section("", "decision") == ""
+    @pytest.mark.parametrize(
+        ("body", "section", "expected"),
+        [
+            pytest.param(
+                "## Context\n\nSome context.\n\n"
+                "## Decision\n\nWe will use X for Y reasons.\n\n"
+                "## Consequences\n\nThis means Z.\n",
+                "decision",
+                "We will use X for Y reasons.",
+                id="extracts_decision_section",
+            ),
+            pytest.param(
+                "## Context\n\nBackground info here.\n\n## Decision\n\nWe decided.\n",
+                "context",
+                "Background info here.",
+                id="extracts_context_section",
+            ),
+            pytest.param(
+                "## Context\n\nSome context.\n",
+                "decision",
+                "",
+                id="returns_empty_for_missing_section",
+            ),
+            pytest.param(
+                "## DECISION\n\nAll caps heading content.\n\n## Consequences\n\nEnd.\n",
+                "decision",
+                "All caps heading content.",
+                id="case_insensitive_heading_match",
+            ),
+            # The last section is terminated by EOF, not by the next heading.
+            pytest.param(
+                "## Context\n\nCtx.\n\n## Consequences\n\nFinal section content.\n",
+                "consequences",
+                "Final section content.",
+                id="extracts_last_section_at_eof",
+            ),
+            pytest.param("", "decision", "", id="empty_body"),
+        ],
+    )
+    def test_section_extraction(self, body: str, section: str, expected: str) -> None:
+        assert extract_adr_section(body, section) == expected
 
 
 # ---------------------------------------------------------------------------

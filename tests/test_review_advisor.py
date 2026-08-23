@@ -160,50 +160,62 @@ class TestShouldPreFlight:
             prior_fix_attempts=prior
         )
 
-    def test_docs_only_returns_false(self, monkeypatch):
+    # `should_pre_flight` routes on (changed paths, lines changed, prior fix
+    # attempts). Each row pins one input; the `id` is the name the case carried
+    # before it became a row here. FORCE_ON is cleared for every row — the
+    # override has its own test below.
+    @pytest.mark.parametrize(
+        ("paths", "lines", "prior", "expected"),
+        [
+            pytest.param(
+                ["README.md", "docs/wiki/x.md"],
+                200,
+                0,
+                False,
+                id="docs_only_returns_false",
+            ),
+            pytest.param(
+                ["tests/test_foo.py"], 200, 0, False, id="test_only_returns_false"
+            ),
+            pytest.param(
+                ["src/foo.py"], 10, 0, False, id="small_src_change_returns_false"
+            ),
+            pytest.param(
+                ["src/foo.py"], 50, 0, True, id="large_src_change_returns_true"
+            ),
+            pytest.param(
+                ["src/orchestrator.py"], 2, 0, True, id="critical_path_always_true"
+            ),
+            # The three globs below are separate CRITICAL_PATHS patterns, not one
+            # rule — each keeps its own row so a dropped pattern still fails here.
+            pytest.param(
+                ["src/persistence/store.py"],
+                2,
+                0,
+                True,
+                id="critical_path_glob_persistence",
+            ),
+            pytest.param(
+                ["src/edge_proposer_loop.py"],
+                2,
+                0,
+                True,
+                id="critical_path_glob_loop",
+            ),
+            pytest.param(
+                ["src/state/checkpoint.py"], 2, 0, True, id="critical_path_glob_state"
+            ),
+            # A prior fix attempt escalates even a docs-only diff.
+            pytest.param(
+                ["docs/wiki/x.md"], 5, 1, True, id="prior_fix_attempt_always_true"
+            ),
+        ],
+    )
+    def test_pre_flight_decision(self, monkeypatch, paths, lines, prior, expected):
         monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["README.md", "docs/wiki/x.md"], lines=200)
-        assert should_pre_flight(diff, pr) is False
+        diff, pr = self._trivial(paths, lines=lines, prior=prior)
 
-    def test_test_only_returns_false(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["tests/test_foo.py"], lines=200)
-        assert should_pre_flight(diff, pr) is False
-
-    def test_small_src_change_returns_false(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["src/foo.py"], lines=10)
-        assert should_pre_flight(diff, pr) is False
-
-    def test_large_src_change_returns_true(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["src/foo.py"], lines=50)
-        assert should_pre_flight(diff, pr) is True
-
-    def test_critical_path_always_true(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["src/orchestrator.py"], lines=2)
-        assert should_pre_flight(diff, pr) is True
-
-    def test_critical_path_glob_persistence(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["src/persistence/store.py"], lines=2)
-        assert should_pre_flight(diff, pr) is True
-
-    def test_critical_path_glob_loop(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["src/edge_proposer_loop.py"], lines=2)
-        assert should_pre_flight(diff, pr) is True
-
-    def test_critical_path_glob_state(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["src/state/checkpoint.py"], lines=2)
-        assert should_pre_flight(diff, pr) is True
-
-    def test_prior_fix_attempt_always_true(self, monkeypatch):
-        monkeypatch.delenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", raising=False)
-        diff, pr = self._trivial(["docs/wiki/x.md"], lines=5, prior=1)
-        assert should_pre_flight(diff, pr) is True
+        assert should_pre_flight(diff, pr) is expected
 
     def test_force_on_overrides(self, monkeypatch):
         monkeypatch.setenv("HYDRAFLOW_REVIEW_PREFLIGHT_FORCE_ON", "true")
@@ -1345,29 +1357,34 @@ class TestSelfModificationGuard:
 
 
 class TestBlastRadius:
-    def test_critical_path_exact_is_high(self):
-        stats = DiffStats(changed_paths=["src/orchestrator.py"], lines_changed=5)
-        assert compute_blast_radius(stats) == "high"
+    # One row per (changed paths, lines changed) shape the tiering has to place;
+    # the `id` is the name the case carried before it became a row here.
+    @pytest.mark.parametrize(
+        ("paths", "lines", "expected"),
+        [
+            pytest.param(
+                ["src/orchestrator.py"], 5, "high", id="critical_path_exact_is_high"
+            ),
+            # Exact entry and glob pattern are distinct CRITICAL_PATHS shapes.
+            pytest.param(
+                ["src/edge_proposer_loop.py"],
+                5,
+                "high",
+                id="critical_path_glob_loop_is_high",
+            ),
+            pytest.param(
+                ["src/some_util.py"], 250, "medium", id="large_src_change_is_medium"
+            ),
+            pytest.param(["src/some_util.py"], 50, "low", id="small_src_change_is_low"),
+            # Volume never lifts a docs-only diff out of "low".
+            pytest.param(["docs/adr/0001.md"], 500, "low", id="docs_only_is_low"),
+            pytest.param([], 0, "low", id="empty_diff_is_low"),
+        ],
+    )
+    def test_blast_radius_tier(self, paths, lines, expected):
+        stats = DiffStats(changed_paths=paths, lines_changed=lines)
 
-    def test_critical_path_glob_loop_is_high(self):
-        stats = DiffStats(changed_paths=["src/edge_proposer_loop.py"], lines_changed=5)
-        assert compute_blast_radius(stats) == "high"
-
-    def test_large_src_change_is_medium(self):
-        stats = DiffStats(changed_paths=["src/some_util.py"], lines_changed=250)
-        assert compute_blast_radius(stats) == "medium"
-
-    def test_small_src_change_is_low(self):
-        stats = DiffStats(changed_paths=["src/some_util.py"], lines_changed=50)
-        assert compute_blast_radius(stats) == "low"
-
-    def test_docs_only_is_low(self):
-        stats = DiffStats(changed_paths=["docs/adr/0001.md"], lines_changed=500)
-        assert compute_blast_radius(stats) == "low"
-
-    def test_empty_diff_is_low(self):
-        stats = DiffStats(changed_paths=[], lines_changed=0)
-        assert compute_blast_radius(stats) == "low"
+        assert compute_blast_radius(stats) == expected
 
 
 class TestBlastRadiusRetryBudget:
@@ -1416,14 +1433,16 @@ class TestSecondOrderFailureProbe:
 
 
 class TestReviewBlastRadiusState:
-    def test_min_review_passes_low(self):
-        assert min_review_passes_for_blast_radius("low") == 1
-
-    def test_min_review_passes_medium(self):
-        assert min_review_passes_for_blast_radius("medium") == 2
-
-    def test_min_review_passes_high(self):
-        assert min_review_passes_for_blast_radius("high") == 3
+    @pytest.mark.parametrize(
+        ("radius", "passes"),
+        [
+            pytest.param("low", 1, id="min_review_passes_low"),
+            pytest.param("medium", 2, id="min_review_passes_medium"),
+            pytest.param("high", 3, id="min_review_passes_high"),
+        ],
+    )
+    def test_min_review_passes_per_tier(self, radius, passes):
+        assert min_review_passes_for_blast_radius(radius) == passes
 
 
 class TestPostVerifyInputLens:

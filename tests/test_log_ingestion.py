@@ -65,42 +65,45 @@ def _write_log_lines(path: Path, lines: list[dict]) -> None:
 
 
 class TestFingerprintMessage:
-    def test_numbers_replaced(self) -> None:
-        assert fingerprint_message("issue 42") == "issue <N>"
-
-    def test_quoted_strings_replaced_single(self) -> None:
-        assert fingerprint_message("loaded 'config.py'") == "loaded <S>"
-
-    def test_quoted_strings_replaced_double(self) -> None:
-        assert fingerprint_message('loaded "config.py"') == "loaded <S>"
-
-    def test_hex_hashes_replaced(self) -> None:
-        assert fingerprint_message("hash abc123def456") == "hash <H>"
+    # One row per variable class the fingerprinter normalizes away; the `id` is
+    # the name the case carried before it became a row here.
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            pytest.param("issue 42", "issue <N>", id="numbers_replaced"),
+            pytest.param(
+                "loaded 'config.py'",
+                "loaded <S>",
+                id="quoted_strings_replaced_single",
+            ),
+            pytest.param(
+                'loaded "config.py"',
+                "loaded <S>",
+                id="quoted_strings_replaced_double",
+            ),
+            pytest.param("hash abc123def456", "hash <H>", id="hex_hashes_replaced"),
+            pytest.param("/usr/local/bin", "<P>", id="paths_replaced"),
+            # Numbers are replaced before paths, so "issue-42" becomes "issue-<N>"
+            # and the path regex stops at "<", leaving a trailing "<N>".
+            pytest.param(
+                "Merged PR #101 on agent/issue-42",
+                "Merged PR #<N> on agent<P><N>",
+                id="combined_replacement",
+            ),
+            pytest.param("", "", id="empty_string"),
+            pytest.param("Connection refused", "Connection refused", id="no_variables"),
+            pytest.param(
+                "item 3 of 10 failed", "item <N> of <N> failed", id="multiple_numbers"
+            ),
+        ],
+    )
+    def test_fingerprint(self, message: str, expected: str) -> None:
+        assert fingerprint_message(message) == expected
 
     def test_short_hex_not_replaced(self) -> None:
         # 7 chars — below the 8-char threshold
         result = fingerprint_message("value abc1234")
         assert "<H>" not in result
-
-    def test_paths_replaced(self) -> None:
-        assert fingerprint_message("/usr/local/bin") == "<P>"
-
-    def test_combined_replacement(self) -> None:
-        # Numbers are replaced before paths, so "issue-42" becomes "issue-<N>"
-        # and the path regex stops at "<", leaving a trailing "<N>".
-        result = fingerprint_message("Merged PR #101 on agent/issue-42")
-        assert result == "Merged PR #<N> on agent<P><N>"
-
-    def test_empty_string(self) -> None:
-        assert fingerprint_message("") == ""
-
-    def test_no_variables(self) -> None:
-        msg = "Connection refused"
-        assert fingerprint_message(msg) == msg
-
-    def test_multiple_numbers(self) -> None:
-        result = fingerprint_message("item 3 of 10 failed")
-        assert result == "item <N> of <N> failed"
 
 
 # ---------------------------------------------------------------------------

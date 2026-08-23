@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from scripts.audit_prompts import (
     AuditTarget,
     Scorecard,
@@ -231,88 +232,42 @@ def test_score_edge_cases_fail_when_no_cues():
 # ---------------------------------------------------------------------------
 
 
-def test_severity_high_when_two_fails():
-    scores = {
-        1: "Pass",
-        2: "Fail",
-        3: "Fail",
-        4: "Pass",
-        5: "Pass",
-        6: "Pass",
-        7: "N/A",
-        8: "Pass",
-    }
-    assert severity_for(Scorecard(scores=scores)) == "High"
+#: An all-clean scorecard. Criterion 7 is "N/A" because it is the only
+#: conditionally-applicable rule; every case below starts here and overrides
+#: exactly the criteria whose verdict it is pinning.
+CLEAN_SCORES = {
+    1: "Pass",
+    2: "Pass",
+    3: "Pass",
+    4: "Pass",
+    5: "Pass",
+    6: "Pass",
+    7: "N/A",
+    8: "Pass",
+}
 
 
-def test_severity_high_when_criterion_1_fails():
-    scores = {
-        1: "Fail",
-        2: "Pass",
-        3: "Pass",
-        4: "Pass",
-        5: "Pass",
-        6: "Pass",
-        7: "N/A",
-        8: "Pass",
-    }
-    assert severity_for(Scorecard(scores=scores)) == "High"
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        pytest.param({2: "Fail", 3: "Fail"}, "High", id="severity_high_when_two_fails"),
+        # Criteria 1 and 6 are load-bearing: a single Fail on either is High on
+        # its own, without the second failure the generic rule requires.
+        pytest.param({1: "Fail"}, "High", id="severity_high_when_criterion_1_fails"),
+        pytest.param({6: "Fail"}, "High", id="severity_high_when_criterion_6_fails"),
+        pytest.param({3: "Fail"}, "Medium", id="severity_medium_on_one_fail"),
+        pytest.param(
+            {1: "Partial", 2: "Partial", 3: "Partial"},
+            "Medium",
+            id="severity_medium_on_three_partials",
+        ),
+        pytest.param({}, "Low", id="severity_low_when_clean"),
+    ],
+)
+def test_severity_for_scorecard(overrides: dict[int, str], expected: str):
+    scores = {**CLEAN_SCORES, **overrides}
 
-
-def test_severity_high_when_criterion_6_fails():
-    scores = {
-        1: "Pass",
-        2: "Pass",
-        3: "Pass",
-        4: "Pass",
-        5: "Pass",
-        6: "Fail",
-        7: "N/A",
-        8: "Pass",
-    }
-    assert severity_for(Scorecard(scores=scores)) == "High"
-
-
-def test_severity_medium_on_one_fail():
-    scores = {
-        1: "Pass",
-        2: "Pass",
-        3: "Fail",
-        4: "Pass",
-        5: "Pass",
-        6: "Pass",
-        7: "N/A",
-        8: "Pass",
-    }
-    assert severity_for(Scorecard(scores=scores)) == "Medium"
-
-
-def test_severity_medium_on_three_partials():
-    scores = {
-        1: "Partial",
-        2: "Partial",
-        3: "Partial",
-        4: "Pass",
-        5: "Pass",
-        6: "Pass",
-        7: "N/A",
-        8: "Pass",
-    }
-    assert severity_for(Scorecard(scores=scores)) == "Medium"
-
-
-def test_severity_low_when_clean():
-    scores = {
-        1: "Pass",
-        2: "Pass",
-        3: "Pass",
-        4: "Pass",
-        5: "Pass",
-        6: "Pass",
-        7: "N/A",
-        8: "Pass",
-    }
-    assert severity_for(Scorecard(scores=scores)) == "Low"
+    assert severity_for(Scorecard(scores=scores)) == expected
 
 
 # ---------------------------------------------------------------------------
