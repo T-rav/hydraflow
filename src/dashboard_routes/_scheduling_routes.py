@@ -19,8 +19,9 @@ that is not:
   ``dispatched: false`` and the summary carries ``workers_dispatched: 0``,
   both of which are then invariants rather than statuses. Armed, a node reads
   ``dispatched: true`` exactly when the same ``request_id`` produced a receipt
-  carrying a ``child_spawn_id`` — a child that actually ran, whether its
-  receipt is ``accepted`` or a reaped ``expired``.
+  carrying a ``child_spawn_id`` — a child that actually ran, whatever its
+  receipt then says: ``accepted``, a reaped ``expired``, or a ``rejected``
+  whose served model did not satisfy the requirement.
 
 #11541 armed dispatch for one repository at ``PLAN``, and two things here
 follow from that. ``workers_dispatched`` is now **counted** rather than

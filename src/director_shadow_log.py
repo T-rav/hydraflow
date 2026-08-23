@@ -399,6 +399,9 @@ class ShadowObservationLog:
             "workers_dispatched": self._counts.get("workers_dispatched", 0),
             "workers_accepted": self._counts.get("workers_accepted", 0),
             "workers_expired": self._counts.get("workers_expired", 0),
+            "workers_rejected_after_spawn": self._counts.get(
+                "workers_rejected_after_spawn", 0
+            ),
             "workers_refused": self._counts.get("workers_refused", 0),
             "worker_usd_cost_total": round(self._worker_usd_total, 6),
             "shadow_mode": self._counts.get("workers_dispatched", 0) == 0,
@@ -454,16 +457,24 @@ class ShadowObservationLog:
             ran = bool(receipt.get("child_spawn_id"))
             if ran:
                 self._bump("workers_dispatched")
-            if receipt.get("status") == "accepted":
+            status = receipt.get("status")
+            if status == "accepted":
                 self._bump("workers_accepted")
-            elif ran:
-                # It ran and did not finish cleanly — reaped at its deadline, or
-                # served a model that did not satisfy the requirement. Counting
-                # it as *refused* put a child that consumed a worker slot in the
-                # same bucket as one that was never started.
+            elif not ran:
+                # Never started: no key, no spend, no worker slot.
+                self._bump("workers_refused")
+            elif status == "expired":
                 self._bump("workers_expired")
             else:
-                self._bump("workers_refused")
+                # It ran and was then rejected — a served model that did not
+                # satisfy the requirement is the case this canary exists to
+                # produce. Its own bucket, keyed on the receipt's own status:
+                # an earlier version lumped it under ``workers_expired``, filing
+                # "a route answered claude-opus with a GLM id" under "reaped at
+                # its deadline" on the operator status. ADR-0053 — EXPIRED is a
+                # ReceiptStatus term and the counter named for it may only
+                # count it.
+                self._bump("workers_rejected_after_spawn")
             cost = receipt.get("usd_cost")
             if isinstance(cost, int | float):
                 self._worker_usd_total += float(cost)

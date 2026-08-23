@@ -522,8 +522,9 @@ class PlanWorkerRunner:
             # error is caught inside the seam and becomes a soft ``rc=-1`` (that
             # is the case the ``spawned`` guard below exists for), and the
             # harness guard is a ``ValueError``, which is a likely bug and is
-            # re-raised by the line above — besides being unreachable from a
-            # call site that passes ``tool="claude"`` literally.
+            # re-raised by ``reraise_on_credit_or_bug`` below — besides being
+            # unreachable from a call site that passes ``tool="claude"``
+            # literally.
             #
             # What actually lands here is the work *around* the spawn:
             # ``_terminal_gateway_runner`` failing to open a Docker client, a
@@ -546,18 +547,25 @@ class PlanWorkerRunner:
 
         requested = str(spawn_out.get("model", "") or "")
         if not spawn_out.get("spawned"):
-            # The seam returned without starting a process. Three ways in, and
-            # the third is why this guard reads ``spawned`` rather than
-            # ``model``: the CH-6 gate and an ``EnforcementRefused`` return
-            # *before* the seam's try block, so they fill nothing — but a
-            # ``GatewayMintError`` is neither fatal nor a likely bug, so the
-            # seam CATCHES it, converts it to a soft ``rc=-1``, and its
-            # ``finally`` fills ``model`` anyway.
+            # The seam returned without starting a process. FOUR ways in,
+            # and the last two are why this guard reads ``spawned`` rather than
+            # ``model``:
             #
-            # Keying on ``model`` therefore let a gateway outage fall through to
-            # the ACCEPTED receipt below: a worker recorded as accepted, with a
-            # spawn id, a served model and zero cost, for a child that never
-            # existed. In the canary's own evidence record.
+            # * the CH-6 gate and an ``EnforcementRefused`` return *before* the
+            #   seam's try block, so they fill no ``model`` (the refusal does
+            #   leave ``refused``/``refused_outcome``, which ``_refusal_for_spawn``
+            #   reads below);
+            # * a ``GatewayMintError`` is neither fatal nor a likely bug, so the
+            #   seam CATCHES it and its ``finally`` fills ``model`` anyway;
+            # * ``run_simple`` itself can fail to start anything — a
+            #   ``DockerRunner`` whose daemon is down, a ``HostRunner`` with no
+            #   CLI binary — which the seam also swallows.
+            #
+            # Keying on ``model`` let the second fall through to the ACCEPTED
+            # receipt below, and setting ``spawned`` before ``run_simple`` let
+            # the third: a worker recorded as accepted, with a spawn id, a
+            # served model and zero cost, for a child that never existed. In
+            # the canary's own evidence record, twice.
             refusal = _refusal_for_spawn(spawn_out)
             logger.info(
                 "plan_worker_runner: #%d %s never spawned: %s/%s -> %s",

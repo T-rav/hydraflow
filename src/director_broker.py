@@ -157,8 +157,9 @@ class BrokerVerdict:
         node reads ``dispatched: false`` — which is then a fact rather than a
         default. Under the armed canary the caller passes the ids of the
         requests that produced a child that actually **ran** — every receipt
-        carrying a lineage, which includes a reaped ``EXPIRED`` child and not
-        only an ``ACCEPTED`` one — so the tree and the receipts agree about the
+        carrying a lineage, whatever its status then says, so a reaped
+        ``EXPIRED`` child and one ``REJECTED`` for its served model both count
+        — so the tree and the receipts agree about the
         same ``request_id`` instead of contradicting each other.
         """
         return [

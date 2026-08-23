@@ -1003,14 +1003,26 @@ class TestOnlyAChildThatExistedCarriesASpawnId:
     """`lineage` is the discriminator `WORKER_TIMEOUT`'s contract promises, so
     exactly the paths that follow a real spawn may carry one.
 
-    Pass 8 gave it to every refusal inside the ``try``, including the
-    ``except Exception`` arm — and that arm fires *before* any process exists:
-    ``run_lightweight_agent`` converts a failed spawn into a soft ``rc=-1`` and
-    fills ``spawn_out``, so what escapes it is a ``GatewayMintError`` from the
-    mint and its own ``provider 'gateway' requires the Claude harness`` guard.
-    A spawn id there would have made a request that never started
-    indistinguishable from a reaped child — the same defect one level down from
-    the one pass 8 was fixing.
+    Three successive versions of this rule were wrong, each one door further
+    in, and the class docstring is where they are recorded so the next reader
+    does not re-derive them:
+
+    * keyed on the ``except`` clause — but ``run_lightweight_agent`` swallows a
+      failed spawn into a soft ``rc=-1``, so which clause fired says nothing;
+    * keyed on ``spawn_out["model"]`` — but a ``GatewayMintError`` is caught
+      *inside* the seam and its ``finally`` fills ``model`` anyway, so a
+      gateway outage minted an ACCEPTED receipt for a child that never started;
+    * set ``spawned`` on the line *before* ``run_simple`` — but a
+      ``DockerRunner`` re-checks its daemon on every call and a ``HostRunner``
+      raises when the CLI binary is missing, so the same false ACCEPTED receipt
+      came back through a Docker outage instead of a gateway one.
+
+    The rule is now ``run_simple``'s **outcome**: it returned, or it timed out.
+    The cases these tests cannot reach — the ones inside the real seam — are
+    covered against the production seam in
+    ``tests/regressions/test_issue_11541_review_findings.py``, because a double
+    standing in for the seam can never exercise the code that decides whether a
+    process started.
     """
 
     async def test_a_gateway_outage_names_no_child(self, config, task) -> None:
@@ -1040,8 +1052,8 @@ class TestOnlyAChildThatExistedCarriesASpawnId:
         assert receipts[0].status is not ReceiptStatus.ACCEPTED
 
     async def test_a_refusal_before_the_seam_names_no_child(self, config, task) -> None:
-        # The CH-6 gate / enforcement-refusal shape: the seam returns without
-        # filling `model`, so nothing was ever spawned.
+        # The CH-6 gate / enforcement-refusal shape: the seam returns before
+        # its try block, so it fills neither `spawned` nor `model`.
         class NeverSpawned(SpawnDouble):
             async def __call__(self, **kwargs: Any) -> SimpleResult:
                 self.calls.append(kwargs)
@@ -1107,9 +1119,9 @@ class TestOnlyAChildThatExistedCarriesASpawnId:
     async def test_a_timeout_after_the_seam_spawned_names_its_child(
         self, config, task
     ) -> None:
-        # Non-vacuity, and the other half of the rule: once the seam recorded a
-        # model it got as far as spawning, so a deadline from its outer finally
-        # describes a child that ran.
+        # Non-vacuity, and the other half of the rule: once the seam recorded
+        # ``spawned`` a process really had started, so a deadline arriving after
+        # it describes a child that ran.
         class SpawnedThenRaised(SpawnDouble):
             async def __call__(self, **kwargs: Any) -> SimpleResult:
                 await super().__call__(**kwargs)

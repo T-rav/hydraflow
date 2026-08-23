@@ -1269,17 +1269,34 @@ async def _claude_cli_complete(
             if provider == _GATEWAY:
                 env = scrub_gateway_spawn_env(env)
             env.update(harness_env)
+        # Recorded from ``run_simple``'s OUTCOME, never from the line before
+        # it. Two outcomes imply a child: it returned, or it timed out — only a
+        # process that started can outlive a deadline. Every other exception
+        # means the runner never got one started, and those are real: a
+        # ``DockerRunner`` re-checks its daemon on every call and raises
+        # ``RuntimeError`` when it is down, and a ``HostRunner`` raises
+        # ``FileNotFoundError`` when the CLI binary is missing. Both are
+        # transient, so this function swallows them into a soft ``rc=-1``.
+        #
+        # Setting the flag *before* the call was #11541's second attempt at this
+        # and had the same shape as its first: a caller inferring "a child ran"
+        # from it attributed a spawn id — and an ACCEPTED receipt — to a Docker
+        # outage. The first attempt inferred it from ``model``, which the
+        # ``finally`` fills even when the mint failed. Neither field was
+        # evidence of a process; this is.
+        #
+        # ``asyncio.CancelledError`` under-claims, which is the safe direction
+        # and the same one already accepted for the seam's ``cleanup()``.
+        try:
+            result = await runner.run_simple(
+                cmd, env=env, input=cmd_input, timeout=timeout
+            )
+        except TimeoutError:
+            if served_out is not None:
+                served_out["spawned"] = True
+            raise
         if served_out is not None:
-            # Recorded HERE, immediately before the process starts, because this
-            # is the only line that knows. Everything above can fail without a
-            # child existing — most importantly ``resolve_harness_env``, whose
-            # ``GatewayMintError`` is neither fatal nor a likely bug, so it is
-            # caught below and converted to a soft rc=-1 whose ``finally`` still
-            # fills ``model``. A caller inferring "a child ran" from the model
-            # would attribute a spawn id to a mint that never produced one
-            # (#11541).
             served_out["spawned"] = True
-        result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
         result = _unwrap_result_envelope(result, usage_out, served_out)
         raise_if_credit_exhausted(
             result.stdout,
@@ -1485,8 +1502,13 @@ async def run_lightweight_agent(
     (``tests/test_prompt_gate_completeness.py`` pins every call site).
 
     *spawn_out*, when given, is filled with what this seam actually spawned:
-    ``spawned`` (True only once a child process has been started — everything
-    else here is filled on paths where none was), ``model`` (the model requested
+    ``spawned`` (True only when the runner actually got a process started —
+    it returned, or it timed out; False when the mint failed, when Docker was
+    down, or when the CLI binary was missing, all of which fill ``model``
+    anyway). **CLI path only**: an OpenAI-compatible backend makes an HTTP call
+    and starts no process, so it never sets it, and a caller passing
+    ``spawn_out`` with such a provider would read every attempt as unspawned.
+    ``model`` (the model requested
     of the child, **after** any enforcement rewrite), ``served_model`` (only
     when the CLI's own result envelope names
     one — absent means unobserved, never substituted), ``provider``, ``usage``

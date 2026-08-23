@@ -251,6 +251,26 @@ class EnvelopeSpawn:
         return SimpleResult(stdout=envelope.result, returncode=0)
 
 
+class _ControlPlane:
+    """The real gateway control-plane contract, so the mint succeeds.
+
+    The point of these tests is a runner that cannot start a process, which is
+    only reachable if everything before it works.
+    """
+
+    async def mint_key(self, *, base_url, control_token, request):
+        _ = (base_url, control_token, request)
+        from gateway_mint_client import GatewayMintCredential
+
+        return GatewayMintCredential(
+            key_id="key-1", token="hfgw_virtual_1", expires_at="2099-08-22T12:05:00Z"
+        )
+
+    async def revoke_key(self, *, base_url, control_token, key_id):
+        _ = (base_url, control_token, key_id)
+        return True
+
+
 class NeverSpawns:
     async def run_simple(self, *args: object, **kwargs: object) -> SimpleResult:
         raise AssertionError("the real spawn seam ran in a regression test")
@@ -551,3 +571,152 @@ class TestAChildThatRanIsDispatchedEvenWhenItsReceiptIsNotAccepted:
         assert summary["workers_expired"] == 1
         assert summary["workers_refused"] == 0
         assert summary["workers_dispatched"] == 1
+
+
+class TestARunnerThatNeverStartsAProcessIsNotAnAcceptedWorker:
+    """The real seam, with a runner that fails to start anything (#11541).
+
+    Every double in this feature stands in for ``run_lightweight_agent`` and
+    therefore *cannot* reach the code that decides whether a process started.
+    Nothing modelled ``run_simple`` itself failing — which is why two successive
+    fixes for "an ACCEPTED receipt for a child that never ran" each closed one
+    door and left the next one open: first the mint (caught inside the seam,
+    fills ``model``), then the runner (raises out of ``run_simple``, and the
+    flag was set on the line before it).
+
+    So this drives the production seam — real ``run_lightweight_agent``, real
+    ``resolve_harness_env``, real mint — and fails only the runner. Both cases
+    are verbatim from production: ``DockerRunner._ensure_client`` re-checks the
+    daemon on **every** call, and ``HostRunner`` raises ``FileNotFoundError``
+    when the CLI binary is absent.
+    """
+
+    class _RunnerThatCannotStart:
+        """A ``SubprocessRunner`` whose ``run_simple`` never starts anything."""
+
+        def __init__(self, error: BaseException) -> None:
+            self._error = error
+            self.calls = 0
+
+        async def run_simple(self, *args: object, **kwargs: object):
+            self.calls += 1
+            raise self._error
+
+    async def _receipt(self, tmp_path: Path, monkeypatch, error: BaseException):
+        monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+        config = _config(tmp_path)
+        object.__setattr__(config, "gateway_base_url", "http://gateway.test:8080")
+        runner = self._RunnerThatCannotStart(error)
+        director = FableDirector(
+            runner=SameRequestIdTurn(),  # type: ignore[arg-type]
+            broker=ShadowDispatchBroker(),
+            shadow_log=ShadowObservationLog(tmp_path / "shadow.jsonl"),
+            evidence=EVIDENCE,
+            repo_slug=CANARY_REPO,
+            route_policy_revision=ROUTE_REVISION,
+            stage_labels=STAGE_LABELS,
+            usd_budget_per_boundary=5.0,
+            # No ``spawn=``: the REAL seam runs, and only the runner fails.
+            dispatcher=PlanWorkerRunner(
+                config=config,
+                route_policy_revision=ROUTE_REVISION,
+                runner=runner,  # type: ignore[arg-type]
+                gateway_client=_ControlPlane(),  # type: ignore[arg-type]
+            ),
+            is_covered=lambda phase: plan_canary_covers(config, phase=phase),
+            latch=PlanCanaryLatch(ttl_seconds=900),
+        )
+        await _observe(director, 7)
+        assert runner.calls == 1, "the seam never reached the runner"
+        return director.shadow_log.recent()[0]
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                RuntimeError("Docker daemon not available after 6 retries"),
+                id="docker-down",
+            ),
+            pytest.param(
+                FileNotFoundError("No such file or directory: 'claude'"),
+                id="cli-missing",
+            ),
+        ],
+    )
+    async def test_it_is_never_recorded_as_accepted(
+        self, tmp_path: Path, monkeypatch, error: BaseException
+    ) -> None:
+        row = await self._receipt(tmp_path, monkeypatch, error)
+
+        receipt = row.dispatched[0]
+        assert receipt["status"] == "rejected"
+        assert receipt["reason"] == "route_unavailable"
+        assert receipt["served_model"] is None
+        assert receipt["child_spawn_id"] is None
+        assert [node["dispatched"] for node in row.would_dispatch] == [False]
+
+    async def test_the_rollup_counts_no_worker(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # workers_dispatched keys on child_spawn_id, so a runner that started
+        # nothing must not appear in it — nor in shadow_mode's denominator.
+        row = await self._receipt(
+            tmp_path, monkeypatch, RuntimeError("Docker daemon not available")
+        )
+
+        assert row.dispatched and row.dispatched[0]["child_spawn_id"] is None
+
+    async def test_a_substituted_model_is_not_counted_as_a_timeout(
+        self, tmp_path: Path
+    ) -> None:
+        """The one signal this canary exists to produce, in its own bucket.
+
+        A route that answered ``claude-opus`` with a GLM id yields a receipt
+        that is ``REJECTED`` **and** carries a lineage — the child ran. An
+        earlier bucketing keyed on "ran and not accepted" and filed it under
+        ``workers_expired``, so the operator status reported the substitution
+        as a worker reaped at its deadline. ADR-0053: ``EXPIRED`` is a
+        ``ReceiptStatus`` term, and a counter named for it may only count it.
+        """
+
+        class ServedSomethingElse(EnvelopeSpawn):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                result = await super().__call__(**kwargs)
+                kwargs["spawn_out"]["served_model"] = "glm-5.3"
+                return result
+
+        director = _director(tmp_path, ServedSomethingElse(REAL_MODEL_USAGE))
+        await _observe(director, 7)
+
+        row = director.shadow_log.recent()[0]
+        summary = director.shadow_log.summary()
+
+        assert row.dispatched[0]["status"] == "rejected"
+        assert row.dispatched[0]["reason"] == "model_requirement_unsatisfiable"
+        assert row.dispatched[0]["served_model"] is None
+        # It ran: it had a key, a process and real spend.
+        assert row.dispatched[0]["child_spawn_id"]
+        assert summary["workers_dispatched"] == 1
+        assert summary["workers_rejected_after_spawn"] == 1
+        assert summary["workers_expired"] == 0
+        assert summary["workers_refused"] == 0
+
+    async def test_a_runner_that_times_out_still_names_its_child(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The other half of the outcome rule, against the production seam.
+
+        Only a process that started can outlive a deadline, so a
+        ``TimeoutError`` out of ``run_simple`` is the one exception that still
+        means a child ran. Mutation-checked: dropping the flag from that arm has
+        to fail something, and no double-based test can catch it — the doubles
+        stand in for the seam and never reach the code that sets it.
+        """
+        row = await self._receipt(tmp_path, monkeypatch, TimeoutError())
+
+        receipt = row.dispatched[0]
+        assert receipt["status"] == "expired"
+        assert receipt["reason"] == "worker_timeout"
+        # It ran: it had a key, a process, and it was reaped.
+        assert receipt["child_spawn_id"]
+        assert [node["dispatched"] for node in row.would_dispatch] == [True]
