@@ -178,11 +178,37 @@ def _real_surface_for_fake(fake: str, repo_root: Path) -> set[str] | None:
     union: set[str] = set()
     resolved_any = False
     for module_stem, class_name in sources:
-        methods = _public_methods_of_class(src_dir / f"{module_stem}.py", class_name)
-        if methods:
-            resolved_any = True
-            union |= methods
+        for source in _module_source_files(src_dir, module_stem):
+            methods = _public_methods_of_class(source, class_name)
+            if methods:
+                resolved_any = True
+                union |= methods
     return union if resolved_any else None
+
+
+def _module_source_files(src_dir: Path, module_stem: str) -> tuple[Path, ...]:
+    """Every file that could define *module_stem*'s classes.
+
+    A stem is a MODULE identity, not a file path. ``pr_manager`` lives at
+    ``src/pr_manager.py`` today and could live at ``src/pr_manager/`` tomorrow;
+    resolving only the file spelling is how this collection goes package-blind
+    (#11673). The comment on ``_FAKE_REAL_SURFACE_SOURCES`` records that a
+    dropped source already reclassified real methods as fake-only scaffolding
+    once, during the #11547 mixin pass.
+
+    The degradation is PERMISSIVE, which is what makes it dangerous: a stem
+    that resolves to nothing contributes no methods, but ``resolved_any`` stays
+    True on the strength of its siblings, so the union silently shrinks and the
+    auditor stops reporting genuine un-cassetted gaps. Nothing reddens.
+    ``test_fake_real_surface_sources_all_resolve`` is the loud half.
+    """
+    single = src_dir / f"{module_stem}.py"
+    if single.is_file():
+        return (single,)
+    package = src_dir / module_stem
+    if package.is_dir():
+        return tuple(sorted(package.rglob("*.py")))
+    return ()
 
 
 def _scan_fake_classes(fake_dir: Path) -> dict[str, ast.ClassDef]:

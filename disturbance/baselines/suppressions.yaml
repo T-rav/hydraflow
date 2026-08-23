@@ -133,7 +133,6 @@ entries:
   "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
   "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
   src/decomposition_council.py::noqa:PLC0415: 1
-  src/diagnostic_loop.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
   src/diagnostic_loop.py::noqa:UP007: 1
   src/diagram_loop.py::noqa:PLC0415: 6

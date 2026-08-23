@@ -131,7 +131,10 @@ def _runner_source_files(src_dir: Path) -> list[Path]:
     files = list(src_dir.glob("*.py"))
     for pkg in sorted(src_dir.iterdir()):
         if pkg.is_dir() and (pkg / "__init__.py").is_file():
-            files.extend(pkg.glob("*.py"))
+            # ``rglob``, not ``glob``: the docstring above names the
+            # ``glob("*.py")`` hazard but the fix only went one level deep, so a
+            # sub-package (``src/agent/skills/*.py``) still dropped out (#11673).
+            files.extend(pkg.rglob("*.py"))
     return sorted(files)
 
 

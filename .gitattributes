@@ -13,11 +13,11 @@
 # …) are deliberately NOT listed here: they ARE drift-checked, so a conflict in
 # them signals a real content change that must be resolved by hand.
 
-# changelog.md: append-only log — `merge=union` keeps both sides' lines (a
-# built-in git driver, honoured locally AND by GitHub's server-side merge). The
-# next mainline arch-regen rewrites it deterministically, cleaning any union
-# artifact.
-docs/arch/generated/changelog.md merge=union
+# changelog.md is no longer tracked (see .gitignore): it is a view of `git log`,
+# so its bytes are a function of the branch's commit graph and it can never be
+# conflict-free while committed. `merge=union` papered over that by duplicating
+# entries. It is now rendered at Pages-deploy time instead, which removes the
+# conflict class rather than resolving it.
 
 # .meta.json: cannot use `union` (it would corrupt the JSON) and its commit_sha
 # is load-bearing for staleness detection, so it stays committed + current on

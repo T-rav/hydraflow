@@ -22,6 +22,9 @@ SCENARIO_DIR = ROOT / "tests" / "sandbox_scenarios" / "scenarios"
 
 
 def _scenario_module_names() -> list[str]:
+    # Feeds ``parametrize``: an empty result is not an error, it is ZERO test
+    # cases and a silent green. ``_assert_non_empty`` below makes the lapse
+    # loud instead (#11673).
     return sorted(
         path.stem for path in SCENARIO_DIR.glob("s*.py") if path.name != "__init__.py"
     )
@@ -118,6 +121,16 @@ def test_sandbox_scenarios_are_not_placeholders(module_name: str) -> None:
         f"{path.relative_to(ROOT)} contains placeholder markers {forbidden}. "
         "Sandbox scenarios are merge gates; remove non-working scenarios "
         "instead of keeping ignored green tests."
+    )
+
+
+def test_scenario_discovery_is_not_vacuous() -> None:
+    """A parametrize source that finds nothing produces no tests, silently."""
+    names = _scenario_module_names()
+    assert names, (
+        f"no scenario modules found under {SCENARIO_DIR} — every parametrized "
+        "contract test below would collect ZERO cases and pass vacuously. "
+        "Did the scenarios move, or the naming convention change?"
     )
 
 

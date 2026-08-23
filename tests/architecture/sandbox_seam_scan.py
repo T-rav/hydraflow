@@ -56,7 +56,12 @@ def spawn_target_files(repo_root: Path) -> list[Path]:
     """
     src = repo_root / "src"
     files: set[Path] = set(loop_source_files(src))
+    # A runner is enumerated as a UNIT too, mirroring ``loop_source_files``
+    # above. ``glob`` is non-recursive, so the day a runner is decomposed into
+    # ``src/foo_runner/`` it drops out of this guard entirely and the guard
+    # stays green -- the same lapse the loop half was fixed for (#11673).
     files.update(src.glob("*_runner.py"))
+    files.update(f for d in src.glob("*_runner") if d.is_dir() for f in d.rglob("*.py"))
     files.update(p for p in (src / "runners").glob("**/*.py"))
     return sorted(files)
 

@@ -105,18 +105,10 @@ class TestExceptBlocksReraisGuard:
         "filename",
         [
             # This file-wide sweep is BROADER than the issue's findings table:
-            # triage_phase.py still carries an unguarded handler outside
-            # ``_flow_reproduce`` that #6766 never covered. Marked per-param
-            # rather than on the whole test, so the stale_issue_gc_loop case
-            # stays an honest green instead of a masked XPASS.
-            pytest.param(
-                "triage_phase.py",
-                marks=pytest.mark.xfail(
-                    reason="Residual unguarded ``except Exception`` in "
-                    "triage_phase.py outside the #6766 findings table — tracked by #11668",
-                    strict=False,
-                ),
-            ),
+            # The residual handler outside ``_flow_reproduce`` -- which #6766
+            # never covered and #11668 found still unguarded -- now carries the
+            # guard, so this is a plain param again: removing it fails loudly.
+            "triage_phase.py",
             "stale_issue_gc_loop.py",
         ],
         ids=lambda f: f.removesuffix(".py"),
