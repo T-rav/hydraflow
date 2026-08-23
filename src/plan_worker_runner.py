@@ -60,8 +60,15 @@ from driver_contracts import (
     WorkerTransport,
 )
 from exception_classify import reraise_on_credit_or_bug
-from hydraflow_gateway.routing_policy import DecisionReason
-from plan_broker import PlanRouteOutcome, PlanRouteReason, resolve_plan_model
+from plan_broker import (
+    INADMISSIBLE_ROUTE_REASONS,
+    OPERATIONAL_ROUTE_REASONS,
+    REFUSAL_CODES,
+    PlanRouteOutcome,
+    PlanRouteReason,
+    refusal_for_spawn,
+    resolve_plan_model,
+)
 from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
@@ -97,92 +104,15 @@ thousand dispatches is not the replay this fence exists to catch — while an
 unbounded set on a long-lived component is a slow leak with no upper bound at
 all."""
 
-#: Which refusal each unsatisfiable tier resolution reports on the receipt.
-#: A table rather than branches so the mapping is one thing an operator can
-#: read, and so a new :class:`plan_broker.PlanRouteReason` fails loudly here
-#: (``_REFUSAL_CODES[...]`` raises) rather than defaulting to a plausible code.
-_REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
-    PlanRouteReason.PHASE_NOT_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-    # A hold, not a rejection: the tier table is the fixable thing and the
-    # request was not inadmissible. Mapping it to the terminal code — which an
-    # earlier draft did — put two holds for the same reason under opposite
-    # receipt codes inside one module.
-    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
-    PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-}
+#: Re-exported from the module that owns the vocabulary, so the two actuators
+#: cannot drift on what a refusal means. See ``plan_broker.REFUSAL_CODES``.
+_REFUSAL_CODES = REFUSAL_CODES
 
-#: Routing-policy refusal reasons that mean *the request was inadmissible*
-#: rather than *something operational is missing*. These map to
-#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing, whatever an
-#: operator edits; every other reason is ROUTE_UNAVAILABLE, where a caretaker
-#: retry is right once whatever is missing is supplied. The remedy for a hold
-#: may be a policy edit rather than a gateway one, so this does not say "look
-#: at the gateway" — an earlier version did, and it was wrong for every hold
-#: except an outage.
-#:
-#: Built from the resolver's own enum rather than from string literals, because
-#: the first draft of this set contained a member that does not exist
-#: (``concrete-model-not-allowed``) and omitted one that does
-#: (``policy-conflict``) — a hand-written copy of another module's vocabulary
-#: drifts silently and reads as a working classification while classifying
-#: nothing. ``tests/test_plan_worker_runner.py`` requires every
-#: :class:`DecisionReason` member to be classified, so a new one fails there
-#: rather than defaulting to "retry it".
-_INADMISSIBLE_ROUTE_REASONS = frozenset(
-    {
-        DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
-        DecisionReason.MODEL_NOT_ALLOWED.value,
-        # Two policies claim the same rung: an operator must resolve it, and a
-        # retry against an unresolved conflict is an infinite one.
-        DecisionReason.POLICY_CONFLICT.value,
-    }
-)
-
-#: Reasons deliberately left retryable, and why — so the judgement is visible
-#: rather than implied by absence from the set above.
-_OPERATIONAL_ROUTE_REASONS = frozenset(
-    {
-        # The snapshot will be back; nothing about the request is wrong.
-        DecisionReason.SNAPSHOT_UNAVAILABLE.value,
-        # Unreachable on THIS seam, and the reason is worth stating because
-        # an earlier comment here got it wrong: it is not that the resolver
-        # never rejects on a hold — ``enforce_canary_route`` raises on every
-        # non-SELECTED outcome, HELD included, which is the whole premise of
-        # classifying on the reason. It is that a brokered child's model is
-        # always a ``PLAN_TIER_CATALOG`` id, and ``requirement_for_model``
-        # returns CAPABILITY only for an *empty* model string — so the resolver
-        # cannot emit ``capability-unmapped`` for one of these spawns at all.
-        # Classified anyway, because the table is required to be total.
-        DecisionReason.CAPABILITY_UNMAPPED.value,
-        # Collapses "no credential for this account" with "a provider lock
-        # excluded every account". The first is operational and the second is
-        # policy, and the resolver does not distinguish them here — so the
-        # conservative reading is the retryable one, which sends the operator
-        # to the gateway where both are visible.
-        DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
-        # Reasons a *selected* decision carries. They reach a refusal only
-        # through ``enforce_canary_route``'s empty-effective-model guard, which
-        # a brokered child cannot trip (its legacy model is always the catalog
-        # id) — so "not a refusal" is nearly but not exactly right, and
-        # operational is the correct reading of the case that can occur.
-        DecisionReason.MATCHED_POLICY.value,
-        DecisionReason.NO_POLICY_APPLIES.value,
-        # NOT one of those two, and an earlier comment here swept it in with
-        # them: ``_legacy_decision`` emits it HELD, so it raises at the outcome
-        # check rather than at the empty-model guard. It is unreachable for a
-        # different reason — ``route_shadow.build_route_context`` always
-        # constructs a ``LegacyRoute``, so ``context.legacy_route`` is never
-        # ``None`` on this path. Operational either way: nothing about the
-        # request is wrong.
-        DecisionReason.NO_LEGACY_ROUTE.value,
-    }
-)
+#: Re-exported from the module that owns the shared vocabulary, so the two
+#: actuators cannot classify one routing refusal two ways.
+#: See ``plan_broker.INADMISSIBLE_ROUTE_REASONS``.
+_INADMISSIBLE_ROUTE_REASONS = INADMISSIBLE_ROUTE_REASONS
+_OPERATIONAL_ROUTE_REASONS = OPERATIONAL_ROUTE_REASONS
 
 
 class PlanWorkerSpawn(Protocol):
@@ -461,6 +391,15 @@ class PlanWorkerRunner:
         budget: float,
     ) -> WorkerReceipt:
         child_spawn_id = uuid.uuid4().hex
+        # Minted before the spawn so every path AFTER it can name the child that
+        # ran — including the refusals. A refusal that dropped it made a reaped
+        # child look like one that never started.
+        lineage = WorkerLineage(
+            driver_id=lease.driver_id,
+            epoch=lease.epoch,
+            child_spawn_id=child_spawn_id,
+            depth=1,
+        )
         spawn_out: dict[str, object] = {}
         started = datetime.now(UTC)
         try:
@@ -485,20 +424,48 @@ class PlanWorkerRunner:
                 spawn_out=spawn_out,
             )
         except TimeoutError:
-            # The seam normally converts its own deadline into a soft rc=-1; a
-            # bare TimeoutError means the child outlived even that, and its
-            # process group has already been reaped by ``run_simple``.
+            # A deadline that escaped the seam rather than one it handled: the
+            # seam converts its OWN timeout into ``spawn_out["timed_out"]`` and
+            # a soft rc=-1, which lands below. So this fires for work outside
+            # that inner try — ``gate_prompt``, the route-shadow and enforcement
+            # threads, the Docker client (``socket.timeout`` IS ``TimeoutError``)
+            # before a child exists, or the seam's outer ``finally`` after one
+            # did. An earlier comment here asserted the second case only, and
+            # attached a spawn id on the strength of it.
             return _refusal(
                 request,
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
+                lineage=_child_lineage(spawn_out, lineage),
             )
         except Exception as exc:
             # A burnt credit balance is factory-wide and must not be converted
             # into a worker refusal (dark-factory 2.2); everything else is this
             # child's failure and becomes a receipt rather than an exception a
             # shadow-shaped observer would have to carry into the allocator.
+            #
+            # **No lineage on this path**, and the honest reason is not the
+            # one an earlier version of this comment gave. It named
+            # ``GatewayMintError`` and the seam's ``provider 'gateway' requires
+            # the Claude harness`` guard, and **neither reaches here**: the mint
+            # error is caught inside the seam and becomes a soft ``rc=-1`` (that
+            # is the case the ``spawned`` guard below exists for), and the
+            # harness guard is a ``ValueError``, which is a likely bug and is
+            # re-raised by ``reraise_on_credit_or_bug`` below — besides being
+            # unreachable from a call site that passes ``tool="claude"``
+            # literally.
+            #
+            # What actually lands here is the work *around* the spawn:
+            # ``_terminal_gateway_runner`` failing to open a Docker client, a
+            # non-``EnforcementRefused`` failure from the route-shadow or
+            # enforcement threads, a non-``PromptGateBlockedError`` from the
+            # CH-6 gate — all before a child exists — and ``cleanup()`` in the
+            # seam's outer ``finally``, which is the one case where a child
+            # *did* run. That last one is a known under-attribution: a receipt
+            # with no spawn id for a child that had one. Under-claiming is the
+            # safe direction for the discriminator, and the alternative is
+            # claiming a spawn on every case above it.
             reraise_on_credit_or_bug(exc)
             logger.warning(
                 "plan_worker_runner: #%d %s could not be dispatched: %s",
@@ -509,10 +476,26 @@ class PlanWorkerRunner:
             return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
 
         requested = str(spawn_out.get("model", "") or "")
-        if not requested:
-            # The seam returned before it spawned anything — a CH-6 block or an
-            # enforcement refusal. No inference happened, so there is no served
-            # model to record and nothing to bill.
+        if not spawn_out.get("spawned"):
+            # The seam returned without starting a process. FOUR ways in,
+            # and the last two are why this guard reads ``spawned`` rather than
+            # ``model``:
+            #
+            # * the CH-6 gate and an ``EnforcementRefused`` return *before* the
+            #   seam's try block, so they fill no ``model`` (the refusal does
+            #   leave ``refused``/``refused_outcome``, which ``_refusal_for_spawn``
+            #   reads below);
+            # * a ``GatewayMintError`` is neither fatal nor a likely bug, so the
+            #   seam CATCHES it and its ``finally`` fills ``model`` anyway;
+            # * ``run_simple`` itself can fail to start anything — a
+            #   ``DockerRunner`` whose daemon is down, a ``HostRunner`` with no
+            #   CLI binary — which the seam also swallows.
+            #
+            # Keying on ``model`` let the second fall through to the ACCEPTED
+            # receipt below, and setting ``spawned`` before ``run_simple`` let
+            # the third: a worker recorded as accepted, with a spawn id, a
+            # served model and zero cost, for a child that never existed. In
+            # the canary's own evidence record, twice.
             refusal = _refusal_for_spawn(spawn_out)
             logger.info(
                 "plan_worker_runner: #%d %s never spawned: %s/%s -> %s",
@@ -533,6 +516,7 @@ class PlanWorkerRunner:
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
+                lineage=_child_lineage(spawn_out, lineage),
             )
         # The model the CLI *reported*, when it reported one. When it did not,
         # the requested id is recorded and ``model_observed`` says so rather
@@ -549,7 +533,10 @@ class PlanWorkerRunner:
                 served,
             )
             return _refusal(
-                request, RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE, decision
+                request,
+                RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
+                decision,
+                lineage=_child_lineage(spawn_out, lineage),
             )
 
         text = (result.stdout or "")[:MAX_ARTIFACT_CHARS]
@@ -567,12 +554,7 @@ class PlanWorkerRunner:
             request_id=request.request_id,
             idempotency_key=request.idempotency_key,
             status=ReceiptStatus.ACCEPTED,
-            lineage=WorkerLineage(
-                driver_id=lease.driver_id,
-                epoch=lease.epoch,
-                child_spawn_id=child_spawn_id,
-                depth=1,
-            ),
+            lineage=lineage,
             worker_role=request.worker_role,
             transport=WorkerTransport.BROKERED,
             requested_model=request.model_requirement,
@@ -674,6 +656,7 @@ def _refusal(
     decision: PlanRouteDecision,
     *,
     status: ReceiptStatus = ReceiptStatus.REJECTED,
+    lineage: WorkerLineage | None = None,
 ) -> WorkerReceipt:
     """A real receipt for a real refusal, naming no served model.
 
@@ -682,12 +665,20 @@ def _refusal(
     it would put a mis-resolved id on a receipt in the one field whose validator
     exists to make that a validation error, which is the smuggling path rather
     than the evidence.
+
+    ``lineage`` is the opposite case and is passed on the refusals that follow a
+    **real spawn**: a child that ran to its deadline and was reaped did exist,
+    was billed, and had a spawn id, and a receipt that hid that would make a
+    dispatched child indistinguishable from one that was never started. It is
+    what tells the two emitters of ``WORKER_TIMEOUT`` apart, and what keeps the
+    worker tree from reporting ``dispatched: false`` for a child that ran.
     """
     return WorkerReceipt(
         request_id=request.request_id,
         idempotency_key=request.idempotency_key,
         status=status,
         reason_code=reason,
+        lineage=lineage,
         worker_role=request.worker_role,
         transport=WorkerTransport.BROKERED,
         requested_model=request.model_requirement,
@@ -696,29 +687,45 @@ def _refusal(
     )
 
 
-def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
-    """Why a spawn that never ran did not run, in the receipt's vocabulary.
+def _child_lineage(
+    spawn_out: dict[str, object], lineage: WorkerLineage
+) -> WorkerLineage | None:
+    """*lineage* when a child actually started, ``None`` when none did.
 
-    The seam collapses a routing-policy refusal and a transport failure onto
-    the same soft ``rc=-1``, so without the reason it left behind, both would
-    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator the request was
-    fine and to retry once whatever is missing is supplied. For an inadmissible
-    route that is wrong: the retry will never succeed, and the thing to edit is
-    the policy.
+    One rule for every refusal that can follow a spawn, rather than one per
+    ``except`` clause. Which clause fired says nothing useful: the seam handles
+    its own deadline and converts it to a soft ``rc=-1``, so a ``TimeoutError``
+    that *escapes* it comes from the work around the spawn — the CH-6 gate, the
+    route-shadow and enforcement threads, a Docker socket (``socket.timeout``
+    IS ``TimeoutError``) — which happen before a child exists, or from the seam's
+    outer ``finally``, which happens after one did.
+
+    ``spawn_out["spawned"]`` is set from ``run_simple``'s **outcome**: it
+    returned, or it timed out. Both imply a process — neither runner
+    implementation returns for one that failed to start, and only a started
+    process can outlive a deadline.
+
+    The residual runs the other way now, and is named rather than hidden: a
+    child that started but whose call ended some third way — a Docker
+    ``attach_socket`` failing after ``container.start()`` succeeded, or the
+    seam's ``cleanup()`` raising in its outer ``finally`` — reads *unspawned*
+    and loses its lineage. **Under**-claiming, which is the safe direction for
+    a discriminator whose whole job is to stop a receipt saying a child ran
+    when none did.
+
+    An earlier version keyed on ``model`` instead, reasoning that the seam fills
+    it once it has "got as far as spawning" — and that was wrong in production:
+    a ``GatewayMintError`` is neither fatal nor a likely bug, so the seam
+    catches it, converts it to a soft ``rc=-1``, and its ``finally`` fills
+    ``model`` anyway. No child had started, and the receipt said ``ACCEPTED``.
+    The unit test did not catch it because its double raised the mint error
+    *out* of the seam, which is not what the seam does — a double more
+    convenient than the thing it stands for.
     """
-    # Classified on the REASON alone, deliberately. A previous draft short-
-    # circuited on ``refused_outcome == held`` first, reasoning that a hold is
-    # retryable whatever its reason — and that silently reversed the one code
-    # this canary is named after: ``RoutingAction.on_unavailable`` defaults to
-    # HOLD, so the ordinary ``provider_lock=zai-harness`` refusal arrives as
-    # HELD with ``literal-family-unsatisfiable``, and the guard turned it back
-    # into a retryable ``ROUTE_UNAVAILABLE``. The reason is the durable fact
-    # about the request; the outcome is a per-policy *dial* over what to do
-    # when a lane is unavailable, and it is the wrong axis to classify on.
-    reason = str(spawn_out.get("refused", "") or "")
-    if reason in _INADMISSIBLE_ROUTE_REASONS:
-        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    return RejectionReason.ROUTE_UNAVAILABLE
+    return lineage if spawn_out.get("spawned") else None
+
+
+_refusal_for_spawn = refusal_for_spawn
 
 
 def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:

@@ -57,9 +57,10 @@ from driver_contracts import (
     DriverPhase,
     ModelRequirement,
     ModelRequirementKind,
+    RejectionReason,
     WorkerRole,
 )
-from hydraflow_gateway.routing_policy import canonicalize_repo
+from hydraflow_gateway.routing_policy import DecisionReason, canonicalize_repo
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -169,6 +170,15 @@ class PlanRouteReason(StrEnum):
     NONE = "none"
     PHASE_NOT_PLAN = "phase-not-plan"
     ROLE_NOT_CATALOGUED_FOR_PLAN = "role-not-catalogued-for-plan"
+
+    # #11542 widened the resolver to a second phase. The two refusals below are
+    # the IMPLEMENT-phase counterparts of the two above, and they are separate
+    # members rather than a shared "phase-not-covered" because they are what an
+    # operator reads off a receipt: "this boundary was not a plan boundary" and
+    # "this boundary was not an implement boundary" are different facts, and
+    # collapsing them would make one refusal explain two different mistakes.
+    PHASE_NOT_IMPLEMENT = "phase-not-implement"
+    ROLE_NOT_CATALOGUED_FOR_IMPLEMENT = "role-not-catalogued-for-implement"
     LITERAL_FAMILY_UNSATISFIABLE = "literal-family-unsatisfiable"
     """The catalogued id does not satisfy the requirement it was resolved from.
 
@@ -194,6 +204,138 @@ class PlanRouteReason(StrEnum):
     quietly returned ``SELECTED`` for a requirement kind it does not handle
     would be the silent-fallback shape (#10053) inside the resolver.
     """
+
+
+#: Which deterministic receipt code each refusal reason reports.
+#:
+#: Lives beside the enum rather than in an actuator because there are now two
+#: actuators bound to one vocabulary, and #11542 proved the hazard by adding two
+#: members here and reddening the Plan actuator's own totality test. A table per
+#: consumer is a drift waiting for the next phase; a table per *vocabulary* is
+#: total by construction, and a new reason reddens one test rather than N.
+REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
+    PlanRouteReason.PHASE_NOT_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.PHASE_NOT_IMPLEMENT: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_IMPLEMENT: (
+        RejectionReason.ROLE_PHASE_FORBIDDEN
+    ),
+    PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
+        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    ),
+    # A hold, not a rejection: the tier table is the fixable thing and the
+    # request was not inadmissible. Mapping it to the terminal code — which an
+    # earlier draft did — put two holds for the same reason under opposite
+    # receipt codes inside one module.
+    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
+    PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
+        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    ),
+}
+
+
+# --- how a spawn that never ran is classified ------------------------------
+#
+# Lifted here from ``plan_worker_runner`` by #11542 for the reason
+# ``REFUSAL_CODES`` was: two actuators, one vocabulary. The copy that phase
+# first made was not merely duplicated but *divergent* — hand-written string
+# literals, two of which ("concrete-model-not-approved",
+# "policy-forbids-principal") matched no ``DecisionReason`` member at all,
+# while ``MODEL_NOT_ALLOWED`` and ``POLICY_CONFLICT`` were missing and would
+# have been reported as retryable. #11657 had already hit exactly that and
+# written the totality test; copying the idea rather than the code
+# reintroduced it one module over. One definition makes that test cover both.
+#: Routing-policy refusal reasons that mean *the request was inadmissible*
+#: rather than *something operational is missing*. These map to
+#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing, whatever an
+#: operator edits; every other reason is ROUTE_UNAVAILABLE, where a caretaker
+#: retry is right once whatever is missing is supplied. The remedy for a hold
+#: may be a policy edit rather than a gateway one, so this does not say "look
+#: at the gateway" — an earlier version did, and it was wrong for every hold
+#: except an outage.
+#:
+#: Built from the resolver's own enum rather than from string literals, because
+#: the first draft of this set contained a member that does not exist
+#: (``concrete-model-not-allowed``) and omitted one that does
+#: (``policy-conflict``) — a hand-written copy of another module's vocabulary
+#: drifts silently and reads as a working classification while classifying
+#: nothing. ``tests/test_plan_worker_runner.py`` requires every
+#: :class:`DecisionReason` member to be classified, so a new one fails there
+#: rather than defaulting to "retry it".
+INADMISSIBLE_ROUTE_REASONS = frozenset(
+    {
+        DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
+        DecisionReason.MODEL_NOT_ALLOWED.value,
+        # Two policies claim the same rung: an operator must resolve it, and a
+        # retry against an unresolved conflict is an infinite one.
+        DecisionReason.POLICY_CONFLICT.value,
+    }
+)
+
+#: Reasons deliberately left retryable, and why — so the judgement is visible
+#: rather than implied by absence from the set above.
+OPERATIONAL_ROUTE_REASONS = frozenset(
+    {
+        # The snapshot will be back; nothing about the request is wrong.
+        DecisionReason.SNAPSHOT_UNAVAILABLE.value,
+        # Unreachable on THIS seam, and the reason is worth stating because
+        # an earlier comment here got it wrong: it is not that the resolver
+        # never rejects on a hold — ``enforce_canary_route`` raises on every
+        # non-SELECTED outcome, HELD included, which is the whole premise of
+        # classifying on the reason. It is that a brokered child's model is
+        # always a ``PLAN_TIER_CATALOG`` id, and ``requirement_for_model``
+        # returns CAPABILITY only for an *empty* model string — so the resolver
+        # cannot emit ``capability-unmapped`` for one of these spawns at all.
+        # Classified anyway, because the table is required to be total.
+        DecisionReason.CAPABILITY_UNMAPPED.value,
+        # Collapses "no credential for this account" with "a provider lock
+        # excluded every account". The first is operational and the second is
+        # policy, and the resolver does not distinguish them here — so the
+        # conservative reading is the retryable one, which sends the operator
+        # to the gateway where both are visible.
+        DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
+        # Reasons a *selected* decision carries. They reach a refusal only
+        # through ``enforce_canary_route``'s empty-effective-model guard, which
+        # a brokered child cannot trip (its legacy model is always the catalog
+        # id) — so "not a refusal" is nearly but not exactly right, and
+        # operational is the correct reading of the case that can occur.
+        DecisionReason.MATCHED_POLICY.value,
+        DecisionReason.NO_POLICY_APPLIES.value,
+        # NOT one of those two, and an earlier comment here swept it in with
+        # them: ``_legacy_decision`` emits it HELD, so it raises at the outcome
+        # check rather than at the empty-model guard. It is unreachable for a
+        # different reason — ``route_shadow.build_route_context`` always
+        # constructs a ``LegacyRoute``, so ``context.legacy_route`` is never
+        # ``None`` on this path. Operational either way: nothing about the
+        # request is wrong.
+        DecisionReason.NO_LEGACY_ROUTE.value,
+    }
+)
+
+
+def refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
+    """Why a spawn that never ran did not run, in the receipt's vocabulary.
+
+    The seam collapses a routing-policy refusal and a transport failure onto
+    the same soft ``rc=-1``, so without the reason it left behind, both would
+    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator the request was
+    fine and to retry once whatever is missing is supplied. For an inadmissible
+    route that is wrong: the retry will never succeed, and the thing to edit is
+    the policy.
+    """
+    # Classified on the REASON alone, deliberately. A previous draft short-
+    # circuited on ``refused_outcome == held`` first, reasoning that a hold is
+    # retryable whatever its reason — and that silently reversed the one code
+    # this canary is named after: ``RoutingAction.on_unavailable`` defaults to
+    # HOLD, so the ordinary ``provider_lock=zai-harness`` refusal arrives as
+    # HELD with ``literal-family-unsatisfiable``, and the guard turned it back
+    # into a retryable ``ROUTE_UNAVAILABLE``. The reason is the durable fact
+    # about the request; the outcome is a per-policy *dial* over what to do
+    # when a lane is unavailable, and it is the wrong axis to classify on.
+    reason = str(spawn_out.get("refused", "") or "")
+    if reason in INADMISSIBLE_ROUTE_REASONS:
+        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    return RejectionReason.ROUTE_UNAVAILABLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +437,34 @@ def resolve_plan_model(
     phase: DriverPhase,
     route_policy_revision: str,
 ) -> PlanRouteDecision:
+    """Resolve one Plan dispatch's model tier. The PLAN binding of the resolver.
+
+    Kept as its own name because it is what ADR-0137's source-file citations
+    and #11541's tests refer to; the body is
+    :func:`resolve_worker_model` bound to the Plan canary's phase, role set and
+    refusal vocabulary.
+    """
+    return resolve_worker_model(
+        request,
+        phase=phase,
+        canary_phase=CANARY_PHASE,
+        legal_roles=plan_roles_for_plan_phase(),
+        phase_refusal=PlanRouteReason.PHASE_NOT_PLAN,
+        role_refusal=PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN,
+        route_policy_revision=route_policy_revision,
+    )
+
+
+def resolve_worker_model(
+    request: WorkerDispatchRequest,
+    *,
+    phase: DriverPhase,
+    canary_phase: DriverPhase,
+    legal_roles: frozenset[WorkerRole],
+    phase_refusal: PlanRouteReason,
+    role_refusal: PlanRouteReason,
+    route_policy_revision: str,
+) -> PlanRouteDecision:
     """Resolve one dispatch's model tier. Pure, total, and first-match-wins.
 
     Total for the same reason ``routing_policy.explain`` is: it runs on a live
@@ -318,17 +488,21 @@ def resolve_plan_model(
     so with no credential in existence and zero upstream bytes. What remains
     here is the check this layer *can* answer: that the tier catalog's own
     answer satisfies the requirement it was resolved from.
+
+    *canary_phase*, *legal_roles* and the two refusal reasons are parameters
+    rather than constants because #11542 added a second bound over the **same**
+    tier tables. Forking the resolver would have forked
+    :data:`PLAN_TIER_CATALOG` with it, and two copies of "which id answers
+    ``claude-opus``" is precisely the drift the table is code-owned to prevent —
+    which is also why #11657's correction above lands on both canaries at once
+    rather than needing to be found twice.
     """
     echo = _echo(request, phase, route_policy_revision)
 
-    if phase is not CANARY_PHASE:
-        return _refusal(echo, PlanRouteOutcome.REJECTED, PlanRouteReason.PHASE_NOT_PLAN)
-    if request.worker_role not in plan_roles_for_plan_phase():
-        return _refusal(
-            echo,
-            PlanRouteOutcome.REJECTED,
-            PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN,
-        )
+    if phase is not canary_phase:
+        return _refusal(echo, PlanRouteOutcome.REJECTED, phase_refusal)
+    if request.worker_role not in legal_roles:
+        return _refusal(echo, PlanRouteOutcome.REJECTED, role_refusal)
 
     requirement = request.model_requirement
     if requirement.kind is ModelRequirementKind.LITERAL_FAMILY:

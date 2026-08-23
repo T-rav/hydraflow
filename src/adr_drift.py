@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from path_membership import module_identities
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -83,8 +85,15 @@ def _is_shared_infra(path: str) -> bool:
     `config.adr_drift_shared_infra_fanout_threshold`) went with the auditor loop
     under ADR-0136: its only supplier was `compute_drift`, and the offline nudge
     generator deliberately passes no config so the artifact stays deterministic.
+
+    Matches on module IDENTITY: a bare citation of ``src/config/_paths.py`` is
+    a citation of ``src/config.py``'s module and nudges the same way, so the
+    allowlist does not quietly empty out the day one of these high-churn
+    modules is decomposed into a package.
     """
-    return path in _SHARED_INFRA_MODULES
+    return any(
+        identity in _SHARED_INFRA_MODULES for identity in module_identities(path)
+    )
 
 
 @dataclass(frozen=True)

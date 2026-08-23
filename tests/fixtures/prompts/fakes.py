@@ -1878,6 +1878,35 @@ from review_advisor import SURFACE_ADVISOR_CONFIGS  # noqa: E402
 
 _REGISTRY[("surface_config", "pr_review")] = SURFACE_ADVISOR_CONFIGS["pr_review"]
 
+# The bounded slice a fenced IMPLEMENT worker is briefed against (#11542). The
+# real contract objects rather than a stand-in, because the prompt prints the
+# branch, the base, the HEAD and the whole-diff digest, and a fake that let any
+# of those drift from what `check_worker_fence` compares would render a prompt
+# no operator could join to a receipt.
+from implement_broker import WorktreeState  # noqa: E402
+from implement_worker_runner import WorktreeMeasurement  # noqa: E402
+
+_REGISTRY[("worktree", "implement_canary_snapshot")] = WorktreeMeasurement(
+    state=WorktreeState(
+        branch="agent/issue-8832",
+        base_sha="4d5f2a1c9b8e7f6a3c2d1e0b9a8f7e6d5c4b3a29",
+        head_sha="7a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d",
+        diff_digest="sha256:9f2c4a7b1e3d5806c9a2b4d6e8f0a1c3",
+    ),
+    diff_excerpt=(
+        "--- a/upload/session.py\n"
+        "+++ b/upload/session.py\n"
+        "@@ -118,9 +118,10 @@ class UploadSession:\n"
+        "         while attempts < self.max_attempts:\n"
+        "             attempts += 1\n"
+        "             try:\n"
+        "                 return await self._put_chunk(chunk)\n"
+        "             except TimeoutError:\n"
+        "-                attempts += 1\n"
+        "                 await asyncio.sleep(backoff)\n"
+    ),
+)
+
 
 def get_fake(kind: str, shape: str) -> Any:
     key = (kind, shape)

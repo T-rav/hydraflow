@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -59,15 +60,19 @@ def _elapse(seconds: float) -> None:
 def _fake_batch_clock(monkeypatch: pytest.MonkeyPatch):
     """A controllable ``time.monotonic`` for the batch deadline.
 
-    Patched on the module under test rather than globally: a global patch would
-    change the clock every other library in the process reads, and the point is
-    to move one budget forward, not to stop time.
+    Rebinds the **name** in the module under test, not an attribute on the
+    ``time`` module. ``plan_worker_runner`` does a plain ``import time``, so
+    ``plan_worker_runner.time`` IS ``sys.modules["time"]`` — patching an
+    attribute on it moves the clock for every library in the process, including
+    the asyncio event loop, whose own clock is ``time.monotonic``. Both of these
+    fixtures claimed to be module-local while doing exactly that, and one of
+    them advances the clock by four minutes inside a running async test.
     """
     _CLOCK["offset"] = 0.0
     monkeypatch.setattr(
-        plan_worker_runner.time,
-        "monotonic",
-        lambda: _REAL_MONOTONIC() + _CLOCK["offset"],
+        plan_worker_runner,
+        "time",
+        SimpleNamespace(monotonic=lambda: _REAL_MONOTONIC() + _CLOCK["offset"]),
     )
 
 
@@ -101,6 +106,12 @@ class SpawnDouble:
             )
             spawn_out.update(
                 {
+                    # The seam sets this from ``run_simple``'s OUTCOME — it returned,
+                    # or it timed out. This double models the returned case. One that
+                    # filled `model` without it models a caught mint failure or a
+                    # runner that never started anything, which are real and
+                    # different things (see TestARunnerThatNeverStartsAProcess...).
+                    "spawned": True,
                     "model": served,
                     "provider": "gateway",
                     "usage": {"input_tokens": 1000, "output_tokens": 200},
@@ -988,3 +999,190 @@ class TestARefusedBatchCarriesNoBorrowedJoin:
         assert (
             receipts[0].reason_code is RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
         )
+
+
+class TestOnlyAChildThatExistedCarriesASpawnId:
+    """`lineage` is the discriminator `WORKER_TIMEOUT`'s contract promises, so
+    exactly the paths that follow a real spawn may carry one.
+
+    Three successive versions of this rule were wrong, each one door further
+    in, and the class docstring is where they are recorded so the next reader
+    does not re-derive them:
+
+    * keyed on the ``except`` clause — but ``run_lightweight_agent`` swallows a
+      failed spawn into a soft ``rc=-1``, so which clause fired says nothing;
+    * keyed on ``spawn_out["model"]`` — but a ``GatewayMintError`` is caught
+      *inside* the seam and its ``finally`` fills ``model`` anyway, so a
+      gateway outage minted an ACCEPTED receipt for a child that never started;
+    * set ``spawned`` on the line *before* ``run_simple`` — but a
+      ``DockerRunner`` re-checks its daemon on every call and a ``HostRunner``
+      raises when the CLI binary is missing, so the same false ACCEPTED receipt
+      came back through a Docker outage instead of a gateway one.
+
+    The rule is now ``run_simple``'s **outcome**: it returned, or it timed out.
+    The cases these tests cannot reach — the ones inside the real seam — are
+    covered against the production seam in
+    ``tests/regressions/test_issue_11541_review_findings.py``, because a double
+    standing in for the seam can never exercise the code that decides whether a
+    process started.
+    """
+
+    async def test_a_gateway_outage_names_no_child(self, config, task) -> None:
+        """The seam CATCHES a mint failure; it does not raise it at us.
+
+        ``GatewayMintError`` is neither fatal nor a likely bug, so
+        ``run_lightweight_agent`` converts it to a soft ``rc=-1`` — and its
+        ``finally`` still fills ``model``. A double that raised the error out of
+        the seam modelled something production never does, and hid that keying
+        "a child ran" on ``model`` attributes a spawn id to a mint that produced
+        no child. This double does what the seam does.
+        """
+
+        class MintFailed(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                kwargs["spawn_out"].update(
+                    {"model": kwargs["model"], "provider": "gateway", "usage": {}}
+                )
+                return SimpleResult(stderr="gateway unreachable", returncode=-1)
+
+        spawn = MintFailed()
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].lineage is None
+        assert receipts[0].status is not ReceiptStatus.ACCEPTED
+
+    async def test_a_refusal_before_the_seam_names_no_child(self, config, task) -> None:
+        # The CH-6 gate / enforcement-refusal shape: the seam returns before
+        # its try block, so it fills neither `spawned` nor `model`.
+        class NeverSpawned(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                return SimpleResult(stderr="refused", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, NeverSpawned()), task, [_request()])
+
+        assert receipts[0].lineage is None
+
+    async def test_a_batch_budget_refusal_names_no_child(self, config, task) -> None:
+        class VerySlowSpawn(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                _elapse(float(config.fable_plan_worker_timeout_seconds) + 1.0)
+                return await super().__call__(**kwargs)
+
+        receipts = await _dispatch(
+            _runner(config, VerySlowSpawn()),
+            task,
+            [
+                _request(key="k1", request_id="r1"),
+                _request(key="k2", request_id="r2"),
+            ],
+        )
+
+        assert receipts[1].lineage is None
+
+    async def test_a_reaped_child_does_name_one(self, config, task) -> None:
+        # Non-vacuity: the three Nones above must be the code's answer, not the
+        # field being unreachable.
+        class TimedOut(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                kwargs["spawn_out"]["timed_out"] = True
+                return SimpleResult(stderr="timed out", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, TimedOut()), task, [_request()])
+
+        assert receipts[0].lineage is not None
+        assert receipts[0].status is ReceiptStatus.EXPIRED
+
+    async def test_a_timeout_before_the_seam_spawned_names_no_child(
+        self, config, task
+    ) -> None:
+        """A ``TimeoutError`` escaping the seam does not imply a child.
+
+        The seam handles its own deadline and converts it to a soft rc=-1, so
+        what escapes comes from the work *around* the spawn — the CH-6 gate,
+        the route-shadow and enforcement threads, or a Docker socket, where
+        ``socket.timeout`` IS ``TimeoutError``. An earlier version attached a
+        spawn id here on the strength of a comment asserting the opposite, and
+        this PR's own double (``SpawnDouble(raises=TimeoutError())``) raises
+        before it touches ``spawn_out`` — modelling exactly the case that never
+        spawned.
+        """
+        spawn = SpawnDouble(raises=TimeoutError())
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].status is ReceiptStatus.EXPIRED
+        assert receipts[0].reason_code is RejectionReason.WORKER_TIMEOUT
+        assert receipts[0].lineage is None
+
+    async def test_a_timeout_after_the_seam_spawned_names_its_child(
+        self, config, task
+    ) -> None:
+        # Non-vacuity, and the other half of the rule: once the seam recorded
+        # ``spawned`` a process really had started, so a deadline arriving after
+        # it describes a child that ran.
+        class SpawnedThenRaised(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                raise TimeoutError
+
+        receipts = await _dispatch(
+            _runner(config, SpawnedThenRaised()), task, [_request()]
+        )
+
+        assert receipts[0].lineage is not None
+
+    async def test_a_caught_mint_failure_is_never_recorded_as_accepted(
+        self, config, task
+    ) -> None:
+        """The live defect the honest double exposed, pinned.
+
+        A gateway outage reaches the seam's try block, so its ``finally`` fills
+        ``model`` — and the guard that was meant to catch "the seam returned
+        before it spawned anything" keyed on exactly that field. A mint failure
+        therefore fell through to the ACCEPTED receipt: a worker recorded as
+        accepted, with a spawn id, a served model and zero cost, for a child
+        that never existed, in the record ADR-0137 B5's bar is read from.
+
+        This predates the review chain — it shipped in #11655 and survived nine
+        passes, because every double raised the mint error out of the seam
+        instead of doing what the seam does with it.
+        """
+
+        class MintFailed(SpawnDouble):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                self.calls.append(kwargs)
+                kwargs["spawn_out"].update(
+                    {"model": kwargs["model"], "provider": "gateway", "usage": {}}
+                )
+                return SimpleResult(stderr="gateway unreachable", returncode=-1)
+
+        receipts = await _dispatch(_runner(config, MintFailed()), task, [_request()])
+
+        assert receipts[0].status is ReceiptStatus.REJECTED
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+        assert receipts[0].served_model is None
+        assert receipts[0].lineage is None
+        assert receipts[0].usd_cost == 0.0
+
+    async def test_a_failure_around_the_spawn_names_no_child(
+        self, config, task
+    ) -> None:
+        """The ``except Exception`` arm: work *around* the spawn, not the spawn.
+
+        What lands here is `_terminal_gateway_runner` failing to open a Docker
+        client, a non-`EnforcementRefused` failure from the route-shadow or
+        enforcement threads, or a non-`PromptGateBlockedError` from the CH-6
+        gate — all before a child exists. Mutation-checked: re-attaching a
+        lineage on this arm has to fail something, and until this test existed
+        it failed nothing.
+        """
+        spawn = SpawnDouble(raises=OSError("docker socket unavailable"))
+
+        receipts = await _dispatch(_runner(config, spawn), task, [_request()])
+
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+        assert receipts[0].lineage is None

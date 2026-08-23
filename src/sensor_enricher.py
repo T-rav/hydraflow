@@ -20,6 +20,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from path_membership import module_identities
+
 __all__ = [
     "ANY_TOOL",
     "MATCH_ALL_TOOLS",
@@ -60,6 +62,10 @@ class FileChanged(RuleTrigger):
     background loop is ``src/*_loop.py`` as a single module and
     ``src/*_loop/*`` once decomposed into a package (#11547), and a rule that
     names only the first silently stops firing for the second.
+
+    Since #11669 a single-shape pattern no longer needs the tuple to survive
+    decomposition: each changed path is resolved to its module identities
+    first, so ``src/models.py`` still fires for ``src/models/_task.py``.
     """
 
     pattern: str | tuple[str, ...]
@@ -68,8 +74,9 @@ class FileChanged(RuleTrigger):
         del raw_output  # unused for this trigger type
         patterns = (self.pattern,) if isinstance(self.pattern, str) else self.pattern
         return any(
-            fnmatch.fnmatch(path.as_posix(), pattern)
+            fnmatch.fnmatch(identity, pattern)
             for path in changed_files
+            for identity in module_identities(path.as_posix())
             for pattern in patterns
         )
 

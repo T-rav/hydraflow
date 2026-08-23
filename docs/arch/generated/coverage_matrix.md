@@ -90,7 +90,7 @@ per-adapter, not per-port).
 | `PRPort` | ✅ [0002, 0045, 0052, 0056, 0068, 0069, 0075, 0077, 0109, 0115] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, diagram-loop.md, fake-coverage-auditor-loop.md, gotchas.md, hitl-item.md, pr-port.md, testing.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ReviewInsightStorePort` | ✅ [0070] | ✅ [review-insight-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeReviewInsightStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `RouteBackCounterPort` | ✅ [0071] | ✅ [route-back-counter-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeRouteBackCounter` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `WorkspacePort` | ✅ [0003, 0050, 0069, 0112] | ✅ [workspace-gc-loop.md, workspace-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeWorkspace` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `WorkspacePort` | ✅ [0003, 0050, 0069, 0112, 0137] | ✅ [workspace-gc-loop.md, workspace-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeWorkspace` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 ## Section 3: Factory phases
 
 Section 3 contains hand-curated prose (Loops driving it / Escalation path /

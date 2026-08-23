@@ -15,6 +15,7 @@ the gauntlet weight, never a diluted average.
 from __future__ import annotations
 
 from audit.models import BlastRadiusClass, MergedChange
+from path_membership import module_identities
 
 # v1 stratum weights (multipliers on the governed base rate; planning-picked).
 # routine = 1x; elevated classes sample more aggressively. Capped at 1.0 in the
@@ -66,8 +67,22 @@ _STRUCTURAL_MARKERS: tuple[str, ...] = (
 
 
 def _matches(paths: tuple[str, ...], markers: tuple[str, ...]) -> bool:
-    lowered = [p.lower() for p in paths]
-    return any(marker in path for path in lowered for marker in markers)
+    """Whether any of *paths* — or the module it belongs to — hits a marker.
+
+    Markers like ``src/ports.py`` and ``orchestrator.py`` are package-blind on
+    their own: neither is a substring of ``src/ports/_registry.py``. Resolving
+    each path to its module identities first keeps a marker aimed at its module
+    after a decomposition, which matters here because falling out of an
+    elevated class silently *lowers* the re-audit sampling probability — and a
+    class that stopped being over-sampled looks exactly like a class that had
+    a quiet week.
+    """
+    return any(
+        marker in identity.lower()
+        for path in paths
+        for identity in module_identities(path)
+        for marker in markers
+    )
 
 
 def _touches_adr_subject(change: MergedChange) -> bool:

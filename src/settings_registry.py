@@ -84,6 +84,10 @@ SETTINGS: dict[str, SettingSpec] = {
     # canary switch.
     "fable_plan_canary_repo": SettingSpec("Scheduling", live=True, order=27),
     "fable_plan_worker_timeout_seconds": SettingSpec("Scheduling", live=True, order=28),
+    "fable_implement_canary_repo": SettingSpec("Scheduling", live=True, order=29),
+    "fable_implement_worker_timeout_seconds": SettingSpec(
+        "Scheduling", live=True, order=30
+    ),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),

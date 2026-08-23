@@ -375,12 +375,41 @@ def test_an_admitted_shadow_dispatch_mints_no_receipt() -> None:
     assert verdict.receipts == ()
 
 
-def test_the_worker_tree_marks_every_node_as_not_dispatched() -> None:
+def test_the_worker_tree_marks_every_node_as_not_dispatched_by_default() -> None:
+    """The broker admits; it does not run anything, so it cannot know.
+
+    This was an unconditional invariant while nothing could dispatch. #11541
+    armed the canary, and an invariant that has stopped being one is a
+    falsehood — so the default stands and the caller holding the receipts says
+    otherwise (see the test below).
+    """
     lease = _lease()
 
     verdict = _admit(_request(lease=lease), lease=lease)
 
     assert verdict.worker_tree()[0]["dispatched"] is False
+
+
+def test_a_dispatched_request_is_marked_dispatched_in_the_tree() -> None:
+    # Without this the tree and the receipts contradict each other about one
+    # request_id in the single record ADR-0137 B5's bar is read from.
+    lease = _lease()
+    request = _request(lease=lease)
+
+    verdict = _admit(request, lease=lease)
+    tree = verdict.worker_tree(frozenset({request.request_id}))
+
+    assert tree[0]["dispatched"] is True
+
+
+def test_only_the_named_requests_are_marked_dispatched() -> None:
+    lease = _lease()
+
+    verdict = _admit(_request(lease=lease), lease=lease)
+
+    assert (
+        verdict.worker_tree(frozenset({"some-other-request"}))[0]["dispatched"] is False
+    )
 
 
 def test_the_worker_tree_carries_a_tier_never_a_concrete_model_id() -> None:

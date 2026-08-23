@@ -187,7 +187,16 @@ class RejectionReason(StrEnum):
     """
 
     WORKER_TIMEOUT = "worker_timeout"
-    """The child exceeded its own wall-clock budget and was reaped with its group.
+    """A wall-clock budget ran out. Either the child outlived its own and was
+    reaped with its process group, or the batch's **shared** budget was already
+    spent when this request came up, so it was refused rather than started with
+    no time to run — in which case no child existed, nothing was reaped, and
+    nothing was billed. Both are the same fact for an operator (the work did not
+    fit in the time allowed) and the receipt's ``lineage`` tells them apart: a
+    child that ran carries one, a request that was never started does not. That
+    is why :class:`WorkerLineage` is permitted on a non-``ACCEPTED`` receipt —
+    a reaped child existed, and a receipt that hid its spawn id would make it
+    indistinguishable from work that never began.
 
     Deliberately not folded into :attr:`BUDGET_EXHAUSTED`, which counts a
     *USD* budget a director may not spend against: an operator reading a spike
@@ -202,6 +211,51 @@ class RejectionReason(StrEnum):
     exceeding its concurrency: folding the two together would make the canary's
     "one active Fable-directed issue per repository" bound unreadable in the
     evidence it is supposed to be proved by.
+    """
+
+    # Added by #11542, when a brokered worker first became write-capable. Each
+    # names a way a *fenced* writer loses authority, and each is separate for
+    # the same reason the three above are: they are the counters ADR-0137 B5's
+    # bar is read from, and one code cannot say two things. Additive members
+    # only; no field changed, so the schema version is unmoved.
+
+    WORKTREE_DIGEST_STALE = "worktree_digest_stale"
+    """The worktree moved under the worker: base, HEAD or the diff changed.
+
+    A *superseded* worker, not a failed one — it ran, it may even have produced
+    a good answer, and the answer is about a tree that no longer exists. Kept
+    apart from :attr:`STALE_EPOCH`, which says the **driver** was replaced: a
+    digest breach is the ordinary case of two writers racing one worktree and
+    must not inflate the ownership-theft counter that a stale epoch feeds.
+    """
+
+    BRANCH_MISMATCH = "branch_mismatch"
+    """The worktree is on a different branch than the lease was minted against.
+
+    Deliberately not folded into :attr:`WORKTREE_DIGEST_STALE`: a moved digest
+    is work happening, and a moved *branch* is the worktree having been reused
+    for another issue — the failure that makes a diff apply cleanly to the
+    wrong place. An operator reading a spike in one of these needs to know
+    which.
+    """
+
+    WORKTREE_UNMEASURED = "worktree_unmeasured"
+    """The fence could not be armed, so no write-capable worker was started.
+
+    The :data:`sandbox_verified` shape applied to the writer lease: a fence
+    that cannot be measured is *unverified*, never "unchanged". Reported before
+    any spawn, so a repository whose worktree has gone missing costs nothing
+    rather than costing a worker whose result could never be admitted.
+    """
+
+    HIBERNATING = "hibernating"
+    """The driver is waiting on CI, a diagnostic, or a human.
+
+    Not :attr:`DRAINING`, which says the canary stopped accepting work, and not
+    :attr:`STOP_FENCE`, which says the factory is going down. This one says the
+    issue itself is parked and the correct number of writers to have running
+    against its worktree is zero — the state ADR-0137's C6 already releases
+    capacity for, applied to worker authority as well.
     """
 
 

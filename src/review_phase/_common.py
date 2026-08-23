@@ -48,35 +48,47 @@ _AdvisorRole = Literal["pre_flight", "mid_flight", "post_verify"]
 # Anything else — prose mention, type-hint reference, file-path-in-error-log —
 # is treated as a non-modification mention and does NOT synthesize the header.
 # T29's self-mod guard still fires when a real modification context is seen.
+#
+# #11669: the module names used to be baked into these patterns as
+# ``src/(?:review_advisor|review_phase)\.py`` — a third copy of
+# ``SELF_MODIFYING_PATHS``, in regex, blind in exactly the same way. It could
+# not see ``src/review_phase/_advisors.py`` even though the caller went on to
+# intersect the result with the canonical set. The patterns now capture any
+# source path in a modification context; deciding whether that path IS the
+# advisor's own implementation is ``review_advisor.is_self_modifying_path``'s
+# job, and its alone. Context detection here, identity there.
+_SOURCE_PATH = r"(src/[\w./-]+\.py)"
+
 _SELF_MOD_SYNTHESIS_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Already-formed diff headers (real diff content embedded in transcript).
-    re.compile(r"diff --git a/(src/(?:review_advisor|review_phase)\.py)"),
-    re.compile(r"\+\+\+ b/(src/(?:review_advisor|review_phase)\.py)"),
-    re.compile(r"--- a/(src/(?:review_advisor|review_phase)\.py)"),
+    re.compile(rf"diff --git a/{_SOURCE_PATH}"),
+    re.compile(rf"\+\+\+ b/{_SOURCE_PATH}"),
+    re.compile(rf"--- a/{_SOURCE_PATH}"),
     # Fenced patch / diff block containing the path.
-    re.compile(
-        r"```(?:diff|patch)\b[^`]*?(src/(?:review_advisor|review_phase)\.py)",
-        re.DOTALL,
-    ),
+    re.compile(rf"```(?:diff|patch)\b[^`]*?{_SOURCE_PATH}", re.DOTALL),
     # Editorial verbs immediately before the path:
     # "modified src/...", "edited src/...", "updated src/...", "patched src/..."
     re.compile(
         r"\b(?:modif(?:y|ied|ies|ying)|chang(?:e|ed|es|ing)|"
         r"edit(?:ed|s|ing)?|update(?:d|s|ing)?|"
-        r"patch(?:ed|es|ing)?|refactor(?:ed|s|ing)?)\s+"
-        r"[`'\"]*(src/(?:review_advisor|review_phase)\.py)",
+        rf"patch(?:ed|es|ing)?|refactor(?:ed|s|ing)?)\s+[`'\"]*{_SOURCE_PATH}",
         re.IGNORECASE,
     ),
 )
 
 
 def _detect_self_modification_context(transcript: str) -> list[str]:
-    """Return the sorted set of advisor source paths that appear in a
-    *modification context* within ``transcript`` (not a benign mention).
+    """Return the sorted set of source paths that appear in a *modification
+    context* within ``transcript`` (not a benign mention).
+
+    Context only — the returned paths are candidates, not verdicts. Callers
+    decide which of them belong to the advisor's own implementation via
+    ``review_advisor.is_self_modifying_path``, so this detector never has to
+    carry a second copy of the module list.
 
     Empty list means no pseudo diff header should be synthesized — the
-    candidate content does not look like it's describing real changes to
-    advisor's own implementation files.
+    candidate content does not look like it's describing real changes to any
+    source file at all.
     """
     detected: set[str] = set()
     for pattern in _SELF_MOD_SYNTHESIS_PATTERNS:

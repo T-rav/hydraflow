@@ -15,7 +15,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from pydantic import BaseModel, Field
@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 import judge_calibration as jc
 import judge_independence as ji
 from human_steering import fenced_steering_guidance
+from path_membership import module_identities
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from events import EventBus
@@ -249,7 +250,12 @@ CRITICAL_PATHS_EXACT: frozenset[str] = frozenset(
 )
 
 CRITICAL_PATH_GLOBS: tuple[str, ...] = (
-    "src/persistence/*",
+    # NOTE: ``src/persistence/*`` used to head this tuple. That directory has
+    # never existed in this repo — the persistence layer is ``src/state/``
+    # (ADR-0021) — so the glob matched nothing for 107 days and nobody could
+    # tell, because a glob that selects zero paths is indistinguishable from a
+    # glob that selects zero paths *on this diff*. Removed in #11669;
+    # ``src/state/*`` below already carries the intent.
     "src/state/*",
     "src/*_loop.py",
     # A loop decomposed into a package (#11547) is the same blast radius it
@@ -262,36 +268,29 @@ CRITICAL_PATH_GLOBS: tuple[str, ...] = (
 )
 
 
-def _module_identities(path: str) -> tuple[str, ...]:
-    """*path* plus the single-file paths it would have had before decomposition.
-
-    ``src/review_phase/_ci.py`` yields ``src/review_phase.py``;
-    ``src/health_monitor_loop/_heavy.py`` yields
-    ``src/health_monitor_loop.py``. Walking every ancestor keeps nested
-    packages covered too.
-
-    Without this, a module listed as critical stops being critical the moment
-    it is split into a package, and NOTHING goes red — the loop simply gets
-    reviewed less hard than the day before. That has now happened twice:
-    ``src/review_phase.py`` has matched nothing since it became a package, and
-    the batch-4 decomposition took 11 of ``health_monitor_loop``'s 12 modules
-    with it (only ``_loop.py`` still matched ``src/*_loop.py``, by accident of
-    its name). Membership follows the MODULE, not the file layout.
-    """
-    identities = [path]
-    parent = PurePosixPath(path).parent
-    while parent.name and parent.as_posix() != "src":
-        identities.append(f"{parent.as_posix()}.py")
-        parent = parent.parent
-    return tuple(identities)
+# ``module_identities`` lives in ``path_membership`` so every path-membership
+# gate in the repo shares one notion of "which module is this path part of".
+# Kept as a private alias because tests and sibling modules import it by this
+# name; the canonical home is ``path_membership.module_identities``.
+_module_identities = module_identities
 
 
 def _matches_critical(path: str) -> bool:
     return any(
         candidate in CRITICAL_PATHS_EXACT
         or any(fnmatch.fnmatch(candidate, glob) for glob in CRITICAL_PATH_GLOBS)
-        for candidate in _module_identities(path)
+        for candidate in module_identities(path)
     )
+
+
+def is_critical_path(path: str) -> bool:
+    """Whether *path* belongs to a module on the critical list.
+
+    Public entry point for the path-membership registry and any caller outside
+    this module. Matches on module IDENTITY, so a member of a decomposed
+    package classifies exactly as its single-file self did.
+    """
+    return _matches_critical(path)
 
 
 # Re-exported for tests / external membership checks.
@@ -307,6 +306,11 @@ CRITICAL_PATHS = CRITICAL_PATHS_EXACT
 # ``review_phase`` imports this set to keep a single source of truth for
 # advisor's own implementation paths. Different matchers (unified-diff
 # headers vs. content-substring) consume the same paths.
+#
+# Entries name MODULES, not files. ``src/review_phase.py`` has been a package
+# since 2026-05-11 and the entry is kept in that spelling deliberately: it is
+# the module's identity, and ``is_self_modifying_path`` resolves package
+# members back to it.
 SELF_MODIFYING_PATHS: frozenset[str] = frozenset(
     {
         "src/review_advisor.py",
@@ -315,17 +319,50 @@ SELF_MODIFYING_PATHS: frozenset[str] = frozenset(
 )
 
 
+def is_self_modifying_path(path: str) -> bool:
+    """Whether *path* is part of the advisor's own implementation.
+
+    Matches on module IDENTITY. ``src/review_phase/_advisors.py`` resolves to
+    ``src/review_phase.py`` and is therefore self-modifying, which a literal
+    comparison against :data:`SELF_MODIFYING_PATHS` was not: from 2026-05-11
+    (when ``review_phase`` became a package) until #11669, the T29 guard was
+    inert for all 14 of that package's members and fired only for
+    ``review_advisor.py``. It failed OPEN on a trust boundary — the advisor
+    could approve edits to its own review logic on an advisory surface.
+    """
+    return any(identity in SELF_MODIFYING_PATHS for identity in module_identities(path))
+
+
+# Unified-diff path headers. Deliberately not line-anchored: the previous
+# implementation substring-searched the whole diff, and anchoring would have
+# quietly *removed* matches (e.g. a header embedded in an added line of a
+# diff-of-a-diff). Matching anywhere keeps this a strict superset.
+_DIFF_HEADER_PATH_RE = re.compile(r"(?:diff --git |\+\+\+ |--- )[ab]/(\S+)")
+_DIFF_GIT_POST_IMAGE_RE = re.compile(r"diff --git \S+ b/(\S+)")
+
+
+def diff_header_paths(diff: str) -> set[str]:
+    """Every path named by a ``diff --git`` / ``+++`` / ``---`` header.
+
+    Both sides of a rename are returned: renaming a self-modifying module out
+    of the way is still a modification of it.
+    """
+    paths = {m.group(1) for m in _DIFF_HEADER_PATH_RE.finditer(diff)}
+    paths |= {m.group(1) for m in _DIFF_GIT_POST_IMAGE_RE.finditer(diff)}
+    paths.discard("dev/null")
+    return paths
+
+
 def _diff_touches_self_modifying_paths(diff: str) -> bool:
-    """Detect whether a diff modifies advisor's own implementation files."""
-    for path in SELF_MODIFYING_PATHS:
-        if (
-            f"diff --git a/{path}" in diff
-            or f"diff --git b/{path}" in diff
-            or f"+++ b/{path}" in diff
-            or f"--- a/{path}" in diff
-        ):
-            return True
-    return False
+    """Detect whether a diff modifies advisor's own implementation files.
+
+    Inverted relative to the pre-#11669 implementation. It used to ask "does
+    the diff text contain a header naming one of these literal paths?", which
+    cannot express "or any member of the package that path became". It now
+    asks, for each path the diff's headers actually name, whether that path's
+    module identity is self-modifying.
+    """
+    return any(is_self_modifying_path(path) for path in diff_header_paths(diff))
 
 
 def resolve_post_verify_authority(

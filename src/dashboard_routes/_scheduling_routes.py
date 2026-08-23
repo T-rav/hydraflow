@@ -14,10 +14,14 @@ that is not:
   startup boundary proof is *detached* for the run (ADR-0137 S1/S4), so desired
   can read ``fable_director`` while effective honestly reports that nothing is
   observing.
-* **hypothetical worker tree** is what the director would have dispatched at
-  recent boundaries. Every node carries ``dispatched: false``, and while the
-  Plan canary is disarmed the summary carries ``workers_dispatched: 0`` —
-  which is then an invariant rather than a status.
+* **worker tree** is what the director asked for at recent boundaries. While
+  the Plan canary is disarmed it is entirely hypothetical: every node carries
+  ``dispatched: false`` and the summary carries ``workers_dispatched: 0``,
+  both of which are then invariants rather than statuses. Armed, a node reads
+  ``dispatched: true`` exactly when the same ``request_id`` produced a receipt
+  carrying a ``child_spawn_id`` — a child that actually ran, whatever its
+  receipt then says: ``accepted``, a reaped ``expired``, or a ``rejected``
+  whose served model did not satisfy the requirement.
 
 #11541 armed dispatch for one repository at ``PLAN``, and two things here
 follow from that. ``workers_dispatched`` is now **counted** rather than

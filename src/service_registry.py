@@ -166,6 +166,7 @@ if TYPE_CHECKING:
     from scripts.gates.activation import ActivationProposal
 
     from auto_tighten.ratchet_adapter import RatchetAdapter
+    from implement_worker_runner import ImplementWorkerRunner
     from metrics_manager import MetricsManager
     from plan_worker_runner import PlanWorkerRunner
 
@@ -629,6 +630,7 @@ def _build_fable_director(
     from director_shadow_log import ShadowObservationLog
     from director_turn_runner import DirectorTurnRunner
     from gateway_mint_client import bound_model_for, revoke_gateway_key
+    from implement_broker import implement_canary_covers
     from package_resources import ResourceNotFoundError
     from plan_broker import (
         DIRECTOR_TURN_FAMILY,
@@ -730,6 +732,29 @@ def _build_fable_director(
         # dispatcher's existence, is what lets a worker run.
         is_covered=lambda phase: plan_canary_covers(config, phase=phase),
         latch=PlanCanaryLatch(ttl_seconds=CANARY_SLOT_TTL_SECONDS),
+        # --- the Implement canary (#11542) --------------------------------
+        # Built whenever a director is selected, and gated only by the live
+        # predicate below — the same correction #11657 had to make to the Plan
+        # actuator directly above, and for the same reason. This phase copied
+        # the conditional-construction shape before that fix existed: it looks
+        # like a stronger default-off proof and is in fact a bug, because the
+        # dial is live and empty by default, so a factory booted disarmed — the
+        # documented starting state — would have had no dispatcher to arm and
+        # naming a repository would have silently done nothing until a restart.
+        # Both directions of a live dial have to work, or it is not live.
+        #
+        # Default-off is proven where it is actually true: Classic and the
+        # deterministic controller build no director and therefore no actuator,
+        # and a director whose dial is empty dispatches nothing — proven
+        # differentially in tests/regressions/test_issue_11542_outside_the_slice.py
+        # rather than by an absent object.
+        implement_dispatcher=_build_implement_worker_runner(
+            config=config, subprocess_runner=subprocess_runner
+        ),
+        # Live, so arming reaches the NEXT boundary and clearing stops it, with
+        # no restart in either direction. This predicate, not the dispatcher's
+        # existence, is what lets a writer run.
+        implement_is_covered=lambda phase: implement_canary_covers(config, phase=phase),
     )
 
 
@@ -760,6 +785,36 @@ def _build_plan_worker_runner(
         route_policy_revision=_route_policy_revision(config),
         # Injected, never built inside a method (#11602/#11615).
         runner=subprocess_runner,
+    )
+
+
+def _build_implement_worker_runner(
+    *, config: HydraFlowConfig, subprocess_runner: SubprocessRunner
+) -> ImplementWorkerRunner:
+    """The Implement canary's actuator, assembled at the composition root (#11542)."""
+    from implement_broker import WriterLeaseRegistry
+    from implement_worker_runner import ImplementWorkerRunner
+
+    return ImplementWorkerRunner(
+        config=config,
+        # The same routing view the director's dispatches are judged against,
+        # so a worker cannot be spawned under a revision the broker refused.
+        route_policy_revision=_route_policy_revision(config),
+        # Injected, never built inside a method (#11602/#11615). It carries
+        # both subprocess paths: the git measurement and, through the seam,
+        # the child.
+        runner=subprocess_runner,
+        # One registry per process, so "exactly one writer lease exists" holds
+        # across boundaries rather than only within a batch. In-memory and
+        # per-run for ``PlanCanaryLatch``'s reason: a durable holder would
+        # outlive the process that took it and wedge the worktree.
+        leases=WriterLeaseRegistry(),
+        # What the worktree's base SHA is measured against. The repository's
+        # own base branch rather than a hardcoded ``main``, because ADR-0042's
+        # two-tier model means an agent branch is cut from ``staging`` on this
+        # fleet and a merge-base against the wrong ref would move every time
+        # the other branch did.
+        base_ref=f"origin/{config.base_branch()}",
     )
 
 

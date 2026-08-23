@@ -190,12 +190,17 @@ class TestShouldPreFlight:
             ),
             # The three globs below are separate CRITICAL_PATHS patterns, not one
             # rule — each keeps its own row so a dropped pattern still fails here.
+            # #11669: this row used to pin a path under a directory that has
+            # never existed in this repo. The row passed because the glob
+            # matched the fictional fixture — the only evidence anyone ever
+            # had that the pattern worked. Pin a path that is really on disk
+            # so the row proves something.
             pytest.param(
-                ["src/persistence/store.py"],
+                ["src/state/_issue.py"],
                 2,
                 0,
                 True,
-                id="critical_path_glob_persistence",
+                id="critical_path_glob_state",
             ),
             pytest.param(
                 ["src/edge_proposer_loop.py"],
@@ -1488,7 +1493,8 @@ class TestSecondOrderFailureProbe:
         advisor = self._make_advisor()
         inp = PostVerifyInput(
             surface="pr_review",
-            diff="diff --git a/src/persistence/store.py b/src/persistence/store.py\n+++ b/src/persistence/store.py\n+x = 1",
+            # A real path under a real CRITICAL_PATH_GLOBS tree (#11669).
+            diff="diff --git a/src/state/_issue.py b/src/state/_issue.py\n+++ b/src/state/_issue.py\n+x = 1",
             executor_verdict_summary="looks good",
         )
         prompt = advisor._build_prompt(inp)

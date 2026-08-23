@@ -218,6 +218,21 @@ SANDBOX_SEAMS: dict[str, str] = {
     # (tests/scenarios/test_fable_plan_canary_scenario.py) with an injected
     # spawn double.
     "plan_worker_runner": "config_disable",
+    # The Fable Implement canary's actuator (#11542) — the same wedge class as
+    # the row above, and one degree worse: its children are write-capable roles
+    # and it also runs ``git`` reads to measure the issue worktree. Three
+    # independent pins hold it. The runner is only constructed under
+    # ``execution_runtime=fable_director``, which
+    # ``_apply_sandbox_config_overrides`` forces to ``stage_subprocess``; it
+    # additionally clears ``fable_implement_canary_repo`` there, so even a
+    # director that somehow existed would find every boundary outside the
+    # bound; and the ``SubprocessRunner`` carrying BOTH its subprocess paths is
+    # injected at the composition root, so the sandbox's
+    # ``FakeSubprocessRunner`` replaces the git reads as well as the spawn.
+    # Scenario cover is the MockWorld implement canary
+    # (tests/scenarios/test_fable_implement_canary_scenario.py) with an
+    # injected spawn double and a scripted git runner.
+    "implement_worker_runner": "config_disable",
 }
 
 
@@ -363,6 +378,11 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # future scenario cannot silently arm real Sonnet/Opus spawns on the
     # air-gapped network as a side effect.
     object.__setattr__(config, "fable_plan_canary_repo", "")
+    # The Fable Implement canary (#11542). Its own line rather than a widening
+    # of the one above, because the two dials are independent: clearing one
+    # says nothing about the other, and a sandbox that cleared only the Plan
+    # dial would air-gap exactly half the actuators.
+    object.__setattr__(config, "fable_implement_canary_repo", "")
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

@@ -286,14 +286,24 @@ def emit(*, repo_root: Path, out_dir: Path) -> None:
     # consecutive regens of unchanged architecture produce zero diff, so
     # DiagramLoop stops opening a churn PR every interval. Keys are sorted so
     # dict-insertion order can never introduce a diff.
-    overall_sha = _sha256(
-        "".join(per_artifact_sha[n] for n in sorted(per_artifact_sha))
-    )
+    #
+    # ``_DRIFT_EXEMPT`` artifacts are EXCLUDED from the digest. They derive from
+    # a moving ``git log`` window, not from source, so their content is a
+    # function of the branch's commit graph — two branches with byte-identical
+    # architecture still produce different bytes for them. Hashing them broke
+    # the "identical source -> byte-identical .meta.json" contract stated above
+    # and made ``.meta.json`` conflict on essentially every rebase and staging
+    # advance. That conflict needed the custom ``merge=arch-meta`` driver, which
+    # ``.gitattributes`` names but which only exists where ``make ensure-hooks``
+    # has run -- never in a fresh clone, a CI checkout, or GitHub's server-side
+    # merge, so the conflict returned exactly where it was least convenient.
+    # Excluding them makes ``.meta.json`` branch-stable by construction: a
+    # conflict in it now means the architecture genuinely diverged.
+    digested = {n: v for n, v in per_artifact_sha.items() if n not in _DRIFT_EXEMPT}
+    overall_sha = _sha256("".join(digested[n] for n in sorted(digested)))
     meta = {
         "content_sha": overall_sha,
-        "artifacts": {
-            n: {"content_sha": per_artifact_sha[n]} for n in sorted(per_artifact_sha)
-        },
+        "artifacts": {n: {"content_sha": digested[n]} for n in sorted(digested)},
     }
     (out_dir.parent / _META_NAME).write_text(
         json.dumps(meta, indent=2, sort_keys=True) + "\n"

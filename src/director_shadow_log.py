@@ -247,17 +247,27 @@ class ShadowObservation(BaseModel):
 
     Empty under shadow mode, and empty for every boundary outside the Plan
     canary's bound — which is what makes ``workers_dispatched`` in the rollup a
-    fact rather than a claim. ``would_dispatch`` beside it stays the
-    *hypothetical* tree, so an operator can see a director asking for four
-    workers and the canary running one.
+    fact rather than a claim. ``would_dispatch`` beside it is the *requested*
+    tree, so an operator can see a director asking for four workers and the
+    canary running one — and each of its nodes carries whether that particular
+    request became a child, so the two lists cannot disagree.
     """
 
     capsule_reconstructed_fresh: bool = True
-    """Always true, and recorded rather than assumed.
+    """Always true, and true **by construction** rather than by observation.
 
     ADR-0137 D2 proved ``--resume`` of a dead session fails closed, so this
     runtime never resumes: every turn gets a capsule rebuilt from live state.
-    The field exists so the canary can *see* that rather than take it on faith.
+
+    The docstring used to say "recorded rather than assumed … so the canary can
+    *see* it rather than take it on faith", and that was the exact shape of the
+    ``dispatched: false`` defect one field over: nothing in ``src/`` ever writes
+    this, so it is a literal default dressed as a measurement, and the test that
+    named it asserted the default and could not fail. Said plainly instead —
+    the field is a schema marker, and the real evidence is elsewhere:
+    ``tests/architecture/test_director_no_authority.py`` pins that ``--resume``
+    never appears in the argv, and ``resume_failures`` in the rollup counts the
+    times the vendor dropped a session unprompted.
     """
 
     usd_cost: float = Field(default=0.0, ge=0.0)
@@ -388,6 +398,10 @@ class ShadowObservationLog:
             # number to be real (#11541).
             "workers_dispatched": self._counts.get("workers_dispatched", 0),
             "workers_accepted": self._counts.get("workers_accepted", 0),
+            "workers_expired": self._counts.get("workers_expired", 0),
+            "workers_rejected_after_spawn": self._counts.get(
+                "workers_rejected_after_spawn", 0
+            ),
             "workers_refused": self._counts.get("workers_refused", 0),
             "worker_usd_cost_total": round(self._worker_usd_total, 6),
             "shadow_mode": self._counts.get("workers_dispatched", 0) == 0,
@@ -434,9 +448,33 @@ class ShadowObservationLog:
         self._bump("invalid_requests", observation.invalid_requests)
         self._bump("route_revisions", observation.route_revisions)
         for receipt in observation.dispatched:
-            self._bump("workers_dispatched")
-            accepted = receipt.get("status") == "accepted"
-            self._bump("workers_accepted" if accepted else "workers_refused")
+            # A child exists exactly when it has a spawn id. Counting every
+            # receipt made ``workers_dispatched`` include refusals that never
+            # started anything — so an armed run could report two workers
+            # dispatched beside one node marked dispatched in its own tree, and
+            # ``shadow_mode`` could flip to False on a boundary that spawned
+            # nothing at all.
+            ran = bool(receipt.get("child_spawn_id"))
+            if ran:
+                self._bump("workers_dispatched")
+            status = receipt.get("status")
+            if status == "accepted":
+                self._bump("workers_accepted")
+            elif not ran:
+                # Never started: no key, no spend, no worker slot.
+                self._bump("workers_refused")
+            elif status == "expired":
+                self._bump("workers_expired")
+            else:
+                # It ran and was then rejected — a served model that did not
+                # satisfy the requirement is the case this canary exists to
+                # produce. Its own bucket, keyed on the receipt's own status:
+                # an earlier version lumped it under ``workers_expired``, filing
+                # "a route answered claude-opus with a GLM id" under "reaped at
+                # its deadline" on the operator status. ADR-0053 — EXPIRED is a
+                # ReceiptStatus term and the counter named for it may only
+                # count it.
+                self._bump("workers_rejected_after_spawn")
             cost = receipt.get("usd_cost")
             if isinstance(cost, int | float):
                 self._worker_usd_total += float(cost)

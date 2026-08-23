@@ -45,6 +45,19 @@ DECISION_PATH_MODULES = (
     # a process is ``plan_worker_runner``, which is seam-declared and has its
     # own tests at the bottom of this file.
     "src/plan_broker.py",
+    # #11542 added a second actuator and split it the same way. ``implement_broker``
+    # owns the Implement canary's bound, the writer-lease registry, the
+    # hibernation predicate and the fence that makes a superseded worker's
+    # result rejected — all pure, all on this list. The one module that CAN
+    # reach a process is ``implement_worker_runner``, which is seam-declared and
+    # has its own tests at the bottom of this file.
+    "src/implement_broker.py",
+    # #11542 cut the actuator half out of ``fable_director`` when the mass
+    # sensor flagged the host class. It moved with its guarantees: the mixin
+    # decides which canary covers a boundary and hands an admitted batch to a
+    # dispatcher, and it must remain unable to spawn, mutate a label, or touch
+    # convergence state. Splitting a god class must not split a guard.
+    "src/director_dispatch.py",
 )
 
 #: Mutation calls that would give the director real authority over an issue.
@@ -223,24 +236,6 @@ def test_the_plan_actuator_never_mutates_a_label_or_merges() -> None:
     assert not (_called_names(_tree("src/plan_worker_runner.py")) & FORBIDDEN_MUTATIONS)
 
 
-def test_the_plan_actuator_never_writes_convergence_state() -> None:
-    # ADR-0137's narrowing of ADR-0094 survives dispatch being armed:
-    # ConvergenceLedger stays the sole owner of convergence state, and the
-    # canary's evidence is telemetry beside it rather than a second copy.
-    forbidden = {
-        "increment_route_backs",
-        "record_lap",
-        "recompute_converged",
-        "set_converged",
-        "add_open_concern",
-        "resolve_open_concern",
-        "record_stage_transition",
-        "record_sub_state_transition",
-    }
-
-    assert not (_called_names(_tree("src/plan_worker_runner.py")) & forbidden)
-
-
 def test_the_plan_actuator_owns_no_raw_spawn_primitive() -> None:
     # Same rule as the turn runner's, for the same reason: the sanctioned
     # ``run_lightweight_agent`` carries the CH-6 gate, the per-spawn mint and
@@ -259,6 +254,170 @@ def test_the_plan_actuator_is_seam_declared() -> None:
     from mockworld.sandbox_main import SANDBOX_SEAMS
 
     assert SANDBOX_SEAMS["plan_worker_runner"] == "config_disable"
+
+
+def test_the_implement_actuator_never_mutates_a_label_or_merges() -> None:
+    # #11542 gives a second module the ability to start a process, and this one
+    # starts WRITE-capable roles. It must gain nothing else: a brokered
+    # implementer or debugger produces an artifact and a receipt, and the
+    # deterministic ImplementPhase still owns every commit and every label.
+    called = _called_names(_tree("src/implement_worker_runner.py"))
+
+    assert not (called & FORBIDDEN_MUTATIONS)
+
+
+#: Calls that would make an actuator an owner of convergence state. ADR-0137's
+#: narrowing of ADR-0094 survives dispatch being armed and survives a
+#: write-capable worker existing: a driver may sequence the outer lap but may
+#: not own its state, and the canaries' evidence is telemetry beside the ledger
+#: rather than a second copy of it.
+CONVERGENCE_WRITES = frozenset(
+    {
+        "increment_route_backs",
+        "record_lap",
+        "recompute_converged",
+        "set_converged",
+        "add_open_concern",
+        "resolve_open_concern",
+        "record_stage_transition",
+        "record_sub_state_transition",
+    }
+)
+
+#: Calls that would let a worker's output become the commit. #11542's sixth
+#: acceptance criterion — "existing implementation output markers, quality
+#: gates, commit rules, and no-push rule remain unchanged" — as a property of
+#: what the module cannot reach rather than a promise beside it. Names rather
+#: than types, because the point is that the call site must not exist.
+WRITE_PRIMITIVES = frozenset(
+    {
+        "commit",
+        "commit_all",
+        "push_branch",
+        "force_push",
+        "create_commit",
+        "stage_all",
+        "write_text",
+        "write_bytes",
+    }
+)
+
+
+@pytest.mark.parametrize(
+    ("module", "forbidden"),
+    [
+        pytest.param(
+            "src/plan_worker_runner.py", CONVERGENCE_WRITES, id="plan-convergence"
+        ),
+        pytest.param(
+            "src/implement_worker_runner.py",
+            CONVERGENCE_WRITES,
+            id="implement-convergence",
+        ),
+        pytest.param(
+            "src/implement_worker_runner.py", WRITE_PRIMITIVES, id="implement-writes"
+        ),
+    ],
+)
+def test_an_actuator_reaches_no_forbidden_call(
+    module: str, forbidden: frozenset[str]
+) -> None:
+    assert not (_called_names(_tree(module)) & forbidden)
+
+
+def test_the_implement_actuator_owns_no_raw_spawn_primitive() -> None:
+    # Same rule as the Plan actuator's: the sanctioned ``run_lightweight_agent``
+    # carries the CH-6 gate, the per-spawn mint and revoke, the credit
+    # detection and the telemetry row. The worktree measurement is deliberately
+    # NOT on this list — it goes through the injected ``SubprocessRunner``,
+    # which owns the reap machinery and which the sandbox replaces wholesale.
+    raw = SPAWN_PRIMITIVES - {"run_lightweight_agent"}
+
+    assert not (_called_names(_tree("src/implement_worker_runner.py")) & raw)
+
+
+def test_the_implement_actuator_is_seam_declared() -> None:
+    # It DOES lexically call ``run_lightweight_agent``, so the sandbox scan sees
+    # it and a declaration is required rather than optional. Without the row an
+    # air-gapped scenario could spawn a real write-capable worker — the s51/s56
+    # wedge class, one degree worse than #11541's because these roles write.
+    from mockworld.sandbox_main import SANDBOX_SEAMS
+
+    assert SANDBOX_SEAMS["implement_worker_runner"] == "config_disable"
+
+
+def test_the_sandbox_clears_the_implement_canary_dial(tmp_path) -> None:
+    """A ``config_disable`` row is silently aspirational unless the pin exists.
+
+    Asserted by **running the override**, not by matching its source text. The
+    first version grepped for ``'"fable_implement_canary_repo", ""'``, which is
+    a gate that stops seeing its subject the moment the line is reformatted,
+    moved into a helper, or rewritten to the same effect — the exact class
+    #11665 found twice (``CRITICAL_PATHS`` entries naming files that never
+    existed, and regression tests monkeypatching a module that never existed,
+    both staying green). This one calls the function and reads the dial.
+    """
+    from config import HydraFlowConfig
+    from mockworld.sandbox_main import _apply_sandbox_config_overrides
+    from scheduling_model import ExecutionRuntime, SchedulingModel
+
+    armed = HydraFlowConfig(
+        state_file=tmp_path / "state.json",
+        repo="acme/widgets",
+        scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+        execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+        fable_implement_canary_repo="acme/widgets",
+    )
+
+    _apply_sandbox_config_overrides(armed)
+
+    # The DIAL, not ``fable_implement_canary_armed()``. The first behavioural
+    # draft asserted the predicate and survived deleting the override outright,
+    # because the sandbox also pins ``execution_runtime`` — so the runtime pin
+    # answered False and the dial was never consulted. A defence behind the
+    # subject doing the subject's work is the same masking #11541's mutation
+    # testing found twice, and it is why this assertion reads the one field the
+    # override actually writes.
+    assert armed.fable_implement_canary_repo == ""
+
+
+async def test_the_implement_actuator_actually_uses_the_injected_git_runner() -> None:
+    # Asserting the parameter merely *exists* would pass against a runner that
+    # accepts it and shells out anyway, which is a seam in name only. So this
+    # drives a real measurement and checks the injected double is what ran.
+    from config import HydraFlowConfig
+    from execution import SimpleResult
+    from implement_broker import WriterLeaseRegistry
+    from implement_worker_runner import ImplementWorkerRunner
+
+    class RecordingRunner:
+        def __init__(self) -> None:
+            self.commands: list[list[str]] = []
+
+        async def run_simple(self, cmd, **kwargs):
+            self.commands.append(list(cmd))
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+    import tempfile
+    from pathlib import Path as _Path
+
+    with tempfile.TemporaryDirectory() as workspace:
+        settings = HydraFlowConfig(
+            state_file=_Path(workspace) / "state.json",
+            repo="acme/widgets",
+            workspace_base=_Path(workspace) / "worktrees",
+        )
+        settings.workspace_path_for_issue(7).mkdir(parents=True, exist_ok=True)
+        probe = RecordingRunner()
+        await ImplementWorkerRunner(
+            config=settings,
+            route_policy_revision="route-v1",
+            runner=probe,  # type: ignore[arg-type]
+            leases=WriterLeaseRegistry(),
+            base_ref="origin/staging",
+        ).measure(7)
+
+    assert probe.commands and probe.commands[0][0] == "git"
 
 
 async def test_the_turn_runner_actually_uses_the_injected_spawner() -> None:
