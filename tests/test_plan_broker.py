@@ -450,17 +450,24 @@ class TestTheBackstopSitsAboveTheLongestBatch:
         from config import HydraFlowConfig
         from service_registry import CANARY_SLOT_TTL_SECONDS
 
-        ceiling = HydraFlowConfig.model_fields[
-            "fable_plan_worker_timeout_seconds"
-        ].metadata
-
-        largest = max(
+        bounds = [
             constraint.le
-            for constraint in ceiling
+            for constraint in HydraFlowConfig.model_fields[
+                "fable_plan_worker_timeout_seconds"
+            ].metadata
             if getattr(constraint, "le", None) is not None
-        )
+        ]
 
-        assert largest * 2 <= CANARY_SLOT_TTL_SECONDS
+        # Asserted, not assumed: reading the bound out of the field's metadata
+        # is only a guard while a bound exists. Removing ``le=`` entirely would
+        # otherwise make ``max()`` raise, which is loud but says the wrong
+        # thing — the failure an operator needs to see is "the ceiling is gone",
+        # not "a test helper blew up".
+        assert bounds, "fable_plan_worker_timeout_seconds has no le= bound"
+
+        # Twice over rather than merely under: a backstop that sits just above
+        # the longest batch is one rounding decision away from sitting at it.
+        assert max(bounds) * 2 <= CANARY_SLOT_TTL_SECONDS
 
     def test_a_config_at_the_ceiling_still_fits(self, tmp_path) -> None:
         # The same invariant read the way an operator would reach it.
