@@ -1481,6 +1481,54 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
+    # --- Fable Implement canary (#11542, ADR-0137 P4) ---------------------
+    # A SECOND dial, deliberately not a widening of the first. "Widen one role
+    # boundary at a time" is the epic's own rollout rule, and one dial covering
+    # both phases would mean an operator running the Plan canary today woke up
+    # dispatching writers tomorrow. Two dials keep the two decisions separate
+    # and keep #11541's bound literally true while this one is empty.
+    fable_implement_canary_repo: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Canonical 'owner/repo' whose IMPLEMENT boundaries may dispatch "
+            "real brokered Sonnet implementer and Opus/Sonnet debugger workers "
+            "under execution_runtime='fable_director'. Empty (the default) "
+            "dispatches nothing anywhere; clearing it is the one-action "
+            "rollback. Independent of fable_plan_canary_repo: arming one arms "
+            "nothing about the other. Deliberately NOT an env override, for "
+            "ADR-0141 D5's reason — an env var that re-applies whenever the "
+            "field is at its default would mean clearing the field did not "
+            "disarm."
+        ),
+    )
+    fable_implement_worker_timeout_seconds: int = Field(
+        default=900,
+        ge=30,
+        le=3600,
+        description=(
+            "Wall-clock budget for one brokered IMPLEMENT batch. A child that "
+            "exceeds what the batch has left is killed with its process group "
+            "and its receipt is EXPIRED. Longer than the Plan default because "
+            "a correction worker reads a diff rather than a goal. Ignored "
+            "unless fable_implement_canary_repo names this repository."
+        ),
+    )
+
+    def fable_implement_canary_armed(self) -> bool:
+        """True when this process may dispatch a real brokered writer (#11542).
+
+        The same two-decision shape as :meth:`fable_plan_canary_armed`, over a
+        different dial: selecting the director is restart-required, naming the
+        implement canary repository is live, and neither implies the other.
+        """
+        from hydraflow_gateway.routing_policy import canonicalize_repo
+
+        if not self.uses_fable_director():
+            return False
+        armed = canonicalize_repo(str(self.fable_implement_canary_repo or ""))
+        return armed is not None and armed == canonicalize_repo(str(self.repo or ""))
+
     def fable_plan_canary_armed(self) -> bool:
         """True when this process may dispatch a real brokered Plan worker.
 
@@ -7101,27 +7149,37 @@ def _validate_gateway_enforcement_canary(config: HydraFlowConfig) -> None:
         raise ValueError(msg)
 
 
+#: Every Fable canary dial that names one repository. One tuple rather than one
+#: validator per dial: #11542 added a second dial, and a copied validator is how
+#: the two would eventually disagree about what "canonical" means.
+_FABLE_CANARY_DIALS: tuple[str, ...] = (
+    "fable_plan_canary_repo",
+    "fable_implement_canary_repo",
+)
+
+
 def _validate_fable_plan_canary(config: HydraFlowConfig) -> None:
-    """A Plan-canary dial that arms nothing must say so at load (#11541).
+    """A Fable canary dial that arms nothing must say so at load (#11541/#11542).
 
     Same rule and the same reason as
     :func:`_validate_gateway_enforcement_canary`: only an exact canonical
     ``owner/repo`` arms the canary, the runtime predicate fails closed on
     anything else, and failing closed silently would leave an operator
     believing a repository was brokered while every boundary stayed shadow.
-    The runtime check stays — this dial is live-editable — but a value written
-    to the config file is refused where the mistake is still cheap.
+    The runtime check stays — these dials are live-editable — but a value
+    written to the config file is refused where the mistake is still cheap.
     """
     from hydraflow_gateway.routing_policy import canonicalize_repo
 
-    raw = str(config.fable_plan_canary_repo or "").strip()
-    if raw and canonicalize_repo(raw) is None:
-        msg = (
-            "fable_plan_canary_repo must be an exact canonical 'owner/repo' "
-            f"(got {raw!r}); the path-safe runtime slug cannot identify a "
-            "canary repository. Leave it empty to dispatch nothing."
-        )
-        raise ValueError(msg)
+    for dial in _FABLE_CANARY_DIALS:
+        raw = str(getattr(config, dial, "") or "").strip()
+        if raw and canonicalize_repo(raw) is None:
+            msg = (
+                f"{dial} must be an exact canonical 'owner/repo' "
+                f"(got {raw!r}); the path-safe runtime slug cannot identify a "
+                "canary repository. Leave it empty to dispatch nothing."
+            )
+            raise ValueError(msg)
 
 
 def _validate_gateway_capture_policy(config: HydraFlowConfig) -> None:

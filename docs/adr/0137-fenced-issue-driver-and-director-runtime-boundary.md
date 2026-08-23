@@ -7,7 +7,7 @@
 **Supersedes:** none
 **Superseded by:** none
 **Amends:** ADR-0094 (Two-level convergence: Gate + ConvergenceLedger) — narrows its blocking-shepherd rejection to the convergence *outer loop*, leaving every other decision in ADR-0094 intact.
-**Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (the concurrency model a driver must not break), [ADR-0002](0002-labels-as-state-machine.md) (labels as the sole durable stage truth), [ADR-0099](0099-orchestration-as-a-control-system.md) (the servo/supervisory-controller vocabulary this realizes), [ADR-0107](0107-collapse-discover-shape-into-plan.md) (the live Triage → Plan → Implement → Review → HITL topology), [ADR-0110](0110-provider-harness-backend-split.md) and [ADR-0134](0134-per-repo-model-harness-selection.md) (per-repo provider routing the broker must resolve per child), [ADR-0124](0124-tier-2-goal-supervisor.md) (the default-off Fable goal supervisor this is deliberately *not* built on). Issues: #11533 (this phase), #11532 (the epic), #10038 / #10055 (the conflict), #11535 / #11537 (the phases this unblocks).
+**Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (the concurrency model a driver must not break), [ADR-0002](0002-labels-as-state-machine.md) (labels as the sole durable stage truth), [ADR-0099](0099-orchestration-as-a-control-system.md) (the servo/supervisory-controller vocabulary this realizes), [ADR-0107](0107-collapse-discover-shape-into-plan.md) (the live Triage → Plan → Implement → Review → HITL topology), [ADR-0110](0110-provider-harness-backend-split.md) and [ADR-0134](0134-per-repo-model-harness-selection.md) (per-repo provider routing the broker must resolve per child), [ADR-0124](0124-tier-2-goal-supervisor.md) (the default-off Fable goal supervisor this is deliberately *not* built on). Issues: #11533 (this phase), #11532 (the epic), #10038 / #10055 (the conflict), #11535 / #11537 / #11541 / #11542 (the phases this unblocks).
 
 **Enforced by:**
 pytest:tests/test_driver_contracts.py
@@ -32,6 +32,11 @@ pytest:tests/test_plan_worker_runner.py
 pytest:tests/test_plan_canary_default_off.py
 pytest:tests/regressions/test_issue_11541_outside_the_slice.py
 pytest:tests/scenarios/test_fable_plan_canary_scenario.py
+pytest:tests/test_implement_broker.py
+pytest:tests/test_implement_worker_runner.py
+pytest:tests/test_implement_canary_default_off.py
+pytest:tests/regressions/test_issue_11542_outside_the_slice.py
+pytest:tests/scenarios/test_fable_implement_canary_scenario.py
 
 **Precedent:** Fenced leases over a durable log — the epoch/fencing-token discipline for a single-writer owner whose liveness cannot be trusted (Chubby, Burrows 2006; Kafka's producer epoch; Lamport's "the lease holder may already be dead").
 **Divergence:** classical fencing assumes the shared store enforces the token, but HydraFlow's durable store is the GitHub label set, which has no compare-and-swap and whose swap primitive is add-first-then-best-effort-remove (`src/pr_manager.py:PRManager.swap_pipeline_labels`), so the fence is enforced at the *admission* boundary instead and multi-label crash states are reconciled against a transition intent recorded before the swap rather than prevented — priority-based reconciliation alone silently reverts backward transitions (receipt: #11533, and the adversarial panel on #10038).
@@ -626,6 +631,142 @@ adds no docker path and no UI page, is covered by two independent air-gap seams
 `_apply_sandbox_config_overrides`) and by the MockWorld scenario, and the honest
 e2e is the canary itself, which needs a live factory rather than a scenario.
 
+### The Implement canary (#11542)
+
+The **fourth phase** widened dispatch from Plan to Implement, and made the
+writer lease real. Under `issue_controller + fable_director` with
+`config.fable_implement_canary_repo` naming this exact repository, an
+`IMPLEMENT` boundary's admitted dispatches become real child processes holding
+a real fence; every other repository, every other phase, and every host with
+the dial empty runs exactly the code the phase before it shipped.
+
+**A second dial, not a widened one.** `fable_implement_canary_repo` is separate
+from `fable_plan_canary_repo`, and the separation is the epic's own rollout rule
+("widen one role boundary at a time") expressed as configuration rather than as
+intent. One dial covering both phases would mean an operator running the Plan
+canary today woke up dispatching *writers* tomorrow.
+`tests/regressions/test_issue_11542_outside_the_slice.py` proves the two are
+independent in both directions, through the real composition root, and
+#11541's own regression is untouched and still passes verbatim.
+
+**The fence is what the phase is named after.** A write-capable worker is
+briefed against one worktree state — branch, base SHA, HEAD, diff digest —
+measured *before* it starts and re-measured *after* it returns.
+`implement_broker.check_worker_fence` judges the two, first-match-wins, in an
+order that is itself a decision: ownership first (another driver is theft, not
+staleness), then the epoch and phase-attempt tokens #11535 already owns, reused
+rather than re-derived, then the live label, then the four worktree tokens
+coarsest-first. A breach produces a `SUPERSEDED` receipt with a deterministic
+code and the artifact is **discarded** — it does not reach `prior_receipts` and
+the next director turn never sees it. That is the difference between a late
+worker being *rejected* and being *ignored*.
+
+`UNMEASURED` is checked before any comparison, for S4's reason at a second
+boundary: an absent reading reads as *unverified*, never as *unchanged*.
+Without that clause two unmeasured sides compare equal and a fence that
+measured nothing would verify everything — the fail-open shape F2 condemns.
+
+**Two refusal codes exist because the criterion names two failures.**
+`WORKTREE_DIGEST_STALE` and `BRANCH_MISMATCH` are separate members: a moved
+digest is work happening, and a moved branch is the worktree having been reused
+for another issue, which is the failure that makes a diff apply cleanly to the
+wrong place. `WORKTREE_UNMEASURED` and `HIBERNATING` join them, additively;
+`DRIVER_CONTRACTS_SCHEMA_VERSION` stays `1`.
+
+**Exactly one writer, and read-only evidence fans out.**
+`implement_broker.WriterLeaseRegistry` admits one holder per *issue* — the
+granularity of a worktree — and `needs_writer_lease` reads the answer off
+`WORKER_CATALOG.write_scope` rather than a second list of role names. The lease
+is taken before the spawn and released in a `finally`, so a timeout, a
+cancellation, a raised bug, a stale digest and a stop all end authority on the
+way out rather than leaving a lease held by a process that is already dead.
+Children run serially, which is both what "run sequentially in one issue
+worktree" means and what stops the second write-capable child of a batch
+deadlocking against the first.
+
+**Hibernation suspends authority and measurement, not observation.**
+`hibernation_reason` names the three waits C6 already releases *capacity* for —
+`PARKED` (CI and barriers), `DIAGNOSE`, `HITL_WAIT` — and the director revokes
+the issue's writer lease on the tick it enters one, refuses any admitted batch
+with `HIBERNATING`, and takes **no worktree measurement at all**. That last
+clause is not tidiness: a driver waiting on a human is ticked for as long as
+the human takes, so measuring it would put three `git` reads on a path the
+allocator reaches every poll interval — the same hot-path defect #11537 had to
+fix at its cause once already. The director's *turn* still runs and is still
+recorded, because the observation is the evidence this rung exists to gather.
+
+There is nothing to reconstruct on the way back, and that is the honest reading
+of "reconstruct from deterministic checkpoints" in a runtime that never resumes
+a session: the next live boundary rebuilds the capsule from live state and
+re-measures the worktree from scratch, and a lease minted before the wait is
+refused by the fence if anything moved.
+
+**The canary still adds workers, not authority.** The deterministic
+`ImplementPhase` runs, gates, commits and does not push, exactly as before —
+`src/implement_phase.py` is untouched by this phase. A brokered implementer or
+debugger produces a bounded correction proposal beside it, as an artifact and a
+receipt. `tests/architecture/test_director_no_authority.py` pins that
+`implement_worker_runner` reaches no label mutation, no merge, no convergence
+write, no commit or push primitive, and no raw spawn primitive other than
+`run_lightweight_agent`. Letting a brokered diff *become* the commit needs the
+independent review #11543 owns.
+
+**Independent review's fence became reachable here.** `admit_dispatch` has
+carried a `SELF_REVIEW_FORBIDDEN` arm since #11533, and until this phase it
+could never fire: nothing populated `implementer_spawn_ids`, because no
+brokered implementer had ever run. The director now records the child spawn ids
+of *accepted* implementer receipts and feeds them to the broker, so a reviewer
+requested from an implementer's lineage is refused. A refused or superseded
+implementer contributes no lineage, so the fence cannot refuse a reviewer over
+a worker that never contributed anything.
+
+**Where the measurement happens, and why not on a Port.** The four tokens are
+read through the **injected** `SubprocessRunner.run_simple`, the same posture
+`director_turn_runner` holds, with the parse and the digest pure in
+`implement_broker` — the pure-engine/one-subprocess-seam split
+`workspace_gc_loop` already uses for its landed proof. `WorkspacePort` carries
+no git-read queries today, and adding four to it would have changed a shared
+protocol, three implementations and three conformance lists for one consumer.
+The seam is honest either way: the sandbox injects `FakeSubprocessRunner`, so
+an air-gapped scenario measures nothing real. If a second consumer appears, the
+queries belong on the Port and this note is the reason they are not there yet.
+
+**Brokered workers mint inside the authorization boundary, and it is asserted.**
+A child's gateway key is minted inside `run_lightweight_agent`, which resolves a
+governed route with `principal_id=source`; the actuator passes the worker's
+catalogued role as `source`, and `routing_policy.canonical_worker_role` matches
+a `WorkerRole` value exactly — so a brokered writer mints a route-**bound** v2
+key attributable to its own worker account wherever the enforcement canary is
+armed. That chain has one link a future edit could break silently, so
+`tests/test_implement_broker.py` pins that every role this canary can dispatch
+is a canonical principal, with a non-vacuity case beside it. ADR-0141 §D1's
+named gap on `service_registry._mint_director_key` was closed by #11541 and is
+unchanged here.
+
+**No retry, and therefore no lost lineage.** ADR-0142 left a HydraFlow-side
+fallback driver unbuilt because *"a worker retry today gets a fresh
+`dispatch_id`, so lineage is gone before it could be cited."* This phase does
+not open that hole: a fenced worker that times out, fails, or comes back to a
+moved slice produces **one** terminal receipt and the boundary ends. The retry
+is the driver's own phase attempt, which the next lease fences with a token it
+carries — so nothing here needs to cite a lineage it no longer has. Building
+that driver stays #11544's, with the citation protocol ADR-0142 already
+enforces at the gateway.
+
+**Rollback is one field, and it is the same shape as #11541's.**
+`fable_implement_canary_repo` is live, empty by default, and deliberately not
+an environment override for ADR-0141 D5's reason. Clearing it stops the next
+dispatch with no restart; the round trip is run, and rolling it back leaves the
+Plan canary armed if it was.
+
+Two things this phase deliberately did **not** do: no default flip (B5's bar is
+unmet), and no sandbox e2e — the actuator adds no docker path and no UI page,
+is covered by three independent air-gap pins
+(`SANDBOX_SEAMS["implement_worker_runner"] = "config_disable"`, the pinned
+`execution_runtime`, and a cleared `fable_implement_canary_repo` in
+`_apply_sandbox_config_overrides`) and by the MockWorld scenario. The honest
+e2e is the canary itself, which needs a live factory.
+
 ## Source-file citations
 
 - `src/driver_contracts.py`: `WorkerRole`, `ModelRequirement`, `DriverLease`, `WriterLease`, `DirectorCapsule`, `DirectorCommand`, `WorkerDispatchRequest`, `WorkerReceipt`, `DriverCheckpoint`, `WorkerLineage`, `WorkerCatalogEntry`, `WORKER_CATALOG`, `RejectionReason`, `admit_dispatch`, `DriverPhase`.
@@ -654,4 +795,8 @@ e2e is the canary itself, which needs a live factory rather than a scenario.
 - `src/route_enforcement.py`: `enforce_director_route`, `DIRECTOR_PRINCIPAL` — ADR-0141 §D1's named gap, closed.
 - `src/gateway_mint_client.py`: `bound_model_for` — which model a route-bound lease commits its spawn to.
 - `src/config.py`: `HydraFlowConfig.fable_plan_canary_repo` (the one-action switch), `fable_plan_worker_timeout_seconds`, `fable_plan_canary_armed`.
+- `src/implement_broker.py`: `CANARY_PHASE`, `FenceBreach`, `FENCE_REJECTIONS`, `WorktreeState`, `worktree_probes`, `worktree_state_from_reads`, `worktree_diff_digest`, `check_worker_fence`, `WriterLeaseRegistry`, `needs_writer_lease`, `Hibernation`, `hibernation_reason`, `implement_canary_repo`, `implement_canary_armed`, `implement_canary_covers`, `implement_roles_for_implement_phase`, `resolve_implement_model`, `writer_lease_for` — the Implement canary's pure decision layer (#11542).
+- `src/implement_worker_runner.py`: `ImplementWorkerRunner`, `WorktreeMeasurement`, `build_implement_worker_prompt`, `hibernation_refusal`, `_spawn_implement_worker` — the one place a fenced writer is started, seam-declared in `SANDBOX_SEAMS`.
+- `src/plan_broker.py`: `resolve_worker_model` — the phase-parameterised resolver both canaries share, so one tier table answers both.
+- `src/config.py`: `HydraFlowConfig.fable_implement_canary_repo` (the second one-action switch), `fable_implement_worker_timeout_seconds`, `fable_implement_canary_armed`.
 - `scripts/director_capability_probe.py` — the probe; `tests/fixtures/director/director_capability_probe_evidence.json` — its sanitized evidence.

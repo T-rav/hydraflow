@@ -169,6 +169,15 @@ class PlanRouteReason(StrEnum):
     NONE = "none"
     PHASE_NOT_PLAN = "phase-not-plan"
     ROLE_NOT_CATALOGUED_FOR_PLAN = "role-not-catalogued-for-plan"
+
+    # #11542 widened the resolver to a second phase. The two refusals below are
+    # the IMPLEMENT-phase counterparts of the two above, and they are separate
+    # members rather than a shared "phase-not-covered" because they are what an
+    # operator reads off a receipt: "this boundary was not a plan boundary" and
+    # "this boundary was not an implement boundary" are different facts, and
+    # collapsing them would make one refusal explain two different mistakes.
+    PHASE_NOT_IMPLEMENT = "phase-not-implement"
+    ROLE_NOT_CATALOGUED_FOR_IMPLEMENT = "role-not-catalogued-for-implement"
     LITERAL_FAMILY_UNSATISFIABLE = "literal-family-unsatisfiable"
     """The catalogued id does not satisfy the requirement it was resolved from.
 
@@ -295,6 +304,34 @@ def resolve_plan_model(
     phase: DriverPhase,
     route_policy_revision: str,
 ) -> PlanRouteDecision:
+    """Resolve one Plan dispatch's model tier. The PLAN binding of the resolver.
+
+    Kept as its own name because it is what ADR-0137's source-file citations
+    and #11541's tests refer to; the body is
+    :func:`resolve_worker_model` bound to the Plan canary's phase, role set and
+    refusal vocabulary.
+    """
+    return resolve_worker_model(
+        request,
+        phase=phase,
+        canary_phase=CANARY_PHASE,
+        legal_roles=plan_roles_for_plan_phase(),
+        phase_refusal=PlanRouteReason.PHASE_NOT_PLAN,
+        role_refusal=PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN,
+        route_policy_revision=route_policy_revision,
+    )
+
+
+def resolve_worker_model(
+    request: WorkerDispatchRequest,
+    *,
+    phase: DriverPhase,
+    canary_phase: DriverPhase,
+    legal_roles: frozenset[WorkerRole],
+    phase_refusal: PlanRouteReason,
+    role_refusal: PlanRouteReason,
+    route_policy_revision: str,
+) -> PlanRouteDecision:
     """Resolve one dispatch's model tier. Pure, total, and first-match-wins.
 
     Total for the same reason ``routing_policy.explain`` is: it runs on a live
@@ -318,17 +355,21 @@ def resolve_plan_model(
     so with no credential in existence and zero upstream bytes. What remains
     here is the check this layer *can* answer: that the tier catalog's own
     answer satisfies the requirement it was resolved from.
+
+    *canary_phase*, *legal_roles* and the two refusal reasons are parameters
+    rather than constants because #11542 added a second bound over the **same**
+    tier tables. Forking the resolver would have forked
+    :data:`PLAN_TIER_CATALOG` with it, and two copies of "which id answers
+    ``claude-opus``" is precisely the drift the table is code-owned to prevent —
+    which is also why #11657's correction above lands on both canaries at once
+    rather than needing to be found twice.
     """
     echo = _echo(request, phase, route_policy_revision)
 
-    if phase is not CANARY_PHASE:
-        return _refusal(echo, PlanRouteOutcome.REJECTED, PlanRouteReason.PHASE_NOT_PLAN)
-    if request.worker_role not in plan_roles_for_plan_phase():
-        return _refusal(
-            echo,
-            PlanRouteOutcome.REJECTED,
-            PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN,
-        )
+    if phase is not canary_phase:
+        return _refusal(echo, PlanRouteOutcome.REJECTED, phase_refusal)
+    if request.worker_role not in legal_roles:
+        return _refusal(echo, PlanRouteOutcome.REJECTED, role_refusal)
 
     requirement = request.model_requirement
     if requirement.kind is ModelRequirementKind.LITERAL_FAMILY:

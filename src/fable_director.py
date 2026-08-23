@@ -69,11 +69,17 @@ from driver_contracts import (
     DirectorCapsule,
     DirectorCommand,
     DriverLease,
+    ReceiptStatus,
     RejectionReason,
     WorkerRole,
     WriterLease,
 )
 from exception_classify import reraise_on_credit_or_bug
+from implement_broker import (
+    hibernation_reason,
+    writer_lease_for,
+)
+from implement_worker_runner import hibernation_refusal
 from issue_driver import AdvanceOutcome
 from issue_driver_policy import phase_for_state
 from plan_broker import CANARY_PHASE
@@ -92,6 +98,7 @@ if TYPE_CHECKING:
         WorkerDispatchRequest,
         WorkerReceipt,
     )
+    from implement_worker_runner import ImplementWorkerRunner, WorktreeMeasurement
     from issue_driver import DriverAdvance, IssueDriver
     from models import Task
     from plan_broker import PlanCanaryLatch
@@ -171,6 +178,8 @@ class FableDirector:
         dispatcher: PlanWorkerRunner | None = None,
         is_covered: Callable[[DriverPhase | None], bool] | None = None,
         latch: PlanCanaryLatch | None = None,
+        implement_dispatcher: ImplementWorkerRunner | None = None,
+        implement_is_covered: Callable[[DriverPhase | None], bool] | None = None,
     ) -> None:
         self._runner = runner
         self._broker = broker
@@ -206,6 +215,15 @@ class FableDirector:
         self._is_covered = is_covered
         self._latch = latch
         self._receipts: dict[int, tuple[WorkerReceipt, ...]] = {}
+        # The Implement canary (#11542). Both are ``None`` under shadow mode
+        # AND under a Plan-only canary, so an operator who has armed one dial
+        # runs exactly the object graph the phase before this one shipped.
+        # ``implement_is_covered`` is a callable for the same reason
+        # ``is_covered`` is: the dial is live, and clearing it must stop the
+        # NEXT dispatch rather than the next restart.
+        self._implement_dispatcher = implement_dispatcher
+        self._implement_is_covered = implement_is_covered
+        self._implementer_spawns: dict[int, frozenset[str]] = {}
 
     @property
     def shadow_log(self) -> ShadowObservationLog:
@@ -283,6 +301,7 @@ class FableDirector:
         # below. A latch released only on a boundary the director paid for would
         # stay held for as long as the next issue waited.
         self._release_slot_if_moved_on(task, advance, driver)
+        self._hibernate_if_waiting(task, driver)
         refusal = self._refuse_before_spending()
         if refusal is not None:
             self._shadow_log.decline(refusal)
@@ -414,17 +433,25 @@ class FableDirector:
             )
             return
 
+        measured = await self._measure_worktree(task, driver, phase)
         verdict = self._broker.admit(
             command,
             capsule=capsule,
             lease=lease,
-            writer_lease=_unheld_writer_lease(lease),
+            writer_lease=self._writer_lease(lease, measured),
             sandbox_verified=True,
             now=datetime.now(UTC),
             live_stage_label=live_label or lease.expected_stage_label,
+            # First populated by #11542. Until a brokered implementer actually
+            # ran there were no spawn ids to compare against, so
+            # ``SELF_REVIEW_FORBIDDEN`` was a fence that could never fire; now
+            # that one can run, an independent reviewer requested from its
+            # lineage is refused. That is the mechanism behind "independent
+            # review remains Classic", not a promise beside it.
+            implementer_spawn_ids=self._implementer_spawns.get(task.id, frozenset()),
         )
         receipts = await self._dispatch(
-            task, driver, lease, command, verdict, phase, live_label
+            task, driver, lease, command, verdict, phase, live_label, measured
         )
         self._record(
             task,
@@ -454,33 +481,77 @@ class FableDirector:
         verdict: BrokerVerdict,
         phase: DriverPhase,
         live_label: str,
+        measured: WorktreeMeasurement | None,
     ) -> tuple[WorkerReceipt, ...]:
-        """Run what the broker admitted, if and only if this boundary is inside
-        the canary (#11541).
+        """Run what the broker admitted, if this boundary is inside a canary.
 
-        Three gates, in this order and each for its own reason:
+        Two canaries now, one per phase, and they are asked in order rather
+        than merged: each has its own dial, its own bound and its own actuator,
+        and a single predicate covering both would be the widening that
+        "widen one role boundary at a time" forbids. The bounds are mutually
+        exclusive by construction — ``plan_broker.CANARY_PHASE`` is ``PLAN`` and
+        ``implement_broker.CANARY_PHASE`` is ``IMPLEMENT`` — so the order below
+        is readability rather than precedence.
+
+        The gates, in this order, and each for its own reason:
 
         1. **the seam is wired** — a director constructed without an actuator
            (Classic and the deterministic controller build no director at all;
-           a hand-built one in a test may omit it) returns here before
+           a hand-built one in a test may omit either) returns here before
            evaluating anything else, so that path stays #11537's exactly. Under
-           a production ``fable_director`` build both are always present, and
-           what stops a dispatch is clause 2, not this one;
-        2. **the boundary is covered** — one repository, phase ``PLAN``, read
-           live so clearing the dial stops the next dispatch;
-        3. **the repository's single brokered slot is free** — the issue's
-           first acceptance criterion, held as a fence.
+           a production ``fable_director`` build **both actuators are always
+           present**, and what stops a dispatch is clause 2, not this one. That
+           is #11657's correction and it applies to both canaries: making
+           construction conditional on the dial looked like a stronger
+           default-off proof and was in fact the bug that made *arming* require
+           a restart while only disarming was live;
+        2. **the boundary is covered** — one repository and one phase, read
+           live, so arming reaches the next boundary and clearing stops it;
+        3. **the canary's own remaining fence** — the Plan slot latch, or for
+           IMPLEMENT the hibernation check and the writer lease.
 
         The dispatcher's own per-request fence is passed down and re-evaluated
         immediately before each spawn, so a stop or an epoch bump *between* two
         children of one batch stops the second.
         """
-        if self._dispatcher is None or self._is_covered is None:
-            return ()
-        if not self._is_covered(phase):
-            return ()
         admitted = _admitted_requests(command, verdict)
         if not admitted:
+            return ()
+        if self._dispatcher is not None and self._covers(self._is_covered, phase):
+            return await self._dispatch_plan(
+                task, driver, lease, admitted, phase, live_label
+            )
+        if self._implement_dispatcher is not None and self._covers(
+            self._implement_is_covered, phase
+        ):
+            return await self._dispatch_implement(
+                task, driver, lease, admitted, phase, live_label, measured
+            )
+        return ()
+
+    @staticmethod
+    def _covers(
+        predicate: Callable[[DriverPhase | None], bool] | None, phase: DriverPhase
+    ) -> bool:
+        """A canary's bound, read live. A missing predicate covers nothing."""
+        return predicate is not None and predicate(phase)
+
+    async def _dispatch_plan(
+        self,
+        task: Task,
+        driver: IssueDriver,
+        lease: DriverLease,
+        admitted: tuple[WorkerDispatchRequest, ...],
+        phase: DriverPhase,
+        live_label: str,
+    ) -> tuple[WorkerReceipt, ...]:
+        """The Plan canary's actuator (#11541), unchanged by #11542.
+
+        The repository's single brokered-Plan slot is the issue's first
+        acceptance criterion from that phase, held as a fence.
+        """
+        dispatcher = self._dispatcher
+        if dispatcher is None:  # pragma: no cover - narrowed by the caller
             return ()
         if self._latch is not None and not self._latch.claim(
             task.id, now=datetime.now(UTC)
@@ -490,20 +561,190 @@ class FableDirector:
                 task.id,
                 self._latch.holder,
             )
-            return self._dispatcher.refuse(admitted, RejectionReason.CANARY_SLOT_HELD)
-        receipts = await self._dispatcher.dispatch(
+            return dispatcher.refuse(admitted, RejectionReason.CANARY_SLOT_HELD)
+        receipts = await dispatcher.dispatch(
             admitted,
             task=task,
             lease=lease,
             phase=phase,
-            fence=self._pre_spawn_fence(driver, lease, phase, live_label),
+            fence=self._pre_spawn_fence(
+                driver, lease, phase, live_label, self._is_covered
+            ),
         )
-        # Real receipts are real context for the next turn — ADR-0137 kept
-        # ``prior_receipts`` empty only for as long as no worker had run.
-        # Bounded by the contract's own ceiling, newest last.
+        self._remember(task, receipts)
+        return receipts
+
+    async def _dispatch_implement(
+        self,
+        task: Task,
+        driver: IssueDriver,
+        lease: DriverLease,
+        admitted: tuple[WorkerDispatchRequest, ...],
+        phase: DriverPhase,
+        live_label: str,
+        measured: WorktreeMeasurement | None,
+    ) -> tuple[WorkerReceipt, ...]:
+        """The Implement canary's actuator (#11542): fenced, and one writer.
+
+        Two refusals happen here rather than inside the runner, because both
+        are facts only the director holds. A **hibernating** driver is parked on
+        CI, a diagnostic or a human, and the right number of writers against its
+        worktree is zero — the lease has already been revoked by
+        :meth:`_hibernate_if_waiting`, and admitting a batch after that would
+        immediately re-take it. An **unmeasurable** worktree means the fence
+        cannot be armed at all, and ADR-0137 S4's rule applies unchanged: a
+        boundary that cannot be proven is refused, never assumed.
+        """
+        dispatcher = self._implement_dispatcher
+        if dispatcher is None:  # pragma: no cover - narrowed by the caller
+            return ()
+        blocked = hibernation_refusal(driver.driver_state)
+        if blocked is not None:
+            logger.info(
+                "fable_director: #%d is hibernating (%s); no writer is dispatched",
+                task.id,
+                driver.driver_state,
+            )
+            return dispatcher.refuse(admitted, blocked)
+        if measured is None or not measured.state.measured:
+            return dispatcher.refuse(admitted, RejectionReason.WORKTREE_UNMEASURED)
+        receipts = await dispatcher.dispatch(
+            admitted,
+            task=task,
+            lease=lease,
+            phase=phase,
+            measured=measured,
+            fence=self._pre_spawn_fence(
+                driver, lease, phase, live_label, self._implement_is_covered
+            ),
+            driver_facts=self._driver_facts(driver, phase),
+        )
+        self._remember(task, receipts)
+        self._remember_implementer_spawns(task, receipts)
+        return receipts
+
+    async def _measure_worktree(
+        self, task: Task, driver: IssueDriver, phase: DriverPhase
+    ) -> WorktreeMeasurement | None:
+        """This issue's worktree, measured once per covered IMPLEMENT boundary.
+
+        ``None`` everywhere else, and that is what keeps a shadow-mode or
+        Plan-only host byte-identical: no dispatcher means no probe, no git
+        subprocess and no change to the evidence recorded. Measured *before*
+        the broker admits rather than inside the runner, because the writer
+        lease the broker judges against has to carry the digests a worker will
+        be fenced on — a lease minted from one reading and checked against
+        another is two fences that agree only by luck.
+
+        **A hibernating driver is not measured**, and that is the difference
+        between hibernating and merely refusing. A driver waiting on a human is
+        ticked for as long as the human takes, so measuring it would put three
+        ``git`` reads on a path the allocator reaches every poll interval for
+        as long as nobody answers — the same hot-path defect #11537 had to fix
+        at its cause once already. Nothing is dispatched from a wait, so
+        nothing needs measuring.
+        """
+        dispatcher = self._implement_dispatcher
+        if dispatcher is None or not self._covers(self._implement_is_covered, phase):
+            return None
+        if hibernation_reason(driver.driver_state) is not None:
+            return None
+        return await dispatcher.measure(task.id)
+
+    def _writer_lease(
+        self, lease: DriverLease, measured: WorktreeMeasurement | None
+    ) -> WriterLease:
+        """The single-writer lease the broker judges this batch against.
+
+        Real digests inside the Implement canary; ``UNOBSERVED_DIGEST`` outside
+        it, exactly as #11537 shipped. Stating the absence rather than
+        fabricating a sha is the same rule in both directions.
+        """
+        if measured is None:
+            return _unheld_writer_lease(lease)
+        return writer_lease_for(lease, measured.state)
+
+    def _driver_facts(
+        self, driver: IssueDriver, phase: DriverPhase
+    ) -> Callable[[], tuple[str, int, int, str]]:
+        """The four ownership tokens, re-read at the moment the fence asks.
+
+        A callable rather than a snapshot because these are precisely the
+        values that move while a child runs: a fence handed a copy of the lease
+        it is checking would verify unconditionally, which is the vacuous-guard
+        shape #11541's mutation testing caught twice.
+
+        The fourth token is the pipeline **label**, not the driver state, because
+        that is what ``DriverLease.expected_stage_label`` holds. Passing the raw
+        state here compared ``"READY"`` against ``"hydraflow-ready"`` and fenced
+        every worker as preempted — a guard that fires on everything is as
+        useless as one that fires on nothing, and it was the unit tests for the
+        happy path that caught it.
+        """
+
+        def facts() -> tuple[str, int, int, str]:
+            return (
+                driver.driver_id,
+                driver.epoch,
+                driver.phase_attempt(phase),
+                self._stage_labels.get(driver.driver_state, ""),
+            )
+
+        return facts
+
+    def _remember(self, task: Task, receipts: tuple[WorkerReceipt, ...]) -> None:
+        """Carry this boundary's receipts into the next capsule, bounded.
+
+        Real receipts are real context for the next turn — ADR-0137 kept
+        ``prior_receipts`` empty only for as long as no worker had run.
+        """
         previous = self._receipts.get(task.id, ())
         self._receipts[task.id] = (previous + receipts)[-MAX_CAPSULE_RECEIPTS:]
-        return receipts
+
+    def _remember_implementer_spawns(
+        self, task: Task, receipts: tuple[WorkerReceipt, ...]
+    ) -> None:
+        """Record which spawns actually implemented, so review can be fenced off them.
+
+        Only ACCEPTED receipts count. A refused or superseded request produced
+        no lineage at all, and inventing one would make the self-review fence
+        refuse a reviewer over a worker that never ran.
+        """
+        spawns = {
+            receipt.lineage.child_spawn_id
+            for receipt in receipts
+            if receipt.status is ReceiptStatus.ACCEPTED
+            and receipt.lineage is not None
+            and receipt.worker_role is WorkerRole.IMPLEMENTER
+        }
+        if not spawns:
+            return
+        self._implementer_spawns[task.id] = (
+            self._implementer_spawns.get(task.id, frozenset()) | spawns
+        )
+
+    def _hibernate_if_waiting(self, task: Task, driver: IssueDriver) -> None:
+        """Revoke this issue's writer lease while it waits on CI, a diagnostic or a human.
+
+        ADR-0137 C6 already releases *capacity* for these three states. This is
+        the same rule applied to *authority*, and it is the load-bearing half of
+        #11542's fourth acceptance criterion: a driver parked on a barrier has
+        no business holding a worktree, and a worker that comes back to find
+        its lease revoked is still fenced on the way out, so revoking without
+        waiting for it is safe.
+
+        There is nothing to reconstruct on the way back. The next live boundary
+        rebuilds the capsule from live state and re-measures the worktree from
+        scratch, which is what "reconstruct from deterministic checkpoints"
+        means in a runtime that never resumes a session.
+        """
+        dispatcher = self._implement_dispatcher
+        if dispatcher is None:
+            return
+        reason = hibernation_reason(driver.driver_state)
+        if reason is None:
+            return
+        dispatcher.revoke(task.id, RejectionReason.HIBERNATING)
 
     def _pre_spawn_fence(
         self,
@@ -511,6 +752,7 @@ class FableDirector:
         lease: DriverLease,
         phase: DriverPhase,
         live_label: str,
+        is_covered: Callable[[DriverPhase | None], bool] | None,
     ) -> Callable[[], RejectionReason | None]:
         """Everything that can move between admission and a spawn, re-read.
 
@@ -539,8 +781,15 @@ class FableDirector:
                 # the honest code: the canary stopped accepting work, which is
                 # not the request's fault and not a fence it failed.
                 (
-                    self._is_covered is not None and not self._is_covered(phase),
+                    is_covered is not None and not is_covered(phase),
                     RejectionReason.DRAINING,
+                ),
+                # The driver entered a wait between the broker's admission and
+                # this spawn. Its own code rather than DRAINING: the canary is
+                # still accepting work, this issue just stopped having any.
+                (
+                    hibernation_reason(driver.driver_state) is not None,
+                    RejectionReason.HIBERNATING,
                 ),
                 (driver.epoch != lease.epoch, RejectionReason.STALE_EPOCH),
                 (

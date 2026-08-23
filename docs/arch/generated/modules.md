@@ -7,7 +7,6 @@ Package-level import graph for `src/`. Edge weight = number of import statements
 ```mermaid
 graph LR
     src["src"]
-    src_agent["src.agent"]
     src_arch["src.arch"]
     src_arch_extractors["src.arch.extractors"]
     src_arch_generators["src.arch.generators"]
@@ -20,13 +19,10 @@ graph LR
     src_erosion["src.erosion"]
     src_escape["src.escape"]
     src_flows["src.flows"]
-    src_health_monitor_loop["src.health_monitor_loop"]
     src_hydraflow_gateway["src.hydraflow_gateway"]
-    src_implement_phase["src.implement_phase"]
     src_intervention["src.intervention"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
-    src_mockworld_fakes_fake_github["src.mockworld.fakes.fake_github"]
     src_observability["src.observability"]
     src_onboarding["src.onboarding"]
     src_preflight["src.preflight"]
@@ -38,7 +34,6 @@ graph LR
     src_state["src.state"]
     src_stillness["src.stillness"]
     src_vitals["src.vitals"]
-    src -- "3" --> src_agent
     src -- "7" --> src_arch
     src -- "10" --> src_audit
     src -- "14" --> src_auto_tighten
@@ -47,17 +42,15 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "24" --> src_erosion
     src -- "9" --> src_escape
-    src -- "5" --> src_flows
-    src -- "1" --> src_health_monitor_loop
-    src -- "23" --> src_hydraflow_gateway
-    src -- "1" --> src_implement_phase
+    src -- "6" --> src_flows
+    src -- "24" --> src_hydraflow_gateway
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
-    src -- "70" --> src_state
+    src -- "72" --> src_state
     src -- "6" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
@@ -74,14 +67,9 @@ graph LR
     src_disturbance_detectors -- "1" --> src_arch
     src_disturbance_detectors -- "5" --> src_disturbance
     src_erosion -- "4" --> src_arch
-    src_health_monitor_loop -- "3" --> src_state
-    src_implement_phase -- "6" --> src_agent
-    src_implement_phase -- "4" --> src_flows
-    src_implement_phase -- "8" --> src_state
     src_intervention -- "3" --> src_escape
     src_mockworld -- "1" --> src_preflight
-    src_mockworld_fakes -- "28" --> src_mockworld
-    src_mockworld_fakes_fake_github -- "5" --> src_mockworld
+    src_mockworld_fakes -- "30" --> src_mockworld
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_review_phase -- "1" --> src_flows
