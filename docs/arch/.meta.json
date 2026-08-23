@@ -10,25 +10,25 @@
       "content_sha": "a20c6127b293485a7c3c21d0427516c7f76370bfebcdcc459c324cf6c54f30bb"
     },
     "adr-falsifiability.md": {
-      "content_sha": "7c7b8c276fd1b641f4cd57cdb13a77e544c6d92d3d2597ecdae8a13a900c7f80"
+      "content_sha": "23f79875d22cf35d8ed816ecf084c20de7164566e942a7c7a02a6586f6ea6e46"
     },
     "adr_xref.md": {
-      "content_sha": "6e8c45b6909b93d7b4727fa2d13c7f52ef846ce6b3f5ef065c4f196875a4f256"
+      "content_sha": "549b4a074ec8f8182aaa6043406e4a9aac7677de7ef546e419733f0b1729d3bb"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "26e04d08d1142225d26f3ac1653aca59b4576955c757c45a0ad6c1b0315300c2"
+      "content_sha": "d00da7232e54996ed09042e73093779ea10818944030652b8fff4dfd22a53313"
     },
     "coverage_matrix.md": {
       "content_sha": "a455e148e242c4fc13110ac6f6c1629fe2d8b996659a182f4172e1f21d3ffaf9"
     },
     "events.md": {
-      "content_sha": "ba7fd543fef903f08d328dbf322559db7ffd6f75b554e7a168362098ac0cab01"
+      "content_sha": "58e2f112e0c991d435026cddd89c1bf282891a3f3a389cd84ffdc8ccb62bb6ca"
     },
     "functional_areas.md": {
-      "content_sha": "2b55540d3a7e189e86e45063f6032e615342654781b486a22579c0250b3c5c8d"
+      "content_sha": "f0ef0fc82d9c4a0bd48d67b6ab8c4df8b8f25f1354840ea01a4e0536c451286c"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -43,10 +43,10 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "636961b4bf1f5d1659a9da2055615ce6653ffac68067e08167762fa6a107d9fb"
+      "content_sha": "62c0f5c75a0f5646bea3ceb731685c46ffe66487a24cc165eedc7ff0c5c8437a"
     },
     "ports.md": {
-      "content_sha": "3158aad6d49ec374e5260d2d289b2222b3942a7b10fc36a53d4177abd6a3f0e0"
+      "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
     },
     "traceability_matrix.md": {
       "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
@@ -55,11 +55,11 @@
       "content_sha": "bec384b2a00e8dd2ff7216babcfd67d509285117ccd1b800fd7ff7f8a11edcba"
     },
     "ubiquitous-language.md": {
-      "content_sha": "bfdf76baf7208c1b391ca3d69f79dac1b4f907d1c335c30ad76d135669d04a94"
+      "content_sha": "99396eec211b21e32b3db34f56aaaf9b30b83db32cdd921c7b9f9704b96636eb"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "c6313633bf8b08191974db99bc921cdeb03786908668ce93a50da663b4fabed0"
+  "content_sha": "17a96a18a130a6da51d4222bb4bad889a5723a0416f132a9e73d95c6edee542b"
 }

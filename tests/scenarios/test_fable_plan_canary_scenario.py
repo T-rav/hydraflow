@@ -482,3 +482,40 @@ class TestTheEvidenceIsComplete:
         )
 
         assert (log, control.minted, spawner.spawns) == (None, [], [])
+
+
+class TestTheTreeAndTheReceiptsAgree:
+    """One record, one answer per ``request_id``.
+
+    ``would_dispatch`` and ``dispatched`` are both on the observation row and
+    both rendered by ``/api/scheduling/status``. The tree's ``dispatched`` flag
+    was hardcoded False — an invariant while nothing could dispatch, and a
+    falsehood the moment this canary armed: an armed row carried
+    ``dispatched: false`` in the tree beside an ``accepted`` receipt for the
+    same request.
+    """
+
+    async def test_every_dispatched_node_is_marked_dispatched(
+        self, seeded_issues, tmp_path
+    ) -> None:
+        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+
+        tree = log.recent()[0].would_dispatch
+        assert [node["dispatched"] for node in tree] == [True, True]
+
+    async def test_the_tree_and_the_receipts_name_the_same_requests(
+        self, seeded_issues, tmp_path
+    ) -> None:
+        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+
+        row = log.recent()[0]
+        dispatched = {
+            node["request_id"] for node in row.would_dispatch if node["dispatched"]
+        }
+        accepted = {
+            receipt["request_id"]
+            for receipt in row.dispatched
+            if receipt["status"] == "accepted"
+        }
+
+        assert dispatched == accepted

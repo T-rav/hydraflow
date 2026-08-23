@@ -69,6 +69,7 @@ from driver_contracts import (
     DirectorCapsule,
     DirectorCommand,
     DriverLease,
+    ReceiptStatus,
     RejectionReason,
     WorkerRole,
     WriterLease,
@@ -723,7 +724,9 @@ class FableDirector:
                 command_kind=command.kind.value if command is not None else None,
                 turn_failure=failure,
                 turn_failure_detail=detail[:500],
-                would_dispatch=() if verdict is None else tuple(verdict.worker_tree()),
+                would_dispatch=()
+                if verdict is None
+                else tuple(verdict.worker_tree(_accepted_ids(receipts))),
                 invalid_requests=0 if verdict is None else verdict.invalid_requests,
                 rejection_reasons=()
                 if verdict is None
@@ -755,6 +758,21 @@ def _admitted_requests(
     admitted = {dispatch.request_id for dispatch in verdict.would_dispatch}
     return tuple(
         request for request in command.dispatches if request.request_id in admitted
+    )
+
+
+def _accepted_ids(receipts: tuple[WorkerReceipt, ...]) -> frozenset[str]:
+    """The requests that produced a child that actually ran.
+
+    ``ACCEPTED`` and nothing else: a refused or expired receipt is evidence a
+    request was *judged*, not that a worker ran, and marking its tree node
+    dispatched would overstate the canary in the record its own rollout bar is
+    read from.
+    """
+    return frozenset(
+        receipt.request_id
+        for receipt in receipts
+        if receipt.status is ReceiptStatus.ACCEPTED
     )
 
 

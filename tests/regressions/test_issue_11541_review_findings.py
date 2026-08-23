@@ -287,3 +287,40 @@ class TestTheReceiptRecordsAModelIdNotABillingKey:
 
         served = director.shadow_log.recent()[0].dispatched[0]["served_model"]
         assert "[1m]" not in served
+
+
+class TestAnAdmittedRequestThatNeverRanIsNotMarkedDispatched:
+    """The broker admitting is not the child running, and the tree must say so.
+
+    This is the case that makes the ``ACCEPTED``-only filter load-bearing: the
+    canary-slot refusal happens **after** the broker admitted the request, so
+    the row carries a ``would_dispatch`` node *and* a receipt — and the receipt
+    is ``rejected``. A tree that marked the node dispatched because a receipt
+    exists would report a worker that never ran, in the record ADR-0137 B5's
+    bar is read from. Mutation-checked: relaxing the filter to "any receipt"
+    survives every other test in this branch and dies here.
+    """
+
+    async def test_the_refused_issue_s_node_reads_not_dispatched(
+        self, tmp_path: Path, spawn: EnvelopeSpawn
+    ) -> None:
+        director = _director(tmp_path, spawn)
+        await _observe(director, 7)
+
+        await _observe(director, 9)
+
+        row = director.shadow_log.recent()[-1]
+        assert [node["dispatched"] for node in row.would_dispatch] == [False]
+        assert [receipt["status"] for receipt in row.dispatched] == ["rejected"]
+
+    async def test_the_issue_that_ran_still_reads_dispatched(
+        self, tmp_path: Path, spawn: EnvelopeSpawn
+    ) -> None:
+        # Non-vacuity: the False above must be the filter's answer, not the
+        # field being stuck at its default again.
+        director = _director(tmp_path, spawn)
+
+        await _observe(director, 7)
+
+        row = director.shadow_log.recent()[0]
+        assert [node["dispatched"] for node in row.would_dispatch] == [True]

@@ -334,6 +334,10 @@ class TestTheShadowDirectorRecordsWhatItWouldHaveDone:
     async def test_no_worker_in_the_tree_was_dispatched(
         self, seeded_issues, tmp_path
     ) -> None:
+        # Shadow mode, so this is a fact about this scenario rather than an
+        # unconditional property of the field: #11541's armed canary marks a
+        # node dispatched when its request produced an accepted receipt, and
+        # tests/scenarios/test_fable_plan_canary_scenario.py asserts that.
         _effects, shadow_log = await _shadowed(seeded_issues, tmp_path)
 
         assert shadow_log.recent()[0].would_dispatch[0]["dispatched"] is False

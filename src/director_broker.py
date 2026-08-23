@@ -69,12 +69,16 @@ logger = logging.getLogger("director_broker")
 
 @dataclass(frozen=True)
 class ShadowDispatch:
-    """One child the director would have been allowed to run. It did not run.
+    """One child the director was allowed to run — whether or not it then ran.
 
     Carries the *requirement*, never a resolved model id: resolving a tier to a
-    concrete model is the broker's job at dispatch time, and in shadow mode
-    there is no dispatch time. Recording a resolved id here would be a claim
-    about a route that was never taken.
+    concrete model is the broker's job at dispatch time, and this record is
+    made before it. In shadow mode there is no dispatch time at all and the
+    requirement is the whole story; under #11541's armed canary the resolved id
+    and the served model live on the :class:`driver_contracts.WorkerReceipt`,
+    which is minted after the child has actually run. Recording a resolved id
+    here would be a claim about a route that had not been taken *yet*, and on
+    the shadow path one that never would be.
     """
 
     request_id: str
@@ -84,8 +88,19 @@ class ShadowDispatch:
     model_requirement: ModelRequirement
     reason: str
 
-    def as_tree_node(self) -> dict[str, object]:
-        """The operator-status shape: what this child would have been."""
+    def as_tree_node(self, *, dispatched: bool = False) -> dict[str, object]:
+        """The operator-status shape: what this child would have been.
+
+        ``dispatched`` defaults to False because the broker cannot know: it
+        admits, and something else runs the admitted request or does not. The
+        caller that holds the receipts passes the answer.
+
+        It used to be hardcoded False, which was an invariant while nothing
+        could dispatch and became a **falsehood** the moment #11541 armed the
+        canary — an armed observation carried ``dispatched: false`` in this
+        tree beside an ``accepted`` receipt for the same ``request_id``, in the
+        one operator-facing record ADR-0137 B5's bar is read from.
+        """
         return {
             "request_id": self.request_id,
             "role": self.role.value,
@@ -94,7 +109,7 @@ class ShadowDispatch:
                 f"{self.model_requirement.kind.value}:{self.model_requirement.value}"
             ),
             "reason": self.reason,
-            "dispatched": False,
+            "dispatched": dispatched,
         }
 
 
@@ -133,9 +148,21 @@ class BrokerVerdict:
             if reason is RejectionReason.ROUTE_POLICY_REVISION_STALE
         )
 
-    def worker_tree(self) -> list[dict[str, object]]:
-        """The hypothetical worker tree the operator status renders."""
-        return [dispatch.as_tree_node() for dispatch in self.would_dispatch]
+    def worker_tree(
+        self, dispatched_ids: frozenset[str] = frozenset()
+    ) -> list[dict[str, object]]:
+        """The worker tree the operator status renders.
+
+        Hypothetical in shadow mode, where *dispatched_ids* is empty and every
+        node reads ``dispatched: false`` — which is then a fact rather than a
+        default. Under the armed canary the caller passes the ids that produced
+        an accepted receipt, so the tree and the receipts agree about the same
+        ``request_id`` instead of contradicting each other.
+        """
+        return [
+            dispatch.as_tree_node(dispatched=dispatch.request_id in dispatched_ids)
+            for dispatch in self.would_dispatch
+        ]
 
 
 class ShadowDispatchBroker:
