@@ -22,27 +22,41 @@ Expected behaviour after fix:
     both sites so the orchestrator's credit-pause / auth-retry logic can
     handle them.
 
-These tests assert the *correct* behaviour and are RED against the current
-(buggy) code.
+STATUS (2026-08-23, #11664): GREEN — the guard landed. History, because it is
+the whole lesson of this file:
 
-STATUS (2026-08-23, #11547 batch 4): still RED. The #6855 guard was never
-added at either site. The line-window anchors above (``445 <= ln <= 475`` /
-``abs(ln - approx_line) <= 15``) had drifted off the method years ago, so both
-tests were matching an empty window and passing VACUOUSLY. Re-anchoring them on
-the enclosing METHOD — which the god-class decomposition forced, since the old
-path no longer exists — restored the real assertion and it fails, correctly.
-Marked ``xfail`` (the ``regression_issue_6630.py`` convention) rather than
-fixed: the decomposition PR moves code verbatim and changes no behaviour, and
-adding ``reraise_on_credit_or_bug`` here changes what escapes a heavy-pass
-cycle under credit exhaustion. Filed as #11664; drop the markers with the fix.
+1. The original tests anchored on LINE WINDOWS (``445 <= ln <= 475`` and
+   ``abs(ln - approx_line) <= 15``). The method drifted off those windows long
+   ago, so the filter matched an EMPTY set and ``assert not []`` passed
+   VACUOUSLY for months while the guard was never actually present.
+2. #11547 batch 4 decomposed the loop into a package, deleting the old path and
+   forcing an honest re-anchor onto the enclosing METHOD. The assertion
+   immediately went red on the real defect, and was parked ``xfail`` so the
+   verbatim-move PR stayed behaviour-neutral. Filed as #11664.
+3. This change adds ``reraise_on_credit_or_bug`` at both handlers and drops the
+   markers.
+
+Two anti-vacuity properties are now structural, and must be preserved by anyone
+editing this file:
+
+* ``_handler_anchors.method_node`` RAISES if the method name disappears, rather
+  than returning an empty handler list. A rotted anchor now fails loudly
+  instead of passing.
+* The behavioural tests patch ``phase_utils.file_memory_suggestion`` — the
+  module the code under test actually imports from. They previously patched
+  ``memory.file_memory_suggestion``; there is no ``src/memory.py``, so the
+  patch could never bind and the tests failed for the wrong reason, hidden
+  under a non-strict ``xfail``. A behavioural test whose seam does not bind is
+  the same vacuity in a different costume.
 """
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 import pytest
+
+from tests.regressions._handler_anchors import unguarded_handlers
 
 SRC = Path(__file__).resolve().parent.parent.parent / "src"
 
@@ -68,107 +82,17 @@ KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
 # ---------------------------------------------------------------------------
 # AST helpers
 # ---------------------------------------------------------------------------
-
-
-def _except_exception_handlers(tree: ast.AST) -> list[ast.ExceptHandler]:
-    """Return all ``except Exception`` handler nodes in *tree*."""
-    handlers: list[ast.ExceptHandler] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        if isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            handlers.append(node)
-    return handlers
-
-
-def _handler_calls_reraise_guard(handler: ast.ExceptHandler) -> bool:
-    """Return True if the handler body calls ``reraise_on_credit_or_bug``."""
-    for node in ast.walk(handler):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == REQUIRED_GUARD:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == REQUIRED_GUARD:
-            return True
-    return False
-
-
-def _method_node(filepath: Path, method: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
-    """Return the ``def``/``async def`` named *method* in *filepath*."""
-    tree = ast.parse(filepath.read_text(), filename=str(filepath))
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-            and node.name == method
-        ):
-            return node
-    raise AssertionError(
-        f"{filepath.name} no longer defines {method}() — the guard has lost its "
-        "anchor and would pass vacuously. Re-point it at the method's new home."
-    )
-
-
-def _unguarded_handlers(
-    filepath: Path, method: str
-) -> list[tuple[int, ast.ExceptHandler]]:
-    """Return ``(lineno, handler)`` pairs for every ``except Exception`` inside
-    *method* that does **not** call ``reraise_on_credit_or_bug``.
-    """
-    return [
-        (h.lineno, h)
-        for h in _except_exception_handlers(_method_node(filepath, method))
-        if not _handler_calls_reraise_guard(h)
-    ]
+#
+# Shared with the sibling guard regressions (#6752, #6766, #6809, #6814, #6983)
+# via ``_handler_anchors``. ``method_node`` RAISES when the method is gone
+# rather than returning an empty result — that raise is what stops this test
+# from ever rotting back into the vacuous pass described above. See that
+# module's docstring for the full statement of the line-anchor rot class.
 
 
 # ---------------------------------------------------------------------------
 # AST-based: verify source has the guard
 # ---------------------------------------------------------------------------
-
-
-class TestSiteAnchorsStillResolve:
-    """The anti-vacuity tripwire, deliberately UNMARKED.
-
-    The checks below are ``xfail`` until the #6855 fix lands (#11664), and
-    ``xfail`` swallows EVERY exception in the body — including the
-    ``AssertionError`` ``_method_node`` raises when the anchor is gone, and
-    the ``filepath.exists()`` assert. Left inside a marked test, the guard
-    written to prevent this file from passing vacuously would itself be unable
-    to turn the suite red: the same failure mode, one layer up.
-
-    So anchor resolution lives here, unmarked. If the module or the method is
-    renamed or moved, THIS reddens, whatever the xfails do.
-    """
-
-    @pytest.mark.parametrize(
-        ("filename", "method"),
-        [(f, m) for f, m, _ in KNOWN_UNGUARDED_SITES],
-        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
-    )
-    def test_site_module_and_method_exist(self, filename: str, method: str) -> None:
-        filepath = SRC / filename
-        assert filepath.exists(), (
-            f"{filename} does not exist — the #6855 checks below are anchored "
-            "at a path that moved, and would report nothing. Re-point them."
-        )
-        # Raises a descriptive AssertionError if the method is gone.
-        assert _method_node(filepath, method) is not None
-
-    def test_the_anchor_still_encloses_broad_handlers(self) -> None:
-        """The method must still CONTAIN the handlers this file is about.
-
-        Existing is not enough: if the two ``except Exception`` blocks were
-        refactored out of this method into a helper, every check below would
-        find zero handlers and read as "fixed" when nothing was fixed.
-        """
-        module, method = INGESTION_SITE
-        handlers = _except_exception_handlers(_method_node(SRC / module, method))
-        assert handlers, (
-            f"{method}() no longer contains any ``except Exception`` block. "
-            "Either the fix landed (drop the xfail markers and this guard's "
-            "premise) or the handlers moved and the checks are now vacuous."
-        )
 
 
 class TestHealthMonitorSuggestionIngestionBlocksHaveReraise:
@@ -177,15 +101,12 @@ class TestHealthMonitorSuggestionIngestionBlocksHaveReraise:
     ``reraise_on_credit_or_bug``.
     """
 
-    @pytest.mark.xfail(
-        reason="#6855 guard never landed; re-anchored off rotted line windows "
-        "in #11547 batch 4 — tracked by #11664. strict=True so landing the fix "
-        "forces the marker off instead of silently XPASSing.",
-        strict=True,
-    )
     def test_suggestion_ingestion_except_blocks_have_reraise_guard(self) -> None:
         module, method = INGESTION_SITE
-        unguarded = _unguarded_handlers(SRC / module, method)
+        filepath = SRC / module
+        assert filepath.exists(), f"Source file not found: {filepath}"
+
+        unguarded = unguarded_handlers(filepath, method)
 
         assert not unguarded, (
             f"{module} has unguarded ``except Exception`` block(s) in "
@@ -202,16 +123,13 @@ class TestKnownSitesHaveReraiseGuard:
         KNOWN_UNGUARDED_SITES,
         ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
     )
-    @pytest.mark.xfail(
-        reason="#6855 guard never landed; re-anchored off rotted line windows "
-        "in #11547 batch 4 — tracked by #11664. strict=True so landing the fix "
-        "forces the marker off instead of silently XPASSing.",
-        strict=True,
-    )
     def test_known_site_has_reraise_guard(
         self, filename: str, method: str, desc: str
     ) -> None:
-        nearby = [ln for ln, _ in _unguarded_handlers(SRC / filename, method)]
+        filepath = SRC / filename
+        assert filepath.exists()
+
+        nearby = [ln for ln, _ in unguarded_handlers(filepath, method)]
 
         assert not nearby, (
             f"{filename}:{method}() ({desc}) — ``except Exception`` "
@@ -226,111 +144,64 @@ class TestKnownSitesHaveReraiseGuard:
 
 
 class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
-    """Behavioural half: the fatal errors must escape ``_do_work``.
-
-    The patch target is ``phase_utils.file_memory_suggestion`` — where the
-    function is DEFINED — because ``_run_harness_suggestion_ingestion_cycle``
-    imports it inside the function body, so the name is rebound per call and
-    patching the caller's module would not intercept it.
-
-    These previously patched ``memory.file_memory_suggestion``, a module that
-    has never existed in this repo. Every run died at ``monkeypatch`` with
-    ``ModuleNotFoundError`` before reaching ``_do_work()``, and
-    ``xfail(strict=False)`` swallowed that as expected — so the tests were
-    green, exercised nothing, and would have stayed green even after the
-    #6855 fix landed. Third instance of this file's own failure mode.
-    """
-
     """Behavioural tests — when ``file_memory_suggestion`` raises
     ``AuthenticationError`` or ``CreditExhaustedError``, the exception
     must NOT be swallowed by the per-item or outer except blocks.
+
+    Driven through ``_run_harness_suggestion_ingestion_cycle`` directly rather
+    than ``_do_work``: the cycle is only reached on the heavy-pass cadence, so
+    going through ``_do_work`` makes the test pass whenever the gate happens to
+    be shut — a green that proves nothing.
     """
 
     @pytest.fixture()
-    def suggestions_dir(self, tmp_path: Path) -> Path:
-        """Seed harness_suggestions.jsonl where the loop will actually read it.
-
-        The path is REPO-scoped (``repo_memory_dir``, ADR-0021 D2), not
-        ``memory_dir``. This fixture used to write ``<data_root>/memory/``,
-        which the loop never reads: the cycle returned at its
-        ``if not suggestions_path.exists()`` guard, the patched
-        ``file_memory_suggestion`` was never called, and both tests below
-        failed for that reason instead of the one they were written for.
-        Derived from the config the loop is actually built with so the two
-        cannot drift apart again.
-        """
-        memory_dir = _loop_config(tmp_path).repo_memory_dir
+    def loop_with_suggestion(self, tmp_path: Path) -> object:
+        """A HealthMonitorLoop with exactly one pending harness suggestion."""
+        loop = _make_health_monitor(tmp_path)
+        memory_dir = loop._config.repo_memory_dir
         memory_dir.mkdir(parents=True, exist_ok=True)
-        jsonl = memory_dir / "harness_suggestions.jsonl"
-        jsonl.write_text(
+        (memory_dir / "harness_suggestions.jsonl").write_text(
             '{"suggestion":"test principle","title":"test","occurrences":1,'
             '"category":"test_cat"}\n',
             encoding="utf-8",
         )
-        return tmp_path
-
-    def test_the_seeded_suggestions_file_is_where_the_loop_reads(
-        self, suggestions_dir: Path
-    ) -> None:
-        """Anti-vacuity: seeding the wrong directory makes both tests below
-        exercise nothing, which is exactly how they sat green for months."""
-        expected = (
-            _loop_config(suggestions_dir).repo_memory_dir / "harness_suggestions.jsonl"
-        )
-        assert expected.is_file(), (
-            f"the ingestion cycle reads {expected}, and nothing seeded it — "
-            "the tests below would return at the existence guard and never "
-            "reach file_memory_suggestion."
-        )
+        return loop
 
     @pytest.mark.asyncio()
-    @pytest.mark.xfail(
-        reason="Regression for issue #6855 — fix not yet landed (#11664). "
-        "strict=True so landing it forces the marker off.",
-        strict=True,
+    @pytest.mark.parametrize(
+        "fatal_name", ["AuthenticationError", "CreditExhaustedError"]
     )
-    async def test_authentication_error_propagates(
-        self, suggestions_dir: Path, monkeypatch: pytest.MonkeyPatch
+    async def test_fatal_error_propagates(
+        self,
+        loop_with_suggestion: object,
+        monkeypatch: pytest.MonkeyPatch,
+        fatal_name: str,
     ) -> None:
-        """AuthenticationError from file_memory_suggestion must not be
-        swallowed — it should propagate so the orchestrator can handle it.
-        """
-        from unittest.mock import AsyncMock
+        """A credit/auth failure escapes the cycle so the orchestrator can pause."""
+        import subprocess_util
 
-        from subprocess_util import AuthenticationError
+        fatal_cls = getattr(subprocess_util, fatal_name)
+        _patch_file_memory_suggestion(monkeypatch, fatal_cls("fatal"))
 
-        loop = _make_health_monitor(suggestions_dir)
-
-        # Patch file_memory_suggestion to raise AuthenticationError
-        mock_fms = AsyncMock(side_effect=AuthenticationError("token expired"))
-        monkeypatch.setattr("phase_utils.file_memory_suggestion", mock_fms)
-
-        with pytest.raises(AuthenticationError):
-            await loop._do_work()
+        with pytest.raises(fatal_cls):
+            await loop_with_suggestion._run_harness_suggestion_ingestion_cycle()
 
     @pytest.mark.asyncio()
-    @pytest.mark.xfail(
-        reason="Regression for issue #6855 — fix not yet landed (#11664). "
-        "strict=True so landing it forces the marker off.",
-        strict=True,
-    )
-    async def test_credit_exhausted_error_propagates(
-        self, suggestions_dir: Path, monkeypatch: pytest.MonkeyPatch
+    async def test_ordinary_error_is_still_swallowed(
+        self, loop_with_suggestion: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """CreditExhaustedError from file_memory_suggestion must not be
-        swallowed — it should propagate so the orchestrator can pause.
+        """Negative control: the guard is narrow, not a blanket re-raise.
+
+        Without this, a handler that simply re-raised everything would satisfy
+        the two tests above while breaking the loop's tolerance for one
+        malformed suggestion — which is the behaviour the broad handler exists
+        to provide.
         """
-        from unittest.mock import AsyncMock
+        # ConnectionError is neither infra-fatal nor a likely-bug type, so
+        # `reraise_on_credit_or_bug` must let the handler absorb it.
+        _patch_file_memory_suggestion(monkeypatch, ConnectionError("transient"))
 
-        from subprocess_util import CreditExhaustedError
-
-        loop = _make_health_monitor(suggestions_dir)
-
-        mock_fms = AsyncMock(side_effect=CreditExhaustedError("credits gone"))
-        monkeypatch.setattr("phase_utils.file_memory_suggestion", mock_fms)
-
-        with pytest.raises(CreditExhaustedError):
-            await loop._do_work()
+        await loop_with_suggestion._run_harness_suggestion_ingestion_cycle()
 
 
 # ---------------------------------------------------------------------------
@@ -338,28 +209,41 @@ class TestHealthMonitorSuggestionIngestionPropagatesFatalErrors:
 # ---------------------------------------------------------------------------
 
 
-def _loop_deps(data_dir: Path):  # noqa: ANN202 — test-local helper
-    """Real LoopDeps with ``data_root`` repointed at *data_dir*."""
-    from tests.helpers import make_bg_loop_deps
+def _patch_file_memory_suggestion(
+    monkeypatch: pytest.MonkeyPatch, error: BaseException
+) -> None:
+    """Make ``file_memory_suggestion`` raise *error*.
 
-    bg = make_bg_loop_deps(data_dir)
-    # Bypass Pydantic __setattr__ to point data_root at our fixture dir
-    object.__setattr__(bg.config, "data_root", data_dir)
-    return bg
-
-
-def _loop_config(data_dir: Path):  # noqa: ANN202 — test-local helper
-    """The config the loop under test is built with.
-
-    The fixture and the loop MUST derive paths from the same object, or the
-    fixture seeds a directory the loop never reads.
+    Patches ``phase_utils`` — the module the code under test imports from
+    (a deferred, in-method ``from phase_utils import file_memory_suggestion``,
+    so the lookup happens at call time and this binds). ``raising=True`` is
+    deliberate: if the symbol ever moves, this errors loudly instead of
+    silently patching nothing and leaving the test to pass for free.
     """
-    return _loop_deps(data_dir).config
+    from unittest.mock import AsyncMock
+
+    import phase_utils
+
+    monkeypatch.setattr(
+        phase_utils,
+        "file_memory_suggestion",
+        AsyncMock(side_effect=error),
+        raising=True,
+    )
 
 
 def _make_health_monitor(data_dir: Path) -> object:
-    """Build a HealthMonitorLoop with data_root pointing at *data_dir*."""
-    from health_monitor_loop import HealthMonitorLoop
+    """Build a HealthMonitorLoop with data_root pointing at *data_dir*.
 
-    bg = _loop_deps(data_dir)
-    return HealthMonitorLoop(config=bg.config, deps=bg.loop_deps)
+    Uses ``make_bg_loop_deps`` to get a real LoopDeps, then overrides
+    ``data_root`` so ``data_path("memory", ...)`` resolves to the tmp dir.
+    """
+    from health_monitor_loop import HealthMonitorLoop
+    from tests.helpers import make_bg_loop_deps
+
+    bg = make_bg_loop_deps(data_dir)
+    config = bg.config
+    # Bypass Pydantic __setattr__ to point data_root at our fixture dir
+    object.__setattr__(config, "data_root", data_dir)
+
+    return HealthMonitorLoop(config=config, deps=bg.loop_deps)

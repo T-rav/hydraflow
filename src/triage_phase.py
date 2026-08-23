@@ -15,6 +15,7 @@ from blocker_gate import BlockerGate, BlockerVerdict
 from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from models import Task, TranscriptLinePayload
 from phase_utils import (
@@ -733,7 +734,13 @@ class TriagePhase:
                         issue.id,
                         repro.investigation,
                     )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # `BugReproducer` spawns an agent (it builds an agent command
+                # and runs it through `BaseRunner`), so credit/auth exhaustion
+                # can surface here. Degrading to "no reproduction record" would
+                # leave the loop spawning against a dead account instead of
+                # pausing (#6855 class, #11666 sweep).
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Bug reproducer raised for issue #%d — leaving issue "
                     "without a reproduction record",

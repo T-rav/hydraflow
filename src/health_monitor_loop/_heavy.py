@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from config import HydraFlowConfig
+from exception_classify import reraise_on_credit_or_bug
 
 from ._common import (
     TrendMetrics,
@@ -304,11 +305,19 @@ class HealthMonitorHeavyPassMixin:
                         "health_monitor",
                         self._config,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
+                    # A credit/auth failure is not "this one suggestion is
+                    # malformed" — it means every subsequent iteration would
+                    # spawn against an exhausted account. Let it out so the
+                    # orchestrator's pause handler sees it (#6855, #11664).
+                    reraise_on_credit_or_bug(exc)
                     continue
             # Clear processed suggestions so they are not re-ingested
             suggestions_path.write_text("", encoding="utf-8")
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # Outer guard: also the path a credit error re-raised by the
+            # per-item handler above takes on its way out of the loop.
+            reraise_on_credit_or_bug(exc)
             logger.debug("Harness suggestion ingestion failed", exc_info=True)
 
     def _run_proposal_verification_cycle(self) -> None:

@@ -18,6 +18,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from dispatch_overlap import DispatchOverlapTracker
+from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory
 from models import PipelineStage, WorkerResult
 from phase_utils import (
@@ -394,6 +395,10 @@ class ImplementPhase(
                     log_file=self._impl_log_reference(result.issue_number),
                 )
             except Exception as exc:
+                # Best-effort summary posting, but not for infra-fatal errors:
+                # this path spawns an LLM, so credit/auth exhaustion here must
+                # reach the loop's pause handler (#6855 class, #11666 sweep).
+                reraise_on_credit_or_bug(exc)
                 log_exception_with_bug_classification(
                     logger,
                     exc,
@@ -424,6 +429,10 @@ class ImplementPhase(
                             log_file=self._impl_log_reference(result.issue_number),
                         )
                     except Exception as exc:
+                        # Best-effort summary posting, but not for infra-fatal errors:
+                        # this path spawns an LLM, so credit/auth exhaustion here must
+                        # reach the loop's pause handler (#6855 class, #11666 sweep).
+                        reraise_on_credit_or_bug(exc)
                         log_exception_with_bug_classification(
                             logger,
                             exc,

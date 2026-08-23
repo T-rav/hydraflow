@@ -11,8 +11,23 @@ Expected behaviour after fix:
     ``capture_if_bug(exc)`` (to report probable bugs to Sentry) or
     ``reraise_on_credit_or_bug(exc)`` (to re-raise fatal + bug exceptions).
 
-These tests intentionally assert the *correct* behaviour, so they are RED
-against the current (buggy) code.
+Anchored on the METHOD, not on a line number (#11664)
+-----------------------------------------------------
+
+This file had the worst line-anchor rot in the repo. The per-site assertion
+filtered whole-file handler line numbers to a ±15-line window around a line
+captured when the issue was filed; TWO of the five anchors pointed PAST
+end-of-file (``review_phase/_phase.py:861`` in a 799-line file,
+``plan_phase.py:660`` in a module that no longer has a single
+``except Exception``). Every window matched an EMPTY set, so
+``assert not []`` passed VACUOUSLY, and the non-strict ``xfail`` reported the
+result as XPASS — which reads like the bug got fixed. It did not.
+
+The anchors are now enclosing method names, resolved through
+``tests.regressions._handler_anchors.unguarded_handlers``, which RAISES if the
+method disappears. With honest anchors these assertions go RED, because most of
+the underlying defect is real and still unfixed — which is why the ``xfail``
+markers stay. See ``_handler_anchors`` for the full rationale.
 """
 
 from __future__ import annotations
@@ -26,76 +41,55 @@ import pytest
 # Ensure src/ is importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from tests.regressions._handler_anchors import (  # noqa: E402
+    BUG_CLASSIFICATION_CALLS,
+    SRC,
+    _except_exception_handlers,
+    _handler_calls_any,
+    unguarded_handlers,
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-SRC = Path(__file__).resolve().parent.parent.parent / "src"
-
-#: The two function names that constitute proper bug-classification handling.
-BUG_CLASSIFICATION_CALLS = {"capture_if_bug", "reraise_on_credit_or_bug"}
-
-#: Files and line numbers from the issue's findings table.  Each entry is
-#: (relative-to-src filename, approximate line of the offending ``except``).
-#: The AST scan below does NOT rely on exact line numbers — it checks every
-#: ``except Exception`` in the file — but these anchors let us produce
-#: targeted failure messages.
-#
-#: T36 — ``review_phase`` is now a package; the class body containing the
-#: original anchored sites lives in ``review_phase/_phase.py``. The exact
-#: line numbers from the original 3702-line file no longer apply, but the
-#: xfail markers below tolerate that drift (strict=False).
-KNOWN_UNGUARDED_SITES: list[tuple[str, int]] = [
-    ("review_phase/_phase.py", 626),
-    ("review_phase/_phase.py", 861),
-    ("diagnostic_runner.py", 145),
-    ("diagnostic_loop.py", 219),
-    ("plan_phase.py", 660),
+#: Files and enclosing METHODS from the issue's findings table. The original
+#: table carried line numbers; see the module docstring for why those rotted.
+#:
+#: Original (line-anchored) -> current (method-anchored):
+#:   review_phase/_phase.py:626 -> _post_review_transcript
+#:   review_phase/_phase.py:861 -> _review_one_inner   (861 was PAST EOF)
+#:   diagnostic_runner.py:145   -> diagnose
+#:   diagnostic_loop.py:219     -> _run_fix
+#:
+#: DROPPED: ``plan_phase.py:660``. That anchor was past EOF *and* the module it
+#: pointed at has since been split (#11547) into ``plan_phase_flow`` /
+#: ``plan_phase_prepass`` / ``plan_phase_disposition`` and friends;
+#: ``src/plan_phase.py`` today contains ZERO ``except Exception`` handlers, so
+#: there is no site left for this row to anchor onto. Re-pointing it would mean
+#: picking a method in a successor module that the #6752 findings table never
+#: examined — a new claim, not a preserved one. Dropped rather than faked.
+KNOWN_UNGUARDED_SITES: list[tuple[str, str]] = [
+    ("review_phase/_phase.py", "_post_review_transcript"),
+    ("review_phase/_phase.py", "_review_one_inner"),
+    ("diagnostic_runner.py", "diagnose"),
+    ("diagnostic_loop.py", "_run_fix"),
 ]
 
 
-def _except_exception_handlers(tree: ast.Module) -> list[ast.ExceptHandler]:
-    """Return all ``except Exception`` handler nodes in *tree*."""
-    handlers: list[ast.ExceptHandler] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        # Match bare ``except Exception`` (no ``as`` required, but it must
-        # catch exactly ``Exception`` — not a tuple, not bare ``except:``).
-        if isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            handlers.append(node)
-    return handlers
-
-
-def _handler_calls_bug_classifier(handler: ast.ExceptHandler) -> bool:
-    """Return True if the handler body contains a call to one of the
-    bug-classification helpers.
-    """
-    for node in ast.walk(handler):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        # Direct call: ``capture_if_bug(exc)``
-        if isinstance(func, ast.Name) and func.id in BUG_CLASSIFICATION_CALLS:
-            return True
-        # Qualified call: ``exception_classify.capture_if_bug(exc)``
-        if isinstance(func, ast.Attribute) and func.attr in BUG_CLASSIFICATION_CALLS:
-            return True
-    return False
-
-
-def _unguarded_handlers(
+def _unguarded_handlers_in_file(
     filepath: Path,
 ) -> list[tuple[int, ast.ExceptHandler]]:
-    """Parse *filepath* and return ``(lineno, handler)`` pairs for every
-    ``except Exception`` that does **not** call a bug-classification helper.
+    """Whole-file variant used by the file-wide sweep below.
+
+    The per-site tests use the method-scoped
+    :func:`~tests.regressions._handler_anchors.unguarded_handlers` instead.
     """
-    source = filepath.read_text()
-    tree = ast.parse(source, filename=str(filepath))
+    tree = ast.parse(filepath.read_text(), filename=str(filepath))
     return [
         (h.lineno, h)
         for h in _except_exception_handlers(tree)
-        if not _handler_calls_bug_classifier(h)
+        if not _handler_calls_any(h, BUG_CLASSIFICATION_CALLS)
     ]
 
 
@@ -116,13 +110,23 @@ class TestExceptBlocksBugClassification:
             "review_phase/_phase.py",
             "diagnostic_runner.py",
             "diagnostic_loop.py",
+            # #11547 split ``plan_phase`` into ``plan_phase_flow`` /
+            # ``_prepass`` / ``_disposition`` / …; what remains here is
+            # construction + queue draining and carries no broad handlers.
             "plan_phase.py",
-            "implement_phase.py",
+            # ``implement_phase`` is likewise a package now. The old
+            # ``implement_phase.py`` path stopped existing, so this param used
+            # to die on ``assert filepath.exists()`` — a failure the non-strict
+            # xfail swallowed, meaning the file went unswept entirely.
+            "implement_phase/_phase.py",
         ],
         ids=lambda f: f.removesuffix(".py").replace("/", "_"),
     )
     @pytest.mark.xfail(
-        reason="Regression for issue #6752 — fix not yet landed", strict=False
+        reason="Issue #6752 is genuinely UNFIXED for several of these modules. "
+        "Paths and anchors are current as of #11664, so a failure here is the "
+        "real defect, no longer path/line rot. Tracked by #11668.",
+        strict=False,
     )
     def test_all_except_exception_blocks_call_bug_classifier(
         self, filename: str
@@ -134,7 +138,7 @@ class TestExceptBlocksBugClassification:
         filepath = SRC / filename
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = _unguarded_handlers_in_file(filepath)
 
         assert not unguarded, (
             f"{filename} has {len(unguarded)} ``except Exception`` block(s) "
@@ -145,87 +149,139 @@ class TestExceptBlocksBugClassification:
         )
 
     @pytest.mark.parametrize(
-        ("filename", "approx_line"),
+        ("filename", "method"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"{f}:{ln}" for f, ln in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m in KNOWN_UNGUARDED_SITES],
     )
     @pytest.mark.xfail(
-        reason="Regression for issue #6752 — fix not yet landed", strict=False
+        reason="Issue #6752 is genuinely UNFIXED for several of these methods. "
+        "Anchors are method-based as of #11664, so a failure here is the real "
+        "defect, no longer line-anchor rot. Tracked by #11668.",
+        strict=False,
     )
-    def test_known_site_has_bug_classifier(
-        self, filename: str, approx_line: int
-    ) -> None:
-        """Each specific site from the issue's findings table must have
-        bug-classification handling within ±15 lines of the reported location.
+    def test_known_site_has_bug_classifier(self, filename: str, method: str) -> None:
+        """Every ``except Exception`` inside the anchored method from the
+        issue's findings table must call a bug-classification helper.
+
+        ``unguarded_handlers`` raises if *method* is gone, so this can never
+        pass by matching nothing.
         """
         filepath = SRC / filename
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = [
+            ln
+            for ln, _ in unguarded_handlers(
+                filepath, method, required_calls=BUG_CLASSIFICATION_CALLS
+            )
+        ]
 
-        # Find unguarded handlers near the reported line.
-        nearby = [lineno for lineno, _ in unguarded if abs(lineno - approx_line) <= 15]
-
-        assert not nearby, (
-            f"{filename}:{approx_line} — ``except Exception`` near line "
-            f"{nearby[0]} does not call capture_if_bug() or "
+        assert not unguarded, (
+            f"{filename}:{method}() — ``except Exception`` at line "
+            f"{unguarded[0]} does not call capture_if_bug() or "
             f"reraise_on_credit_or_bug().  Programming errors here are "
             f"silently swallowed (issue #6752)."
         )
 
 
+# ---------------------------------------------------------------------------
+# AST anchors for the ValidationError finding
+# ---------------------------------------------------------------------------
+
+
+def _parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    """Map every node in *tree* to its parent node."""
+    return {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+
+
+def _model_validate_calls(tree: ast.AST) -> list[ast.Call]:
+    """Return every ``<something>.model_validate(...)`` call in *tree*."""
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "model_validate"
+    ]
+
+
+def _enclosing_try(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.Try | None:
+    """Return the nearest ``ast.Try`` whose *body* (not handlers) holds *node*.
+
+    Walking up the real parent chain is what makes this anchor honest: the old
+    version guessed at containment with a ±10 source-line text window, which
+    stops matching the instant the ``try`` grows past ten lines.
+    """
+    child: ast.AST = node
+    parent = parents.get(child)
+    while parent is not None:
+        if isinstance(parent, ast.Try) and any(stmt is child for stmt in parent.body):
+            return parent
+        child, parent = parent, parents.get(parent)
+    return None
+
+
 class TestDiagnosticRunnerValidationError:
-    """diagnostic_runner.py:145 — pydantic ValidationError (a ValueError
+    """``diagnostic_runner.diagnose`` — pydantic ValidationError (a ValueError
     subclass) is caught by ``except Exception`` and treated the same as a
     network failure.  The fix should catch ValidationError specifically
     with ``exc_info=True`` for actionable stack traces.
     """
 
     @pytest.mark.xfail(
-        reason="Regression for issue #6752 — fix not yet landed", strict=False
+        reason="Issue #6752 is genuinely UNFIXED — the try around "
+        "DiagnosisResult.model_validate() still catches bare Exception. The "
+        "anchor is AST-based as of #11664, so this failure is the real defect, "
+        "no longer a missed proximity window. Tracked by #11668.",
+        strict=False,
     )
     def test_validation_error_not_caught_specifically(self) -> None:
         """The except block around ``DiagnosisResult.model_validate()``
         must catch ``pydantic.ValidationError`` explicitly (with exc_info)
         rather than lumping it into the generic ``except Exception``.
+
+        Anchored on the AST: find the ``model_validate`` call, take the ``try``
+        that actually encloses it, and assert on *that* try's handlers. The
+        previous version built a ±10-source-line proximity window and
+        ``continue``d when ``model_validate`` was not inside it — with no
+        assertion after the loop, a window miss meant the test ran ZERO
+        assertions and passed. The terminal ``raise`` below closes that hole:
+        finding nothing is now a failure, not a free green.
         """
         filepath = SRC / "diagnostic_runner.py"
-        source = filepath.read_text()
-        tree = ast.parse(source, filename=str(filepath))
+        assert filepath.exists(), f"Source file not found: {filepath}"
 
-        # Find the except handler(s) near ``model_validate``.
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ExceptHandler):
-                continue
-            # Check if this handler is near a model_validate call by
-            # looking at the parent try block.  We use a simpler heuristic:
-            # look for handlers that catch bare ``Exception`` and whose
-            # body returns a DiagnosisResult fallback.
-            if not (isinstance(node.type, ast.Name) and node.type.id == "Exception"):
-                continue
+        tree = ast.parse(filepath.read_text(), filename=str(filepath))
+        parents = _parent_map(tree)
 
-            # Check if the handler body references "model_validate" context
-            # by looking at surrounding source lines.
-            handler_start = node.lineno
-            source_lines = source.splitlines()
-            # Look at the 10 lines before the except for model_validate.
-            context_lines = source_lines[max(0, handler_start - 10) : handler_start]
-            context_text = "\n".join(context_lines)
-            if "model_validate" not in context_text:
+        checked_any = False
+        for call in _model_validate_calls(tree):
+            guard = _enclosing_try(call, parents)
+            if guard is None:
                 continue
+            checked_any = True
+            for handler in guard.handlers:
+                assert not (
+                    isinstance(handler.type, ast.Name)
+                    and handler.type.id == "Exception"
+                ), (
+                    f"diagnostic_runner.py:{handler.lineno} — "
+                    f"``except Exception`` around the model_validate() call at "
+                    f"line {call.lineno} catches pydantic ValidationError "
+                    f"(a ValueError subclass, i.e. a LIKELY_BUG_EXCEPTION) "
+                    f"generically.  It should catch ValidationError explicitly "
+                    f"with exc_info=True for actionable stack traces "
+                    f"(issue #6752)."
+                )
 
-            # Found it — this handler catches Exception generically near
-            # model_validate.  After the fix it should catch
-            # ValidationError specifically.
-            assert node.type.id != "Exception", (
-                f"diagnostic_runner.py:{handler_start} — "
-                f"``except Exception`` catches pydantic ValidationError "
-                f"(a ValueError subclass, i.e. a LIKELY_BUG_EXCEPTION) "
-                f"generically.  It should catch ValidationError explicitly "
-                f"with exc_info=True for actionable stack traces (issue #6752)."
+        if not checked_any:
+            raise AssertionError(
+                "diagnostic_runner.py no longer wraps a ``model_validate()`` "
+                "call in a ``try`` — this test has lost its anchor and would "
+                "otherwise assert nothing at all (the #11664 vacuity class). "
+                "Re-point it at wherever the diagnosis payload is now parsed."
             )
-
-        # If we reach here without finding the handler, the code structure
-        # changed — fail with a clear message.
-        # (The loop above should always find at least one match given the
-        # current code, so reaching here means the test needs updating.)
