@@ -18,16 +18,16 @@ _DATA_ROOT_FIELD_RE = re.compile(
 
 @register("P9.1")
 def _data_root_field(ctx: CheckContext) -> Finding:
-    config = ctx.root / "src" / "config.py"
+    config = ctx.src_module("config")
     if not config.exists():
-        return finding("P9.1", Status.FAIL, "src/config.py missing")
+        return finding("P9.1", Status.FAIL, f"{ctx.rel(config)} missing")
     text = config.read_text(encoding="utf-8", errors="replace")
     if _DATA_ROOT_FIELD_RE.search(text):
         return finding("P9.1", Status.PASS)
     return finding(
         "P9.1",
         Status.FAIL,
-        "src/config.py has no `data_root` field with a default",
+        f"{ctx.rel(config)} has no `data_root` field with a default",
     )
 
 

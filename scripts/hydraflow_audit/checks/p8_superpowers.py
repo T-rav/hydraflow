@@ -120,8 +120,8 @@ _TRACE_WRITE_RE = re.compile(
 @register("P8.6")
 def _trace_collector(ctx: CheckContext) -> Finding:
     candidates = [
-        ctx.root / "src" / "trace_collector.py",
-        ctx.root / "src" / "tracing.py",
+        ctx.src_module("trace_collector"),
+        ctx.src_module("tracing"),
     ]
     for path in candidates:
         if not path.exists():

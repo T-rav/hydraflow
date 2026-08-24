@@ -112,9 +112,9 @@ _WIKI_OPS_RE = re.compile(r"\b(ingest|query|lint)\b")
 
 @register("P7.3b")
 def _wiki_store_operations(ctx: CheckContext) -> Finding:
-    store = ctx.root / "src" / "repo_wiki.py"
+    store = ctx.src_module("repo_wiki")
     if not store.exists():
-        return finding("P7.3b", Status.FAIL, "src/repo_wiki.py missing")
+        return finding("P7.3b", Status.FAIL, f"{ctx.rel(store)} missing")
     text = store.read_text(encoding="utf-8", errors="replace")
     hits = {op for op in ("ingest", "query", "lint") if re.search(rf"\b{op}\b", text)}
     if hits == {"ingest", "query", "lint"}:
@@ -123,7 +123,7 @@ def _wiki_store_operations(ctx: CheckContext) -> Finding:
     return finding(
         "P7.3b",
         Status.FAIL,
-        f"src/repo_wiki.py missing operations: {', '.join(missing)}",
+        f"{ctx.rel(store)} missing operations: {', '.join(missing)}",
     )
 
 
@@ -132,7 +132,7 @@ _INJECT_WIKI_RE = re.compile(r"\b(_inject_repo_wiki|inject_repo_wiki|inject_wiki
 
 @register("P7.3c")
 def _runner_injects_wiki(ctx: CheckContext) -> Finding:
-    candidates = [ctx.root / "src" / "base_runner.py", ctx.root / "src" / "runner.py"]
+    candidates = [ctx.src_module("base_runner"), ctx.src_module("runner")]
     for path in candidates:
         if not path.exists():
             continue
@@ -258,14 +258,15 @@ def _audit_self_instrumented(ctx: CheckContext) -> Finding:
 
 @register("P7.7")
 def _observability_behind_port(ctx: CheckContext) -> Finding:
-    ports = ctx.root / "src" / "ports.py"
+    ports = ctx.src_module("ports")
     if not ports.exists():
-        return finding("P7.7", Status.FAIL, "src/ports.py missing")
+        return finding("P7.7", Status.FAIL, f"{ctx.rel(ports)} missing")
     text = ports.read_text(encoding="utf-8", errors="replace")
     if re.search(r"class\s+(ObservabilityPort|TracingPort|MetricsPort)\b", text):
         return finding("P7.7", Status.PASS)
     return finding(
         "P7.7",
         Status.WARN,
-        "no ObservabilityPort/TracingPort/MetricsPort in ports.py — backend swap requires call-site edits",
+        f"no ObservabilityPort/TracingPort/MetricsPort in {ctx.rel(ports)} — "
+        "backend swap requires call-site edits",
     )
