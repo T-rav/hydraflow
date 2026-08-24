@@ -101,7 +101,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger("review_worker_runner")
 
 MAX_ARTIFACT_CHARS = 20000
-"""How much of a child's reply is retained. A receipt is evidence, not a store."""
+"""How much of a child's reply is RETAINED. A receipt is evidence, not a store."""
+
+MAX_PARSE_CHARS = 64000
+"""How much of a child's reply is READ. Deliberately larger than what is kept.
+
+Two bounds rather than one, because collapsing them loses findings silently. A
+maximally compliant proposal — :data:`MAX_FINDINGS` findings at
+:data:`MAX_FINDING_SUMMARY_CHARS` each, plus a
+:data:`MAX_PROPOSAL_SUMMARY_CHARS` summary — is about 29 000 characters, so
+parsing the *retained* 20 000 would cut a legal reply mid-JSON and yield no
+proposal at all. The reviewer would have filed fifty findings and the receipt
+would record an output-contract failure: this module hiding findings by
+accident, which is the one thing :data:`MAX_FINDINGS` refuses to do on purpose.
+
+So the whole reply (up to this ceiling, which is still bounded — a receipt path
+must not read an unbounded string) is parsed, and only the text kept beside the
+receipt is truncated. The siblings collapse the two; their artifacts are prose
+that degrades gracefully when cut, and a proposal does not.
+"""
 
 MAX_DIFF_CHARS = 24000
 """How much of the change a reviewer is shown.
@@ -561,8 +579,11 @@ class ReviewWorkerRunner:
 
         observed = str(spawn_out.get("served_model", "") or "")
         served = observed or str(spawn_out.get("model", "") or "")
-        text = (result.stdout or "")[:MAX_ARTIFACT_CHARS]
-        proposal = parse_review_proposal(text)
+        # Parsed from the reply, truncated only for storage. The other order
+        # would cut a long-but-legal proposal mid-JSON — see MAX_PARSE_CHARS.
+        reply = (result.stdout or "")[:MAX_PARSE_CHARS]
+        proposal = parse_review_proposal(reply)
+        text = reply[:MAX_ARTIFACT_CHARS]
         if proposal is None:
             logger.info(
                 "review_worker_runner: #%d %s returned no parseable proposal; "

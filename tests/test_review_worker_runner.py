@@ -33,7 +33,9 @@ from execution import SimpleResult
 from models import ReviewVerdict
 from review_evidence import build_review_evidence
 from review_worker_runner import (
+    MAX_ARTIFACT_CHARS,
     MAX_DIFF_CHARS,
+    MAX_FINDING_SUMMARY_CHARS,
     MAX_FINDINGS,
     NO_SUMMARY_PLACEHOLDER,
     ReviewWorkerRunner,
@@ -800,6 +802,39 @@ class TestTheReceiptIsTheEvidence:
         assert receipts[0].output_contract_ok is False
         assert "req-1" not in runner.last_proposals
         assert runner.artifacts[0].proposal is None
+
+    @pytest.mark.asyncio
+    async def test_a_proposal_longer_than_the_retained_artifact_still_parses(
+        self, tmp_path: Path
+    ) -> None:
+        """The reply is parsed whole and truncated only for storage.
+
+        A maximally compliant proposal is larger than MAX_ARTIFACT_CHARS, so
+        truncating before parsing would cut legal JSON mid-object and record an
+        output-contract failure for a reviewer that filed fifty findings — this
+        module hiding findings by accident, which is the one thing MAX_FINDINGS
+        refuses to do on purpose.
+        """
+        reply = json.dumps(
+            {
+                "recommended": "request-changes",
+                "summary": "s" * 3000,
+                "findings": [
+                    {"summary": f"{i:03d}" + "f" * (MAX_FINDING_SUMMARY_CHARS - 3)}
+                    for i in range(MAX_FINDINGS)
+                ],
+            }
+        )
+        assert len(reply) > MAX_ARTIFACT_CHARS, "the fixture must exceed the cut"
+        runner = _runner(tmp_path, SpawnRecorder(stdout=reply))
+
+        receipts = await _dispatch(runner, [_request()])
+
+        proposal = runner.last_proposals["req-1"]
+        assert len(proposal.findings) == MAX_FINDINGS
+        assert receipts[0].output_contract_ok is True
+        # The stored artifact is still bounded — the two limits are separate.
+        assert len(runner.artifacts[0].text) == MAX_ARTIFACT_CHARS
 
     @pytest.mark.asyncio
     async def test_a_timed_out_child_is_expired_and_keeps_its_spawn_id(

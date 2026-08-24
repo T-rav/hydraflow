@@ -1537,7 +1537,12 @@ class HydraFlowConfig(BaseModel):
             "Empty (the default) dispatches nothing anywhere; clearing it is the "
             "one-action rollback. Independent of fable_plan_canary_repo and "
             "fable_implement_canary_repo: arming one arms nothing about the "
-            "others. Deliberately NOT an env override, for ADR-0141 D5's reason."
+            "others. Deliberately NOT an env override, for ADR-0141 D5's reason. "
+            "NOT WIRED YET (#11543): nothing constructs a ReviewWorkerRunner, "
+            "because nothing yet produces the canonical ReviewEvidence its "
+            "prompt is built from, so arming this today is a no-op. The dial "
+            "and its bound ship with the actuator so the rollback exists before "
+            "the capability does."
         ),
     )
     fable_review_worker_timeout_seconds: int = Field(
@@ -1559,7 +1564,14 @@ class HydraFlowConfig(BaseModel):
     )
 
     def fable_review_canary_armed(self) -> bool:
-        """True when this process may dispatch a real brokered reviewer (#11543).
+        """True when this process *would* dispatch a real brokered reviewer.
+
+        Would, not will: no dispatcher is wired yet (#11543 — see
+        ``review_worker_runner.ReviewWorkerRunner``), so this predicate answers
+        the operator's question about the dial rather than reporting a live
+        capability. It is stated in the conditional because the sibling
+        predicates are not, and a reader comparing the three would otherwise
+        take the parallel wording as a parallel guarantee.
 
         The same two-decision shape as its siblings, over a third dial:
         selecting the director is restart-required, naming the review canary
