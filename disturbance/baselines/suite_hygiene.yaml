@@ -1,8 +1,9 @@
 comment: "High-water marks for structural test redundancy (erosion.suite_hygiene):\
   \ parametrize copies (identical bodies in one file) and cross-file duplicate tests.\
   \ The gate fails only when a count rises above its mark; falling is the point. Last\
-  \ moved: #11548 batch 6 \u2014 the two P5 audit-check tables in\
-  \ test_hydraflow_audit_p5_checks (workflow checks, githook checks), 451 -> 445.\
-  \ Collected cases unchanged (28 -> 28); all 8 removed names survive as case ids."
+  \ moved: #11548 batch 7 — test_planner.py's three 4-groups (plan-malformation\
+  \ errors, task-graph rejections, Feature file:line rejections) plus eight more\
+  \ single-claim 4-groups, 445 -> 412. Collected cases unchanged across all nine\
+  \ files (466 -> 466); all 45 removed names survive as case ids."
 cross_file_duplicates: 21
-parametrize_copies: 445
+parametrize_copies: 412

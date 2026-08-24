@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pytest
+
 from lint_scaffold import (
     _ensure_js_dev_deps,
     _ensure_python_dev_deps,
@@ -156,20 +158,25 @@ class TestHasPyrightConfig:
 
 
 class TestHasEslintConfig:
-    def test_detects_eslintrc_json(self, tmp_path: Path) -> None:
-        (tmp_path / ".eslintrc.json").write_text("{}")
-        assert _has_eslint_config(tmp_path) is True
-
-    def test_detects_eslint_config_js(self, tmp_path: Path) -> None:
-        (tmp_path / "eslint.config.js").write_text("export default [];")
-        assert _has_eslint_config(tmp_path) is True
-
-    def test_detects_biome_json(self, tmp_path: Path) -> None:
-        (tmp_path / "biome.json").write_text("{}")
-        assert _has_eslint_config(tmp_path) is True
-
-    def test_detects_eslintrc_yaml(self, tmp_path: Path) -> None:
-        (tmp_path / ".eslintrc.yaml").write_text("rules: {}")
+    @pytest.mark.parametrize(
+        ("filename", "content"),
+        [
+            (".eslintrc.json", "{}"),
+            ("eslint.config.js", "export default [];"),
+            ("biome.json", "{}"),
+            (".eslintrc.yaml", "rules: {}"),
+        ],
+        ids=[
+            "detects_eslintrc_json",
+            "detects_eslint_config_js",
+            "detects_biome_json",
+            "detects_eslintrc_yaml",
+        ],
+    )
+    def test_detects_config_file(
+        self, tmp_path: Path, filename: str, content: str
+    ) -> None:
+        (tmp_path / filename).write_text(content)
         assert _has_eslint_config(tmp_path) is True
 
     def test_has_eslint_config_returns_false_when_absent(self, tmp_path: Path) -> None:
