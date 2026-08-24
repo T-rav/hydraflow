@@ -160,6 +160,7 @@ def _one(lease: dict[str, Any], role: str, family: str, n: int) -> dict[str, Any
         "reason": "the plan needs it",
         "expected_route_policy_revision": ROUTE_REVISION,
         "idempotency_key": f"key-{lease['issue_number']}-{n}",
+        "requesting_spawn_id": "spawn-director",  # fenced roles carry lineage
     }
 
 

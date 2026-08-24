@@ -68,14 +68,14 @@ _LOCAL_HOST_RE = re.compile(
 
 _URL_RE = re.compile(r"https?://([^/\s\"']+)")
 
-#: Files under a conformance root that legitimately name a network module —
-#: because verifying "nothing reaches the network" requires naming what that
-#: means. Kept tiny and explicit; an entry here is a claim about one file.
-_ALLOWED: frozenset[str] = frozenset(
-    {
-        "tests/architecture/test_vitals_conformance_seam.py",
-    }
-)
+# There is deliberately no allow-list here. One was written — a single entry
+# exempting THIS file, on the theory that verifying "nothing reaches the
+# network" requires naming what that means. It does not: the names live in
+# ``_REMOTE_CLIENTS`` as strings and in the negative control as source written
+# to ``tmp_path``, never as an import, so the exemption was a no-op that
+# exempted the one file whose job is the rule. A no-op exemption is worse than
+# none, because the day this file did import a remote client the sweep would
+# have stayed green. It is swept like everything else.
 
 
 def _conformance_files() -> list[Path]:
@@ -153,8 +153,6 @@ def test_no_conformance_check_imports_a_remote_client() -> None:
     offenders: list[str] = []
     for path in _conformance_files():
         rel = str(path.relative_to(_REPO))
-        if rel in _ALLOWED:
-            continue
         reached = _imported_roots(path) & _REMOTE_CLIENTS
         if reached:
             offenders.append(f"{rel} imports remote client(s) {sorted(reached)}")
@@ -205,13 +203,34 @@ def test_the_remote_client_detector_actually_fires(tmp_path: Path) -> None:
 
 
 def test_a_vitals_claim_is_not_held_to_the_offline_rule() -> None:
-    """The seam has two sides, and the point is that vitals MAY externalise."""
+    """The seam has two sides, and the point is that vitals MAY externalise.
+
+    Two assertions, because the original made one and gave the other's reason.
+
+    It checked the path PREFIX and justified it as "it would be swept by the
+    offline rule" — which is false for six of the seven vitals claims: they are
+    ``.yaml`` files, ``_conformance_files()`` globs ``*.py``, and a ``.yaml``
+    under ``tests/architecture`` would never be swept whatever the prefix says.
+    A guard whose stated reason does not describe its subject passes for a
+    reason nobody can check, which is how it goes vacuous unnoticed.
+
+    So the prefix survives as what it actually is — a FILING rule, vitals do
+    not live under a conformance root — and the claim its reason made is
+    asserted directly against the sweep. The second is the load-bearing one and
+    is strictly wider: ``_conformance_files()`` also pulls in registered
+    conformance claims from outside the roots, which no prefix check can see.
+    """
     vitals = [c for c in registered_claims() if c.kind is ClaimKind.VITALS]
     assert vitals, "no vitals registered — nothing may be externalised, which is wrong"
+    swept = set(_conformance_files())
     for claim in vitals:
         assert not any(claim.path.startswith(root) for root in CONFORMANCE_ROOTS), (
-            f"{claim.name} is registered as vitals but lives under a conformance "
-            f"root ({claim.path}); it would be swept by the offline rule."
+            f"{claim.name} is registered as vitals but is filed under a "
+            f"conformance root ({claim.path}). Vitals live elsewhere."
+        )
+        assert (_REPO / claim.path) not in swept, (
+            f"{claim.name} is registered as vitals but ({claim.path}) is inside "
+            "the offline sweep; it would be held to the conformance rule."
         )
 
 

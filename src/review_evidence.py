@@ -25,14 +25,12 @@ therefore be tested against a value rather than against a subprocess.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from secret_scrub import scrub_secrets
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Mapping
 
 __all__ = [
     "CANONICAL_FIELDS",
@@ -89,10 +87,15 @@ PRIVATE_MARKERS: frozenset[str] = frozenset(
 
 Every name here is already unreachable — it is absent from
 :data:`CANONICAL_FIELDS`, so nothing copies it. This set exists so that a leak
-arriving by some path other than the builder (a caller hand-assembling a
-payload, a future field whose *name* is canonical but whose *content* is not)
-is still detectable. Treating it as the primary check would reintroduce the
-fail-open deny-list the module docstring rejects.
+arriving by some path other than the builder — a caller hand-assembling a
+payload — is still detectable. Treating it as the primary check would
+reintroduce the fail-open deny-list the module docstring rejects.
+
+It compares **keys**, and only keys. This docstring used to claim a second
+catch: "a future field whose *name* is canonical but whose *content* is not".
+:func:`private_markers_in` cannot see content and never could, so the clause
+described a check that was not there — worse than no clause, because a reader
+who trusts it stops looking for the check that would.
 """
 
 
@@ -131,8 +134,62 @@ class ReviewEvidence(BaseModel):
         Derived from the model's own fields rather than from a hand-written
         list: a field added to the model reaches the prompt, and a field NOT on
         the model cannot, so the two can never disagree.
+
+        Which is exactly why the field set is checked here. ``model_dump``
+        renders ``type(self)``'s fields, so a *subclass* declaring one more
+        renders one more — and ``extra="forbid"`` does not stop a subclass, it
+        stops an extra key on this class. A subclass is the one way an
+        implementer-private field could ride the allow-list into a reviewer's
+        prompt while every existing test stayed green, so the allow-list asserts
+        its own identity at the boundary it guards rather than at construction.
         """
+        fields = set(type(self).model_fields)
+        if fields != CANONICAL_FIELDS:
+            extra = sorted(fields - CANONICAL_FIELDS)
+            missing = sorted(CANONICAL_FIELDS - fields)
+            raise ValueError(
+                "review evidence must render exactly the canonical field set; "
+                f"{type(self).__name__} adds {extra} and drops {missing}. "
+                "Widening what a fresh reviewer sees is a change to "
+                "CANONICAL_FIELDS, never a subclass."
+            )
         return self.model_dump()
+
+
+def _scrubbed(value: Any) -> Any:
+    """*value* with every string it carries scrubbed, whatever shape it arrived in.
+
+    The scrub used to run on ``str`` and on ``list``/``tuple``, which is the
+    same class of bug one type later. Pydantic's lax mode — which this model
+    runs in — coerces a good deal more than that into its fields: ``set``,
+    ``frozenset``, ``deque`` and a bare generator all satisfy
+    ``tuple[str, ...]``, and ``bytes`` satisfies ``str``. Every one of those
+    shapes reached ``ReviewEvidence`` untouched, and both realistic ones leaked
+    a live token by execution: a deduplicated changed-files list is a ``set``,
+    and a diff read off an un-texted subprocess pipe is ``bytes``.
+
+    So the fix is not a longer ``isinstance`` tuple. It is: decode bytes, walk
+    any iterable, and scrub the leaves — which covers the shapes Pydantic will
+    accept next as well as the ones it accepts now.
+
+    A ``Mapping`` is deliberately passed through untouched rather than walked.
+    No canonical field takes one, so Pydantic rejects it; converting it to a
+    tuple of its keys would make the model *accept* a shape it currently
+    refuses, which is a widening dressed as a scrub.
+    """
+    if isinstance(value, str):
+        return scrub_secrets(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # errors="replace" rather than a raise: a diff off a pipe may carry a
+        # stray byte, and refusing the whole evidence bundle over one would
+        # leave the reviewer with nothing to judge. A mangled character is
+        # visible; an unscrubbed credential is not.
+        return scrub_secrets(bytes(value).decode("utf-8", errors="replace"))
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, Iterable):
+        return tuple(_scrubbed(item) for item in value)
+    return value
 
 
 def build_review_evidence(source: Mapping[str, Any]) -> ReviewEvidence:
@@ -144,21 +201,15 @@ def build_review_evidence(source: Mapping[str, Any]) -> ReviewEvidence:
     because a key that is never read cannot leak, and naming it in an error
     would put private content into a message.
 
-    Free text is scrubbed for secrets on the way through. A diff is the most
-    likely place for a credential to have been committed by accident, and a
-    reviewer is a fresh external process that should never be the thing that
-    first sees one.
+    Free text is scrubbed for secrets on the way through, after being
+    normalised into the shapes the scrub can read — see :func:`_scrubbed`.
+    A diff is the most likely place for a credential to have been committed by
+    accident, and a reviewer is a fresh external process that should never be
+    the thing that first sees one.
     """
-    picked: dict[str, Any] = {}
-    for field in CANONICAL_FIELDS:
-        if field not in source:
-            continue
-        value = source[field]
-        if isinstance(value, str):
-            value = scrub_secrets(value)
-        elif isinstance(value, (list, tuple)):
-            value = tuple(scrub_secrets(v) if isinstance(v, str) else v for v in value)
-        picked[field] = value
+    picked: dict[str, Any] = {
+        field: _scrubbed(source[field]) for field in CANONICAL_FIELDS if field in source
+    }
     return ReviewEvidence(**picked)
 
 
