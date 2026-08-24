@@ -73,7 +73,7 @@ class TestIssue6697FetchLockRace:
             except Exception as exc:
                 errors[index] = exc
 
-        with patch.object(workspace, "_FETCH_LOCKS", racy_dict):
+        with patch.object(workspace._manager, "_FETCH_LOCKS", racy_dict):
             t1 = threading.Thread(target=worker, args=(0,))
             t2 = threading.Thread(target=worker, args=(1,))
             t1.start()
@@ -121,7 +121,7 @@ class TestIssue6697WorkspaceLockRace:
             except Exception as exc:
                 errors[index] = exc
 
-        with patch.object(workspace, "_WORKTREE_LOCKS", racy_dict):
+        with patch.object(workspace._manager, "_WORKTREE_LOCKS", racy_dict):
             t1 = threading.Thread(target=worker, args=(0,))
             t2 = threading.Thread(target=worker, args=(1,))
             t1.start()

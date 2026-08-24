@@ -16,6 +16,7 @@ import pytest
 from config import _validate_repo_format
 from events import EventBus, EventType, HydraFlowEvent
 from log import JSONFormatter
+from tests.workspace_patch import expect_unconsulted
 
 # ---------------------------------------------------------------------------
 # Config: repo format validation
@@ -234,58 +235,101 @@ class TestWorktreeOriginValidation:
             return WorkspaceManager(config)
 
     @pytest.mark.asyncio
-    async def test_https_url_matches(self) -> None:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://github.com/owner/repo.git\n",
+            "git@github.com:owner/repo.git\n",
+            "https://github.com/owner/repo\n",
+            "ssh://git@github.com/owner/repo.git\n",
+        ],
+        ids=["https", "ssh-scp", "https-no-suffix", "ssh-url"],
+    )
+    async def test_matching_origin_url_is_accepted(
+        self, url: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
         wm = self._make_wt_manager("owner/repo")
-        with patch(
-            "workspace._manager.run_subprocess", new_callable=AsyncMock
-        ) as mock_run:
-            mock_run.return_value = "https://github.com/owner/repo.git\n"
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+            patch(
+                "workspace._remote.run_subprocess", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = url
             result = await wm._assert_origin_matches_repo()
-        assert result is None  # method completes without error
+        # The mock must be the thing that answered: a stale patch target lets
+        # the real subprocess run, fail, and get swallowed at _remote.py's
+        # broad ``except Exception`` — ``result is None`` alone cannot tell the
+        # two apart (#11547 review).
+        mock_run.assert_awaited_once()
+        # And the URL must have been *parsed*, not merely tolerated. Without
+        # this, breaking the origin regexes leaves every case green: an
+        # unparseable URL only logs a warning and returns None.
+        assert "Could not parse origin URL" not in caplog.text
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_ssh_url_matches(self) -> None:
-        wm = self._make_wt_manager("owner/repo")
-        with patch(
-            "workspace._manager.run_subprocess", new_callable=AsyncMock
-        ) as mock_run:
-            mock_run.return_value = "git@github.com:owner/repo.git\n"
-            result = await wm._assert_origin_matches_repo()
-        assert result is None  # method completes without error
-
-    @pytest.mark.asyncio
-    async def test_https_without_git_suffix(self) -> None:
-        wm = self._make_wt_manager("owner/repo")
-        with patch(
-            "workspace._manager.run_subprocess", new_callable=AsyncMock
-        ) as mock_run:
-            mock_run.return_value = "https://github.com/owner/repo\n"
-            result = await wm._assert_origin_matches_repo()
-        assert result is None  # method completes without error
-
-    @pytest.mark.asyncio
-    async def test_mismatch_raises(self) -> None:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://github.com/other/project.git\n",
+            "git@github.com:other/project.git\n",
+            "https://github.com/other/project\n",
+        ],
+        ids=["https", "ssh-scp", "https-no-suffix"],
+    )
+    async def test_mismatch_raises(self, url: str) -> None:
         wm = self._make_wt_manager("owner/repo")
         with patch(
             "workspace._remote.run_subprocess", new_callable=AsyncMock
         ) as mock_run:
-            mock_run.return_value = "https://github.com/other/project.git\n"
+            mock_run.return_value = url
             with pytest.raises(RuntimeError, match="expected 'owner/repo'"):
                 await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_case_insensitive_match(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wm = self._make_wt_manager("Owner/Repo")
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+            patch(
+                "workspace._remote.run_subprocess", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = "https://github.com/owner/repo.git\n"
+            result = await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+        assert "Could not parse origin URL" not in caplog.text
+        assert result is None  # case-insensitive match succeeds
+
+    @pytest.mark.asyncio
+    async def test_unparseable_origin_url_warns_and_does_not_raise(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A URL neither regex understands is tolerated, loudly."""
+        wm = self._make_wt_manager("owner/repo")
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+            patch(
+                "workspace._remote.run_subprocess", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = "https://gitlab.example/owner/repo.git\n"
+            result = await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+        assert "Could not parse origin URL" in caplog.text
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_empty_repo_skips_validation(self) -> None:
         wm = self._make_wt_manager("")
-        # Should not raise even without mocking run_subprocess
-        result = await wm._assert_origin_matches_repo()
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_case_insensitive_match(self) -> None:
-        wm = self._make_wt_manager("Owner/Repo")
         with patch(
-            "workspace._manager.run_subprocess", new_callable=AsyncMock
+            "workspace._remote.run_subprocess", new_callable=AsyncMock
         ) as mock_run:
-            mock_run.return_value = "https://github.com/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
-        assert result is None  # case-insensitive match succeeds
+        # The short-circuit is the point: no subprocess is spawned at all.
+        expect_unconsulted(mock_run, "empty repo short-circuits before any git call")
+        assert result is None

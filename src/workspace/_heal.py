@@ -10,9 +10,8 @@ from __future__ import annotations
 import contextlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from subprocess_util import run_subprocess
 
 logger = logging.getLogger("hydraflow.workspace")
@@ -215,9 +214,3 @@ class WorkspaceHealMixin:
                 issue_number,
                 exc,
             )
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from credentials import Credentials

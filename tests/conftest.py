@@ -234,6 +234,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):  
     """
     outcome = yield
     report = outcome.get_result()
+    # Expose each phase's report to teardown fixtures, so a guard that runs in
+    # teardown can tell "this test passed and still tripped me" from "this test
+    # already failed" and stay quiet in the second case.
+    setattr(item, f"rep_{report.when}", report)
     if (
         report.when == "call"
         and report.passed
@@ -403,6 +407,51 @@ def setup_test_environment():
     finally:
         os.environ.update(saved_env)
         clear_dotenv_inert_roots()
+
+
+@pytest.fixture(autouse=True)
+def _workspace_patches_must_be_consulted(request: pytest.FixtureRequest):
+    """Fail any test that patches a ``workspace`` symbol and never uses the mock.
+
+    #11547 batch 6 split ``WorkspaceManager`` into slices and repointed ~19
+    patch targets by trial and error — keep whichever slice makes the test
+    pass. That method is blind: patch the wrong slice and the REAL
+    ``run_subprocess`` runs, its failure is swallowed by the code's own broad
+    ``except``, and a weak assertion (``assert result is None``, ``assert not
+    any(...)``, ``assert not path.exists()``) is satisfied by the error path
+    rather than by the behaviour under test. Five sites shipped that way; three
+    were regression guards that passed with their subject reintroduced.
+
+    An installed-but-never-consulted mock is the detectable shape of that
+    mistake, so it is a hard failure here. A test whose POINT is that a call is
+    not made declares it with ``tests.workspace_patch.expect_unconsulted``.
+
+    Same family as #11673 (a gate that stopped seeing its subject): an
+    assertion that cannot fail is worse than no assertion, because it reports
+    coverage it does not have. Full write-up in ``docs/wiki/testing.md`` —
+    "A patch target resolved by 'whichever slice makes the test pass' is not
+    evidence".
+    """
+    from tests.workspace_patch import PatchConsultationRecorder
+
+    with PatchConsultationRecorder() as recorder:
+        yield
+    report = getattr(request.node, "rep_call", None)
+    if report is not None and not report.passed:
+        # The test already failed for its own reason — don't bury it.
+        return
+    if recorder.violations:
+        pytest.fail(
+            "Unconsulted patch target(s): "
+            + ", ".join(sorted(set(recorder.violations)))
+            + ". The mock was installed but never called, so every assertion "
+            "in this test was satisfied without the patched symbol being "
+            "reached. Either the patch target names the wrong workspace slice "
+            "(patch the module that BINDS the symbol — the one whose method is "
+            "under test), or the test is asserting nothing. If the absence of "
+            "the call is the point, say so with "
+            "tests.workspace_patch.expect_unconsulted(mock, reason)."
+        )
 
 
 @pytest.fixture(autouse=True)

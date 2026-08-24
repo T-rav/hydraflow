@@ -491,3 +491,26 @@ _Source: #11601 (plan)_
 ```json:entry
 {"id":"01KSANDBOXCIDISPATCH11601WIKI","title":"Sandbox verification runs belong in CI, not on the factory host (#11601)","topic":null,"source_type":"plan","source_issue":11601,"source_repo":null,"created_at":"2026-08-22T00:00:00.000000+00:00","updated_at":"2026-08-22T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+## A patch target resolved by "whichever slice makes the test pass" is not evidence
+
+When #11696 split `WorkspaceManager` into `src/workspace/` slices, ~19 tests had to repoint `patch("workspace.run_subprocess")` at the slice that binds it. Each site was resolved **empirically** — try each slice, keep the one that made that test pass. Five sites were wrong and passed anyway; three of them were regression guards (#6697, #7839) that stayed green with the bug they exist to catch reintroduced.
+
+The method is blind by construction. Patch the wrong slice and the mock is simply never consulted: the **real** `run_subprocess` runs, fails (`FileNotFoundError` / `rc=128` against a fixture path), and the production code's own broad `except Exception` swallows it. Every weak assertion is then satisfied by the error path rather than by the behavior under test. Every mis-targeted site had one — `assert result is None`, `assert not any(...)`, `assert not path.exists()`; every correctly-targeted site had an assertion that would have failed on the wrong slice. `patch` itself stays silent because the attribute *exists* on the wrong module too (both slices import `run_subprocess`), so there is no `AttributeError` to hear.
+
+The same shape bites module-level **data**: `patch.object(workspace, "_FETCH_LOCKS", racy_dict)` *rebinds a name*; it does not mutate the dict. It set the attribute on the package while `_repo_fetch_lock` kept reading `workspace._manager.__dict__`, so the racy dict was never consulted and the deterministic TOCTOU window never opened. A re-export is what let that stale target resolve instead of raising — re-exporting a shared mutable registry is safe for *mutation* and actively harmful for *rebinding*, and the only consumers rebound.
+
+**Rules:**
+
+1. Patch the module that **binds** the symbol — the one whose method is under test — never the package and never a sibling slice. Verify by reading the import in that module, not by watching the test go green.
+2. Every `patch` of a `workspace.*` symbol must be **consulted**. `tests/conftest.py::_workspace_patches_must_be_consulted` fails any test that installs such a mock and never calls it; declare a deliberate non-call with `tests.workspace_patch.expect_unconsulted(mock, reason)`.
+3. Strengthen the assertion, not just the target. `assert result is None` cannot distinguish "parsed and matched" from "blew up and got swallowed" — assert the call reached the mock (`mock.assert_awaited_once()`, `assert ("git", ...) in calls`) and that the happy path was actually taken (no "could not parse" warning in `caplog`).
+4. Prove it bites: break the subject and confirm the guard reddens. A guard that never went red has not been tested.
+
+Same family as #11673 (a gate that stopped seeing its subject) and the gate-masked-by-an-upstream-pin shape (an assertion already satisfied by a runtime pin, so deleting its subject leaves it green): an assertion that cannot fail is worse than no assertion, because it reports coverage it does not have.
+
+_Source: #11547 review of #11696_
+
+```json:entry
+{"id":"TEST-PATCH-TARGET-CONSULTED-001","source_type":"manual","topic":"testing","tags":["mocking","patch-target","vacuous-test","regression-guard","workspace","mutation-testing"],"rule":"Patch the module that BINDS the symbol (the one whose method is under test), never the package or a sibling slice, and assert the mock was consulted. tests/conftest.py::_workspace_patches_must_be_consulted fails any test that installs a workspace.* mock and never calls it; a deliberate non-call is declared with tests.workspace_patch.expect_unconsulted(mock, reason). patch.object on module-level DATA rebinds a name and does not mutate the object, so a re-exported registry makes a stale target resolve silently instead of raising AttributeError.","anti_pattern":"Resolving a patch target empirically — try each module until the test passes. A wrong target lets the real callee run, its failure is swallowed by the production code's broad except, and a weak assertion (assert result is None / assert not any(...) / assert not path.exists()) passes while testing nothing.","code_refs":["tests/workspace_patch.py","tests/conftest.py","tests/architecture/test_workspace_patch_targets.py","src/workspace/__init__.py"],"source_issue":11547,"added":"2026-08-24"}
+```
