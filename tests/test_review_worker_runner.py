@@ -20,6 +20,7 @@ import pytest
 
 from config import HydraFlowConfig
 from driver_contracts import (
+    WORKER_CATALOG,
     DriverLease,
     DriverPhase,
     ModelRequirement,
@@ -31,6 +32,7 @@ from driver_contracts import (
 )
 from execution import SimpleResult
 from models import ReviewVerdict
+from review_broker import review_roles_for_review_phase
 from review_evidence import build_review_evidence
 from review_worker_runner import (
     MAX_ARTIFACT_CHARS,
@@ -157,7 +159,8 @@ def _request(
     request_id: str = "req-1",
     key: str = "key-1",
     value: str = "claude-opus",
-    spawn_id: str | None = None,
+    spawn_id: str | None = "spawn-fresh",
+    requirement: ModelRequirement | None = None,
 ) -> WorkerDispatchRequest:
     return WorkerDispatchRequest(
         request_id=request_id,
@@ -165,9 +168,8 @@ def _request(
         epoch=3,
         phase_attempt=1,
         worker_role=role,
-        model_requirement=ModelRequirement(
-            kind=ModelRequirementKind.LITERAL_FAMILY, value=value
-        ),
+        model_requirement=requirement
+        or ModelRequirement(kind=ModelRequirementKind.LITERAL_FAMILY, value=value),
         # Deliberately carries the private sentinel. A task contract is written
         # by a director that has read the implementer's receipts, so if this
         # module ever renders one, implementer-private context has a path in.
@@ -342,30 +344,55 @@ class TestAReviewerCannotReviewItsOwnWork:
         assert len(spawn.calls) == 1
         assert receipts[0].status is ReceiptStatus.ACCEPTED
 
+    @pytest.mark.parametrize("role", sorted(review_roles_for_review_phase(), key=str))
     @pytest.mark.asyncio
-    async def test_the_rule_is_the_catalogues_not_this_modules(
-        self, tmp_path: Path
+    async def test_every_dispatchable_review_role_is_fenced(
+        self, tmp_path: Path, role: WorkerRole
     ) -> None:
-        """A role the catalogue does not mark independent is NOT fenced here.
+        """No role this runner can dispatch at REVIEW escapes the fence.
 
-        The point is not that an architect should review its own work; it is
-        that this module must not hold a second opinion about which roles must
-        be independent. ``WORKER_CATALOG`` decides, and a hardcoded role list
-        here would go stale the day a role is added (#11673's class).
+        The subject is READ from ``review_roles_for_review_phase()`` rather
+        than named, and that is load-bearing rather than tidy. The first
+        version of this test picked ``architect`` by hand as "a role the
+        catalogue does not call independent", to prove the runner holds no
+        second opinion about independence. #11699 then fenced ``architect``
+        and filtered the REVIEW menu to ``WriteScope.NONE``, which dropped
+        ``debugger`` out of it — and the hand-picked test kept passing for a
+        completely different reason: its request was refused as *not catalogued
+        for REVIEW* and never reached the fence at all. A test that names a
+        role as a probe is one catalogue edit away from measuring nothing.
+
+        So the property is stated over the menu itself: dispatch every role the
+        runner can actually dispatch, with lineage that collides with a known
+        implementer, and require the fence to stop each one. Widening the menu
+        to a role the fence does not cover reddens this; so does un-fencing a
+        role already on it.
         """
-        from driver_contracts import WORKER_CATALOG
-
-        assert WORKER_CATALOG[WorkerRole.ARCHITECT].independent_of_implementer is False
         spawn = SpawnRecorder()
         runner = _runner(tmp_path, spawn)
 
         receipts = await _dispatch(
             runner,
-            [_request(role=WorkerRole.ARCHITECT, spawn_id="spawn-abc")],
+            [
+                _request(
+                    role=role,
+                    # The catalogue's own default, so a role whose requirement
+                    # is a capability class rather than a literal family still
+                    # builds a legal request.
+                    requirement=WORKER_CATALOG[role].default_model,
+                    spawn_id="spawn-abc",
+                )
+            ],
             implementers={"spawn-abc"},
         )
 
-        assert receipts[0].status is ReceiptStatus.ACCEPTED
+        assert spawn.calls == []
+        assert receipts[0].reason_code is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+    def test_the_review_menu_is_not_empty(self) -> None:
+        """Negative control for the parametrize above: an empty menu would make
+        it collect zero cases and report green over nothing."""
+        assert review_roles_for_review_phase()
 
     @pytest.mark.asyncio
     async def test_the_implementer_set_is_materialised_once(
@@ -476,7 +503,14 @@ class TestItProducesAProposalAndNeverAVerdict:
         runner = _runner(tmp_path, spawn)
         await _dispatch(runner, [_request()])
 
-        verdict, _reason = adjudicate(runner.last_proposals["req-1"], ci_green=True)
+        verdict, _reason = adjudicate(
+            runner.last_proposals["req-1"],
+            ci_green=True,
+            hitl_required=False,
+            reviewer_independent=True,
+            evidence_head_sha=HEAD,
+            current_head_sha=HEAD,
+        )
 
         assert verdict is ReviewVerdict.REQUEST_CHANGES
 

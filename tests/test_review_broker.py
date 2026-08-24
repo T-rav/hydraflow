@@ -300,7 +300,10 @@ def test_every_independent_role_is_fenced() -> None:
 
 
 def _review_request(
-    *, role: WorkerRole = WorkerRole.REVIEWER, value: str = "claude-opus"
+    *,
+    role: WorkerRole = WorkerRole.REVIEWER,
+    value: str = "claude-opus",
+    spawn_id: str | None = "spawn-fresh",
 ):
     from driver_contracts import (
         ModelRequirement,
@@ -321,6 +324,10 @@ def _review_request(
         reason="the implement boundary finished",
         expected_route_policy_revision="route-v1",
         idempotency_key="key-1",
+        # #11699 made this REQUIRED for a role the catalogue marks independent:
+        # an unstated lineage cannot be compared against the known implementer
+        # spawns, so the contract refuses it rather than admitting it as fresh.
+        requesting_spawn_id=spawn_id,
     )
 
 
