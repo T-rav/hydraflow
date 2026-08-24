@@ -85,6 +85,7 @@ SETTINGS: dict[str, SettingSpec] = {
     "fable_plan_canary_repo": SettingSpec("Scheduling", live=True, order=27),
     "fable_plan_worker_timeout_seconds": SettingSpec("Scheduling", live=True, order=28),
     "fable_implement_canary_repo": SettingSpec("Scheduling", live=True, order=29),
+    "fable_review_canary_repo": SettingSpec("Scheduling", live=True, order=30),
     "fable_implement_worker_timeout_seconds": SettingSpec(
         "Scheduling", live=True, order=30
     ),
