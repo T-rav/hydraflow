@@ -228,7 +228,7 @@ quality-fix: <description> (#<issue>)
 
 ---
 
-## Reviewer Agent (`src/reviewer.py` → `ReviewRunner`)
+## Reviewer Agent (`src/reviewer/` → `ReviewRunner`)
 
 ### Role
 

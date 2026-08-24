@@ -32,6 +32,7 @@ graph LR
     src_preflight["src.preflight"]
     src_preflight_playbooks["src.preflight.playbooks"]
     src_review_phase["src.review_phase"]
+    src_reviewer["src.reviewer"]
     src_runners["src.runners"]
     src_sentry["src.sentry"]
     src_signal_control["src.signal_control"]
@@ -55,6 +56,7 @@ graph LR
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
+    src -- "1" --> src_reviewer
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
     src -- "70" --> src_state
@@ -85,6 +87,7 @@ graph LR
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_review_phase -- "1" --> src_flows
+    src_review_phase -- "6" --> src_reviewer
     src_review_phase -- "8" --> src_state
     src_runners -- "1" --> src_hydraflow_gateway
     src_runners -- "1" --> src_preflight

@@ -55,6 +55,6 @@ behavioral dimensions:
 
 - Issue #3182 — original discovery of the missing assertion
 - Issue #3183 — implementation of symmetric test coverage
-- `src/reviewer.py:ReviewRunner` — the three methods sharing `ReviewResult`
+- `src/reviewer/_runner.py:ReviewRunner` — the three methods sharing `ReviewResult`
 - `src/models.py:ReviewResult` — the shared return type
 - `tests/test_reviewer.py` — symmetric test cases

@@ -570,11 +570,23 @@ class TestOrchestratorStatusCreditsPausedUntil:
 
 
 class TestReviewerUsesEnumStatus:
-    """Verify reviewer.py uses ReviewerStatus enum, not a raw string."""
+    """The reviewer emits ReviewerStatus, never a raw status string."""
 
     def test_no_raw_fixing_review_findings_string(self) -> None:
         import pathlib
 
-        src = (pathlib.Path(__file__).parent.parent / "src" / "reviewer.py").read_text()
-        # The old raw string must be replaced by the enum reference everywhere
-        assert '"fixing_review_findings"' not in src
+        # The whole PACKAGE, not one file. ``reviewer`` became a package in
+        # #11547 batch 5; reading a single module would leave the raw string
+        # free to reappear in any sibling and the guard would stay green —
+        # the package-blindness class this repo has been closing (#11673).
+        package = pathlib.Path(__file__).parent.parent / "src" / "reviewer"
+        sources = sorted(package.rglob("*.py"))
+        assert sources, f"no reviewer sources under {package} — guard is vacuous"
+        offenders = [
+            str(path.relative_to(package))
+            for path in sources
+            if '"fixing_review_findings"' in path.read_text()
+        ]
+        assert not offenders, (
+            f"raw status string instead of ReviewerStatus in: {offenders}"
+        )

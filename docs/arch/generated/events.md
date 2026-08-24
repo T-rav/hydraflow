@@ -19,7 +19,7 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **AGENT_ACTIVITY** | `src.runner_utils:_stream_and_collect` | ★ all (fan-out) |
 | **BACKGROUND_WORKER_STATUS** | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.base_background_loop:BaseBackgroundLoop._report_cycle_failure`<br>`src.orchestrator_bg_workers:OrchestratorBGWorkersMixin._seed_background_worker_statuses` | ★ all (fan-out) |
 | **BASELINE_UPDATE** | `src.baseline_policy:BaselinePolicy.check_approval`<br>`src.baseline_policy:BaselinePolicy.rollback` | ★ all (fan-out) |
-| **CI_CHECK** | `src.pr_manager_ci:PRManagerCIMixin.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | ★ all (fan-out) |
+| **CI_CHECK** | `src.pr_manager_ci:PRManagerCIMixin.wait_for_ci`<br>`src.reviewer._fixes:ReviewFixMixin.fix_ci` | ★ all (fan-out) |
 | **CONCERN_ADDRESSED** ⚠️ | — | — |
 | **CONCERN_FORWARDED** | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_concerns_forwarded` | ★ all (fan-out) |
 | **DIAGNOSTIC_UPDATE** | `src.diagnostic_loop:DiagnosticLoop._publish_update` | ★ all (fan-out) |
@@ -47,7 +47,7 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **RATCHET_TIGHTENED** | `src.auto_tighten_loop:AutoTightenLoop._emit_tightened`<br>`src.auto_tighten_loop:AutoTightenLoop._emit_unattributed` | ★ all (fan-out) |
 | **REPORT_UPDATE** | `src.report_issue_loop:ReportIssueLoop._emit_report_event` | ★ all (fan-out) |
 | **RETROSPECTIVE_UPDATE** | `src.retrospective_loop:RetrospectiveLoop._publish_update` | ★ all (fan-out) |
-| **REVIEW_UPDATE** | `src.merge_conflict_resolver:MergeConflictResolver._publish_review_status`<br>`src.phase_utils:publish_review_status`<br>`src.reviewer:ReviewRunner.fix_review_findings`<br>`src.reviewer:ReviewRunner.review` | ★ all (fan-out) |
+| **REVIEW_UPDATE** | `src.merge_conflict_resolver:MergeConflictResolver._publish_review_status`<br>`src.phase_utils:publish_review_status`<br>`src.reviewer._fixes:ReviewFixMixin.fix_review_findings`<br>`src.reviewer._runner:ReviewRunner.review` | ★ all (fan-out) |
 | **SESSION_END** | `src.orchestrator_lifecycle:OrchestratorLifecycleMixin._end_session` | ★ all (fan-out) |
 | **SESSION_START** | `src.orchestrator_lifecycle:OrchestratorLifecycleMixin._start_session` | ★ all (fan-out) |
 | **SHIPPED_WITH_KNOWN_GAP** | `src.post_merge_handler:PostMergeHandler._maybe_emit_shipped_with_known_gap` | ★ all (fan-out) |

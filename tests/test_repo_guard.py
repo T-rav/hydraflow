@@ -35,21 +35,24 @@ class TestValidateRepoFormat:
         result = _validate_repo_format("")
         assert result is None  # no exception raised for empty string
 
-    def test_no_slash_raises(self) -> None:
-        with pytest.raises(ValueError, match="expected 'owner/repo'"):
-            _validate_repo_format("just-a-name")
-
-    def test_triple_slash_raises(self) -> None:
-        with pytest.raises(ValueError, match="expected 'owner/repo'"):
-            _validate_repo_format("a/b/c")
-
-    def test_path_traversal_raises(self) -> None:
-        with pytest.raises(ValueError, match="path traversal"):
-            _validate_repo_format("../evil")
-
-    def test_dotdot_in_repo_raises(self) -> None:
-        with pytest.raises(ValueError, match="path traversal"):
-            _validate_repo_format("owner/..repo")
+    @pytest.mark.parametrize(
+        ("value", "match"),
+        [
+            ("just-a-name", "expected 'owner/repo'"),
+            ("a/b/c", "expected 'owner/repo'"),
+            ("../evil", "path traversal"),
+            ("owner/..repo", "path traversal"),
+        ],
+        ids=[
+            "no_slash_raises",
+            "triple_slash_raises",
+            "path_traversal_raises",
+            "dotdot_in_repo_raises",
+        ],
+    )
+    def test_rejects(self, value: str, match: str) -> None:
+        with pytest.raises(ValueError, match=match):
+            _validate_repo_format(value)
 
 
 # ---------------------------------------------------------------------------

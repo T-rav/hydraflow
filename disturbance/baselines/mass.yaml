@@ -38,9 +38,6 @@ classes:
   src/repo_wiki_loop.py:RepoWikiLoop:
     loc: 826
     methods: 17
-  src/reviewer.py:ReviewRunner:
-    loc: 983
-    methods: 21
   src/skill_prompt_eval_loop.py:SkillPromptEvalLoop:
     loc: 748
     methods: 25
@@ -64,8 +61,8 @@ comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC o
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: decomposed HealthMonitorLoop and AgentRunner into mixin packages\
-  \ (#11547 batch 4)"
+  \ PR. Last moved: decomposed ReviewRunner into src/reviewer/ mixin package (batch\
+  \ 5, Refs #11547)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109

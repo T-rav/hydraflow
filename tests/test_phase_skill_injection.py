@@ -157,7 +157,9 @@ class TestReviewSkillInjection:
         pr = PRInfo(number=1, issue_number=1, branch="feat/test")
         reviewer = ReviewRunner(config, event_bus)
 
-        with patch("reviewer.discover_plugin_skills", return_value=fake_skills):
+        with patch(
+            "reviewer._prompts.discover_plugin_skills", return_value=fake_skills
+        ):
             prompt, _ = await reviewer._build_review_prompt_with_stats(
                 pr, issue, diff="diff --git a/x b/x\n+foo\n"
             )
@@ -177,7 +179,7 @@ class TestReviewSkillInjection:
         pr = PRInfo(number=1, issue_number=1, branch="feat/test")
         reviewer = ReviewRunner(config, event_bus)
 
-        with patch("reviewer.discover_plugin_skills", return_value=[]):
+        with patch("reviewer._prompts.discover_plugin_skills", return_value=[]):
             prompt, _ = await reviewer._build_review_prompt_with_stats(
                 pr, issue, diff=""
             )
@@ -197,7 +199,9 @@ class TestReviewSkillInjection:
         pr = PRInfo(number=1, issue_number=1, branch="feat/test")
         reviewer = ReviewRunner(config, event_bus)
 
-        with patch("reviewer.discover_plugin_skills", return_value=_all_phase_skills()):
+        with patch(
+            "reviewer._prompts.discover_plugin_skills", return_value=_all_phase_skills()
+        ):
             prompt, _ = await reviewer._build_review_prompt_with_stats(
                 pr, issue, diff="diff --git a/x b/x\n+foo\n"
             )
