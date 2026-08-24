@@ -72,7 +72,7 @@ Guidance is folded into the prompt at every phase, not just IMPLEMENT, including
 | Discover | `src/discover_completeness.py`, `src/discover_runner.py` |
 | Shape | `src/shape_coherence.py`, `src/shape_runner.py` |
 | Plan | `src/planner.py` |
-| Review | `src/reviewer.py`, `src/review_advisor.py` |
+| Review | `src/reviewer/`, `src/review_advisor.py` |
 | Implement | `src/agent/_runner.py` |
 | HITL | `src/hitl_runner.py` (cause-template prompt) |
 

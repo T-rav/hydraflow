@@ -165,14 +165,74 @@ def discovered_builders() -> dict[str, list[str]]:
             tree = ast.parse(path.read_text(errors="replace"))
         except SyntaxError:  # pragma: no cover - src must parse
             continue
-        for node in ast.walk(tree):
-            if isinstance(
-                node, ast.FunctionDef | ast.AsyncFunctionDef
-            ) and _BUILDER_NAME.match(node.name):
+        for node in _real_functions(tree):
+            if _BUILDER_NAME.match(node.name):
                 if f"{module}.{node.name}" in EXCLUDED_BUILDERS:
                     continue
                 out.setdefault(module, []).append(node.name)
     return out
+
+
+def _real_functions(tree: ast.AST) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every function that has a body, excluding collaborator seam stubs.
+
+    A mixin package declares the sibling methods it calls as signature-only
+    stubs under ``if TYPE_CHECKING:`` (#11629 — a runtime ``...`` body is a real
+    class attribute and wins the MRO over the sibling's real implementation).
+    A plain ``ast.walk`` sees those stubs as functions, so decomposing a runner
+    that builds prompts made every builder it calls look like a SECOND,
+    unregistered builder in each mixin that names it — six phantom builders for
+    one real decomposition (#11547 batch 5).
+
+    Two independent reasons to skip a node, because either alone is leaky: it
+    sits under ``if TYPE_CHECKING:``, or its body is a bare ``...``/``pass``.
+    A stub is not a builder in any sense the registry cares about — nothing
+    renders it, and scoring it would score the signature.
+    """
+    stubs: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and _is_type_checking(node.test):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef):
+                    stubs.add(id(inner))
+    out: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if id(node) in stubs or _is_stub_body(node):
+            continue
+        out.append(node)
+    return out
+
+
+def _is_type_checking(test: ast.expr) -> bool:
+    """``if TYPE_CHECKING:`` in either the bare or ``typing.``-qualified spelling."""
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _is_stub_body(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """A body of nothing but a docstring and ``...``/``pass``."""
+    body = [
+        stmt
+        for stmt in node.body
+        if not (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Constant)
+            and isinstance(stmt.value.value, str)
+        )
+    ]
+    if not body:
+        return True
+    return len(body) == 1 and (
+        isinstance(body[0], ast.Pass)
+        or (
+            isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and body[0].value.value is Ellipsis
+        )
+    )
 
 
 def registered_modules() -> set[str]:

@@ -42,7 +42,7 @@ GRANDFATHERED_UNDECLARED: frozenset[str] = frozenset(
         "src/research_runner.py::_build_command",
         "src/review_phase/_advisors.py::_run_pre_merge_spec_check",
         "src/review_phase/_advisors.py::run",
-        "src/reviewer.py::_build_command",
+        "src/reviewer/_prompts.py::_build_command",
         "src/shape_runner.py::_build_command",
         "src/triage.py::_build_command",
         "src/ultra_review.py::build_ultra_review_command",

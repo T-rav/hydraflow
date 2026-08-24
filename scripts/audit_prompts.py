@@ -126,10 +126,10 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     # Review
     AuditTarget(
         "reviewer_build_review",
-        "reviewer.ReviewRunner._build_review_prompt_with_stats",
+        "reviewer._prompts.ReviewPromptMixin._build_review_prompt_with_stats",
         "tests/fixtures/prompts/reviewer_build_review.json",
         "Review",
-        "src/reviewer.py:676",
+        "src/reviewer/_prompts.py:216",
     ),
     # Same builder as ``reviewer_build_review`` above, but the fixture declares
     # ``config_overrides`` (``max_ci_fix_attempts=0`` +
@@ -139,24 +139,24 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     # so without a per-fixture override it could never be scored (#10872).
     AuditTarget(
         "reviewer_build_review_quality_gate",
-        "reviewer.ReviewRunner._build_review_prompt_with_stats",
+        "reviewer._prompts.ReviewPromptMixin._build_review_prompt_with_stats",
         "tests/fixtures/prompts/reviewer_build_review_quality_gate.json",
         "Review",
-        "src/reviewer.py:800",
+        "src/reviewer/_prompts.py:216",
     ),
     AuditTarget(
         "reviewer_ci_fix",
-        "reviewer.ReviewRunner._build_ci_fix_prompt",
+        "reviewer._prompts.ReviewPromptMixin._build_ci_fix_prompt",
         "tests/fixtures/prompts/reviewer_ci_fix.json",
         "Review",
-        "src/reviewer.py:473",
+        "src/reviewer/_prompts.py:216",
     ),
     AuditTarget(
         "reviewer_review_fix",
-        "reviewer.ReviewRunner._build_review_fix_prompt",
+        "reviewer._prompts.ReviewPromptMixin._build_review_fix_prompt",
         "tests/fixtures/prompts/reviewer_review_fix.json",
         "Review",
-        "src/reviewer.py:441",
+        "src/reviewer/_prompts.py:216",
     ),
     AuditTarget(
         "pr_unsticker_ci_fix",
@@ -560,7 +560,7 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     ),
     AuditTarget(
         "reviewer_precheck",
-        "reviewer.ReviewRunner._build_precheck_prompt",
+        "reviewer._prompts.ReviewPromptMixin._build_precheck_prompt",
         "tests/fixtures/prompts/reviewer_precheck.json",
         "Review",
         "src/reviewer.py",

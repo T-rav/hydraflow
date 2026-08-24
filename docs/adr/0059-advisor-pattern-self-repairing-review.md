@@ -91,7 +91,7 @@ Nine OTel metrics (all surface-tagged), wired via [ADR-0055](0055-otel-honeycomb
 
 **Negative:**
 
-- Adds ~3500 lines of code + tests across `src/review_advisor.py`, `src/review_phase/_phase.py`, `src/reviewer.py`, `src/mockworld/fakes/fake_llm.py`, and `tests/`.
+- Adds ~3500 lines of code + tests across `src/review_advisor.py`, `src/review_phase/_phase.py`, `src/reviewer/`, `src/mockworld/fakes/fake_llm.py`, and `tests/`.
 - Each advisor invocation is a Claude Code subagent dispatch — measurable latency and cost. Mitigated by per-surface tiering and conditional pre-flight (composite trigger skips trivial PRs).
 - `src/review_phase/_phase.py` grew to ~3700 lines. Phase 5+ should consider extraction (per cumulative review M2, see *When to supersede* below).
 
@@ -121,7 +121,7 @@ Nine OTel metrics (all surface-tagged), wired via [ADR-0055](0055-otel-honeycomb
 
 - `src/review_advisor.py` — schemas, env helpers, advisor classes, `_SURFACE_DEFAULTS`, telemetry.
 - `src/review_phase/_phase.py` — wiring across 5 surfaces, retry loop, runner adapter, self-modification guard.
-- `src/reviewer.py` — executor prompt threading (pre-flight plan injection).
+- `src/reviewer/` — executor prompt threading (pre-flight plan injection).
 - `src/mockworld/fakes/fake_llm.py` — `_FakeAdvisorRunner` for scenario testing.
 - `.claude/agents/hydraflow-review-advisor.md` — Opus subagent definition.
 - `tests/test_review_advisor.py` — unit tests (~100+ across 5 surfaces).

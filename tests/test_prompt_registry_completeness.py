@@ -80,9 +80,9 @@ def test_grandfathered_entries_still_have_builders() -> None:
 def test_discovery_finds_the_known_registered_builders() -> None:
     """Guards the convention itself: if discovery breaks, the ratchet is blind."""
     discovered = discovered_builders()
-    # ``agent`` is a package (#11547 batch 4); its builders live in
-    # ``agent._prompts``, which is the module discovery reports.
-    for module in ("triage", "planner", "agent._prompts", "reviewer"):
+    # ``agent`` and ``reviewer`` are packages (#11547 batches 4 and 5); their
+    # builders live in ``<pkg>._prompts``, which is the module discovery reports.
+    for module in ("triage", "planner", "agent._prompts", "reviewer._prompts"):
         assert module in discovered, (
             f"AST discovery found no prompt builder in src/{module.replace('.', '/')}.py, but "
             "PROMPT_REGISTRY registers one. The naming convention in "
