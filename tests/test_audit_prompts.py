@@ -120,24 +120,29 @@ def test_score_xml_tags_excludes_thinking_and_scratchpad():
 # ---------------------------------------------------------------------------
 
 
-def test_score_examples_na_when_output_is_free_form():
-    prompt = "Write a short summary of the issue."
-    assert score_examples(prompt) == "N/A"
-
-
-def test_score_examples_pass_when_applicable_and_example_tag_present():
-    prompt = 'Produce a JSON object with fields.\n<example>{"ready": true}</example>'
-    assert score_examples(prompt) == "Pass"
-
-
-def test_score_examples_pass_when_applicable_and_example_header_present():
-    prompt = 'Produce a JSON object with fields.\n\nExample:\n{"ready": true}'
-    assert score_examples(prompt) == "Pass"
-
-
-def test_score_examples_fail_when_applicable_but_no_example():
-    prompt = "Produce a JSON object with fields `ready` and `reasons`."
-    assert score_examples(prompt) == "Fail"
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("Write a short summary of the issue.", "N/A"),
+        (
+            'Produce a JSON object with fields.\n<example>{"ready": true}</example>',
+            "Pass",
+        ),
+        (
+            'Produce a JSON object with fields.\n\nExample:\n{"ready": true}',
+            "Pass",
+        ),
+        ("Produce a JSON object with fields `ready` and `reasons`.", "Fail"),
+    ],
+    ids=[
+        "na_when_output_is_free_form",
+        "pass_when_applicable_and_example_tag_present",
+        "pass_when_applicable_and_example_header_present",
+        "fail_when_applicable_but_no_example",
+    ],
+)
+def test_score_examples(prompt: str, expected: str):
+    assert score_examples(prompt) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -145,20 +150,23 @@ def test_score_examples_fail_when_applicable_but_no_example():
 # ---------------------------------------------------------------------------
 
 
-def test_score_output_contract_pass_on_respond_with():
-    assert score_output_contract("Respond with a single JSON object.") == "Pass"
-
-
-def test_score_output_contract_pass_on_do_not():
-    assert score_output_contract("Do not include any prose.") == "Pass"
-
-
-def test_score_output_contract_pass_on_return_only():
-    assert score_output_contract("Return only the JSON, nothing else.") == "Pass"
-
-
-def test_score_output_contract_fail_when_no_cues():
-    assert score_output_contract("Think carefully. Give your best answer.") == "Fail"
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("Respond with a single JSON object.", "Pass"),
+        ("Do not include any prose.", "Pass"),
+        ("Return only the JSON, nothing else.", "Pass"),
+        ("Think carefully. Give your best answer.", "Fail"),
+    ],
+    ids=[
+        "pass_on_respond_with",
+        "pass_on_do_not",
+        "pass_on_return_only",
+        "fail_when_no_cues",
+    ],
+)
+def test_score_output_contract(prompt: str, expected: str):
+    assert score_output_contract(prompt) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -211,20 +219,23 @@ def test_score_cot_fail_when_decision_without_scaffold():
 # ---------------------------------------------------------------------------
 
 
-def test_score_edge_cases_pass_when_if_empty_present():
-    assert score_edge_cases("Classify. If empty, return 'unknown'.") == "Pass"
-
-
-def test_score_edge_cases_pass_when_otherwise_present():
-    assert score_edge_cases("Prefer X; otherwise, Y.") == "Pass"
-
-
-def test_score_edge_cases_pass_when_fallback_present():
-    assert score_edge_cases("Use A as fallback when B is unavailable.") == "Pass"
-
-
-def test_score_edge_cases_fail_when_no_cues():
-    assert score_edge_cases("Classify the issue and return JSON.") == "Fail"
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("Classify. If empty, return 'unknown'.", "Pass"),
+        ("Prefer X; otherwise, Y.", "Pass"),
+        ("Use A as fallback when B is unavailable.", "Pass"),
+        ("Classify the issue and return JSON.", "Fail"),
+    ],
+    ids=[
+        "pass_when_if_empty_present",
+        "pass_when_otherwise_present",
+        "pass_when_fallback_present",
+        "fail_when_no_cues",
+    ],
+)
+def test_score_edge_cases(prompt: str, expected: str):
+    assert score_edge_cases(prompt) == expected
 
 
 # ---------------------------------------------------------------------------
