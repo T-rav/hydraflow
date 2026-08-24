@@ -52,6 +52,15 @@ DECISION_PATH_MODULES = (
     # reach a process is ``implement_worker_runner``, which is seam-declared and
     # has its own tests at the bottom of this file.
     "src/implement_broker.py",
+    # #11543 added a THIRD canary and split it the same way. ``review_broker``
+    # owns the Review canary's bound, the REVIEW tier binding and the
+    # independence fence that stops an implementer reviewing its own work — all
+    # pure, all on this list. This is the boundary where "no authority" is the
+    # whole point of the phase, so it is also the one where a prose claim would
+    # be worth least. The module that CAN reach a process is
+    # ``review_worker_runner``, which is seam-declared and covered by the
+    # actuator table at the bottom of this file.
+    "src/review_broker.py",
     # #11542 cut the actuator half out of ``fable_director`` when the mass
     # sensor flagged the host class. It moved with its guarantees: the mixin
     # decides which canary covers a boundary and hands an admitted batch to a
@@ -229,41 +238,96 @@ def test_the_turn_runner_owns_no_raw_spawn_primitive() -> None:
     assert not (_called_names(_tree("src/director_turn_runner.py")) & SPAWN_PRIMITIVES)
 
 
-def test_the_plan_actuator_never_mutates_a_label_or_merges() -> None:
-    # #11541 gives one module the ability to start a process. It must gain
-    # nothing else: a brokered Plan worker produces an artifact and a receipt,
-    # and the deterministic driver still owns every label and every merge.
-    assert not (_called_names(_tree("src/plan_worker_runner.py")) & FORBIDDEN_MUTATIONS)
+#: Every module that can start a brokered child, and the ``SANDBOX_SEAMS`` key
+#: it must be declared under. A TABLE rather than three hand-written copies per
+#: rule: #11543 was about to add a third set of near-identical tests, and the
+#: suite-hygiene ratchet is right that the copies are the defect — a fourth
+#: canary should be one row here, and should be unable to exist without one.
+ACTUATORS: tuple[tuple[str, str], ...] = (
+    ("src/plan_worker_runner.py", "plan_worker_runner"),
+    ("src/implement_worker_runner.py", "implement_worker_runner"),
+    ("src/review_worker_runner.py", "review_worker_runner"),
+)
 
 
-def test_the_plan_actuator_owns_no_raw_spawn_primitive() -> None:
+@pytest.mark.parametrize(("module", "_seam"), ACTUATORS)
+def test_an_actuator_never_mutates_a_label_or_merges(module: str, _seam: str) -> None:
+    # Each canary gives one module the ability to start a process. It must gain
+    # nothing else: a brokered worker produces an artifact and a receipt, and
+    # the deterministic driver still owns every label and every merge. #11542's
+    # workers WRITE and #11543's has an opinion about whether a change should
+    # land, so the rule matters more with each one, not less.
+    assert not (_called_names(_tree(module)) & FORBIDDEN_MUTATIONS)
+
+
+@pytest.mark.parametrize(("module", "_seam"), ACTUATORS)
+def test_an_actuator_owns_no_raw_spawn_primitive(module: str, _seam: str) -> None:
     # Same rule as the turn runner's, for the same reason: the sanctioned
     # ``run_lightweight_agent`` carries the CH-6 gate, the per-spawn mint and
     # revoke, the credit detection and the telemetry row. A raw spawn here
-    # would have to re-derive all four and would get one wrong.
+    # would have to re-derive all four and would get one wrong. The Implement
+    # actuator's worktree measurement is deliberately NOT caught by this — it
+    # goes through the injected ``SubprocessRunner``, which owns the reap
+    # machinery and which the sandbox replaces wholesale.
     raw = SPAWN_PRIMITIVES - {"run_lightweight_agent"}
 
-    assert not (_called_names(_tree("src/plan_worker_runner.py")) & raw)
+    assert not (_called_names(_tree(module)) & raw)
 
 
-def test_the_plan_actuator_is_seam_declared() -> None:
-    # It DOES lexically call ``run_lightweight_agent``, so the sandbox scan
+@pytest.mark.parametrize(("module", "seam"), ACTUATORS)
+def test_an_actuator_is_seam_declared(module: str, seam: str) -> None:
+    # Each DOES lexically call ``run_lightweight_agent``, so the sandbox scan
     # sees it and a declaration is required rather than optional. Without the
-    # row an air-gapped scenario could spawn a real Sonnet worker — the s51/s56
-    # wedge class.
+    # row an air-gapped scenario could spawn a real worker — the s51/s56 wedge
+    # class, one degree worse at IMPLEMENT because those roles write.
     from mockworld.sandbox_main import SANDBOX_SEAMS
 
-    assert SANDBOX_SEAMS["plan_worker_runner"] == "config_disable"
+    assert module.endswith(f"{seam}.py")
+    assert SANDBOX_SEAMS[seam] == "config_disable"
 
 
-def test_the_implement_actuator_never_mutates_a_label_or_merges() -> None:
-    # #11542 gives a second module the ability to start a process, and this one
-    # starts WRITE-capable roles. It must gain nothing else: a brokered
-    # implementer or debugger produces an artifact and a receipt, and the
-    # deterministic ImplementPhase still owns every commit and every label.
-    called = _called_names(_tree("src/implement_worker_runner.py"))
+@pytest.mark.parametrize(
+    "dial",
+    [
+        pytest.param("fable_plan_canary_repo", id="plan"),
+        pytest.param("fable_implement_canary_repo", id="implement"),
+        pytest.param("fable_review_canary_repo", id="review"),
+    ],
+)
+def test_the_sandbox_clears_every_canary_dial(dial: str, tmp_path) -> None:
+    """A ``config_disable`` row is silently aspirational unless the pin exists.
 
-    assert not (called & FORBIDDEN_MUTATIONS)
+    Asserted by **running the override**, not by matching its source text. The
+    first version grepped for ``'"fable_implement_canary_repo", ""'``, which is
+    a gate that stops seeing its subject the moment the line is reformatted,
+    moved into a helper, or rewritten to the same effect — the exact class
+    #11665 found twice (``CRITICAL_PATHS`` entries naming files that never
+    existed, and regression tests monkeypatching a module that never existed,
+    both staying green). This one calls the function and reads the dial.
+
+    The DIAL, not ``fable_*_canary_armed()``. The first behavioural draft
+    asserted the predicate and survived deleting the override outright, because
+    the sandbox also pins ``execution_runtime`` — so the runtime pin answered
+    False and the dial was never consulted. A defence behind the subject doing
+    the subject's work is the same masking #11541's mutation testing found
+    twice, and it is why this reads the one field the override actually writes.
+    """
+    from config import HydraFlowConfig
+    from mockworld.sandbox_main import _apply_sandbox_config_overrides
+    from scheduling_model import ExecutionRuntime, SchedulingModel
+
+    fields: dict[str, object] = {
+        "state_file": tmp_path / "state.json",
+        "repo": "acme/widgets",
+        "scheduling_model": SchedulingModel.ISSUE_CONTROLLER,
+        "execution_runtime": ExecutionRuntime.FABLE_DIRECTOR,
+        dial: "acme/widgets",
+    }
+    armed = HydraFlowConfig(**fields)
+
+    _apply_sandbox_config_overrides(armed)
+
+    assert getattr(armed, dial) == ""
 
 
 #: Calls that would make an actuator an owner of convergence state. ADR-0137's
@@ -317,68 +381,23 @@ WRITE_PRIMITIVES = frozenset(
         pytest.param(
             "src/implement_worker_runner.py", WRITE_PRIMITIVES, id="implement-writes"
         ),
+        pytest.param(
+            "src/review_worker_runner.py", CONVERGENCE_WRITES, id="review-convergence"
+        ),
+        # The Review actuator is on the WRITE list too, although its catalogued
+        # roles are read-only. The catalogue is a table an edit can change; this
+        # is a property of what the module can reach, and it is what stops a
+        # future "let the reviewer apply its own fix" being a one-line change
+        # nothing reddens.
+        pytest.param(
+            "src/review_worker_runner.py", WRITE_PRIMITIVES, id="review-writes"
+        ),
     ],
 )
 def test_an_actuator_reaches_no_forbidden_call(
     module: str, forbidden: frozenset[str]
 ) -> None:
     assert not (_called_names(_tree(module)) & forbidden)
-
-
-def test_the_implement_actuator_owns_no_raw_spawn_primitive() -> None:
-    # Same rule as the Plan actuator's: the sanctioned ``run_lightweight_agent``
-    # carries the CH-6 gate, the per-spawn mint and revoke, the credit
-    # detection and the telemetry row. The worktree measurement is deliberately
-    # NOT on this list — it goes through the injected ``SubprocessRunner``,
-    # which owns the reap machinery and which the sandbox replaces wholesale.
-    raw = SPAWN_PRIMITIVES - {"run_lightweight_agent"}
-
-    assert not (_called_names(_tree("src/implement_worker_runner.py")) & raw)
-
-
-def test_the_implement_actuator_is_seam_declared() -> None:
-    # It DOES lexically call ``run_lightweight_agent``, so the sandbox scan sees
-    # it and a declaration is required rather than optional. Without the row an
-    # air-gapped scenario could spawn a real write-capable worker — the s51/s56
-    # wedge class, one degree worse than #11541's because these roles write.
-    from mockworld.sandbox_main import SANDBOX_SEAMS
-
-    assert SANDBOX_SEAMS["implement_worker_runner"] == "config_disable"
-
-
-def test_the_sandbox_clears_the_implement_canary_dial(tmp_path) -> None:
-    """A ``config_disable`` row is silently aspirational unless the pin exists.
-
-    Asserted by **running the override**, not by matching its source text. The
-    first version grepped for ``'"fable_implement_canary_repo", ""'``, which is
-    a gate that stops seeing its subject the moment the line is reformatted,
-    moved into a helper, or rewritten to the same effect — the exact class
-    #11665 found twice (``CRITICAL_PATHS`` entries naming files that never
-    existed, and regression tests monkeypatching a module that never existed,
-    both staying green). This one calls the function and reads the dial.
-    """
-    from config import HydraFlowConfig
-    from mockworld.sandbox_main import _apply_sandbox_config_overrides
-    from scheduling_model import ExecutionRuntime, SchedulingModel
-
-    armed = HydraFlowConfig(
-        state_file=tmp_path / "state.json",
-        repo="acme/widgets",
-        scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
-        execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
-        fable_implement_canary_repo="acme/widgets",
-    )
-
-    _apply_sandbox_config_overrides(armed)
-
-    # The DIAL, not ``fable_implement_canary_armed()``. The first behavioural
-    # draft asserted the predicate and survived deleting the override outright,
-    # because the sandbox also pins ``execution_runtime`` — so the runtime pin
-    # answered False and the dial was never consulted. A defence behind the
-    # subject doing the subject's work is the same masking #11541's mutation
-    # testing found twice, and it is why this assertion reads the one field the
-    # override actually writes.
-    assert armed.fable_implement_canary_repo == ""
 
 
 async def test_the_implement_actuator_actually_uses_the_injected_git_runner() -> None:
@@ -441,3 +460,25 @@ async def test_the_turn_runner_actually_uses_the_injected_spawner() -> None:
     await DirectorTurnRunner(runner=spawner, cli_path="claude-double").run_turn("hi")
 
     assert spawner.commands and spawner.commands[0][0] == "claude-double"
+
+
+def test_the_review_actuator_cannot_reach_the_adjudicator() -> None:
+    """The one thing this actuator must not be able to do that its siblings
+    have no equivalent of: turn a proposal into a verdict.
+
+    ``review_authority.adjudicate`` is the only function that produces a
+    ``ReviewVerdict``, and a reviewer that could call it would own the decision
+    whatever the prose around it said. Read from the AST rather than the text,
+    so the docstrings *explaining* the rule cannot satisfy the test for it.
+    """
+    tree = _tree("src/review_worker_runner.py")
+    imported = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+
+    assert "adjudicate" not in imported
+    assert "ReviewVerdict" not in imported
+    assert "adjudicate" not in _called_names(tree)

@@ -233,6 +233,22 @@ SANDBOX_SEAMS: dict[str, str] = {
     # (tests/scenarios/test_fable_implement_canary_scenario.py) with an
     # injected spawn double and a scripted git runner.
     "implement_worker_runner": "config_disable",
+    # The Fable Review canary's actuator (#11543) — a real
+    # ``run_lightweight_agent`` (``claude``) spawn per admitted reviewer, the
+    # same wedge class as the two rows above. Declared with the actuator, which
+    # is EARLIER than it is needed: nothing constructs a ``ReviewWorkerRunner``
+    # yet, because no code produces the canonical ``ReviewEvidence`` its prompt
+    # is built from. A seam added with the actuator cannot be forgotten with the
+    # actuator, and forgetting it is how s51/s56/s57 each wedged a sandbox.
+    # The pins that will hold it once the director wires it are already here:
+    # ``_apply_sandbox_config_overrides`` forces
+    # ``execution_runtime=stage_subprocess``, under which no director exists,
+    # and clears ``fable_review_canary_repo``, so even a director that somehow
+    # existed would find every boundary outside the bound (the runner re-reads
+    # that dial per request, so the clear needs no restart). The
+    # ``SubprocessRunner`` is injected, so the sandbox's ``FakeSubprocessRunner``
+    # replaces the spawn if it ever did run.
+    "review_worker_runner": "config_disable",
 }
 
 
@@ -383,6 +399,10 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # says nothing about the other, and a sandbox that cleared only the Plan
     # dial would air-gap exactly half the actuators.
     object.__setattr__(config, "fable_implement_canary_repo", "")
+    # The Fable Review canary (#11543). Its own line for the same reason the
+    # implement dial got one: three independent dials, and a sandbox that
+    # cleared only two would air-gap exactly two thirds of the actuators.
+    object.__setattr__(config, "fable_review_canary_repo", "")
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

@@ -1908,6 +1908,58 @@ _REGISTRY[("worktree", "implement_canary_snapshot")] = WorktreeMeasurement(
 )
 
 
+# The Review canary's whole reviewer input (#11543). Built through
+# ``build_review_evidence`` rather than by constructing the model directly, so
+# the fixture crosses the SAME allow-list a production boundary does: a field
+# that stopped being canonical would silently drop out of the rendered prompt
+# here too, rather than the fixture keeping it alive after the code stopped
+# copying it.
+from review_evidence import build_review_evidence  # noqa: E402
+
+_REGISTRY[("evidence", "review_canary_change")] = build_review_evidence(
+    {
+        "issue_number": 8832,
+        "issue_title": "Retries on the upload path double-count an attempt",
+        "issue_goal": (
+            "`upload_chunk` increments `attempts` in its `except TimeoutError` "
+            "arm and again at the top of the loop, so a single timeout burns "
+            "two of the five permitted attempts. Bound the retry count "
+            "correctly and keep the failure surfaced to the caller."
+        ),
+        "acceptance_criteria": (
+            "one timeout consumes exactly one attempt",
+            "the caller still sees the original TimeoutError after the last try",
+        ),
+        "plan_summary": (
+            "Delete the increment in the except arm; the loop head already "
+            "counts. Add a regression test that asserts the attempt count "
+            "after a single timeout."
+        ),
+        "branch": "agent/issue-8832",
+        "base_sha": "4d5f2a1c9b8e7f6a3c2d1e0b9a8f7e6d5c4b3a29",
+        "head_sha": "7a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d",
+        "diff": (
+            "--- a/upload/session.py\n"
+            "+++ b/upload/session.py\n"
+            "@@ -118,9 +118,10 @@ class UploadSession:\n"
+            "         while attempts < self.max_attempts:\n"
+            "             attempts += 1\n"
+            "             try:\n"
+            "                 return await self._put_chunk(chunk)\n"
+            "             except TimeoutError:\n"
+            "-                attempts += 1\n"
+            "                 await asyncio.sleep(backoff)\n"
+        ),
+        "changed_files": ("upload/session.py", "tests/test_upload_session.py"),
+        "test_command": "make quality",
+        "test_summary": "412 passed, 1 failed in 84.2s",
+        "test_failures": (
+            "tests/test_upload_session.py::test_backoff_is_capped - assert 8.0 <= 4.0",
+        ),
+    }
+)
+
+
 def get_fake(kind: str, shape: str) -> Any:
     key = (kind, shape)
     if key not in _REGISTRY:

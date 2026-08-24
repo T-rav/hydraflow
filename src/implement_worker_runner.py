@@ -54,7 +54,6 @@ dispatch nothing.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 import uuid
@@ -82,16 +81,17 @@ from implement_broker import (
     worktree_state_from_reads,
 )
 from plan_broker import (
-    PLAN_TIER_CATALOG_REVISION,
     REFUSAL_CODES,
     PlanRouteDecision,
     PlanRouteOutcome,
-    PlanRouteReason,
-    PlanRouteRule,
-    PlanRouteSource,
     refusal_for_spawn,
 )
 from runner_utils import run_lightweight_agent
+from worker_receipts import (
+    artifact_digest,
+    estimate_worker_cost,
+    unresolved_decision,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -425,7 +425,7 @@ class ImplementWorkerRunner:
         them here keeps "a refusal names no served model" a property of one
         function rather than of every caller remembering it.
         """
-        blank = _unresolved_decision(self._route_policy_revision)
+        blank = unresolved_decision(self._route_policy_revision)
         self.last_decision_ids = dict.fromkeys(
             (request.request_id for request in requests), ""
         )
@@ -635,11 +635,11 @@ class ImplementWorkerRunner:
             requested_model=request.model_requirement,
             served_model=served,
             route_policy_revision=decision.route_policy_revision,
-            artifact_digest=_digest(text),
+            artifact_digest=artifact_digest(text),
             output_contract_ok=result.returncode == 0 and bool(text.strip()),
             started_at=started,
             finished_at=datetime.now(UTC),
-            usd_cost=_estimate_cost(served, spawn_out.get("usage")),
+            usd_cost=estimate_worker_cost(served, spawn_out.get("usage")),
         )
 
     def _refusal_after_spawn(
@@ -878,28 +878,6 @@ def _refusal(
     )
 
 
-def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:
-    """A decision record for a refusal taken before any tier was resolved.
-
-    It carries the route-policy revision because a receipt joins on that, and
-    nothing else: inventing a rule, a source or a served model for a resolution
-    that never ran would put fiction into the record the canary is read from.
-    """
-    return PlanRouteDecision(
-        decision_id="",
-        outcome=PlanRouteOutcome.REJECTED,
-        rule=PlanRouteRule.NONE_MATCHED,
-        source=PlanRouteSource.NONE,
-        reason=PlanRouteReason.NONE,
-        catalog_revision=PLAN_TIER_CATALOG_REVISION,
-        route_policy_revision=route_policy_revision,
-        worker_role="",
-        phase="",
-        requirement_kind="",
-        requirement_value="",
-    )
-
-
 def _served_model(spawn_out: dict[str, object]) -> tuple[str, bool]:
     """The model that served, and whether the CLI actually said so.
 
@@ -913,32 +891,6 @@ def _served_model(spawn_out: dict[str, object]) -> tuple[str, bool]:
     observed = str(spawn_out.get("served_model", "") or "")
     requested = str(spawn_out.get("model", "") or "")
     return (observed or requested), bool(observed)
-
-
-def _digest(text: str) -> str:
-    return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:64]}"
-
-
-def _estimate_cost(model: str, usage: object) -> float:
-    """This child's spend, from the token counts the seam actually reported.
-
-    Zero when the backend reported none, and zero for an unpriced model — never
-    a guess dressed as a measurement. ADR-0137 B5's bar reads *"100% of accepted
-    workers carry lineage, cost and effective-route receipts"*, and a fabricated
-    cost would satisfy its letter while destroying it.
-    """
-    if not isinstance(usage, dict):
-        return 0.0
-    from model_pricing import load_pricing
-
-    cost = load_pricing().estimate_cost(
-        model,
-        int(usage.get("input_tokens", 0) or 0),
-        int(usage.get("output_tokens", 0) or 0),
-        int(usage.get("cache_creation_input_tokens", 0) or 0),
-        int(usage.get("cache_read_input_tokens", 0) or 0),
-    )
-    return round(cost, 6) if cost else 0.0
 
 
 def _issue_goal(task: Task) -> str:

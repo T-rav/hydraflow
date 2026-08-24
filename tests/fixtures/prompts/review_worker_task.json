@@ -1,0 +1,9 @@
+{
+  "builder": "review_worker_runner.build_review_worker_prompt",
+  "args": {
+    "role": "reviewer"
+  },
+  "faked_deps": {
+    "evidence": "review_canary_change"
+  }
+}
