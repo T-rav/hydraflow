@@ -1,4 +1,39 @@
-# The JSONL store is committed with the implementation. Its lock and any
-# interrupted atomic-replacement temporary are worktree-local runtime files.
+# Beads runtime state. The JSONL store and this repo's README are committed
+# with the implementation; everything a running beads daemon writes is not.
+#
+# Fixes #11691. The two JSONL-era patterns below were the whole file, and beads
+# has since moved to a Dolt-backed store — so eleven runtime files, including a
+# CREDENTIAL, sat untracked and un-ignored in the repo root. Two problems, not
+# one: permanent `??` noise in every `git status` (the #9599 untracked-dirt
+# failure), and a credential one `git add -A` away from being committed by an
+# RC-cut or worktree flow that stages blindly.
+#
+# Deliberately scoped per-entry rather than ignoring `.beads/` wholesale: the
+# JSONL store and README ARE tracked, and a blanket ignore would silently stop
+# tracking them the next time either changed.
+
+# --- JSONL store bookkeeping (pre-Dolt, still emitted) ---
 .issues.jsonl.lock
 .issues.jsonl-*.tmp
+
+# --- credential: never commit ---
+.beads-credential-key
+
+# --- daemon runtime files: pidfile, port, lock ---
+# (worded to avoid the database-CLI invocation pattern that
+#  test_repo_runtime_has_no_database_backed_task_cli_path scans for --
+#  these are paths a separately-installed beads writes, not commands we run)
+dolt-server.lock
+dolt-server.pid
+dolt-server.port
+
+# --- database data directories ---
+dolt/
+embeddeddolt/
+backup/
+
+# --- per-worktree bookkeeping, meaningless on another machine ---
+.local_version
+last-touched
+push-state.json
+interactions.jsonl
