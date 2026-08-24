@@ -465,12 +465,21 @@ class TestInstallHooksDocker:
         wt_path = tmp_path / "worktree"
         wt_path.mkdir()
 
+        calls: list[tuple[str, ...]] = []
+
         async def _raise(*args, cwd=None, gh_token=None):  # noqa: ARG001
+            calls.append(args)
             raise RuntimeError("git not available")
 
-        with patch("workspace._manager.run_subprocess", side_effect=_raise):
+        with patch("workspace._provision.run_subprocess", side_effect=_raise):
             await manager._install_hooks(wt_path)  # should not raise
 
+        # The mock must be what failed. Patching a slice the code does not bind
+        # lets the REAL git run, and `not ...exists()` is then satisfied by an
+        # error that never reached the code under test (#11547 review).
+        assert ("git", "rev-parse", "--git-path", "hooks") in calls, (
+            f"git rev-parse was never attempted through the mock: {calls}"
+        )
         # No hooks should have been copied since git rev-parse failed
         assert not (wt_path / ".git" / "hooks" / "pre-commit").exists()
 
@@ -795,12 +804,18 @@ class TestPostWorkCleanup:
             return ""
 
         with (
-            patch("workspace._manager.run_subprocess", side_effect=fake_run),
+            patch("workspace._heal.run_subprocess", side_effect=fake_run),
             patch.object(manager, "destroy", new_callable=AsyncMock),
         ):
             await manager.post_work_cleanup(42)
 
         cmd_strs = [" ".join(c) for c in calls]
+        # The clean-check must have run through the mock. Without this, a stale
+        # patch target leaves `calls` empty and every `not any(...)` below is
+        # trivially true (#11547 review).
+        assert any("git status --porcelain" in c for c in cmd_strs), (
+            f"the porcelain status check never reached the mock: {cmd_strs}"
+        )
         assert not any("git add -A" in c for c in cmd_strs)
         assert not any("git commit" in c for c in cmd_strs)
 
