@@ -261,6 +261,19 @@ class RejectionReason(StrEnum):
     # Added by #11543, when REVIEW became the boundary independence binds at.
     # Additive member only; no field changed, so the schema version is unmoved.
 
+    OUTSIDE_CANARY_BOUND = "outside_canary_bound"
+    """This boundary is not inside the canary the operator armed.
+
+    Three operator situations reach it — the dial is empty, the dial names
+    another repository, or the phase is not the canary's — and they share a
+    code because they share a remedy: *arm the dial for this repository and
+    phase.* What they must NOT share is :attr:`ROLE_PHASE_FORBIDDEN`, which
+    says the catalogue forbids this role here. That was the code minted for all
+    three, and it was false for two of them: an unarmed dial says nothing about
+    the role, and B5's bar is read from these counters, where "one code cannot
+    say two things" is the rule every neighbouring docstring states.
+    """
+
     LINEAGE_UNKNOWN = "lineage_unknown"
     """A role that must be independent of the implementer cannot say where it
     came from.

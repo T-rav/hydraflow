@@ -395,7 +395,8 @@ def test_no_independence_fenced_role_can_write() -> None:
             assert entry.write_scope is not WriteScope.ISSUE_WORKTREE, role
 
 
-def test_a_request_for_a_fenced_role_must_carry_its_lineage() -> None:
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_request_for_a_fenced_role_must_carry_its_lineage(blank: str) -> None:
     """Refused at CONSTRUCTION, so a director's reply is discarded as malformed
     before it can reach a route (#11543).
 
@@ -404,8 +405,17 @@ def test_a_request_for_a_fenced_role_must_carry_its_lineage() -> None:
     only ever refuse a request where the party being fenced volunteered the
     value that refused it.
     """
+    # The None cell is the helper's own default; the blank-string cells are
+    # parametrised. THREE tables describe this rule — this constructor, the
+    # admission backstop, and review_broker — and this one is the PRIMARY
+    # defence the other two's docstrings lean on ("refuses to construct the
+    # shape"). It carried only the None cell, so dropping `.strip()` here, or
+    # narrowing to `is None`, left the whole suite green while a director
+    # emitting "   " built a valid request.
     with pytest.raises(ValidationError, match="requesting_spawn_id"):
         _request(worker_role=WorkerRole.REVIEWER)
+    with pytest.raises(ValidationError, match="requesting_spawn_id"):
+        _request(worker_role=WorkerRole.REVIEWER, requesting_spawn_id=blank)
 
 
 def test_an_unfenced_role_still_needs_no_lineage() -> None:

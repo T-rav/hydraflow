@@ -433,7 +433,7 @@ class ReviewWorkerRunner:
                 evidence.issue_number,
                 request.worker_role.value,
             )
-            return _refusal(request, RejectionReason.ROLE_PHASE_FORBIDDEN, blank)
+            return _refusal(request, RejectionReason.OUTSIDE_CANARY_BOUND, blank)
 
         # 2. Independence, asked of the module that owns the rule. Before the
         #    tier is resolved, because no route can make a self-review
@@ -446,12 +446,28 @@ class ReviewWorkerRunner:
         )
         if self_review is not None:
             self.last_decision_ids[request.request_id] = ""
-            logger.info(
-                "review_worker_runner: #%d %s would review its own work (spawn %s)",
-                evidence.issue_number,
-                request.worker_role.value,
-                request.requesting_spawn_id,
-            )
+            # The message follows the REASON, because the fence now returns two
+            # of them and they say different things to an operator (#11543).
+            # A single "would review its own work" line was accurate while
+            # SELF_REVIEW_FORBIDDEN was the only outcome; against
+            # LINEAGE_UNKNOWN it asserted a fact nothing established, and
+            # rendered "(spawn None)" as the evidence for it. That is the same
+            # dishonest-reason-code defect this phase already fixed once in
+            # `adjudicate`, arriving here through a new enum member.
+            if self_review is RejectionReason.LINEAGE_UNKNOWN:
+                logger.info(
+                    "review_worker_runner: #%d %s states no lineage, so its "
+                    "independence cannot be checked",
+                    evidence.issue_number,
+                    request.worker_role.value,
+                )
+            else:
+                logger.info(
+                    "review_worker_runner: #%d %s would review its own work (spawn %s)",
+                    evidence.issue_number,
+                    request.worker_role.value,
+                    request.requesting_spawn_id,
+                )
             return _refusal(request, self_review, blank)
 
         decision = resolve_review_model(

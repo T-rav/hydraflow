@@ -413,9 +413,15 @@ class TestTheAllowListGuardsWhatIsRENDERED:
 
         Adds shows a reviewer something extra. **Drops hides the change from
         the reviewer**: excluding ``diff`` renders a review of a change with no
-        change in it. Reachable with an ordinary field override, no serializer
-        trickery. Matching on ``drops ['diff']`` rather than the generic
-        message is what makes this kill that mutation.
+        change in it. Reachable with a stock ``Field`` keyword — no custom
+        serializer, though ``exclude=True`` is itself a serialization directive.
+
+        The ``drops ['diff']`` pattern is load-bearing, but not for the
+        mutation an earlier draft of this docstring named: the adds-only
+        weakening raises nothing at all, so ``pytest.raises`` kills it whatever
+        the pattern says. What the pattern actually catches is the message's
+        two halves being swapped — ``extra``/``missing`` transposed — which a
+        generic ``match="canonical field set"`` lets through.
         """
 
         class ViaExcluded(ReviewEvidence):
@@ -423,6 +429,30 @@ class TestTheAllowListGuardsWhatIsRENDERED:
 
         with pytest.raises(ValueError, match=r"drops \['diff'\]"):
             ViaExcluded(issue_number=1).as_payload()
+
+    def test_a_subclass_cannot_swap_a_canonical_field_for_a_private_one(self) -> None:
+        """Both failure modes at once — and the only one that survived ``!=``.
+
+        Pass 4 pinned *adds*; the sibling above pins *drops*. Nobody pinned the
+        case that is both, and it is the one a real subclass produces: you
+        exclude a field **because** you replaced it. Every existing subject
+        changes the payload's cardinality, so weakening the guard to
+        ``len(rendered) != len(CANONICAL_FIELDS)`` kept every test green while
+        this rendered a reviewer a change with no diff in it *and* the
+        implementer's transcript to read instead.
+
+        Asserting on both halves of the message is what makes cardinality
+        insufficient: a swap is exactly the shape a length check cannot see.
+        """
+
+        class Swap(ReviewEvidence):
+            model_config = ConfigDict(extra="allow", frozen=True)
+            diff: str = Field(default="", exclude=True)
+
+        with pytest.raises(ValueError, match=r"adds \['implementer_transcript'\]"):
+            Swap(issue_number=1, implementer_transcript="smuggled").as_payload()
+        with pytest.raises(ValueError, match=r"drops \['diff'\]"):
+            Swap(issue_number=1, implementer_transcript="smuggled").as_payload()
 
     def test_the_ordinary_payload_still_renders(self) -> None:
         """Non-vacuity: the guard must not refuse the thing it exists to pass."""

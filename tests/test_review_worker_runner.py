@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -253,7 +254,10 @@ class TestAnUnarmedRepositoryDispatchesNothing:
 
         assert spawn.calls == []
         assert receipts[0].status is ReceiptStatus.REJECTED
-        assert receipts[0].reason_code is RejectionReason.ROLE_PHASE_FORBIDDEN
+        # An unarmed dial says nothing about the ROLE (#11543). This asserted
+        # ROLE_PHASE_FORBIDDEN, which claims the catalogue forbids a reviewer
+        # at REVIEW — it does not — and pinned that claim as correct.
+        assert receipts[0].reason_code is RejectionReason.OUTSIDE_CANARY_BOUND
 
     @pytest.mark.asyncio
     async def test_another_repositorys_dial_arms_nothing_here(
@@ -265,7 +269,7 @@ class TestAnUnarmedRepositoryDispatchesNothing:
         receipts = await _dispatch(runner, [_request()])
 
         assert spawn.calls == []
-        assert receipts[0].reason_code is RejectionReason.ROLE_PHASE_FORBIDDEN
+        assert receipts[0].reason_code is RejectionReason.OUTSIDE_CANARY_BOUND
 
     @pytest.mark.asyncio
     async def test_a_non_review_boundary_dispatches_nothing(
@@ -284,7 +288,11 @@ class TestAnUnarmedRepositoryDispatchesNothing:
         )
 
         assert spawn.calls == []
-        assert receipts[0].reason_code is RejectionReason.ROLE_PHASE_FORBIDDEN
+        # The canary's phase clause, not the catalogue's. This read
+        # ROLE_PHASE_FORBIDDEN, which is accurate here only by accident — the
+        # runner never looks at the role, so the same code was minted for a
+        # debugger at IMPLEMENT, which the catalogue plainly allows (#11543).
+        assert receipts[0].reason_code is RejectionReason.OUTSIDE_CANARY_BOUND
 
     @pytest.mark.asyncio
     async def test_clearing_the_dial_mid_batch_stops_the_next_child(
@@ -311,7 +319,9 @@ class TestAnUnarmedRepositoryDispatchesNothing:
 
         assert len(spawn.calls) == 1
         assert receipts[0].status is ReceiptStatus.ACCEPTED
-        assert receipts[1].reason_code is RejectionReason.ROLE_PHASE_FORBIDDEN
+        # Cleared mid-batch: the second child is outside the bound, which is
+        # not a statement about its role (#11543).
+        assert receipts[1].reason_code is RejectionReason.OUTSIDE_CANARY_BOUND
 
 
 class TestAReviewerCannotReviewItsOwnWork:
@@ -329,6 +339,45 @@ class TestAReviewerCannotReviewItsOwnWork:
         assert spawn.calls == []
         assert receipts[0].reason_code is RejectionReason.SELF_REVIEW_FORBIDDEN
         assert receipts[0].status is ReceiptStatus.REJECTED
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_log_follows_the_reason_not_the_variable_name(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Two reasons reach this arm now, and they say different things.
+
+        The fence returns ``SELF_REVIEW_FORBIDDEN`` *or* ``LINEAGE_UNKNOWN``
+        (#11543). One log line served both, so a request that merely failed to
+        state its lineage was reported as "would review its own work (spawn
+        None)" — asserting a fact nothing established and then rendering
+        ``None`` as the evidence for it. Same dishonest-reason-code defect this
+        phase already fixed in ``adjudicate``, arriving through a new enum
+        member. Nothing pinned the message, so nothing reddened.
+        """
+        runner = _runner(tmp_path, SpawnRecorder())
+        blank = _request().model_copy(update={"requesting_spawn_id": "   "})
+
+        with caplog.at_level(logging.INFO):
+            receipts = await _dispatch(runner, [blank], implementers={"spawn-abc"})
+
+        assert receipts[0].reason_code is RejectionReason.LINEAGE_UNKNOWN
+        assert "states no lineage" in caplog.text
+        assert "would review its own work" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_the_self_review_log_still_says_self_review(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Non-vacuity: the other branch must keep its own accurate wording."""
+        runner = _runner(tmp_path, SpawnRecorder())
+
+        with caplog.at_level(logging.INFO):
+            await _dispatch(
+                runner, [_request(spawn_id="spawn-abc")], implementers={"spawn-abc"}
+            )
+
+        assert "would review its own work" in caplog.text
+        assert "states no lineage" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_a_fresh_spawn_is_admitted(self, tmp_path: Path) -> None:
