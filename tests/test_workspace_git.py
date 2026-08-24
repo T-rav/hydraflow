@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from tests.helpers import make_proc
+from tests.workspace_patch import patch_workspace_run_subprocess
 from workspace import WorkspaceManager
 
 # ---------------------------------------------------------------------------
@@ -205,7 +206,7 @@ class TestMergeMain:
             return ""
 
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run_subprocess),
+            patch_workspace_run_subprocess(side_effect=fake_run_subprocess),
             patch("asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
         ):
             result = await manager.merge_main(tmp_path, "agent/issue-7")

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.helpers import ConfigFactory, make_proc
+from tests.workspace_patch import patch_workspace_run_subprocess
 from workspace import WorkspaceManager
 
 # ---------------------------------------------------------------------------
@@ -304,7 +305,7 @@ class TestCreate:
             return ""
 
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run_subprocess),
+            patch_workspace_run_subprocess(side_effect=fake_run_subprocess),
             patch.object(manager, "_remote_branch_exists", return_value=False),
             patch.object(manager, "_setup_env"),
             patch.object(manager, "_create_venv", new_callable=AsyncMock),
