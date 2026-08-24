@@ -266,8 +266,11 @@ class RejectionReason(StrEnum):
 
     Three operator situations reach it — the dial is empty, the dial names
     another repository, or the phase is not the canary's — and they share a
-    code because they share a remedy: *arm the dial for this repository and
-    phase.* What they must NOT share is :attr:`ROLE_PHASE_FORBIDDEN`, which
+    code because they share a *shape*: this boundary is outside what the
+    operator armed. The remedy differs by situation, and only two of the three
+    are a dial (`CANARY_PHASE` is a module constant, not a setting, so the
+    third is answered by dispatching at REVIEW rather than by arming
+    anything). What they must NOT share is :attr:`ROLE_PHASE_FORBIDDEN`, which
     says the catalogue forbids this role here. That was the code minted for all
     three, and it was false for two of them: an unarmed dial says nothing about
     the role, and B5's bar is read from these counters, where "one code cannot
@@ -847,7 +850,12 @@ def admit_dispatch(
     fenced = entry.independent_of_implementer
     stated_lineage = (request.requesting_spawn_id or "").strip()
     lineage_unknown = fenced and not stated_lineage
-    self_review = fenced and stated_lineage in implementer_spawn_ids
+    # Both operands normalised. Stripping only the request's meant two
+    # byte-identical padded ids compared unequal and the fence admitted an
+    # implementer reviewing itself (#11543).
+    self_review = fenced and stated_lineage in {
+        (spawn or "").strip() for spawn in implementer_spawn_ids
+    }
     # Writer-lease checks apply only to roles that can actually take the lease.
     # A read-only explorer must not be blocked because the lease has not been
     # re-minted at the current epoch, and a lease lagging its driver's epoch is

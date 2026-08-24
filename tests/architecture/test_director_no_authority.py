@@ -61,6 +61,16 @@ DECISION_PATH_MODULES = (
     # ``review_worker_runner``, which is seam-declared and covered by the
     # actuator table at the bottom of this file.
     "src/review_broker.py",
+    # The other two P5 modules make the SAME claim in prose and were not on
+    # this list, so nothing enforced it: ``review_evidence`` says "Pure by
+    # construction: no I/O, no clock, no spawn" and ``review_authority`` says
+    # "Merge authority is not modelled here at all". ``adjudicate`` is the one
+    # function in the repository that produces a ``ReviewVerdict``, so a
+    # ``merge_pr`` added beside it was exactly the edit this guard exists to
+    # redden — and would not have. Three modules claimed the property; one was
+    # pinned (#11543).
+    "src/review_evidence.py",
+    "src/review_authority.py",
     # #11542 cut the actuator half out of ``fable_director`` when the mass
     # sensor flagged the host class. It moved with its guarantees: the mixin
     # decides which canary covers a boundary and hands an admitted batch to a

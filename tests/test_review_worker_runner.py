@@ -378,6 +378,10 @@ class TestAReviewerCannotReviewItsOwnWork:
 
         assert "would review its own work" in caplog.text
         assert "states no lineage" not in caplog.text
+        # The runner's own comment calls the spawn id "the evidence for it",
+        # and deleting `(spawn %s)` changed no test. An accusation without the
+        # id it rests on is not one an operator can check.
+        assert "spawn-abc" in caplog.text
 
     @pytest.mark.asyncio
     async def test_a_fresh_spawn_is_admitted(self, tmp_path: Path) -> None:

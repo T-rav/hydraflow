@@ -171,7 +171,10 @@ def test_a_subclass_cannot_render_a_wider_payload() -> None:
 
     ``as_payload`` renders ``model_dump()``'s keys, so a subclass declaring one
     more renders one more — the one way an implementer-private field could ride
-    the allow-list into a reviewer's prompt with every existing test green.
+    the allow-list into the rendered PAYLOAD with every existing test green.
+    Not into the prompt: ``build_review_worker_prompt`` indexes payload by
+    canonical key name, a second independent allow-list. Saying "prompt" named
+    a subject this guard does not protect.
     (Said as *keys*, not as ``model_fields``: they are different sets, and the
     guard was briefly written against the narrower one.)
     """

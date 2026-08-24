@@ -182,6 +182,46 @@ def test_a_forgetful_caller_fails_loudly_rather_than_adjudicating_fail_open() ->
             adjudicate(_CLEAN, **kwargs)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        pytest.param(
+            {"reviewer_independent": False, "hitl_required": True, "ci_green": False},
+            AdjudicationReason.NOT_INDEPENDENT,
+            id="independence-outranks-hitl",
+        ),
+        pytest.param(
+            {"hitl_required": True, "ci_green": False},
+            AdjudicationReason.HITL_REQUIRED,
+            id="hitl-outranks-ci",
+        ),
+        pytest.param(
+            {"ci_green": False},
+            AdjudicationReason.CI_NOT_GREEN,
+            id="ci-outranks-findings",
+        ),
+    ],
+)
+def test_every_adjacency_in_the_strictness_order_is_pinned(
+    kwargs: dict[str, bool], expected: AdjudicationReason
+) -> None:
+    """Five checks make FOUR adjacencies; one was pinned.
+
+    Every deterministic block returns ``REQUEST_CHANGES``, so swapping two of
+    them moves only the REASON — which is the product, per this module's own
+    "one code cannot say two things". Swapping the ``hitl_required`` and
+    ``not ci_green`` blocks changed no test. Each case below trips its rule
+    AND every rule below it, so it can only pass if the order holds.
+
+    The snapshot adjacency is covered by
+    ``test_a_review_of_a_moved_snapshot_is_not_a_review_of_what_would_merge``,
+    which supplies a stale pair alongside a blocking finding.
+    """
+    _, reason = adjudicate(_BLOCKING, **_DETERMINISTIC | kwargs)
+
+    assert reason is expected
+
+
 def test_the_binding_constraint_is_the_reason_reported() -> None:
     """Strict-first, so the reason is why it was held, not the last check run."""
     _, reason = adjudicate(

@@ -207,6 +207,11 @@ def reviewer_independence_refusal(
     stated = (requesting_spawn_id or "").strip()
     if not stated:
         return RejectionReason.LINEAGE_UNKNOWN
-    if stated in set(implementer_spawn_ids):
+    # BOTH operands, not just the request's. #11543's first pass at this
+    # stripped one side and called it "one vocabulary, one normalisation",
+    # which made a padded id on the KNOWN-IMPLEMENTER side unmatchable — and,
+    # worst of all, two byte-identical padded strings compared unequal, so the
+    # fence admitted a reviewer that was literally the implementer.
+    if stated in {(s or "").strip() for s in implementer_spawn_ids}:
         return RejectionReason.SELF_REVIEW_FORBIDDEN
     return None
