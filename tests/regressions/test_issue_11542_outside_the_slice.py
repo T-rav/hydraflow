@@ -948,20 +948,54 @@ class TestTheImplementersLineageReachesTheBroker:
             in _rows(director.shadow_log)[-1]["rejection_reasons"]
         )
 
-    async def test_a_reviewer_from_no_lineage_is_admitted(self, tmp_path: Path) -> None:
+    async def test_a_reviewer_from_a_fresh_lineage_is_admitted(
+        self, tmp_path: Path
+    ) -> None:
         # Non-vacuity: without this, a reviewer refused for any other reason
         # would satisfy the test above.
+        #
+        # The lineage is a DIFFERENT spawn, not an absent one. This test used to
+        # send no lineage at all and assert the absence of
+        # ``self_review_forbidden``; #11543 made an absent lineage refuse, and
+        # the malformed command that now results carries no rejection reasons —
+        # so the old assertion would have kept passing while proving nothing
+        # about admission. Which is the whole failure class this file documents.
         broker = RecordingBroker()
         director = _director_with(tmp_path, broker=broker, canary=CANARY_REPO)
         await _observe(director)
 
+        director._runner = ScriptedTurn(  # noqa: SLF001
+            role="reviewer", family="claude-opus", requesting_spawn_id="spawn-director"
+        )
+        await _observe(director, phase=DriverPhase.REVIEW, state="REVIEW")
+
+        row = _rows(director.shadow_log)[-1]
+        assert row["rejection_reasons"] == []
+        assert row["command_kind"] == "dispatch_workers"
+
+    async def test_a_reviewer_with_no_lineage_never_reaches_the_broker(
+        self, tmp_path: Path
+    ) -> None:
+        """#11543: an unstated lineage is refused at the contract boundary.
+
+        ``requesting_spawn_id`` was optional and nothing in ``src/`` wrote it,
+        so the self-review fence could only ever refuse a request in which the
+        director volunteered the value that refused it. A reviewer that cannot
+        say where it came from is now discarded as malformed before a route is
+        resolved — earlier and cheaper than an admission refusal.
+        """
+        broker = RecordingBroker()
+        director = _director_with(tmp_path, broker=broker, canary=CANARY_REPO)
+        await _observe(director)
+        judged_before = len(broker.implementer_spawn_ids)
+
         director._runner = ScriptedTurn(role="reviewer", family="claude-opus")  # noqa: SLF001
         await _observe(director, phase=DriverPhase.REVIEW, state="REVIEW")
 
-        assert (
-            "self_review_forbidden"
-            not in _rows(director.shadow_log)[-1]["rejection_reasons"]
-        )
+        row = _rows(director.shadow_log)[-1]
+        assert row["command_kind"] is None
+        assert row["turn_failure"] == "malformed_output"
+        assert len(broker.implementer_spawn_ids) == judged_before
 
 
 class TestAnUnmeasurableWorktreeRefusesAtTheDirector:

@@ -86,13 +86,28 @@ class ScriptedTurn:
     IMPLEMENT a ``planner`` is refused by the capsule's role allow-list anyway,
     so a planner-only script can never tell "the bound excluded this phase"
     from "the catalog excluded this role".
+
+    ``requesting_spawn_id`` is a parameter for the same reason, one defence
+    later (#11543). An independence-fenced role — architect, test-adequacy,
+    reviewer — whose request states no lineage is now refused by
+    ``WorkerDispatchRequest``'s own validator, so ``_parse_command`` discards
+    the whole command and the boundary is never offered to the canary at all.
+    A script that omits it therefore reproduces this file's own opening
+    lesson: an assertion that nothing dispatched, passing because the request
+    never became a command, with the clause under test never consulted.
     """
 
-    def __init__(self, role: str = "planner", family: str = "claude-sonnet") -> None:
+    def __init__(
+        self,
+        role: str = "planner",
+        family: str = "claude-sonnet",
+        requesting_spawn_id: str | None = None,
+    ) -> None:
         self.cli_version = "2.1.239"
         self.turns = 0
         self._role = role
         self._family = family
+        self._requesting_spawn_id = requesting_spawn_id
 
     async def preflight(self) -> str:
         return self.cli_version
@@ -127,6 +142,7 @@ class ScriptedTurn:
                     "reason": "the plan needs drafting",
                     "expected_route_policy_revision": ROUTE_REVISION,
                     "idempotency_key": f"key-{lease['issue_number']}",
+                    "requesting_spawn_id": self._requesting_spawn_id,
                 }
             ],
         }
@@ -371,16 +387,33 @@ class TestOutsideTheBoundNothingMoves:
         assert calls == []
 
     @pytest.mark.parametrize(
-        ("phase", "role", "family"),
+        ("phase", "role", "family", "spawn"),
         [
             pytest.param(
-                DriverPhase.IMPLEMENT, "explorer", "claude-sonnet", id="implement"
+                DriverPhase.IMPLEMENT, "explorer", "claude-sonnet", None, id="implement"
             ),
-            pytest.param(DriverPhase.REVIEW, "architect", "claude-opus", id="review"),
+            pytest.param(
+                DriverPhase.REVIEW,
+                "architect",
+                "claude-opus",
+                # An architect is independence-fenced (#11543), so without a
+                # stated lineage its request is malformed and never becomes a
+                # command — which would satisfy this test without the clause
+                # under test ever running. Mutation-checked: with the lineage
+                # absent, deleting `plan_canary_covers`'s phase clause leaves
+                # this case green.
+                "spawn-director",
+                id="review",
+            ),
         ],
     )
     async def test_a_later_stage_is_not_even_offered_to_the_canary(
-        self, tmp_path: Path, phase: DriverPhase, role: str, family: str
+        self,
+        tmp_path: Path,
+        phase: DriverPhase,
+        role: str,
+        family: str,
+        spawn: str | None,
     ) -> None:
         """The phase clause itself, isolated from the defences behind it.
 
@@ -406,11 +439,16 @@ class TestOutsideTheBoundNothingMoves:
             canary=CANARY_REPO,
             wired=True,
             phase=phase,
-            turn=ScriptedTurn(role=role, family=family),
+            turn=ScriptedTurn(role=role, family=family, requesting_spawn_id=spawn),
         )
 
         assert calls == []
         assert [row["dispatched"] for row in rows] == [[]]
+        # The turn produced a real command that was judged and found outside the
+        # bound — not a command that never parsed. Without this, a request the
+        # contract refuses to construct satisfies the two assertions above with
+        # the phase clause deleted, which is this file's own opening lesson.
+        assert [row["command_kind"] for row in rows] == ["dispatch_workers"]
 
     async def test_clearing_the_dial_mid_run_stops_the_next_boundary(
         self, tmp_path: Path

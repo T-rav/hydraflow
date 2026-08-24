@@ -63,6 +63,10 @@ def _request(
         reason="because",
         expected_route_policy_revision=ROUTE_REVISION,
         idempotency_key=f"key-{role.value}",
+        # The architect is independence-fenced, so its request must state where
+        # it came from (#11543). A director-originated request names no
+        # implementer spawn, which is the ordinary case at PLAN.
+        requesting_spawn_id="spawn-director",
     )
 
 

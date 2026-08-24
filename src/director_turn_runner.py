@@ -467,6 +467,11 @@ Rules for a dispatch:
   verbatim, and `expected_route_policy_revision` from its
   `route_policy_revision`. A request carrying different values is fenced and
   refused.
+- A role that judges someone else's work — `reviewer`, `architect`,
+  `test_adequacy` — must also carry `requesting_spawn_id`, naming the spawn the
+  request comes from, or `"director"` when it is your own. A request for one of
+  those roles without it is refused as malformed, because a judge that cannot
+  say where it came from cannot be checked against who did the work.
 
 Edge cases, and what to do about each:
 
