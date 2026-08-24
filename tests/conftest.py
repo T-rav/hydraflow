@@ -436,10 +436,14 @@ def _workspace_patches_must_be_consulted(request: pytest.FixtureRequest):
 
     with PatchConsultationRecorder() as recorder:
         yield
-    report = getattr(request.node, "rep_call", None)
-    if report is not None and not report.passed:
-        # The test already failed for its own reason — don't bury it.
-        return
+    # The test already failed/skipped for its own reason — don't bury it under a
+    # teardown error. Setup counts too: a fixture ordered after this one can fail
+    # or skip before the test body ever runs, and a patch installed in between
+    # would then be unconsulted for a reason that is not this guard's business.
+    for phase in ("rep_setup", "rep_call"):
+        report = getattr(request.node, phase, None)
+        if report is not None and not report.passed:
+            return
     if recorder.violations:
         pytest.fail(
             "Unconsulted patch target(s): "
