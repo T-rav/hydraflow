@@ -174,6 +174,13 @@ _REFUSAL_CODES = REFUSAL_CODES
 #: ``review_evidence.CANONICAL_FIELDS`` and for the same reason: a deny-list of
 #: forbidden keys is fail-open the moment somebody invents a new one, and the
 #: key an untrusted reviewer would invent is precisely the one nobody listed.
+#:
+#: Scope, stated exactly (#11543): ``_FINDING_KEYS`` filters, and every read of
+#: a finding goes through the filtered dict. ``_PROPOSAL_KEYS`` does NOT filter
+#: anything — the proposal is assembled by naming its four fields explicitly,
+#: which is a second, independent allow-list. It is kept as the written record
+#: of what a proposal may carry, and deleting it changes no behaviour. Saying
+#: otherwise would describe a check that is not there.
 #: Nothing outside this set is read, so nothing outside it can arrive.
 _PROPOSAL_KEYS: frozenset[str] = frozenset({"recommended", "summary", "findings"})
 _FINDING_KEYS: frozenset[str] = frozenset({"summary", "file", "line", "blocking"})
@@ -920,11 +927,17 @@ def parse_review_proposal(text: str) -> ReviewProposal | None:
     judgement with no finding behind it. A caller that gets ``None`` has a
     receipt saying the output contract failed, which is the truth.
 
-    Only :data:`_PROPOSAL_KEYS` and :data:`_FINDING_KEYS` are read. A reply
-    carrying, say, a ``verdict`` key is not rejected for it and not warned
-    about — the key is simply never looked at, so it has no path to authority.
-    That is ``review_evidence``'s allow-list argument applied to the other
-    direction of the boundary.
+    Only the keys :data:`_PROPOSAL_KEYS` and :data:`_FINDING_KEYS` name are
+    read. A reply carrying, say, a ``verdict`` key is not rejected for it and
+    not warned about — the key is simply never looked at, so it has no path to
+    authority. That is ``review_evidence``'s allow-list argument applied to the
+    other direction of the boundary.
+
+    Which constant *enforces* that differs, and the difference is worth
+    knowing before editing either: findings are filtered through
+    ``_FINDING_KEYS`` and read only from the filtered dict, while a proposal is
+    assembled by naming its fields explicitly and ``_PROPOSAL_KEYS`` filters
+    nothing. Both close the boundary; only one does it with a set.
 
     Coercion is deliberately asymmetric, and the asymmetry is the safety
     property. Prose is trimmed to fit, and an unusable ``line`` becomes
@@ -978,7 +991,16 @@ def _finding(entry: object) -> ReviewFinding:
         # is wrong. Kept, and kept blocking: silently dropping it would be this
         # parser hiding a finding on a formatting technicality.
         return ReviewFinding(summary=_summary_or_placeholder(entry))
+    # `picked` is the allow-list doing real work: every read below goes
+    # through it, never through `entry`. An earlier shape read all four
+    # members back out by name, which made the filter unobservable —
+    # `dict(entry)` passed every test — so the constant documented a guard the
+    # `.get()` calls were actually providing. Same defect as `as_payload`
+    # comparing `model_fields` while claiming to guard the rendered payload
+    # (#11543): the guard's stated subject was not the thing doing the work.
     picked: dict[str, Any] = {k: v for k, v in entry.items() if k in _FINDING_KEYS}
+    if set(picked) - _FINDING_KEYS:  # pragma: no cover - defensive, by construction
+        raise AssertionError("the finding allow-list let an unlisted key through")
     line = picked.get("line")
     return ReviewFinding(
         summary=_summary_or_placeholder(picked.get("summary")),

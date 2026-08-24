@@ -58,6 +58,7 @@ from review_broker import (
     reviewer_independence_refusal,
 )
 from review_evidence import CANONICAL_FIELDS, ReviewEvidence, build_review_evidence
+from review_worker_runner import MAX_DIFF_CHARS, _bounded_diff, _finding
 from scheduling_model import ExecutionRuntime, SchedulingModel
 
 _PERMISSIVE = {"ci_green": True, "hitl_required": False, "reviewer_independent": True}
@@ -995,3 +996,58 @@ class TestTheTwoLineageArmsAreMutuallyExclusive:
         )
 
         assert reason is RejectionReason.LINEAGE_UNKNOWN
+
+
+class TestTheFindingAllowListActuallyFilters:
+    """``_FINDING_KEYS`` was decorative: replacing it with ``dict(entry)``
+    survived, because all four members were read back out by name. The
+    constant documented a guard the ``.get()`` calls were providing — the
+    ``as_payload`` defect one module over."""
+
+    def test_an_unlisted_key_cannot_reach_a_finding(self) -> None:
+        finding = _finding(
+            {
+                "summary": "real finding",
+                "blocking": True,
+                "verdict": "approve",
+                "merge": True,
+            }
+        )
+
+        assert finding.summary == "real finding"
+        assert not hasattr(finding, "verdict")
+        assert set(type(finding).model_fields) == {
+            "summary",
+            "file",
+            "line",
+            "blocking",
+        }
+
+    def test_the_listed_keys_still_arrive(self) -> None:
+        """Non-vacuity: a filter that dropped everything would pass the above."""
+        finding = _finding(
+            {"summary": "s", "file": "src/x.py", "line": 12, "blocking": False}
+        )
+
+        assert (finding.summary, finding.file, finding.line, finding.blocking) == (
+            "s",
+            "src/x.py",
+            12,
+            False,
+        )
+
+
+class TestTheAnnouncedDiffCeilingIsExact:
+    """The third announced ceiling, left out of the ceiling test that exists
+    for exactly this class: ``len(diff) <= MAX_DIFF_CHARS`` -> ``<`` survived."""
+
+    def test_a_diff_exactly_at_the_ceiling_is_not_truncated(self) -> None:
+        exact = "d" * MAX_DIFF_CHARS
+
+        assert _bounded_diff(exact) == exact
+
+    def test_one_character_over_is_announced(self) -> None:
+        over = _bounded_diff("d" * (MAX_DIFF_CHARS + 1))
+
+        assert over != "d" * (MAX_DIFF_CHARS + 1)
+        assert len(over) > MAX_DIFF_CHARS or "truncat" in over.lower()
