@@ -25,7 +25,7 @@ logger = logging.getLogger("hydraflow.epic")
 
 
 class EpicMergeOrderMixin:
-    """Merge coordination (ADR-0012): what an approved child means under each"""
+    """Merge coordination (ADR-0012): what an approved child means under each merge strategy."""
 
     # ------------------------------------------------------------------
     # Collaborator seams — provided by ``EpicManager.__init__`` or by a sibling

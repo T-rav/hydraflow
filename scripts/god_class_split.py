@@ -335,6 +335,22 @@ def _init_attr_types(cls: ast.ClassDef) -> dict[str, str]:
     return out
 
 
+def _summary_sentence(doc: str) -> str:
+    """The mixin class's one-line docstring: a WHOLE sentence, not a line.
+
+    The module docstring is prose wrapped at the source width, so its first
+    physical line usually ends mid-clause ("what an epic does when one of its
+    issues"). Taking ``splitlines()[0]`` for the class docstring published that
+    fragment as the class's own summary. Rejoin the first paragraph and cut at
+    the first sentence end instead, so the summary is readable on its own.
+    """
+    paragraph = " ".join(
+        line.strip() for line in doc.split("\n\n", 1)[0].splitlines() if line.strip()
+    )
+    head, sep, _ = paragraph.partition(". ")
+    return f"{head}." if sep else paragraph
+
+
 _SEAM_BANNER = """    # ------------------------------------------------------------------
     # Collaborator seams — provided by ``{cls}.__init__`` or by a sibling
     # mixin. The method declarations are TYPE_CHECKING-only on purpose: a
@@ -471,7 +487,7 @@ def do_split(spec: Spec) -> int:
             out += [
                 "",
                 f"class {mod.mixin}:",
-                f'    """{mod.doc.splitlines()[0]}"""',
+                f'    """{_summary_sentence(mod.doc)}"""',
                 "",
             ]
             seam = _seam_block(

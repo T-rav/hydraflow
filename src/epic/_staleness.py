@@ -26,7 +26,7 @@ logger = logging.getLogger("hydraflow.epic")
 
 
 class EpicStalenessMixin:
-    """The stale-epic sweep: epics that stopped moving, and epics already closed"""
+    """The stale-epic sweep: epics that stopped moving, and epics already closed out from under us."""
 
     # ------------------------------------------------------------------
     # Collaborator seams — provided by ``EpicManager.__init__`` or by a sibling

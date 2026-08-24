@@ -28,7 +28,7 @@ logger = logging.getLogger("hydraflow.epic")
 
 
 class EpicChildEventsMixin:
-    """The child-lifecycle callbacks: what an epic does when one of its issues"""
+    """The child-lifecycle callbacks: what an epic does when one of its issues moves."""
 
     # ------------------------------------------------------------------
     # Collaborator seams — provided by ``EpicManager.__init__`` or by a sibling
