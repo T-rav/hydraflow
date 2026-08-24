@@ -1522,6 +1522,40 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
+    # --- Fable Review canary (#11543, ADR-0137 P5) -----------------------
+    # A THIRD dial, deliberately not a widening of the first two. "Widen one
+    # role boundary at a time" is the epic's own rollout rule; one dial covering
+    # plan, implement and review would mean an operator running the Plan canary
+    # today woke up dispatching REVIEWERS tomorrow. Review is also the boundary
+    # where independence binds, so arming it must be its own decision.
+    fable_review_canary_repo: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Canonical 'owner/repo' whose REVIEW boundaries may dispatch a real "
+            "brokered Opus reviewer under execution_runtime='fable_director'. "
+            "Empty (the default) dispatches nothing anywhere; clearing it is the "
+            "one-action rollback. Independent of fable_plan_canary_repo and "
+            "fable_implement_canary_repo: arming one arms nothing about the "
+            "others. Deliberately NOT an env override, for ADR-0141 D5's reason."
+        ),
+    )
+
+    def fable_review_canary_armed(self) -> bool:
+        """True when this process may dispatch a real brokered reviewer (#11543).
+
+        The same two-decision shape as its siblings, over a third dial:
+        selecting the director is restart-required, naming the review canary
+        repository is live, and neither implies the other — nor does arming
+        the plan or implement canary imply this one.
+        """
+        from hydraflow_gateway.routing_policy import canonicalize_repo
+
+        if not self.uses_fable_director():
+            return False
+        armed = canonicalize_repo(str(self.fable_review_canary_repo or ""))
+        return armed is not None and armed == canonicalize_repo(str(self.repo or ""))
+
     def fable_implement_canary_armed(self) -> bool:
         """True when this process may dispatch a real brokered writer (#11542).
 
@@ -7162,6 +7196,7 @@ def _validate_gateway_enforcement_canary(config: HydraFlowConfig) -> None:
 _FABLE_CANARY_DIALS: tuple[str, ...] = (
     "fable_plan_canary_repo",
     "fable_implement_canary_repo",
+    "fable_review_canary_repo",
 )
 
 
