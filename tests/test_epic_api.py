@@ -258,37 +258,37 @@ class TestWebSocketForwarding:
 
 class TestStageFromLabels:
     def test_review_label(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels(config.review_label, config) == "review"
 
     def test_ready_label(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels(config.ready_label, config) == "implement"
 
     def test_plan_label(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels(config.planner_label, config) == "plan"
 
     def test_find_label(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels(config.find_label, config) == "triage"
 
     def test_fixed_label(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels(config.fixed_label, config) == "merged"
 
     def test_no_matching_label(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels(["unrelated-label"], config) == ""
 
     def test_empty_labels(self, config) -> None:
-        from epic import _stage_from_labels
+        from epic._parse import _stage_from_labels
 
         assert _stage_from_labels([], config) == ""
 

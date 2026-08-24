@@ -17,6 +17,7 @@ graph LR
     src_dashboard_routes["src.dashboard_routes"]
     src_disturbance["src.disturbance"]
     src_disturbance_detectors["src.disturbance.detectors"]
+    src_epic["src.epic"]
     src_erosion["src.erosion"]
     src_escape["src.escape"]
     src_flows["src.flows"]
@@ -29,6 +30,7 @@ graph LR
     src_mockworld_fakes_fake_github["src.mockworld.fakes.fake_github"]
     src_observability["src.observability"]
     src_onboarding["src.onboarding"]
+    src_pr_unsticker["src.pr_unsticker"]
     src_preflight["src.preflight"]
     src_preflight_playbooks["src.preflight.playbooks"]
     src_review_phase["src.review_phase"]
@@ -40,13 +42,14 @@ graph LR
     src_stillness["src.stillness"]
     src_vitals["src.vitals"]
     src_workspace["src.workspace"]
-    src -- "3" --> src_agent
+    src -- "2" --> src_agent
     src -- "7" --> src_arch
     src -- "10" --> src_audit
     src -- "14" --> src_auto_tighten
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
+    src -- "9" --> src_epic
     src -- "24" --> src_erosion
     src -- "9" --> src_escape
     src -- "5" --> src_flows
@@ -55,12 +58,13 @@ graph LR
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
+    src -- "2" --> src_pr_unsticker
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "1" --> src_reviewer
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
-    src -- "70" --> src_state
+    src -- "68" --> src_state
     src -- "6" --> src_vitals
     src -- "5" --> src_workspace
     src_arch -- "1" --> src_disturbance
@@ -77,6 +81,7 @@ graph LR
     src_dashboard_routes -- "1" --> src_vitals
     src_disturbance_detectors -- "1" --> src_arch
     src_disturbance_detectors -- "5" --> src_disturbance
+    src_epic -- "9" --> src_state
     src_erosion -- "4" --> src_arch
     src_health_monitor_loop -- "3" --> src_state
     src_implement_phase -- "6" --> src_agent
@@ -86,6 +91,8 @@ graph LR
     src_mockworld -- "1" --> src_preflight
     src_mockworld_fakes -- "28" --> src_mockworld
     src_mockworld_fakes_fake_github -- "5" --> src_mockworld
+    src_pr_unsticker -- "4" --> src_agent
+    src_pr_unsticker -- "4" --> src_state
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_review_phase -- "1" --> src_flows

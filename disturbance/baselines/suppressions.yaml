@@ -50,7 +50,12 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ occurrences, all inside the two touched families) and every untouched file byte-identical.\
   \ The -1 is agent.py's `# noqa: F401` re-export block, which became an explicit\
   \ `__all__` in agent/__init__.py and needs no suppression; no other suppression\
-  \ was added, removed, widened, or rewritten."
+  \ was added, removed, widened, or rewritten. re-key 2026-08-24: god-class decomposition
+  \ batch 7 (Refs #11547) moved 4 suppressions verbatim out of pr_unsticker.py and
+  \ epic.py into the extracted package modules \u2014 the 3 PLC0415 occurrences split
+  \ 1/2 across _reflection.py and _unsticker.py because their lazy imports live in
+  \ different slices now. Net ZERO occurrences; every untouched file byte-identical;
+  \ no suppression was added, removed, widened, or rewritten."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -148,7 +153,7 @@ entries:
   src/docker_runner.py::type-ignore[arg-type]: 1
   src/edge_proposer_loop.py::noqa:PLC0415: 1
   src/entry_evidence_loop.py::noqa:SLF001: 1
-  src/epic.py::noqa:BLE001: 1
+  src/epic/_release.py::noqa:BLE001: 1
   src/events.py::noqa:S101: 1
   src/execution.py::noqa:A002: 2
   src/execution.py::noqa:PLW0603: 1
@@ -252,7 +257,8 @@ entries:
   src/pr_manager_labels.py::noqa:PLC0415: 1
   src/pr_manager_pr_queries.py::noqa:PLC0415: 5
   src/pr_manager_promotion.py::noqa:PLC0415: 2
-  src/pr_unsticker.py::noqa:PLC0415: 3
+  src/pr_unsticker/_reflection.py::noqa:PLC0415: 1
+  src/pr_unsticker/_unsticker.py::noqa:PLC0415: 2
   src/precheck.py::noqa:BLE001: 1
   src/precondition_gate.py::noqa:BLE001: 1
   src/preflight/__init__.py::noqa:PLC0415: 3

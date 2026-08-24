@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import epic  # noqa: E402
+import epic._release  # noqa: E402  # logger/error bound at the call site
 from events import EventBus, EventType
 from models import EpicState
 from state import StateTracker
@@ -1118,7 +1119,7 @@ class TestExecuteRelease:
         prs.merge_pr = AsyncMock(return_value=False)
 
         captured: list[BaseException] = []
-        original_warning = epic.logger.warning
+        original_warning = epic._release.logger.warning
 
         def _capture_warning(*args, **kwargs):
             if kwargs.get("exc_info"):
@@ -1127,13 +1128,13 @@ class TestExecuteRelease:
                     captured.append(exc)
             return original_warning(*args, **kwargs)
 
-        monkeypatch.setattr(epic.logger, "warning", _capture_warning)
+        monkeypatch.setattr(epic._release.logger, "warning", _capture_warning)
 
         await mgr._execute_release(100, "test-job-cause")
 
         assert captured, "Expected failure to log an exception"
         exc = captured[0]
-        assert isinstance(exc, epic.ReleaseEpicResultError)
+        assert isinstance(exc, epic._release.ReleaseEpicResultError)
         assert exc.epic_number == 100
         assert exc.result.get("error")
 

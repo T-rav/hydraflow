@@ -335,6 +335,22 @@ def _init_attr_types(cls: ast.ClassDef) -> dict[str, str]:
     return out
 
 
+def _summary_sentence(doc: str) -> str:
+    """The mixin class's one-line docstring: a WHOLE sentence, not a line.
+
+    The module docstring is prose wrapped at the source width, so its first
+    physical line usually ends mid-clause ("what an epic does when one of its
+    issues"). Taking ``splitlines()[0]`` for the class docstring published that
+    fragment as the class's own summary. Rejoin the first paragraph and cut at
+    the first sentence end instead, so the summary is readable on its own.
+    """
+    paragraph = " ".join(
+        line.strip() for line in doc.split("\n\n", 1)[0].splitlines() if line.strip()
+    )
+    head, sep, _ = paragraph.partition(". ")
+    return f"{head}." if sep else paragraph
+
+
 _SEAM_BANNER = """    # ------------------------------------------------------------------
     # Collaborator seams — provided by ``{cls}.__init__`` or by a sibling
     # mixin. The method declarations are TYPE_CHECKING-only on purpose: a
@@ -359,7 +375,16 @@ def _seam_block(
     foreign_methods = sorted(
         n for n in (used_methods | used_attrs) - owned if n in all_methods
     )
-    foreign_attrs = sorted(n for n in used_attrs - owned if n not in all_methods)
+    # A CALLABLE collaborator attribute (``self._suggest_memory(...)``, a
+    # callback, an injected policy object) reads as a call, so ``_self_attrs``
+    # files it under *called* rather than *read* — and it is not a method of
+    # the class, so it falls out of ``foreign_methods`` too. Before this union
+    # it landed in NEITHER list and the mixin declared no seam for it at all
+    # (#11547 batch 7: ``_suggest_memory`` in two ``pr_unsticker`` slices).
+    # Attribute or method, a name the class does not own needs a seam.
+    foreign_attrs = sorted(
+        n for n in (used_attrs | used_methods) - owned if n not in all_methods
+    )
     if not foreign_methods and not foreign_attrs:
         return ""
     out = [_SEAM_BANNER.format(cls=cls_name)]
@@ -462,7 +487,7 @@ def do_split(spec: Spec) -> int:
             out += [
                 "",
                 f"class {mod.mixin}:",
-                f'    """{mod.doc.splitlines()[0]}"""',
+                f'    """{_summary_sentence(mod.doc)}"""',
                 "",
             ]
             seam = _seam_block(
