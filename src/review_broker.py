@@ -28,6 +28,7 @@ from driver_contracts import (
     WorkerRole,
 )
 from hydraflow_gateway.routing_policy import canonicalize_repo
+from plan_broker import PlanRouteReason, resolve_worker_model
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Iterable
@@ -119,13 +120,11 @@ def resolve_review_model(
     that answer matters most, because the catalogued reviewer asks for Opus by
     name and a canary that quietly reviewed with Sonnet would still look armed.
 
-    Imported inside the function rather than at module scope so this module
-    keeps its "pure, no import-time coupling to the actuator layer" posture and
-    so ``plan_broker`` — which imports nothing from here — cannot be drawn into
-    a cycle by a later edit.
+    Imported at module scope, matching ``implement_broker``'s precedent rather
+    than deferring: ``plan_broker`` is a peer pure broker that imports nothing
+    from here, so there is no cycle to avoid and a function-local import would
+    be a smell justified by a hazard that does not exist.
     """
-    from plan_broker import PlanRouteReason, resolve_worker_model
-
     return resolve_worker_model(
         request,
         phase=phase,
