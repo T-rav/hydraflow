@@ -169,9 +169,11 @@ def test_a_shape_the_model_refuses_is_still_refused() -> None:
 def test_a_subclass_cannot_render_a_wider_payload() -> None:
     """``extra="forbid"`` stops an extra KEY on this class, not a subclass.
 
-    ``as_payload`` dumps ``type(self)``'s fields, so a subclass declaring one
+    ``as_payload`` renders ``model_dump()``'s keys, so a subclass declaring one
     more renders one more — the one way an implementer-private field could ride
     the allow-list into a reviewer's prompt with every existing test green.
+    (Said as *keys*, not as ``model_fields``: they are different sets, and the
+    guard was briefly written against the narrower one.)
     """
 
     class WiderEvidence(ReviewEvidence):

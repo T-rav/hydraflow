@@ -414,7 +414,10 @@ def test_an_unfenced_role_still_needs_no_lineage() -> None:
     assert _request(worker_role=WorkerRole.EXPLORER).requesting_spawn_id is None
 
 
-def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too() -> None:
+@pytest.mark.parametrize("blank", [None, "", "   "])
+def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too(
+    blank: str | None,
+) -> None:
     """The belt under the validator, reached the way validation is skipped.
 
     ``model_copy`` (like ``model_construct``) does not revalidate, so a fenced
@@ -423,11 +426,19 @@ def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too() -> Non
     admitting, and it is why this reports its own code rather than
     ``SELF_REVIEW_FORBIDDEN``: nothing here establishes that the requester
     implemented anything.
+
+    Parametrised over all three blank shapes to mirror
+    ``test_review_broker``'s ``test_a_fenced_role_with_no_lineage_is_refused``
+    EXACTLY rather than approximately. Only ``None`` was covered here, so the
+    two descriptions of one rule had different subjects: reverting just this
+    table's presence test to the raw value left every test green while
+    ``"   "`` was admitted. Two tables over one vocabulary need the same cells,
+    not merely a cell each.
     """
     valid = _request(
         worker_role=WorkerRole.REVIEWER, requesting_spawn_id="spawn-director"
     )
-    stripped = valid.model_copy(update={"requesting_spawn_id": None})
+    stripped = valid.model_copy(update={"requesting_spawn_id": blank})
 
     reason = _admit(
         request=stripped,

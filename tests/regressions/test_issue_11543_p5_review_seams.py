@@ -26,7 +26,7 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from pydantic import ConfigDict, ValidationError, computed_field
+from pydantic import ConfigDict, Field, ValidationError, computed_field
 
 from driver_contracts import (
     WORKER_CATALOG,
@@ -402,6 +402,27 @@ class TestTheAllowListGuardsWhatIsRENDERED:
 
         with pytest.raises(ValueError, match="canonical field set"):
             ViaExtra(issue_number=1, implementer_transcript="smuggled").as_payload()
+
+    def test_a_subclass_cannot_hide_a_canonical_field_from_the_reviewer(self) -> None:
+        """The other half of ``!=``, and the more dangerous direction.
+
+        Every other test here is an *adds* test, so weakening the guard to
+        ``if rendered - CANONICAL_FIELDS:`` — the natural simplification once a
+        reader notices that — left the whole suite green, with ``missing``
+        computed on a path nothing reached.
+
+        Adds shows a reviewer something extra. **Drops hides the change from
+        the reviewer**: excluding ``diff`` renders a review of a change with no
+        change in it. Reachable with an ordinary field override, no serializer
+        trickery. Matching on ``drops ['diff']`` rather than the generic
+        message is what makes this kill that mutation.
+        """
+
+        class ViaExcluded(ReviewEvidence):
+            diff: str = Field(default="", exclude=True)
+
+        with pytest.raises(ValueError, match=r"drops \['diff'\]"):
+            ViaExcluded(issue_number=1).as_payload()
 
     def test_the_ordinary_payload_still_renders(self) -> None:
         """Non-vacuity: the guard must not refuse the thing it exists to pass."""
