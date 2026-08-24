@@ -135,28 +135,53 @@ class ReviewEvidence(BaseModel):
         list: a field added to the model reaches the prompt, and a field NOT on
         the model cannot, so the two can never disagree.
 
-        Which is exactly why the field set is checked here. ``model_dump``
-        renders ``type(self)``'s fields, so a *subclass* declaring one more
-        renders one more — and ``extra="forbid"`` does not stop a subclass, it
-        stops an extra key on this class. A subclass is the one way an
-        implementer-private field could ride the allow-list into a reviewer's
-        prompt while every existing test stayed green, so the allow-list asserts
-        its own identity at the boundary it guards rather than at construction.
+        Which is exactly why the rendered key set is checked here. A *subclass*
+        is the one way an implementer-private field could ride the allow-list
+        into a reviewer's prompt while every existing test stayed green —
+        ``extra="forbid"`` does not stop a subclass, it stops an extra key on
+        this class.
+
+        The check is on ``model_dump()``'s **keys**, not on ``model_fields``.
+        The first version compared ``model_fields`` and its docstring claimed
+        it guarded what got rendered; those are not the same set, and two
+        subclass shapes walked straight past it — a ``@computed_field`` (absent
+        from ``model_fields``, present in the dump by design) and
+        ``ConfigDict(extra="allow")`` (``model_fields`` unchanged, extras
+        emitted). Both were confirmed by execution to smuggle
+        ``implementer_transcript`` into the payload. A guard that asserts a
+        proxy for its subject, over a docstring claiming it asserts the
+        subject, is the exact shape this module was repaired for; here it is
+        one layer in.
         """
-        fields = set(type(self).model_fields)
-        if fields != CANONICAL_FIELDS:
-            extra = sorted(fields - CANONICAL_FIELDS)
-            missing = sorted(CANONICAL_FIELDS - fields)
+        payload = self.model_dump()
+        rendered = set(payload)
+        if rendered != CANONICAL_FIELDS:
+            extra = sorted(rendered - CANONICAL_FIELDS)
+            missing = sorted(CANONICAL_FIELDS - rendered)
             raise ValueError(
                 "review evidence must render exactly the canonical field set; "
                 f"{type(self).__name__} adds {extra} and drops {missing}. "
                 "Widening what a fresh reviewer sees is a change to "
                 "CANONICAL_FIELDS, never a subclass."
             )
-        return self.model_dump()
+        return payload
 
 
-def _scrubbed(value: Any) -> Any:
+#: Ceilings on the walk :func:`_scrubbed` performs. Not tuning knobs — they
+#: exist because widening the walk from ``list``/``tuple`` to ``Iterable``
+#: introduced two ways to not terminate that the narrower version could not
+#: have: a ``list`` is always finite and the old code never recursed, so
+#: neither an endless generator nor a deeply nested structure was reachable.
+#:
+#: Both ceilings are far above any legitimate bundle. ``ReviewEvidence``'s
+#: sequence fields are ``tuple[str, ...]``, so honest depth is 1 and honest
+#: length is "files in a very large PR". Anything past these is a caller
+#: handing evidence a stream, not a bundle.
+_MAX_SEQUENCE_ITEMS = 50_000
+_MAX_NESTING_DEPTH = 8
+
+
+def _scrubbed(value: Any, _depth: int = 0) -> Any:
     """*value* with every string it carries scrubbed, whatever shape it arrived in.
 
     The scrub used to run on ``str`` and on ``list``/``tuple``, which is the
@@ -176,6 +201,13 @@ def _scrubbed(value: Any) -> Any:
     No canonical field takes one, so Pydantic rejects it; converting it to a
     tuple of its keys would make the model *accept* a shape it currently
     refuses, which is a widening dressed as a scrub.
+
+    The walk is bounded in both directions, and **raises** rather than
+    truncating. Truncating would be the worse bug of the two: a silently
+    shortened diff or changed-file list is a reviewer judging something other
+    than the change, which is the one failure this whole module exists to
+    prevent. Refusing is loud, and a bundle that trips a ceiling is a caller
+    defect, not evidence.
     """
     if isinstance(value, str):
         return scrub_secrets(value)
@@ -188,7 +220,24 @@ def _scrubbed(value: Any) -> Any:
     if isinstance(value, Mapping):
         return value
     if isinstance(value, Iterable):
-        return tuple(_scrubbed(item) for item in value)
+        if _depth >= _MAX_NESTING_DEPTH:
+            raise ValueError(
+                f"review evidence nests deeper than {_MAX_NESTING_DEPTH} levels; "
+                "a canonical field is a string or a flat sequence of strings, so "
+                "this is a caller handing the builder a structure it should have "
+                "flattened."
+            )
+        walked: list[Any] = []
+        for item in value:
+            if len(walked) >= _MAX_SEQUENCE_ITEMS:
+                raise ValueError(
+                    f"review evidence sequence exceeds {_MAX_SEQUENCE_ITEMS} "
+                    "items. An unbounded iterable would walk here forever, so "
+                    "the builder refuses it rather than hanging the boundary "
+                    "that was supposed to be a pure function of a value."
+                )
+            walked.append(_scrubbed(item, _depth + 1))
+        return tuple(walked)
     return value
 
 

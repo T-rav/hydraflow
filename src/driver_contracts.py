@@ -271,6 +271,13 @@ class RejectionReason(StrEnum):
     failed to stamp provenance, not at a worker caught grading its own homework,
     and the two have different remedies. Both refuse, because "independent"
     is a claim, and a claim nothing can check is not one.
+
+    In practice this code is rare on a receipt, and that is by design rather
+    than neglect: ``WorkerDispatchRequest`` refuses to construct the shape, so
+    a director that omits lineage is recorded as ``MALFORMED_OUTPUT`` with no
+    reason code at all. This arm is the backstop for values that skip
+    validation (``model_construct``, ``model_copy``), and an operator who does
+    see it is looking at one of those.
     """
 
 
@@ -442,7 +449,10 @@ a change — the architect and the test-adequacy reader — free to be requested
 from the implementer's own lineage and grade its work. "Independent review"
 that three roles can perform and one is fenced on is not a property; it is a
 name. ``test_driver_contracts`` derives the rule rather than listing the roles,
-so a role added at ``REVIEW`` inherits it or reddens.
+so a **read-only** role added at ``REVIEW`` inherits it or reddens. A
+write-scoped one does not, and must not: ``DEBUGGER`` is legal at ``REVIEW``
+and holds the worktree, and ``_write_scope_is_coherent`` refuses the
+combination outright.
 """
 
 
@@ -817,13 +827,14 @@ def admit_dispatch(
     # `WorkerDispatchRequest` now refuses to *construct* such a request, so this
     # arm catches the values that skip validation — model_construct, model_copy,
     # a future default change — rather than the ordinary path.
+    # Both halves of one rule read the value the SAME way. An earlier version
+    # stripped for the presence test and not for the membership test, so a
+    # padded " spawn-impl-1 " counted as a stated lineage and then failed to
+    # match the spawn it names. One vocabulary, one normalisation.
     fenced = entry.independent_of_implementer
-    lineage_unknown = fenced and not (request.requesting_spawn_id or "").strip()
-    self_review = (
-        fenced
-        and request.requesting_spawn_id is not None
-        and request.requesting_spawn_id in implementer_spawn_ids
-    )
+    stated_lineage = (request.requesting_spawn_id or "").strip()
+    lineage_unknown = fenced and not stated_lineage
+    self_review = fenced and stated_lineage in implementer_spawn_ids
     # Writer-lease checks apply only to roles that can actually take the lease.
     # A read-only explorer must not be blocked because the lease has not been
     # re-minted at the current epoch, and a lease lagging its driver's epoch is

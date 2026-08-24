@@ -383,14 +383,33 @@ class TestOutsideTheBoundNothingMoves:
         assert spawns == []
 
     @pytest.mark.parametrize(
-        ("phase", "role", "family"),
+        ("phase", "role", "family", "spawn"),
         [
-            pytest.param(DriverPhase.PLAN, "explorer", "claude-sonnet", id="plan"),
-            pytest.param(DriverPhase.REVIEW, "architect", "claude-opus", id="review"),
+            pytest.param(
+                DriverPhase.PLAN, "explorer", "claude-sonnet", None, id="plan"
+            ),
+            pytest.param(
+                DriverPhase.REVIEW,
+                "architect",
+                "claude-opus",
+                # An architect is independence-fenced (#11543), so without a
+                # stated lineage its request never constructs, the command is
+                # discarded as malformed, and both assertions below hold with
+                # the clause under test never consulted. Mutation-checked:
+                # with this None, deleting implement_canary_covers' phase
+                # clause left THIS case green while [plan] reddened.
+                "spawn-director",
+                id="review",
+            ),
         ],
     )
     async def test_another_phase_is_never_offered_to_the_writer_canary(
-        self, tmp_path: Path, phase: DriverPhase, role: str, family: str
+        self,
+        tmp_path: Path,
+        phase: DriverPhase,
+        role: str,
+        family: str,
+        spawn: str | None,
     ) -> None:
         """The phase clause, isolated from the defences behind it.
 
@@ -413,11 +432,17 @@ class TestOutsideTheBoundNothingMoves:
             canary=CANARY_REPO,
             wired=True,
             phase=phase,
-            turn=ScriptedTurn(role=role, family=family),
+            turn=ScriptedTurn(role=role, family=family, requesting_spawn_id=spawn),
         )
 
         assert spawns == []
         assert [row["dispatched"] for row in rows] == [[]]
+        # The turn produced a real command that was judged and found outside
+        # the bound — not one that never parsed. Carried over verbatim from the
+        # #11541 sibling rather than paraphrased: without it, a request the
+        # contract refuses to construct satisfies both assertions above with
+        # the phase clause deleted.
+        assert [row["command_kind"] for row in rows] == ["dispatch_workers"]
 
     async def test_the_plan_canary_alone_dispatches_no_writer(
         self, tmp_path: Path, shadow_baseline
