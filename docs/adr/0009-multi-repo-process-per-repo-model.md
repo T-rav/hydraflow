@@ -121,5 +121,5 @@ Adopt the **process-per-repo** model as the canonical multi-repo architecture:
 - `src/repo_runtime.py:RepoRuntimeRegistry.register`, `src/repo_runtime.py:RepoRuntime.start` — per-repo runtime lifecycle (replaced the former `supervisor_service` `_start_repo`/`RUNNERS` subprocess+TCP registry)
 - `src/config.py:_resolve_base_paths`, `src/config.py:_resolve_repo_scoped_paths`, `src/config.py:HydraFlowConfig.workspace_path_for_issue`
 - `src/orchestrator.py:HydraFlowOrchestrator.__init__`
-- `src/workspace.py:WorkspaceManager`
+- `src/workspace/_manager.py:WorkspaceManager`
 - `src/state:StateTracker`

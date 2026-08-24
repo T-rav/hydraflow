@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 from tests.helpers import ConfigFactory
+from tests.workspace_patch import patch_workspace_run_subprocess
 
 
 def _cfg(tmp_path: Path, *, staging_enabled: bool):
@@ -25,7 +25,7 @@ class TestWorkspaceBaseBranchFetch:
 
         cfg = _cfg(tmp_path, staging_enabled=True)
         ws = WorkspaceManager(cfg)
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch_workspace_run_subprocess() as mock_run:
             mock_run.return_value = ""
             await ws.reset_to_main(tmp_path)
         all_cmds = [call.args for call in mock_run.call_args_list]
@@ -43,7 +43,7 @@ class TestWorkspaceBaseBranchFetch:
 
         cfg = _cfg(tmp_path, staging_enabled=False)
         ws = WorkspaceManager(cfg)
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch_workspace_run_subprocess() as mock_run:
             mock_run.return_value = ""
             await ws.reset_to_main(tmp_path)
         all_cmds = [call.args for call in mock_run.call_args_list]

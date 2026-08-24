@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from tests.helpers import ConfigFactory, make_docker_manager, make_proc
+from tests.workspace_patch import patch_workspace_run_subprocess
 from workspace import WorkspaceManager
 
 # ---------------------------------------------------------------------------
@@ -125,7 +126,10 @@ class TestSetupEnvDocker:
         env_src = repo_root / ".env"
         env_src.write_text("SECRET=val")
 
-        with patch("workspace.shutil.copy2", side_effect=OSError("permission denied")):
+        with patch(
+            "workspace._provision.shutil.copy2",
+            side_effect=OSError("permission denied"),
+        ):
             manager._setup_env(wt_path)  # should not raise
 
         assert not (wt_path / ".env").exists()
@@ -146,7 +150,7 @@ class TestSetupEnvDocker:
         ui_nm_src.mkdir(parents=True)
 
         with patch(
-            "workspace.shutil.copytree", side_effect=OSError("disk full")
+            "workspace._provision.shutil.copytree", side_effect=OSError("disk full")
         ) as mock_copytree:
             manager._setup_env(wt_path)  # should not raise
 
@@ -261,7 +265,7 @@ class TestInstallHooksDocker:
         hooks_dir.mkdir(parents=True)
 
         with patch(
-            "workspace.run_subprocess",
+            "workspace._provision.run_subprocess",
             side_effect=_make_hooks_subprocess_mock(hooks_dir),
         ):
             await manager._install_hooks(wt_path)
@@ -312,11 +316,11 @@ class TestInstallHooksDocker:
 
         with (
             patch(
-                "workspace.run_subprocess",
+                "workspace._provision.run_subprocess",
                 side_effect=_make_hooks_subprocess_mock(hooks_dir),
             ),
             patch(
-                "workspace.shutil.copy2", side_effect=OSError("perm denied")
+                "workspace._provision.shutil.copy2", side_effect=OSError("perm denied")
             ) as mock_copy,
         ):
             await manager._install_hooks(wt_path)  # should not raise
@@ -344,7 +348,7 @@ class TestInstallHooksDocker:
 
         with (
             patch(
-                "workspace.run_subprocess",
+                "workspace._provision.run_subprocess",
                 side_effect=_make_hooks_subprocess_mock(hooks_dir),
             ),
             patch("pathlib.Path.mkdir", side_effect=OSError("read-only fs")),
@@ -404,7 +408,7 @@ class TestInstallHooksDocker:
                 return str(hooks_dir)
             return ""
 
-        with patch("workspace.run_subprocess", side_effect=_record):
+        with patch("workspace._provision.run_subprocess", side_effect=_record):
             await manager._install_hooks(wt_path)
 
         config_calls = [a[:4] for a in calls]
@@ -436,7 +440,7 @@ class TestInstallHooksDocker:
         hooks_dir.mkdir(parents=True)
 
         with patch(
-            "workspace.run_subprocess",
+            "workspace._provision.run_subprocess",
             side_effect=_make_hooks_subprocess_mock(hooks_dir),
         ):
             await manager._install_hooks(wt_path)
@@ -464,7 +468,7 @@ class TestInstallHooksDocker:
         async def _raise(*args, cwd=None, gh_token=None):  # noqa: ARG001
             raise RuntimeError("git not available")
 
-        with patch("workspace.run_subprocess", side_effect=_raise):
+        with patch("workspace._manager.run_subprocess", side_effect=_raise):
             await manager._install_hooks(wt_path)  # should not raise
 
         # No hooks should have been copied since git rev-parse failed
@@ -599,7 +603,7 @@ class TestSanitizeRepo:
 
         fetch_mock = AsyncMock()
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run),
+            patch("workspace._manager.run_subprocess", side_effect=fake_run),
             patch.object(manager, "_fetch_origin_with_retry", fetch_mock),
         ):
             await manager.sanitize_repo()
@@ -626,7 +630,7 @@ class TestSanitizeRepo:
             return ""
 
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run),
+            patch("workspace._manager.run_subprocess", side_effect=fake_run),
             patch.object(manager, "_fetch_origin_with_retry", new_callable=AsyncMock),
         ):
             await manager.sanitize_repo()
@@ -650,7 +654,7 @@ class TestSanitizeRepo:
             return ""
 
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run),
+            patch("workspace._manager.run_subprocess", side_effect=fake_run),
             patch.object(manager, "_fetch_origin_with_retry", new_callable=AsyncMock),
         ):
             await manager.sanitize_repo()  # must not raise
@@ -680,7 +684,7 @@ class TestResetToMain:
             commands_run.append(list(args))
             return ""
 
-        with patch("workspace.run_subprocess", side_effect=mock_run_subprocess):
+        with patch_workspace_run_subprocess(side_effect=mock_run_subprocess):
             await manager.reset_to_main(wt_path)
 
         # Should have run 3 commands: fetch, reset --hard, clean -fd
@@ -709,7 +713,7 @@ class TestResetToMain:
             commands_run.append(list(args))
             return ""
 
-        with patch("workspace.run_subprocess", side_effect=mock_run_subprocess):
+        with patch_workspace_run_subprocess(side_effect=mock_run_subprocess):
             await manager.reset_to_main(wt_path)
 
         assert "develop" in commands_run[0]  # fetch includes branch
@@ -765,7 +769,7 @@ class TestPostWorkCleanup:
             return ""
 
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run),
+            patch("workspace._heal.run_subprocess", side_effect=fake_run),
             patch.object(manager, "destroy", new_callable=AsyncMock),
         ):
             await manager.post_work_cleanup(42)
@@ -791,7 +795,7 @@ class TestPostWorkCleanup:
             return ""
 
         with (
-            patch("workspace.run_subprocess", side_effect=fake_run),
+            patch("workspace._manager.run_subprocess", side_effect=fake_run),
             patch.object(manager, "destroy", new_callable=AsyncMock),
         ):
             await manager.post_work_cleanup(42)

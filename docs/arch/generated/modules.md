@@ -39,6 +39,7 @@ graph LR
     src_state["src.state"]
     src_stillness["src.stillness"]
     src_vitals["src.vitals"]
+    src_workspace["src.workspace"]
     src -- "3" --> src_agent
     src -- "7" --> src_arch
     src -- "10" --> src_audit
@@ -61,6 +62,7 @@ graph LR
     src -- "1" --> src_signal_control
     src -- "70" --> src_state
     src -- "6" --> src_vitals
+    src -- "5" --> src_workspace
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "14" --> src_arch

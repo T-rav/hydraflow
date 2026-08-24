@@ -10,14 +10,14 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 |---|---|---|
 | ADR-0001 | — | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
 | ADR-0002 | `src.config`, `src.implement_phase._build`, `src.issue_store`, `src.label_transitions`, `src.pr_manager_labels` | `pytest:tests/test_state_machine.py` |
-| ADR-0003 | `src.ports`, `src.workspace` | — |
+| ADR-0003 | `src.ports`, `src.workspace._manager` | — |
 | ADR-0004 | `src.agent_cli`, `src.base_runner` | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
 | ADR-0005 | `src.implement_phase._pr`, `src.implement_phase._screen`, `src.pr_manager` | `pytest:tests/test_implement_phase.py` |
 | ADR-0006 | `src.events`, `src.issue_store`, `src.orchestrator`, `src.repo_runtime`, `src.state.__init__` | — |
 | ADR-0007 | `src.dashboard`, `src.dashboard_routes._routes`, `src.dashboard_routes._state_routes`, `src.repo_runtime` | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | `src.dashboard`, `src.dashboard_routes._routes`, `src.repo_runtime` | `pytest:tests/test_dashboard_routes_repo.py` |
-| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` |
-| ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.workspace` | `pytest:tests/test_integration_worktree.py` |
+| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace._manager` | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` |
+| ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.workspace._manager` | `pytest:tests/test_integration_worktree.py` |
 | ADR-0011 | `src.epic`, `src.models`, `src.pr_manager_artifacts`, `src.pr_manager_branches` | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | `src.epic`, `src.epic_monitor_loop`, `src.models`, `src.post_merge_handler`, `src.review_phase._self_fix` | `pytest:tests/test_epic_merge_coordination.py` |
 | ADR-0013 | `src.dashboard_routes._reports_routes`, `src.models`, `src.pr_manager`, `src.report_issue_loop`, `src.state._report` | — |
@@ -61,7 +61,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0052 | `src.contract_diff`, `src.contract_recording`, `src.mockworld.sandbox_main` | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
-| ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` | — |
+| ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector` | — |
 | ADR-0056 | `src.adr_drift`, `src.state._adr_audit` | `(superseded — the loop and its tests were deleted by #11600; ADR-0136 carries the live enforcement)` |
 | ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
@@ -118,7 +118,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer._runner`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | `src.base_runner`, `src.gateway_coverage_loop`, `src.hydraflow_gateway.app`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
 | ADR-0111 | `src.flows.adapters`, `src.flows.flow` | `pytest:tests/test_flows.py` |
-| ADR-0112 | `src.config`, `src.ports`, `src.workspace` | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
+| ADR-0112 | `src.config`, `src.ports`, `src.workspace._manager` | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | — | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
 | ADR-0114 | `src.arch._models`, `src.arch.extractors.events`, `src.arch.generators.event_bus`, `src.events` | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 | ADR-0115 | `src.audit.adjudicate`, `src.escape.auto_diagnose`, `src.escape_ledger_loop`, `src.sampled_audit_loop` | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld`, `pytest:tests/regressions/test_issue_11176.py::test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget` |
@@ -420,7 +420,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.wiki_carryover` | ADR-0064 |
 | `src.wiki_compiler` | ADR-0032 |
 | `src.wiki_rot_detector_loop` | ADR-0045 |
-| `src.workspace` | ADR-0003, ADR-0009, ADR-0010, ADR-0055, ADR-0112 |
+| `src.workspace._manager` | ADR-0003, ADR-0009, ADR-0010, ADR-0112 |
 | `src.workspace_gc_landed_safety` | ADR-0069 |
 | `src.workspace_gc_loop` | ADR-0069 |
 

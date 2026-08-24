@@ -53,16 +53,13 @@ classes:
   src/wiki_rot_detector_loop.py:WikiRotDetectorLoop:
     loc: 803
     methods: 20
-  src/workspace.py:WorkspaceManager:
-    loc: 970
-    methods: 41
 comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC or\
   \ method count >= class thresholds) \u2014 the mass sensor (erosion.mass). The gate\
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: decomposed ReviewRunner into src/reviewer/ mixin package (batch\
-  \ 5, Refs #11547)"
+  \ PR. Last moved: decomposed WorkspaceManager into src/workspace/ mixin package\
+  \ (batch 6, Refs #11547)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109

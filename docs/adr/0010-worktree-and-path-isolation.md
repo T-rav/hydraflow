@@ -120,6 +120,6 @@ artifacts:
   `log_dir`, `plans_dir`, and `memory_dir` as mandated by this ADR.
 - `src/config.py:HydraFlowConfig` — `worktree_path_for_issue`, `log_dir`, `plans_dir`, `memory_dir` properties
 - `src/config.py:_resolve_base_paths`, `src/config.py:_resolve_repo_scoped_paths` — config resolution phases
-- `src/workspace.py:WorkspaceManager` — worktree lifecycle and cleanup
+- `src/workspace/_manager.py:WorkspaceManager` — worktree lifecycle and cleanup
 - `src/docker_runner.py:DockerRunner._build_mounts` — container mount strategy
 - `src/metrics_manager.py:get_metrics_cache_dir` — repo-slug scoping reference

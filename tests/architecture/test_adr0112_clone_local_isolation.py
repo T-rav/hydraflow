@@ -5,7 +5,7 @@ ADR-0112 (Per-Issue Isolation via Local Git Clone) supersedes ADR-0003's
 *independent* local clone per issue — ``git clone --local --no-checkout`` of
 the primary checkout — at a repo-slug-scoped workspace path, rather than a
 linked git worktree that shares the primary repo's ``.git``. The ``wt_path`` /
-"worktree" identifiers left in ``src/workspace.py`` are vestigial names for
+"worktree" identifiers left in ``src/workspace/_manager.py`` are vestigial names for
 what are now full local clones (hardlinked objects, own ``.git/``).
 
 Like ADR-0107, this is a mechanism decision with a crisp, machine-checkable
@@ -44,10 +44,10 @@ def _string_args(call: ast.Call) -> list[str]:
 
 def _create_path_argvs(real_repo_root: Path) -> list[list[str]]:
     """String-arg lists of every call inside WorkspaceManager._create_unlocked."""
-    tree = ast.parse((real_repo_root / "src" / "workspace.py").read_text())
+    tree = ast.parse((real_repo_root / "src" / "workspace" / "_manager.py").read_text())
     node = _function_node(tree, "_create_unlocked")
     assert node is not None, (
-        "WorkspaceManager._create_unlocked not found in src/workspace.py — the "
+        "WorkspaceManager._create_unlocked not found in src/workspace/_manager.py — the "
         "per-issue workspace creation seam ADR-0112 governs is missing/renamed"
     )
     return [_string_args(c) for c in ast.walk(node) if isinstance(c, ast.Call)]
@@ -88,7 +88,7 @@ def test_workspace_path_is_repo_slug_scoped(real_repo_root: Path) -> None:
     """ADR-0112: the workspace lives at a repo-slug-scoped isolated path,
     resolved via ``HydraFlowConfig.workspace_path_for_issue`` — distinct from
     the primary checkout so per-issue clones cannot collide across repos."""
-    tree = ast.parse((real_repo_root / "src" / "workspace.py").read_text())
+    tree = ast.parse((real_repo_root / "src" / "workspace" / "_manager.py").read_text())
     node = _function_node(tree, "_create_unlocked")
     assert node is not None
     attrs = {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
