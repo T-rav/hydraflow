@@ -727,7 +727,7 @@ Hexagonal port for persisting and querying recurring reviewer-feedback patterns.
 **Kind:** `value_object` · **Context:** `builder` · **Anchor:** `src/models.py:ReviewVerdict` · **Confidence:** `accepted`
 **Aliases:** `review verdict`, `review decision`, `review outcome`
 
-The closed-set outcome of a reviewer agent's evaluation of a pull request — APPROVE, REQUEST_CHANGES, or COMMENT. It is the terminal decision produced by the review phase (src/reviewer.py), submitted as a formal GitHub PR review via PRManager.submit_review, and consumed downstream to gate auto-merge eligibility (DependabotMergeLoop's human/bot shepherd path only merges on ReviewVerdict.APPROVE) and to drive review-insight analytics (review_insights.py filters records by verdict != APPROVE).
+The closed-set outcome of a reviewer agent's evaluation of a pull request — APPROVE, REQUEST_CHANGES, or COMMENT. It is the terminal decision produced by the review phase (src/reviewer/), submitted as a formal GitHub PR review via PRManager.submit_review, and consumed downstream to gate auto-merge eligibility (DependabotMergeLoop's human/bot shepherd path only merges on ReviewVerdict.APPROVE) and to drive review-insight analytics (review_insights.py filters records by verdict != APPROVE).
 
 **Invariants:**
 - Exactly one of APPROVE, REQUEST_CHANGES, or COMMENT — no other values are valid

@@ -206,7 +206,9 @@ def test_every_runner_execute_call_passes_issue_labels() -> None:
         "agent/_quality.py",
         "agent/_skills.py",
         "planner.py",
-        "reviewer.py",
+        "reviewer/_runner.py",
+        "reviewer/_context.py",
+        "reviewer/_fixes.py",
         "triage.py",
     }
     assert core <= set(modules), (

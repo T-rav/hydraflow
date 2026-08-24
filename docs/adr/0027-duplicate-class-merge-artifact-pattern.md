@@ -122,7 +122,7 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
 
 ### Operational impact on HydraFlow workers
 
-- **Review agent** (`src/reviewer.py:ReviewRunner`): No longer needs to grep for
+- **Review agent** (`src/reviewer/_runner.py:ReviewRunner`): No longer needs to grep for
   duplicate class names manually — `test_no_dead_duplicate_model_class_definitions`
   runs on every PR via `make quality` and fails the build on a dead merge-artifact
   duplicate (Rule 5, Trigger C fired per #10867).

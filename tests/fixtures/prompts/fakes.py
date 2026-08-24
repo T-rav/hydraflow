@@ -75,7 +75,7 @@ class _EmptyRepoWikiStore:
 
 _MINIMAL_MANIFEST = [
     "src/agent.py",
-    "src/reviewer.py",
+    "src/reviewer/_prompts.py",
     "src/triage.py",
 ]
 

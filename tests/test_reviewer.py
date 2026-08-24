@@ -1112,7 +1112,7 @@ async def test_review_logs_warning_when_fixes_made_but_no_committed_files(
         patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
         patch.object(runner, "_save_transcript"),
-        patch("reviewer.logger") as mock_logger,
+        patch("reviewer._fixes.logger") as mock_logger,
     ):
         result = await runner.review(pr_info, task, tmp_path, "diff")
 
@@ -1741,7 +1741,7 @@ async def test_build_review_prompt_logs_warning_on_truncation(
     runner = _make_runner(config, event_bus)
     long_diff = "x" * 20_000
 
-    with patch("reviewer.logger") as mock_logger:
+    with patch("reviewer._parsing.logger") as mock_logger:
         await runner._build_review_prompt_with_stats(pr_info, task, long_diff)
 
     mock_logger.warning.assert_called_once()
@@ -2150,7 +2150,7 @@ class TestRunPrecheckContext:
         runner = _make_runner(config, event_bus)
 
         with patch(
-            "reviewer.run_precheck_context",
+            "reviewer._context.run_precheck_context",
             new_callable=AsyncMock,
             return_value="Precheck risk: low",
         ) as mock_rpc:
@@ -2182,7 +2182,7 @@ class TestRunPrecheckContext:
             return "Precheck risk: low"
 
         with patch(
-            "reviewer.run_precheck_context",
+            "reviewer._context.run_precheck_context",
             side_effect=capture_rpc,
         ):
             await runner._run_precheck_context(pr_info, task, "diff", tmp_path)

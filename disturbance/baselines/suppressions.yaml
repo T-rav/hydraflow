@@ -309,7 +309,7 @@ entries:
   src/review_phase/_visual_gate.py::noqa:PLC0415: 1
   src/review_phase/_wiki_ingest.py::noqa:BLE001: 2
   src/review_phase/_wiki_ingest.py::noqa:PLC0415: 4
-  src/reviewer.py::noqa:PLC0415: 3
+  src/reviewer/_prompts.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 8
   src/runner_utils.py::noqa:PLC0415: 6
   src/runners/base_subprocess_runner.py::noqa:PLC0415: 1

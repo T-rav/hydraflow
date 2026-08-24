@@ -23,7 +23,7 @@ The **reachable** equivalent is the locally-installed `code-review` plugin
 command (multiple independent reviewers, then confidence-scoring that drops
 low-confidence findings). HydraFlow can already dispatch that headlessly through
 the exact seam `src/review_phase/_phase.py:ReviewPhase._build_post_verify_runner`
-uses — `src/agent_cli.py:build_agent_command` + `src/reviewer.py:ReviewRunner`
+uses — `src/agent_cli.py:build_agent_command` + `src/reviewer/_runner.py:ReviewRunner`
 `_execute`. The one load-bearing constraint: `build_agent_command` must be called
 with `isolate_user_settings=False`, because `True` strips the `--plugin-dir`
 flags, so the plugin slash-command would not resolve inside the spawn.
