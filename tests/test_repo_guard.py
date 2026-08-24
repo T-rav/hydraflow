@@ -236,7 +236,9 @@ class TestWorktreeOriginValidation:
     @pytest.mark.asyncio
     async def test_https_url_matches(self) -> None:
         wm = self._make_wt_manager("owner/repo")
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "workspace._manager.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
         assert result is None  # method completes without error
@@ -244,7 +246,9 @@ class TestWorktreeOriginValidation:
     @pytest.mark.asyncio
     async def test_ssh_url_matches(self) -> None:
         wm = self._make_wt_manager("owner/repo")
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "workspace._manager.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = "git@github.com:owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
         assert result is None  # method completes without error
@@ -252,7 +256,9 @@ class TestWorktreeOriginValidation:
     @pytest.mark.asyncio
     async def test_https_without_git_suffix(self) -> None:
         wm = self._make_wt_manager("owner/repo")
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "workspace._manager.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo\n"
             result = await wm._assert_origin_matches_repo()
         assert result is None  # method completes without error
@@ -260,7 +266,9 @@ class TestWorktreeOriginValidation:
     @pytest.mark.asyncio
     async def test_mismatch_raises(self) -> None:
         wm = self._make_wt_manager("owner/repo")
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "workspace._remote.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = "https://github.com/other/project.git\n"
             with pytest.raises(RuntimeError, match="expected 'owner/repo'"):
                 await wm._assert_origin_matches_repo()
@@ -275,7 +283,9 @@ class TestWorktreeOriginValidation:
     @pytest.mark.asyncio
     async def test_case_insensitive_match(self) -> None:
         wm = self._make_wt_manager("Owner/Repo")
-        with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "workspace._manager.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
         assert result is None  # case-insensitive match succeeds

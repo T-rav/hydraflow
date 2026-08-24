@@ -34,7 +34,7 @@ per-issue workspace a **fully independent** `.git/` directory with its own
 `HEAD`, config, and remote. There is no shared-worktree bookkeeping to corrupt
 and no linked-worktree handle contention on teardown: the workspace is just a
 directory that can be `rmtree`'d. This is the mechanism
-`src/workspace.py:WorkspaceManager` already ships — its `create` clones
+`src/workspace/_manager.py:WorkspaceManager` already ships — its `create` clones
 locally; the `wt_path` and "worktree" names throughout the module are vestigial
 labels for what are now full local clones.
 
@@ -47,9 +47,9 @@ than a clarification, per the repo's ADR discipline.
 Create the per-issue workspace as an **independent local git clone**, not a
 linked git worktree.
 
-- `WorkspaceManager.create` (`src/workspace.py:WorkspaceManager.create`) acquires
+- `WorkspaceManager.create` (`src/workspace/_manager.py:WorkspaceManager.create`) acquires
   a per-repo workspace lock and delegates to
-  `src/workspace.py:WorkspaceManager._create_unlocked`, which runs
+  `src/workspace/_manager.py:WorkspaceManager._create_unlocked`, which runs
   `git clone --local --no-checkout <primary-checkout> <workspace-path>`. The
   `--local` flag hardlinks the object store (fast, no extra disk); the clone
   gets its own `.git/`, so it is independent of the primary checkout.
@@ -82,7 +82,7 @@ The formal interface remains `src/ports.py:WorkspacePort`.
 
 **Negative / Trade-offs:**
 
-- The `wt_path` / "worktree" naming in `src/workspace.py` is now a misnomer for
+- The `wt_path` / "worktree" naming in `src/workspace/` is now a misnomer for
   a local clone; the vestigial names are kept to bound the diff but can mislead
   a reader who takes them literally.
 - A local clone still needs write access under `workspace_base`; the isolated
@@ -99,8 +99,8 @@ The formal interface remains `src/ports.py:WorkspacePort`.
   per-issue isolated workspaces necessary.
 - ADR-0006 (RepoRuntime Isolation Architecture) — repo-level isolation that the
   repo-slug-scoped workspace path composes with in multi-repo mode.
-- `src/workspace.py:WorkspaceManager.create` — public entry point.
-- `src/workspace.py:WorkspaceManager._create_unlocked` — the `git clone --local
+- `src/workspace/_manager.py:WorkspaceManager.create` — public entry point.
+- `src/workspace/_manager.py:WorkspaceManager._create_unlocked` — the `git clone --local
   --no-checkout` implementation.
 - `src/config.py:HydraFlowConfig.workspace_path_for_issue` — the repo-slug-scoped
   workspace path.

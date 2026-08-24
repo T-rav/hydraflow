@@ -97,7 +97,7 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/base_runner.py` — `BaseRunner._execute` decorated with `@runner_span()`; `phase` property bridges `_phase_name` ClassVar.
 - `src/base_background_loop.py` — `BaseBackgroundLoop._execute_cycle` decorated with `@loop_span()`; `name` property bridges `_worker_name`.
 - `src/pr_manager.py` — `PRManager.create_pr/merge_pr/create_issue/push_branch` decorated with `@port_span(...)`.
-- `src/workspace.py` — `WorkspaceManager.create/merge_main` decorated with `@port_span(...)`.
+- `src/workspace/` — `WorkspaceManager.create/merge_main` decorated with `@port_span(...)`.
 - `src/exception_classify.py` — `reraise_on_credit_or_bug()` tags active span with `error=true` + `exception.slug` before re-raise (best-effort; never alters classify behavior).
 - `src/events.py` — `EventBus.publish` calls `span.add_event("hf.event", ...)` on active span (best-effort).
 - `src/trace_collector.py` — `_record_inner` calls `bridge_event_to_span` on every parsed subprocess event (lazy imports to avoid circular dependency).
