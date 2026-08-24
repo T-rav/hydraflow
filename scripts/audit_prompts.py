@@ -608,6 +608,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Implement",
         "src/implement_worker_runner.py",
     ),
+    # The fresh reviewer's whole input (#11543). Registered for a reason the
+    # other two worker prompts do not carry: this one is also the boundary that
+    # keeps implementer-private context away from a reviewer, so rendering it to
+    # a fixture is how "the prompt is built from canonical evidence and nothing
+    # else" becomes a thing a human can read rather than a claim in a docstring.
+    AuditTarget(
+        "review_worker_task",
+        "review_worker_runner.build_review_worker_prompt",
+        "tests/fixtures/prompts/review_worker_task.json",
+        "Review",
+        "src/review_worker_runner.py",
+    ),
     AuditTarget(
         "prompt_refiner_refine",
         "prompt_refiner.build_refine_prompt",

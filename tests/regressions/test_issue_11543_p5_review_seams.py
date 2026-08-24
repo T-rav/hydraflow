@@ -21,17 +21,25 @@ Offline by construction: every check is a pure function of a value.
 
 from __future__ import annotations
 
+import itertools
 from collections import deque
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from pydantic import ValidationError
+from pydantic import ConfigDict, ValidationError, computed_field
 
 from driver_contracts import (
     WORKER_CATALOG,
+    DriverLease,
     DriverPhase,
+    ModelRequirement,
+    ModelRequirementKind,
     RejectionReason,
+    WorkerDispatchRequest,
     WorkerRole,
+    WriterLease,
     WriteScope,
+    admit_dispatch,
 )
 from models import ReviewVerdict
 from review_authority import (
@@ -45,7 +53,7 @@ from review_broker import (
     review_roles_for_review_phase,
     reviewer_independence_refusal,
 )
-from review_evidence import build_review_evidence
+from review_evidence import CANONICAL_FIELDS, ReviewEvidence, build_review_evidence
 
 _PERMISSIVE = {"ci_green": True, "hitl_required": False, "reviewer_independent": True}
 
@@ -311,3 +319,165 @@ class TestTheSecretScrubCoversWhatPydanticAccepts:
         shape is a widening wearing a safety label."""
         with pytest.raises(ValidationError):
             build_review_evidence({"issue_number": 1, "changed_files": {"a": 1}})
+
+
+class TestTheScrubWalkTerminates:
+    """The defect the scrub FIX introduced, found reviewing the fix (#11543).
+
+    Widening the walk from ``list``/``tuple`` to any ``Iterable`` closed the
+    leak and opened two ways to not terminate that the narrower version could
+    not have had: a ``list`` is always finite, and the old code never recursed.
+    So an endless generator walked forever and a deeply nested structure hit
+    ``RecursionError`` — in a function whose module docstring calls it *pure,
+    no I/O, testable against a value*. A pure function that hangs is not one.
+
+    Both ceilings **raise**. Truncating would be the worse bug: a silently
+    shortened diff or changed-file list is a reviewer judging something other
+    than the change, which is the one failure this module exists to prevent.
+    """
+
+    def test_an_endless_iterable_is_refused_rather_than_walked_forever(self) -> None:
+        with pytest.raises(ValueError, match="exceeds"):
+            build_review_evidence(
+                {"issue_number": 1, "changed_files": itertools.repeat("x")}
+            )
+
+    def test_a_deeply_nested_structure_is_refused_rather_than_overflowing(self) -> None:
+        nested: object = "x"
+        for _ in range(2000):
+            nested = [nested]
+        with pytest.raises(ValueError, match="nests deeper"):
+            build_review_evidence({"issue_number": 1, "changed_files": nested})
+
+    def test_a_realistically_large_bundle_is_untouched(self) -> None:
+        """Non-vacuity in the direction that matters: the ceilings must sit far
+        above any honest bundle, or the fix trades a hang for a false refusal.
+
+        Five thousand changed files is a monstrous PR and nowhere near the cap.
+        """
+        payload = build_review_evidence(
+            {"issue_number": 1, "changed_files": [f"src/f{i}.py" for i in range(5000)]}
+        ).as_payload()
+        assert len(payload["changed_files"]) == 5000
+
+    def test_the_bound_did_not_cost_the_scrub(self) -> None:
+        """The ceilings must not have been bought by narrowing the walk back."""
+        secret = "hfgwctl_" + "e" * 40
+        payload = build_review_evidence(
+            {
+                "issue_number": 1,
+                "test_failures": {f"tok {secret}"},
+                "diff": f"+T={secret}\n".encode(),
+            }
+        ).as_payload()
+        assert secret not in repr(payload)
+
+
+class TestTheAllowListGuardsWhatIsRENDERED:
+    """Pass 3's finding: the guard asserted a PROXY for its subject.
+
+    ``as_payload`` compared ``model_fields`` and its docstring claimed it
+    guarded what got rendered. Those are different sets — ``model_dump()``'s
+    keys are a superset — so two subclass shapes walked past it and put
+    ``implementer_transcript`` into a reviewer's prompt with every test green.
+
+    That is the defect class this whole file exists to repair, landing one
+    layer inside the repair itself: a guard whose stated subject is not the
+    thing it checks.
+    """
+
+    def test_a_computed_field_cannot_ride_into_the_payload(self) -> None:
+        class ViaComputed(ReviewEvidence):
+            @computed_field  # type: ignore[prop-decorator]
+            @property
+            def implementer_transcript(self) -> str:
+                return "I considered three approaches and picked..."
+
+        with pytest.raises(ValueError, match="canonical field set"):
+            ViaComputed(issue_number=1).as_payload()
+
+    def test_an_extra_allowing_subclass_cannot_smuggle_a_key(self) -> None:
+        class ViaExtra(ReviewEvidence):
+            model_config = ConfigDict(extra="allow", frozen=True)
+
+        with pytest.raises(ValueError, match="canonical field set"):
+            ViaExtra(issue_number=1, implementer_transcript="smuggled").as_payload()
+
+    def test_the_ordinary_payload_still_renders(self) -> None:
+        """Non-vacuity: the guard must not refuse the thing it exists to pass."""
+        payload = ReviewEvidence(issue_number=1).as_payload()
+        assert set(payload) == CANONICAL_FIELDS
+
+
+class TestOneVocabularyForOneLineage:
+    """Both halves of the fence normalise the value the same way.
+
+    The presence test stripped and the membership test did not, so a padded
+    lineage counted as *stated* and then failed to match the spawn it names —
+    two readings of one value inside one rule.
+    """
+
+    def test_a_padded_lineage_still_matches_the_spawn_it_names(self) -> None:
+        assert (
+            reviewer_independence_refusal(
+                role=WorkerRole.REVIEWER,
+                requesting_spawn_id="  spawn-impl-1  ",
+                implementer_spawn_ids=["spawn-impl-1"],
+            )
+            is RejectionReason.SELF_REVIEW_FORBIDDEN
+        )
+
+    def test_admit_dispatch_reads_it_the_same_way(self) -> None:
+        """The SECOND table over the same vocabulary, pinned separately.
+
+        ``reviewer_independence_refusal`` and ``admit_dispatch`` are two
+        descriptions of one rule, and a mutation that unstripped only the
+        second stayed green against the test above — the exact "two tables,
+        one vocabulary" trap. Each table needs its own subject.
+        """
+        now = datetime.now(UTC)
+        lease = DriverLease(
+            driver_id="drv-1",
+            epoch=0,
+            repo_slug="acme/widget",
+            issue_number=1,
+            phase=DriverPhase.REVIEW,
+            expected_stage_label="hydraflow-review",
+            phase_attempt=0,
+            expires_at=now + timedelta(hours=1),
+        )
+        request = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=WorkerRole.REVIEWER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="review the change",
+            reason="the change needs review",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+            requesting_spawn_id="  spawn-impl-1  ",
+        )
+
+        reason = admit_dispatch(
+            request=request,
+            lease=lease,
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-review",
+            writer_lease=WriterLease(
+                driver_id="drv-1",
+                epoch=0,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.REVIEWER}),
+            remaining_usd_budget=10.0,
+            implementer_spawn_ids=frozenset({"spawn-impl-1"}),
+        )
+
+        assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
