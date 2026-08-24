@@ -10,10 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from epic import (
-    EpicCompletionChecker,
-    extract_version_from_title,
-)
+from epic import EpicCompletionChecker
+from epic._parse import extract_version_from_title
 from models import Release
 from state import StateTracker
 from tests.conftest import IssueFactory
@@ -396,11 +394,14 @@ class TestCreateReleaseTargetsPromotedMain:
         checker, prs, _, _ = _make_release_checker()
         prs.resolve_remote_branch_sha = AsyncMock(return_value=_MAIN_SHA)
 
-        with patch("epic.generate_changelog", AsyncMock(return_value="## v1.0.0")):
+        with patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value="## v1.0.0")
+        ) as mock_gen:
             url, changelog = await checker._create_release_for_epic(
                 100, "[Epic] v1.0.0 — Features", [1, 2]
             )
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         assert url == "https://github.com/test-org/test-repo/releases/tag/v1.0.0"
         assert changelog == "## v1.0.0"
         prs.resolve_remote_branch_sha.assert_awaited_once_with("main")
@@ -419,9 +420,12 @@ class TestCreateReleaseTargetsPromotedMain:
         assert checker._config.base_branch() != "trunk"
         prs.resolve_remote_branch_sha = AsyncMock(return_value=_MAIN_SHA)
 
-        with patch("epic.generate_changelog", AsyncMock(return_value="")):
+        with patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value="")
+        ) as mock_gen:
             await checker._create_release_for_epic(100, "[Epic] v2.0", [1])
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         prs.resolve_remote_branch_sha.assert_awaited_once_with("trunk")
         prs.create_tag.assert_awaited_once_with("v2.0", ref=_MAIN_SHA)
 
@@ -430,11 +434,14 @@ class TestCreateReleaseTargetsPromotedMain:
         checker, prs, _, _ = _make_release_checker()
         prs.resolve_remote_branch_sha = AsyncMock(return_value=None)
 
-        with patch("epic.generate_changelog", AsyncMock(return_value="## v1.0.0")):
+        with patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value="## v1.0.0")
+        ) as mock_gen:
             url, changelog = await checker._create_release_for_epic(
                 100, "[Epic] v1.0.0 — Features", [1, 2]
             )
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         assert (url, changelog) == ("", "## v1.0.0")
         prs.create_tag.assert_not_awaited()
         prs.create_release.assert_not_awaited()

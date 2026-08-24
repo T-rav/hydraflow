@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from subprocess_util import run_subprocess
 
 logger = logging.getLogger("hydraflow.workspace")
@@ -249,9 +249,3 @@ class WorkspaceMainlineMixin:
             logger.info("git rerere enabled")
         except (RuntimeError, FileNotFoundError):
             logger.debug("Could not enable git rerere", exc_info=True)
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from credentials import Credentials

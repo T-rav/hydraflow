@@ -9,6 +9,8 @@ unpushed-branch parser.
 
 from __future__ import annotations
 
+import pytest
+
 from branch_gc_scan import (
     BranchGCDecision,
     UnpushedBranch,
@@ -183,21 +185,23 @@ class TestParseUnpushedBranches:
             )
         ]
 
-    def test_gone_upstream_is_not_reported(self) -> None:
-        # Upstream ref deleted (typically after merge) — not unpushed work.
-        output = "agent/issue-8693|origin/agent/issue-8693|[gone]"
-        assert parse_unpushed_branches(output) == []
-
-    def test_in_sync_branch_is_not_reported(self) -> None:
-        output = "main|origin/main|"
-        assert parse_unpushed_branches(output) == []
-
-    def test_branch_with_no_upstream_is_not_reported(self) -> None:
-        output = "scratch||"
-        assert parse_unpushed_branches(output) == []
-
-    def test_behind_only_is_not_reported(self) -> None:
-        output = "old-branch|origin/old-branch|[behind 5]"
+    @pytest.mark.parametrize(
+        "output",
+        [
+            # Upstream ref deleted (typically after merge) — not unpushed work.
+            "agent/issue-8693|origin/agent/issue-8693|[gone]",
+            "main|origin/main|",
+            "scratch||",
+            "old-branch|origin/old-branch|[behind 5]",
+        ],
+        ids=[
+            "gone_upstream_is_not_reported",
+            "in_sync_branch_is_not_reported",
+            "branch_with_no_upstream_is_not_reported",
+            "behind_only_is_not_reported",
+        ],
+    )
+    def test_branch_without_unpushed_work_is_not_reported(self, output: str) -> None:
         assert parse_unpushed_branches(output) == []
 
     def test_multiple_lines_mixed(self) -> None:

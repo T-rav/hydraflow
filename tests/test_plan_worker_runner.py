@@ -153,6 +153,7 @@ def _request(
         reason="the plan needs the module map first",
         expected_route_policy_revision=ROUTE_REVISION,
         idempotency_key=key,
+        requesting_spawn_id="spawn-director",  # fenced roles carry lineage (#11543)
     )
 
 

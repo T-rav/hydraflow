@@ -14,9 +14,6 @@ classes:
   src/contract_refresh_loop.py:ContractRefreshLoop:
     loc: 671
     methods: 23
-  src/epic.py:EpicManager:
-    loc: 898
-    methods: 36
   src/issue_store.py:IssueStore:
     loc: 726
     methods: 49
@@ -29,9 +26,6 @@ classes:
   src/post_merge_handler.py:PostMergeHandler:
     loc: 696
     methods: 13
-  src/pr_unsticker.py:PRUnsticker:
-    loc: 903
-    methods: 20
   src/repo_wiki.py:RepoWikiStore:
     loc: 767
     methods: 30
@@ -58,8 +52,8 @@ comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC o
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: decomposed WorkspaceManager into src/workspace/ mixin package\
-  \ (batch 6, Refs #11547)"
+  \ PR. Last moved: batch 7: PRUnsticker and EpicManager decomposed into mixin packages\
+  \ (Refs #11547)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109

@@ -236,10 +236,30 @@ def test_every_runner_execute_call_passes_issue_labels() -> None:
     )
 
 
+#: Entries are module paths or PACKAGE DIRECTORIES relative to ``src/``. A
+#: directory expands to every module under it: ``pr_unsticker.py`` became a
+#: package (#11547 batch 7), and a basename entry would have stopped seeing
+#: both of its ``self._agents.execute`` call sites at once (#11673).
 _AGENTPORT_CALLER_MODULES = (
     "merge_conflict_resolver.py",
-    "pr_unsticker.py",
+    "pr_unsticker/",
 )
+
+
+def _agentport_caller_files() -> list[str]:
+    """Resolve the roster above to the source files it walks."""
+    out: list[str] = []
+    for rel in _AGENTPORT_CALLER_MODULES:
+        path = SRC / rel
+        assert path.exists(), f"module {rel} not found in src/"
+        if path.is_dir():
+            found = sorted(p.relative_to(SRC).as_posix() for p in path.rglob("*.py"))
+            assert found, f"{rel} is an empty package — the pin covers nothing"
+            out.extend(found)
+        else:
+            out.append(rel)
+    return out
+
 
 # implement_spec_reviewer.py also calls self._agents.execute but its run()
 # interface carries no issue context at all — threading labels there is an
@@ -258,9 +278,9 @@ def test_every_agentport_execute_call_passes_issue_labels() -> None:
     structural blind spot.
     """
     offenders: list[str] = []
-    for rel in _AGENTPORT_CALLER_MODULES:
+    seen = 0
+    for rel in _agentport_caller_files():
         path = SRC / rel
-        assert path.exists(), f"module {rel} not found in src/"
         tree = ast.parse(path.read_text(), filename=rel)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -276,8 +296,17 @@ def test_every_agentport_execute_call_passes_issue_labels() -> None:
             )
             if not is_agents_execute:
                 continue
+            seen += 1
             if not any(kw.arg == "issue_labels" for kw in node.keywords):
                 offenders.append(f"{rel}:{node.lineno}")
+    # Guard the guard. "No offenders" and "no call sites at all" are the same
+    # green, and a roster repointed at the wrong module after a decomposition
+    # lands squarely in the second case (#11673).
+    assert seen >= 4, (
+        f"only {seen} self._agents.execute call sites found across "
+        f"{_AGENTPORT_CALLER_MODULES} — the pin is watching the wrong modules, "
+        "not passing."
+    )
     assert not offenders, (
         f"These self._agents.execute(...) call sites omit issue_labels=: "
         f"{offenders}. Pass issue_labels=issue.tags / issue.labels so the "

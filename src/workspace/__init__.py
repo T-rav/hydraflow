@@ -23,17 +23,29 @@ class identity and every ``patch.object(WorkspaceManager, ...)`` still resolves.
 through is bound in the module that CALLS it, so ``patch("workspace.X")`` would
 replace an attribute here and leave the real binding untouched — a patch that
 silently no-ops. Patch ``workspace._provision.X`` / ``workspace._remote.X``
-instead, so a stale target fails loudly.
+instead, so a stale target fails loudly. This holds for module-level DATA too,
+which is why ``_FETCH_LOCKS`` and ``_WORKTREE_LOCKS`` are deliberately NOT
+re-exported here; see below.
+
+**Nothing else is re-exported, on purpose.** The first cut of this module also
+re-exported ``_FETCH_LOCKS`` / ``_WORKTREE_LOCKS``, reasoning that a shared
+mutable registry is safe to alias because ``workspace._FETCH_LOCKS is
+workspace._manager._FETCH_LOCKS`` — mutate either name, both see it. True, and
+irrelevant: no consumer mutates them. Both consumers *rebind* them, via
+``patch.object(workspace, "_FETCH_LOCKS", racy_dict)``, and rebinding sets the
+attribute on THIS module while ``_repo_fetch_lock`` keeps reading
+``_manager.__dict__``. So the alias bought nothing real and cost the loud
+failure: the four #6697/#7839 TOCTOU guards patched a name that resolved, never
+opened the race window they exist to open, and stayed green for a full release
+with the check-then-set bug reintroducible at will (#11547 review).
+
+Without the re-export, ``patch.object(workspace, "_FETCH_LOCKS", ...)`` raises
+``AttributeError`` — which is the whole point. Reach the registries at
+``workspace._manager._FETCH_LOCKS``, the module that defines and reads them.
 """
 
 from __future__ import annotations
 
-from ._manager import _FETCH_LOCKS, _WORKTREE_LOCKS, WorkspaceManager
+from ._manager import WorkspaceManager
 
-#: Re-exported deliberately, and this is the ONE case where re-exporting is
-#: right. A function binding re-exported here would be a second name for the
-#: same callable and patching it would leave each slice's own binding untouched
-#: — a patch that silently no-ops. A shared mutable registry is the opposite:
-#: ``workspace._FETCH_LOCKS is workspace._manager._FETCH_LOCKS``, so the
-#: single-registry invariant #6697 and #7839 pin holds through the package.
-__all__ = ["WorkspaceManager", "_FETCH_LOCKS", "_WORKTREE_LOCKS"]
+__all__ = ["WorkspaceManager"]

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -112,6 +116,69 @@ def test_secrets_inside_a_sequence_field_are_scrubbed() -> None:
     }
     payload = build_review_evidence(envelope).as_payload()
     assert "hfgwctl_" + "b" * 40 not in payload["test_failures"][0]
+
+
+#: Every container Pydantic's lax mode accepts for ``tuple[str, ...]``, and the
+#: one it accepts for ``str``. The scrub ran on ``str``/``list``/``tuple`` only,
+#: so all five arrived at the model untouched. A ``set`` is what a deduplicated
+#: changed-files list actually is, and ``bytes`` is what a diff read off an
+#: un-texted subprocess pipe actually is; both were confirmed to leak a live
+#: token by execution before the fix.
+_SECRET = "hfgwctl_" + "b" * 40
+
+
+@pytest.mark.parametrize(
+    ("field", "make_value"),
+    [
+        ("test_failures", lambda: {f"tok {_SECRET} rejected"}),
+        ("changed_files", lambda: frozenset({f"src/{_SECRET}.py"})),
+        ("changed_files", lambda: deque([f"src/{_SECRET}.py"])),
+        ("changed_files", lambda: (f"src/{_SECRET}.py" for _ in range(1))),
+        ("diff", lambda: bytes(f"+TOKEN={_SECRET}\n", "utf-8")),
+    ],
+    ids=["set", "frozenset", "deque", "generator", "bytes"],
+)
+def test_a_secret_is_scrubbed_whatever_container_it_arrives_in(
+    field: str, make_value: Callable[[], Any]
+) -> None:
+    """The scrub must cover the shapes Pydantic coerces, not the two it knew.
+
+    Extending an ``isinstance`` tuple would be the same bug one type later, so
+    the builder normalises: bytes are decoded, any non-mapping iterable is
+    walked, and the leaves are scrubbed.
+    """
+    # A factory, not a value: a generator built at collection time is consumed
+    # by the first run, and a rerun would then scrub an empty tuple and pass.
+    payload = build_review_evidence(
+        {"issue_number": 1, field: make_value()}
+    ).as_payload()
+    assert _SECRET not in repr(payload)
+
+
+def test_a_shape_the_model_refuses_is_still_refused() -> None:
+    """The normaliser must not widen what evidence ACCEPTS.
+
+    Walking a ``Mapping`` into a tuple of its keys would have made a ``dict``
+    satisfy ``tuple[str, ...]``, which Pydantic rejects today. A scrub that
+    quietly admits a new shape is a widening wearing a safety label.
+    """
+    with pytest.raises(ValidationError):
+        build_review_evidence({"issue_number": 1, "changed_files": {"a": 1}})
+
+
+def test_a_subclass_cannot_render_a_wider_payload() -> None:
+    """``extra="forbid"`` stops an extra KEY on this class, not a subclass.
+
+    ``as_payload`` dumps ``type(self)``'s fields, so a subclass declaring one
+    more renders one more — the one way an implementer-private field could ride
+    the allow-list into a reviewer's prompt with every existing test green.
+    """
+
+    class WiderEvidence(ReviewEvidence):
+        implementer_transcript: str = ""
+
+    with pytest.raises(ValueError, match="canonical field set"):
+        WiderEvidence(issue_number=1).as_payload()
 
 
 def test_missing_canonical_fields_are_absent_not_invented() -> None:

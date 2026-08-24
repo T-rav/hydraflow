@@ -85,7 +85,12 @@ Sentry stays as-is during Phase A. The decision to retire / consolidate / unify 
 
 ## Source-file citations
 
-The following files carry this ADR's decisions and must be kept in sync with any supersession:
+The following files carried this ADR's decisions **while it was live**. ADR-0118 removed
+the whole telemetry layer: `src/telemetry/*` no longer exists and `grep port_span src/`
+returns nothing, so **no path below still holds the decorator described next to it**.
+This list is a historical record, not a live citation set — superseded ADRs are exempt
+from `test_adr_source_citations_exist.py` for exactly that reason, and a reader chasing
+`@port_span` into any of these files will find it gone (#11547 review).
 
 - `src/telemetry/__init__.py` — package marker; re-exports `init_otel`, `shutdown_otel`, `slug_for`.
 - `src/telemetry/otel.py` — `init_otel(config)` feature-gated SDK bootstrap, `shutdown_otel()` flush, OTLP/HTTP exporter to Honeycomb, auto-instrumentation registration (FastAPI, httpx, asyncio, logging).

@@ -10,10 +10,15 @@ import pytest
 from epic import (
     EpicCompletionChecker,
     EpicManager,
-    ReleaseEpicResultError,
     check_all_checkboxes,
     parse_epic_sub_issues,
 )
+
+# ``epic`` is a package (#11547 batch 7) and re-exports only the two classes
+# src/ imports plus the two epic-body parsers. Everything else is imported from
+# the slice that DEFINES it, so a stale target raises instead of resolving
+# against a re-export that nothing reads.
+from epic._release import ReleaseEpicResultError
 from events import EventType
 from models import EpicChildInfo, EpicState, GitHubIssue
 from tests.conftest import IssueFactory, make_state
@@ -1293,19 +1298,25 @@ class TestNarrowedExceptionHandling:
     async def test_generate_epic_changelog_catches_runtime_error(self) -> None:
         """RuntimeError from generate_changelog returns empty string."""
         checker, prs, _ = _make_checker()
-        with patch("epic.generate_changelog", new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "epic._completion.generate_changelog", new_callable=AsyncMock
+        ) as mock_gen:
             mock_gen.side_effect = RuntimeError("changelog failed")
             result = await checker._generate_epic_changelog(100, [1, 2])
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         assert result == ""
 
     @pytest.mark.asyncio
     async def test_generate_epic_changelog_propagates_type_error(self) -> None:
         """TypeError from generate_changelog propagates."""
         checker, _, _ = _make_checker()
-        with patch("epic.generate_changelog", new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "epic._completion.generate_changelog", new_callable=AsyncMock
+        ) as mock_gen:
             mock_gen.side_effect = TypeError("bad type")
             with pytest.raises(TypeError, match="bad type"):
                 await checker._generate_epic_changelog(100, [1, 2])
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
 
     def test_write_changelog_file_catches_os_error(self, tmp_path: Path) -> None:
         """OSError from file I/O is caught gracefully."""

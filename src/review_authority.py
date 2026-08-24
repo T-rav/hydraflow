@@ -67,6 +67,14 @@ class AdjudicationReason(StrEnum):
     HITL_REQUIRED = "hitl_required"
     NOT_INDEPENDENT = "not_independent"
     EVIDENCE_STALE = "evidence_stale"
+    SNAPSHOT_UNKNOWN = "snapshot_unknown"
+    """Exactly one side of the head-sha pair was supplied.
+
+    A partial pair is a *broken caller* — a head-sha lookup that failed and
+    passed an empty string on — not an un-plumbed one. Reading it as "no
+    comparison, therefore no objection" is how a failed lookup silently
+    disables the bounded-slice rule at the one boundary it exists to hold.
+    """
 
 
 class ReviewFinding(BaseModel):
@@ -103,12 +111,31 @@ def _strictest(*verdicts: ReviewVerdict) -> ReviewVerdict:
     return max(verdicts, key=STRICTER.index)
 
 
+def _snapshot_objection(
+    evidence_head_sha: str, current_head_sha: str
+) -> AdjudicationReason | None:
+    """The bounded-slice rule read over a head-sha pair, in three states.
+
+    One function rather than two conditions at the call site, because the two
+    live states are not independent: which one applies is decided by *how much*
+    of the pair arrived, and splitting that decision is how the partial case
+    ended up filed under "not checked".
+    """
+    if evidence_head_sha and current_head_sha:
+        if evidence_head_sha == current_head_sha:
+            return None
+        return AdjudicationReason.EVIDENCE_STALE
+    if evidence_head_sha or current_head_sha:
+        return AdjudicationReason.SNAPSHOT_UNKNOWN
+    return None
+
+
 def adjudicate(
     proposal: ReviewProposal,
     *,
     ci_green: bool,
-    hitl_required: bool = False,
-    reviewer_independent: bool = True,
+    hitl_required: bool,
+    reviewer_independent: bool,
     evidence_head_sha: str = "",
     current_head_sha: str = "",
 ) -> tuple[ReviewVerdict, AdjudicationReason]:
@@ -118,17 +145,41 @@ def adjudicate(
     rather than the last one checked. A caller that logs the reason is logging
     why the change was held, which is the question an operator actually asks.
 
+    ``hitl_required`` and ``reviewer_independent`` are required keyword
+    arguments with no defaults, for ``admit_dispatch``'s stated reason about the
+    same class of input: *a caller that forgets either must fail loudly rather
+    than dispatch fail-open.* They defaulted to ``False``/``True`` — the
+    permissive reading of both — which meant the one caller most likely to exist
+    (wiring written in a hurry, against a fence whose other half had already
+    been found unreachable) got a verdict computed as though no human was
+    needed and the reviewer was known to be independent. A ``TypeError`` at the
+    call site is the cheapest possible version of that bug.
+
     ``evidence_head_sha``/``current_head_sha`` implement ADR-0137's bounded
     slice at the verdict boundary: a review of a snapshot that has since moved
-    is not a review of what would merge. Both empty means "not checked" — the
-    caller has not supplied a snapshot — rather than "matched", so an
-    un-plumbed caller cannot get a free pass from a pair of empty strings.
+    is not a review of what would merge. The pair is read in three states, not
+    two:
+
+    - **both supplied** — compared; a mismatch is ``EVIDENCE_STALE``.
+    - **exactly one supplied** — ``SNAPSHOT_UNKNOWN``, and it blocks. A caller
+      that has one side has plumbed the check; an empty other side is a lookup
+      that failed, and treating a failed lookup as "no objection" turns the
+      bounded-slice rule off exactly when the repository state is unknown.
+    - **neither supplied** — not checked, and it does not block. This is a real
+      gap rather than a property: the verdict is indistinguishable from a
+      matched pair, and the honest statement is that a caller which plumbs
+      neither side simply does not get the bounded slice. An earlier docstring
+      claimed the two were distinguishable; they are byte-identical, so the
+      claim pinned nothing and a test written against it could not fail. The
+      remedy is a caller that plumbs both, which the partial-pair rule above
+      now makes the only halfway state worth writing.
     """
     if not reviewer_independent:
         return ReviewVerdict.REQUEST_CHANGES, AdjudicationReason.NOT_INDEPENDENT
 
-    if evidence_head_sha and current_head_sha and evidence_head_sha != current_head_sha:
-        return ReviewVerdict.REQUEST_CHANGES, AdjudicationReason.EVIDENCE_STALE
+    snapshot = _snapshot_objection(evidence_head_sha, current_head_sha)
+    if snapshot is not None:
+        return ReviewVerdict.REQUEST_CHANGES, snapshot
 
     if hitl_required:
         return ReviewVerdict.REQUEST_CHANGES, AdjudicationReason.HITL_REQUIRED
@@ -143,7 +194,16 @@ def adjudicate(
     # to the strictness its own non-blocking findings justify: a reviewer that
     # files advisory findings and then recommends APPROVE gets COMMENT.
     floor = ReviewVerdict.COMMENT if proposal.findings else ReviewVerdict.APPROVE
-    return (
-        _strictest(proposal.recommended, floor),
-        AdjudicationReason.RECOMMENDATION_ACCEPTED,
+    verdict = _strictest(proposal.recommended, floor)
+    # The reason names the BINDING constraint here too. When the advisory floor
+    # lifts the verdict above what was recommended, the recommendation was not
+    # accepted — it lost to the reviewer's own findings, which is what
+    # FINDINGS_PRESENT already says. Reporting RECOMMENDATION_ACCEPTED for an
+    # APPROVE that came back COMMENT was a reason code that contradicted its own
+    # verdict, in the one field an operator reads to learn why.
+    reason = (
+        AdjudicationReason.FINDINGS_PRESENT
+        if verdict is not proposal.recommended
+        else AdjudicationReason.RECOMMENDATION_ACCEPTED
     )
+    return verdict, reason

@@ -133,13 +133,16 @@ async def test_release_tags_promoted_main_sha_not_checkout_head(
     checker, prs, state = _checker(two_tier_repo, tmp_path)
 
     with (
-        patch("epic.generate_changelog", AsyncMock(return_value="## v1.0.0")),
+        patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value="## v1.0.0")
+        ) as mock_gen,
         patch.object(prs, "_run_with_body_file", AsyncMock(return_value="")),
     ):
         url, changelog = await checker._create_release_for_epic(
             100, _EPIC_TITLE, [1, 2]
         )
 
+    assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
     assert url == "https://github.com/org/repo/releases/tag/v1.0.0"
     assert changelog == "## v1.0.0"
     tagged = _git(two_tier_repo.factory, "rev-parse", "v1.0.0^{commit}")
@@ -165,7 +168,9 @@ async def test_release_skips_fail_closed_when_main_cannot_be_resolved(
     create_release = AsyncMock(wraps=prs.create_release)
 
     with (
-        patch("epic.generate_changelog", AsyncMock(return_value="## v1.0.0")),
+        patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value="## v1.0.0")
+        ) as mock_gen,
         patch.object(prs, "create_tag", create_tag),
         patch.object(prs, "create_release", create_release),
     ):
@@ -173,6 +178,7 @@ async def test_release_skips_fail_closed_when_main_cannot_be_resolved(
             100, _EPIC_TITLE, [1, 2]
         )
 
+    assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
     assert url == ""
     assert changelog == "## v1.0.0", "changelog is preserved for the caller"
     create_tag.assert_not_awaited()

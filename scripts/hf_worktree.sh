@@ -9,7 +9,7 @@
 # name an agent picks can already exist. Three same-session incidents, the
 # worst staging 1469 files from a merge into the wrong branch.
 #
-# The factory path (src/workspace.py::_create_workspace) rmtree's stale dirs
+# The factory path (src/workspace/_manager.py::_create_unlocked) rmtree's stale dirs
 # because factory issue worktrees are disposable. An agent worktree can hold
 # hand-written work, so this helper FAILS instead of deleting — removal is a
 # human/agent decision, and the exact command is printed, never run.

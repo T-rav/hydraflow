@@ -51,7 +51,7 @@ _GRANDFATHERED = frozenset(
         "evidence_pack.py",
         "plan_council.py",
         "post_merge_handler.py",
-        "pr_unsticker.py",
+        "pr_unsticker/_unsticker.py",
         "subprocess_util.py",
         "term_proposer_loop.py",
     }
