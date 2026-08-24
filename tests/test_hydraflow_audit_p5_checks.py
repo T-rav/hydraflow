@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 from scripts.hydraflow_audit import registry  # noqa: F401
 from scripts.hydraflow_audit.checks import p5_ci  # noqa: F401
 from scripts.hydraflow_audit.models import CheckContext, Status
@@ -36,34 +37,37 @@ def test_workflows_dir_empty_fails(tmp_path: Path) -> None:
     assert _run("P5.1", _ctx(tmp_path)).status is Status.FAIL
 
 
-def test_workflows_dir_with_files_passes(tmp_path: Path) -> None:
-    _write(tmp_path / ".github" / "workflows" / "ci.yml", "name: ci\n")
-    assert _run("P5.1", _ctx(tmp_path)).status is Status.PASS
-
-
-def test_workflow_quality_lite_detected(tmp_path: Path) -> None:
-    _write(tmp_path / ".github" / "workflows" / "ci.yml", "run: make quality-lite\n")
-    assert _run("P5.2", _ctx(tmp_path)).status is Status.PASS
-
-
-def test_workflow_unified_quality_detected(tmp_path: Path) -> None:
-    # C-3 unified CI onto the full `make quality` (no separate lite stage);
-    # the unified superset target satisfies P5.2's "or equivalent" principle.
-    _write(tmp_path / ".github" / "workflows" / "ci.yml", "run: make quality\n")
-    assert _run("P5.2", _ctx(tmp_path)).status is Status.PASS
+@pytest.mark.parametrize(
+    ("relpath", "content", "check"),
+    [
+        ((".github", "workflows", "ci.yml"), "name: ci\n", "P5.1"),
+        ((".github", "workflows", "ci.yml"), "run: make quality-lite\n", "P5.2"),
+        # C-3 unified CI onto the full `make quality` (no separate lite stage);
+        # the unified superset target satisfies P5.2's "or equivalent" principle.
+        ((".github", "workflows", "ci.yml"), "run: make quality\n", "P5.2"),
+        (
+            (".github", "workflows", "test.yml"),
+            "run: pytest --cov-fail-under=70\n",
+            "P5.3",
+        ),
+    ],
+    ids=[
+        "workflows_dir_with_files_passes",
+        "workflow_quality_lite_detected",
+        "workflow_unified_quality_detected",
+        "workflow_coverage_gate_detected",
+    ],
+)
+def test_workflow_check_passes(
+    tmp_path: Path, relpath: tuple[str, ...], content: str, check: str
+) -> None:
+    _write(tmp_path.joinpath(*relpath), content)
+    assert _run(check, _ctx(tmp_path)).status is Status.PASS
 
 
 def test_workflow_quality_lite_absent_fails(tmp_path: Path) -> None:
     _write(tmp_path / ".github" / "workflows" / "ci.yml", "run: make lint\n")
     assert _run("P5.2", _ctx(tmp_path)).status is Status.FAIL
-
-
-def test_workflow_coverage_gate_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / ".github" / "workflows" / "test.yml",
-        "run: pytest --cov-fail-under=70\n",
-    )
-    assert _run("P5.3", _ctx(tmp_path)).status is Status.PASS
 
 
 # --- Hooks ----------------------------------------------------------------
@@ -78,9 +82,31 @@ def test_pre_commit_hook_not_executable_fails(tmp_path: Path) -> None:
     assert _run("P5.4", _ctx(tmp_path)).status is Status.FAIL
 
 
-def test_pre_commit_hook_present_and_executable_passes(tmp_path: Path) -> None:
-    _write(tmp_path / ".githooks" / "pre-commit", "#!/bin/sh\n", executable=True)
-    assert _run("P5.4", _ctx(tmp_path)).status is Status.PASS
+@pytest.mark.parametrize(
+    ("hook", "content", "check"),
+    [
+        ("pre-commit", "#!/bin/sh\n", "P5.4"),
+        ("pre-push", "#!/bin/sh\nmake quality-lite\n", "P5.8"),
+        ("pre-commit", "#!/bin/sh\nmake lint-check || make lint-fix\n", "P5.9"),
+        (
+            "pre-commit",
+            "#!/bin/sh\nif git diff --cached --name-status | grep '^D.*CLAUDE.md';"
+            " then exit 1; fi\n",
+            "P5.10",
+        ),
+    ],
+    ids=[
+        "pre_commit_hook_present_and_executable_passes",
+        "pre_push_hook_with_quality_lite_passes",
+        "self_repair_pattern_detected",
+        "claude_md_guard_detected",
+    ],
+)
+def test_githook_check_passes(
+    tmp_path: Path, hook: str, content: str, check: str
+) -> None:
+    _write(tmp_path / ".githooks" / hook, content, executable=True)
+    assert _run(check, _ctx(tmp_path)).status is Status.PASS
 
 
 def test_pre_push_hook_missing_fails(tmp_path: Path) -> None:
@@ -92,24 +118,6 @@ def test_pre_push_hook_without_quality_lite_warns(tmp_path: Path) -> None:
     assert _run("P5.8", _ctx(tmp_path)).status is Status.WARN
 
 
-def test_pre_push_hook_with_quality_lite_passes(tmp_path: Path) -> None:
-    _write(
-        tmp_path / ".githooks" / "pre-push",
-        "#!/bin/sh\nmake quality-lite\n",
-        executable=True,
-    )
-    assert _run("P5.8", _ctx(tmp_path)).status is Status.PASS
-
-
-def test_self_repair_pattern_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / ".githooks" / "pre-commit",
-        "#!/bin/sh\nmake lint-check || make lint-fix\n",
-        executable=True,
-    )
-    assert _run("P5.9", _ctx(tmp_path)).status is Status.PASS
-
-
 def test_self_repair_absent_fails(tmp_path: Path) -> None:
     _write(
         tmp_path / ".githooks" / "pre-commit",
@@ -117,15 +125,6 @@ def test_self_repair_absent_fails(tmp_path: Path) -> None:
         executable=True,
     )
     assert _run("P5.9", _ctx(tmp_path)).status is Status.FAIL
-
-
-def test_claude_md_guard_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / ".githooks" / "pre-commit",
-        "#!/bin/sh\nif git diff --cached --name-status | grep '^D.*CLAUDE.md'; then exit 1; fi\n",
-        executable=True,
-    )
-    assert _run("P5.10", _ctx(tmp_path)).status is Status.PASS
 
 
 # --- Cultural + pytest config --------------------------------------------
