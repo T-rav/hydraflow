@@ -233,6 +233,18 @@ SANDBOX_SEAMS: dict[str, str] = {
     # (tests/scenarios/test_fable_implement_canary_scenario.py) with an
     # injected spawn double and a scripted git runner.
     "implement_worker_runner": "config_disable",
+    # The Fable Review canary's actuator (#11543) — a real
+    # ``run_lightweight_agent`` (``claude``) spawn per admitted reviewer, the
+    # same wedge class as the two rows above. Three independent pins hold it:
+    # the runner is only constructed under ``execution_runtime=fable_director``,
+    # which ``_apply_sandbox_config_overrides`` forces to ``stage_subprocess``;
+    # it additionally clears ``fable_review_canary_repo`` there, so even a
+    # director that somehow existed would find every boundary outside the bound
+    # (the runner re-reads that dial per request, so the clear takes effect
+    # without a restart); and the ``SubprocessRunner`` it hands the seam is
+    # injected at the composition root, so the sandbox's
+    # ``FakeSubprocessRunner`` replaces the spawn if it ever did run.
+    "review_worker_runner": "config_disable",
 }
 
 
@@ -383,6 +395,10 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # says nothing about the other, and a sandbox that cleared only the Plan
     # dial would air-gap exactly half the actuators.
     object.__setattr__(config, "fable_implement_canary_repo", "")
+    # The Fable Review canary (#11543). Its own line for the same reason the
+    # implement dial got one: three independent dials, and a sandbox that
+    # cleared only two would air-gap exactly two thirds of the actuators.
+    object.__setattr__(config, "fable_review_canary_repo", "")
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

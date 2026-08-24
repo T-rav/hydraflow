@@ -179,6 +179,15 @@ class PlanRouteReason(StrEnum):
     # collapsing them would make one refusal explain two different mistakes.
     PHASE_NOT_IMPLEMENT = "phase-not-implement"
     ROLE_NOT_CATALOGUED_FOR_IMPLEMENT = "role-not-catalogued-for-implement"
+
+    # #11543 widened the resolver to a third phase, on the same rule as the two
+    # above: an operator reads these off a receipt, and "this boundary was not a
+    # review boundary" is a different fact from the other two. A shared
+    # "phase-not-covered" member would make one refusal explain three different
+    # mistakes, which is precisely what a deterministic reason code exists to
+    # stop.
+    PHASE_NOT_REVIEW = "phase-not-review"
+    ROLE_NOT_CATALOGUED_FOR_REVIEW = "role-not-catalogued-for-review"
     LITERAL_FAMILY_UNSATISFIABLE = "literal-family-unsatisfiable"
     """The catalogued id does not satisfy the requirement it was resolved from.
 
@@ -218,6 +227,10 @@ REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
     PlanRouteReason.PHASE_NOT_IMPLEMENT: RejectionReason.ROLE_PHASE_FORBIDDEN,
     PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_IMPLEMENT: (
+        RejectionReason.ROLE_PHASE_FORBIDDEN
+    ),
+    PlanRouteReason.PHASE_NOT_REVIEW: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW: (
         RejectionReason.ROLE_PHASE_FORBIDDEN
     ),
     PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (

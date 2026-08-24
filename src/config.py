@@ -1540,6 +1540,23 @@ class HydraFlowConfig(BaseModel):
             "others. Deliberately NOT an env override, for ADR-0141 D5's reason."
         ),
     )
+    fable_review_worker_timeout_seconds: int = Field(
+        default=240,
+        ge=30,
+        le=900,
+        description=(
+            "Wall-clock budget for one brokered REVIEW BATCH, shared by its "
+            "children. A child that exceeds what the batch has left is killed "
+            "with its process group and its receipt is EXPIRED. Deliberately "
+            "the SAME default and ceiling as the Plan and Implement batches, "
+            "not larger: this dispatch is also awaited inside the allocator "
+            "tick, so the figure is exactly how long one armed REVIEW boundary "
+            "can delay every other driver in the fleet — and a reviewer reading "
+            "a long diff is a reason to bound the batch, not a licence to spend "
+            "more of that tick on it. Ignored unless fable_review_canary_repo "
+            "names this repository."
+        ),
+    )
 
     def fable_review_canary_armed(self) -> bool:
         """True when this process may dispatch a real brokered reviewer (#11543).

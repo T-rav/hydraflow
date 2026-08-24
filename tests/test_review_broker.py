@@ -201,3 +201,108 @@ def test_every_independent_role_is_fenced() -> None:
             )
             is RejectionReason.SELF_REVIEW_FORBIDDEN
         )
+
+
+# ---------------------------------------------------------------------------
+# The REVIEW binding of the one shared tier resolver (#11543)
+# ---------------------------------------------------------------------------
+
+
+def _review_request(
+    *, role: WorkerRole = WorkerRole.REVIEWER, value: str = "claude-opus"
+):
+    from driver_contracts import (
+        ModelRequirement,
+        ModelRequirementKind,
+        WorkerDispatchRequest,
+    )
+
+    return WorkerDispatchRequest(
+        request_id="req-1",
+        driver_id="drv-1",
+        epoch=1,
+        phase_attempt=1,
+        worker_role=role,
+        model_requirement=ModelRequirement(
+            kind=ModelRequirementKind.LITERAL_FAMILY, value=value
+        ),
+        task_contract="review the change",
+        reason="the implement boundary finished",
+        expected_route_policy_revision="route-v1",
+        idempotency_key="key-1",
+    )
+
+
+def test_a_catalogued_reviewer_resolves_to_the_catalogued_opus_id() -> None:
+    """The tier tables are shared with PLAN and IMPLEMENT, deliberately: a
+    third copy would carry a third answer to "which id is claude-opus", and
+    this is the phase where a canary that quietly reviewed with Sonnet would
+    still look armed."""
+    from plan_broker import PLAN_TIER_CATALOG, PlanRouteOutcome
+    from review_broker import resolve_review_model
+
+    decision = resolve_review_model(
+        _review_request(), phase=DriverPhase.REVIEW, route_policy_revision="route-v1"
+    )
+
+    assert decision.outcome is PlanRouteOutcome.SELECTED
+    assert decision.served_model == PLAN_TIER_CATALOG["claude-opus"]
+
+
+def test_a_non_review_boundary_is_refused_in_its_own_words() -> None:
+    from plan_broker import PlanRouteOutcome, PlanRouteReason
+    from review_broker import resolve_review_model
+
+    decision = resolve_review_model(
+        _review_request(), phase=DriverPhase.PLAN, route_policy_revision="route-v1"
+    )
+
+    assert decision.outcome is PlanRouteOutcome.REJECTED
+    assert decision.reason is PlanRouteReason.PHASE_NOT_REVIEW
+
+
+def test_a_role_not_catalogued_for_review_is_refused_in_its_own_words() -> None:
+    from plan_broker import PlanRouteOutcome, PlanRouteReason
+    from review_broker import resolve_review_model
+
+    assert DriverPhase.REVIEW not in WORKER_CATALOG[WorkerRole.PLANNER].allowed_phases
+    decision = resolve_review_model(
+        _review_request(role=WorkerRole.PLANNER, value="claude-sonnet"),
+        phase=DriverPhase.REVIEW,
+        route_policy_revision="route-v1",
+    )
+
+    assert decision.outcome is PlanRouteOutcome.REJECTED
+    assert decision.reason is PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW
+
+
+def test_every_review_refusal_reason_has_a_receipt_code() -> None:
+    """The one vocabulary stays total. #11670 paid for a second, divergent
+    table with two invented members and two real ones missing, both of which
+    degraded to *retryable*."""
+    from plan_broker import REFUSAL_CODES, PlanRouteReason
+
+    assert PlanRouteReason.PHASE_NOT_REVIEW in REFUSAL_CODES
+    assert PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW in REFUSAL_CODES
+    assert set(REFUSAL_CODES) == set(PlanRouteReason) - {PlanRouteReason.NONE}
+
+
+@pytest.mark.parametrize(
+    "dial",
+    [
+        pytest.param("fable_review_canary_repo", id="repository"),
+        pytest.param("fable_review_worker_timeout_seconds", id="budget"),
+    ],
+)
+def test_both_review_dials_are_live_and_not_environment_overridable(dial: str) -> None:
+    """ADR-0141 D5's lesson inherited rather than relearned for a third time.
+    The rollback depends on liveness: an actuator already constructed keeps
+    existing, and what stops it dispatching is the predicate being re-read. An
+    env override applies whenever a field is at its *default*, and for the
+    repository dial the disarmed value IS the default."""
+    from config import _ENV_INT_OVERRIDES, _ENV_STR_OVERRIDES
+    from settings_registry import SETTINGS
+
+    assert SETTINGS[dial].live is True
+    rows = [*_ENV_STR_OVERRIDES, *_ENV_INT_OVERRIDES]
+    assert [row for row in rows if row[0] == dial] == []

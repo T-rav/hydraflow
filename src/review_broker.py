@@ -33,9 +33,12 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Iterable
 
     from config import HydraFlowConfig
+    from driver_contracts import WorkerDispatchRequest
+    from plan_broker import PlanRouteDecision
 
 __all__ = [
     "CANARY_PHASE",
+    "resolve_review_model",
     "review_canary_armed",
     "review_canary_covers",
     "review_canary_repo",
@@ -98,6 +101,40 @@ def review_canary_covers(config: HydraFlowConfig, *, phase: DriverPhase | None) 
     if phase is not CANARY_PHASE:
         return False
     return canonicalize_repo(str(getattr(config, "repo", "") or "")) == armed
+
+
+def resolve_review_model(
+    request: WorkerDispatchRequest,
+    *,
+    phase: DriverPhase,
+    route_policy_revision: str,
+) -> PlanRouteDecision:
+    """Resolve one REVIEW dispatch's model tier.
+
+    The REVIEW binding of ``plan_broker.resolve_worker_model``: the same
+    code-owned tier tables, the same content-addressed decision record, the
+    same "a literal family resolves literally or refuses", over this phase's
+    role set and refusal vocabulary. A third copy of the resolver would carry a
+    third answer to "which id is ``claude-opus``" — and this is the phase where
+    that answer matters most, because the catalogued reviewer asks for Opus by
+    name and a canary that quietly reviewed with Sonnet would still look armed.
+
+    Imported inside the function rather than at module scope so this module
+    keeps its "pure, no import-time coupling to the actuator layer" posture and
+    so ``plan_broker`` — which imports nothing from here — cannot be drawn into
+    a cycle by a later edit.
+    """
+    from plan_broker import PlanRouteReason, resolve_worker_model
+
+    return resolve_worker_model(
+        request,
+        phase=phase,
+        canary_phase=CANARY_PHASE,
+        legal_roles=review_roles_for_review_phase(),
+        phase_refusal=PlanRouteReason.PHASE_NOT_REVIEW,
+        role_refusal=PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW,
+        route_policy_revision=route_policy_revision,
+    )
 
 
 def reviewer_independence_refusal(
