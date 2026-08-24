@@ -13,6 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pytest
+
 from traceability import (
     REQ_LABEL_PREFIX,
     append_req_trailer,
@@ -38,20 +40,25 @@ class TestNormalizeReqId:
     def test_dotted_and_slashed_ids_accepted(self) -> None:
         assert normalize_req_id("FDA/820.30-a") == "FDA/820.30-a"
 
-    def test_empty_rejected(self) -> None:
-        assert normalize_req_id("") is None
-
-    def test_whitespace_only_rejected(self) -> None:
-        assert normalize_req_id("   ") is None
-
-    def test_embedded_space_rejected(self) -> None:
-        assert normalize_req_id("REQ 42") is None
-
-    def test_leading_punctuation_rejected(self) -> None:
-        assert normalize_req_id("-REQ42") is None
-
-    def test_overlong_id_rejected(self) -> None:
-        assert normalize_req_id("R" * 65) is None
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",
+            "   ",
+            "REQ 42",
+            "-REQ42",
+            "R" * 65,
+        ],
+        ids=[
+            "empty_rejected",
+            "whitespace_only_rejected",
+            "embedded_space_rejected",
+            "leading_punctuation_rejected",
+            "overlong_id_rejected",
+        ],
+    )
+    def test_malformed_id_rejected(self, value: str) -> None:
+        assert normalize_req_id(value) is None
 
     def test_max_length_id_accepted(self) -> None:
         assert normalize_req_id("R" * 64) == "R" * 64

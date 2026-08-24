@@ -52,11 +52,23 @@ class TestCategorizeChange:
     def test_doc_singular_prefix(self) -> None:
         assert categorize_change("doc: fix typo") == ChangeCategory.DOCUMENTATION
 
-    def test_unknown_prefix(self) -> None:
-        assert categorize_change("chore: update deps") == ChangeCategory.MISCELLANEOUS
-
-    def test_no_prefix(self) -> None:
-        assert categorize_change("Add new feature") == ChangeCategory.MISCELLANEOUS
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "chore: update deps",
+            "Add new feature",
+            "",
+            "   ",
+        ],
+        ids=[
+            "unknown_prefix",
+            "no_prefix",
+            "empty_title",
+            "whitespace_title",
+        ],
+    )
+    def test_titles_without_a_known_prefix_are_miscellaneous(self, title: str) -> None:
+        assert categorize_change(title) == ChangeCategory.MISCELLANEOUS
 
     def test_case_insensitive(self) -> None:
         assert categorize_change("FEAT: uppercase") == ChangeCategory.FEATURES
@@ -64,12 +76,6 @@ class TestCategorizeChange:
 
     def test_breaking_change_bang(self) -> None:
         assert categorize_change("feat!: breaking change") == ChangeCategory.FEATURES
-
-    def test_empty_title(self) -> None:
-        assert categorize_change("") == ChangeCategory.MISCELLANEOUS
-
-    def test_whitespace_title(self) -> None:
-        assert categorize_change("   ") == ChangeCategory.MISCELLANEOUS
 
 
 # ---------------------------------------------------------------------------

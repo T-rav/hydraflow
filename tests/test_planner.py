@@ -691,13 +691,51 @@ def test_validate_plan_all_sections_present(config, event_bus):
     assert errors == []
 
 
-def test_validate_plan_missing_section_returns_errors(config, event_bus):
-    """Plan missing '## Testing Strategy' returns that specific error."""
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("## Testing Strategy", "## Tests", "Testing Strategy"),
+        (
+            "- src/models.py — add new data model\n"
+            "- src/config.py — add configuration field",
+            "- Some vague description without paths",
+            "file path",
+        ),
+        (
+            "- Add tests/test_models.py for the new model\n"
+            "- Add tests/test_config.py for the new config field",
+            "- Write some unit checks\n- Verify behavior manually",
+            "test file",
+        ),
+        (
+            "1. Add the new model class to models.py\n"
+            "2. Add configuration field to config.py\n"
+            "3. Wire up the new model in the orchestrator\n"
+            "4. Add validation logic",
+            "Do the thing and then verify",
+            "at least one actionable step",
+        ),
+    ],
+    ids=[
+        "validate_plan_missing_section_returns_errors",
+        "validate_plan_files_to_modify_requires_file_path",
+        "validate_plan_testing_strategy_requires_test_reference",
+        "validate_plan_implementation_steps_requires_at_least_one_step",
+    ],
+)
+def test_validate_plan_reports_an_error_per_malformation(
+    config, event_bus, old: str, new: str, expected: str
+):
+    """Each way of breaking a valid plan surfaces its own validation error.
+
+    The task title only feeds a soft log-warning path inside ``validate_plan``
+    and never the returned errors, so one title serves every row.
+    """
     runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Fix authentication handler")
-    plan = _valid_plan().replace("## Testing Strategy", "## Tests")
+    task = TaskFactory.create(id=1, title="Fix it")
+    plan = _valid_plan().replace(old, new)
     errors = runner._validate_plan(task, plan)
-    assert any("Testing Strategy" in e for e in errors)
+    assert any(expected in e for e in errors)
 
 
 def test_validate_plan_missing_multiple_sections(config, event_bus):
@@ -711,49 +749,6 @@ def test_validate_plan_missing_multiple_sections(config, event_bus):
     errors = runner._validate_plan(task, plan)
     missing = [e for e in errors if "Missing required section" in e]
     assert len(missing) == 3
-
-
-def test_validate_plan_files_to_modify_requires_file_path(config, event_bus):
-    """Files to Modify section present but with no file paths fails."""
-    runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Fix it")
-    plan = _valid_plan().replace(
-        "- src/models.py — add new data model\n"
-        "- src/config.py — add configuration field",
-        "- Some vague description without paths",
-    )
-    errors = runner._validate_plan(task, plan)
-    assert any("file path" in e for e in errors)
-
-
-def test_validate_plan_testing_strategy_requires_test_reference(config, event_bus):
-    """Testing Strategy section present but with no test file references fails."""
-    runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Fix it")
-    plan = _valid_plan().replace(
-        "- Add tests/test_models.py for the new model\n"
-        "- Add tests/test_config.py for the new config field",
-        "- Write some unit checks\n- Verify behavior manually",
-    )
-    errors = runner._validate_plan(task, plan)
-    assert any("test file" in e for e in errors)
-
-
-def test_validate_plan_implementation_steps_requires_at_least_one_step(
-    config, event_bus
-):
-    """Implementation Steps must include at least one actionable list item."""
-    runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Fix it")
-    plan = _valid_plan().replace(
-        "1. Add the new model class to models.py\n"
-        "2. Add configuration field to config.py\n"
-        "3. Wire up the new model in the orchestrator\n"
-        "4. Add validation logic",
-        "Do the thing and then verify",
-    )
-    errors = runner._validate_plan(task, plan)
-    assert any("at least one actionable step" in e for e in errors)
 
 
 def test_validate_plan_implementation_steps_allows_slim_numbered_plan(
@@ -2100,64 +2095,65 @@ def test_extract_task_graph_phases_returns_empty_for_no_phases(config, event_bus
     assert extract_phases("Just some text") == []
 
 
-def test_validate_plan_rejects_task_graph_without_phases(config, event_bus):
-    """A Task Graph section with no ### P{N} subsections is rejected."""
+@pytest.mark.parametrize(
+    ("old", "new", "count", "expected"),
+    [
+        (
+            "### P1 \u2014 Data Model\n"
+            "**Files:** src/models.py (modify)\n"
+            "**Tests:**\n"
+            "- Creating a new model instance persists and returns an id\n"
+            "- Invalid fields raise ValidationError\n"
+            "**Depends on:** (none)\n\n"
+            "### P2 \u2014 Configuration\n"
+            "**Files:** src/config.py (modify)\n"
+            "**Tests:**\n"
+            "- Config field accepts valid values\n"
+            "- Config field rejects invalid values\n"
+            "**Depends on:** P1",
+            "Some vague description of steps",
+            -1,
+            "at least one ### P{N} phase",
+        ),
+        # count=1 for the phase-level cases: strip only P1's block, leaving P2
+        # intact so the error is attributed to a single malformed phase.
+        (
+            "**Files:** src/models.py (modify)\n",
+            "",
+            1,
+            "must include **Files:**",
+        ),
+        (
+            "**Tests:**\n"
+            "- Creating a new model instance persists and returns an id\n"
+            "- Invalid fields raise ValidationError\n",
+            "",
+            1,
+            "must include **Tests:**",
+        ),
+        (
+            "**Depends on:** P1",
+            "**Depends on:** P9",
+            -1,
+            "P9 which does not exist",
+        ),
+    ],
+    ids=[
+        "validate_plan_rejects_task_graph_without_phases",
+        "validate_plan_rejects_phase_without_files",
+        "validate_plan_rejects_phase_without_tests",
+        "validate_plan_rejects_invalid_dependency_ref",
+    ],
+)
+def test_validate_plan_rejects_malformed_task_graph(
+    config, event_bus, old: str, new: str, count: int, expected: str
+):
+    """Each way of malforming the Task Graph is rejected with its own error."""
     runner = _make_runner(config, event_bus)
     task = TaskFactory.create(id=1, title="Add feature")
-    plan = _valid_plan().replace(
-        "### P1 \u2014 Data Model\n"
-        "**Files:** src/models.py (modify)\n"
-        "**Tests:**\n"
-        "- Creating a new model instance persists and returns an id\n"
-        "- Invalid fields raise ValidationError\n"
-        "**Depends on:** (none)\n\n"
-        "### P2 \u2014 Configuration\n"
-        "**Files:** src/config.py (modify)\n"
-        "**Tests:**\n"
-        "- Config field accepts valid values\n"
-        "- Config field rejects invalid values\n"
-        "**Depends on:** P1",
-        "Some vague description of steps",
-    )
+    plan = _valid_plan().replace(old, new, count)
     errors = runner._validate_plan(task, plan, scale="full")
-    assert any("at least one ### P{N} phase" in e for e in errors)
-
-
-def test_validate_plan_rejects_phase_without_files(config, event_bus):
-    """A Task Graph phase missing **Files:** is rejected."""
-    runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Add feature")
-    plan = _valid_plan().replace(
-        "**Files:** src/models.py (modify)\n",
-        "",
-        1,  # only replace first occurrence
-    )
-    errors = runner._validate_plan(task, plan, scale="full")
-    assert any("must include **Files:**" in e for e in errors)
-
-
-def test_validate_plan_rejects_phase_without_tests(config, event_bus):
-    """A Task Graph phase missing **Tests:** is rejected."""
-    runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Add feature")
-    plan = _valid_plan().replace(
-        "**Tests:**\n"
-        "- Creating a new model instance persists and returns an id\n"
-        "- Invalid fields raise ValidationError\n",
-        "",
-        1,  # only replace first occurrence
-    )
-    errors = runner._validate_plan(task, plan, scale="full")
-    assert any("must include **Tests:**" in e for e in errors)
-
-
-def test_validate_plan_rejects_invalid_dependency_ref(config, event_bus):
-    """A Task Graph phase referencing a non-existent dependency is rejected."""
-    runner = _make_runner(config, event_bus)
-    task = TaskFactory.create(id=1, title="Add feature")
-    plan = _valid_plan().replace("**Depends on:** P1", "**Depends on:** P9")
-    errors = runner._validate_plan(task, plan, scale="full")
-    assert any("P9 which does not exist" in e for e in errors)
+    assert any(expected in e for e in errors)
 
 
 def test_validate_plan_task_graph_not_required_for_lite(config, event_bus):
@@ -2231,12 +2227,28 @@ class TestValidateAlreadySatisfiedEvidence:
         errors = PlannerRunner.validate_already_satisfied_evidence(summary)
         assert any("Criteria" in e for e in errors)
 
-    def test_feature_without_file_line_ref(self) -> None:
-        summary = (
-            "Feature: MyClass implements this\n"
-            "Tests: test_my_class\n"
-            "Criteria: All criteria met"
-        )
+    @pytest.mark.parametrize(
+        "feature",
+        [
+            "Feature: MyClass implements this",
+            "Feature: some description of the feature",
+            "Feature: see http://example.com for details",
+            "Feature: see http://example.com:8080 for details",
+        ],
+        ids=[
+            "feature_without_file_line_ref",
+            "feature_field_with_description_colon_but_no_file_ref_fails",
+            "feature_field_with_url_colon_fails",
+            "feature_field_with_url_port_fails",
+        ],
+    )
+    def test_feature_without_a_file_line_ref_fails(self, feature: str) -> None:
+        """A Feature field is only satisfied by a real file:line ref.
+
+        A bare description, a URL, and a URL with a port each carry a colon
+        without carrying a file:line reference.
+        """
+        summary = f"{feature}\nTests: test_my_class\nCriteria: All criteria met"
         errors = PlannerRunner.validate_already_satisfied_evidence(summary)
         assert any("file:line" in e.lower() for e in errors)
 
@@ -2244,16 +2256,6 @@ class TestValidateAlreadySatisfiedEvidence:
         summary = "The feature already exists and is working."
         errors = PlannerRunner.validate_already_satisfied_evidence(summary)
         assert len(errors) >= 3  # Feature, Tests, Criteria all missing
-
-    def test_feature_field_with_description_colon_but_no_file_ref_fails(self) -> None:
-        """A Feature field with a colon but no file:line ref should fail."""
-        summary = (
-            "Feature: some description of the feature\n"
-            "Tests: test_my_class\n"
-            "Criteria: All criteria met"
-        )
-        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
-        assert any("file:line" in e.lower() for e in errors)
 
     def test_feature_field_with_valid_file_line_passes(self) -> None:
         """A Feature field with a valid file:line reference should pass."""
@@ -2264,26 +2266,6 @@ class TestValidateAlreadySatisfiedEvidence:
         )
         errors = PlannerRunner.validate_already_satisfied_evidence(summary)
         assert errors == []
-
-    def test_feature_field_with_url_colon_fails(self) -> None:
-        """A Feature field with a URL (has colon but no file:line) should fail."""
-        summary = (
-            "Feature: see http://example.com for details\n"
-            "Tests: test_example\n"
-            "Criteria: All criteria met"
-        )
-        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
-        assert any("file:line" in e.lower() for e in errors)
-
-    def test_feature_field_with_url_port_fails(self) -> None:
-        """A URL with a port (e.g. :8080) should NOT pass as a file:line ref."""
-        summary = (
-            "Feature: see http://example.com:8080 for details\n"
-            "Tests: test_example\n"
-            "Criteria: All criteria met"
-        )
-        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
-        assert any("file:line" in e.lower() for e in errors)
 
     def test_multiple_file_refs_all_valid(self) -> None:
         """Multiple file:line references should all pass."""

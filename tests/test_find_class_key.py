@@ -86,17 +86,25 @@ class TestNormalizeNeedle:
         )
         assert a & b >= {"misses", "agent", "auto"}
 
-    def test_empty_string_returns_empty_set(self) -> None:
-        assert normalize_needle("") == frozenset()
-
-    def test_whitespace_only_returns_empty_set(self) -> None:
-        assert normalize_needle("   \n\t  ") == frozenset()
-
-    def test_all_stopwords_and_numbers_returns_empty_set(self) -> None:
-        assert normalize_needle("the pr #123 at 39 to a src") == frozenset()
-
-    def test_single_and_double_char_tokens_are_dropped(self) -> None:
-        assert normalize_needle("a N to gc") == frozenset()
+    @pytest.mark.parametrize(
+        "needle",
+        [
+            "",
+            "   \n\t  ",
+            "the pr #123 at 39 to a src",
+            "a N to gc",
+        ],
+        ids=[
+            "empty_string_returns_empty_set",
+            "whitespace_only_returns_empty_set",
+            "all_stopwords_and_numbers_returns_empty_set",
+            "single_and_double_char_tokens_are_dropped",
+        ],
+    )
+    def test_needle_with_no_significant_tokens_returns_empty_set(
+        self, needle: str
+    ) -> None:
+        assert normalize_needle(needle) == frozenset()
 
 
 # ---------------------------------------------------------------------------
