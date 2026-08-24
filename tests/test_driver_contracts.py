@@ -368,14 +368,75 @@ def test_catalog_enumerates_exactly_the_seven_proposal_roles() -> None:
     assert set(WORKER_CATALOG) == set(WorkerRole)
 
 
-def test_reviewer_is_marked_independent_of_the_implementer() -> None:
-    assert WORKER_CATALOG[WorkerRole.REVIEWER].independent_of_implementer is True
+def test_every_read_only_role_legal_at_review_is_independent() -> None:
+    """Derived from the catalogue, never a role list (#11543).
+
+    ``REVIEWER`` alone carried the flag, so an implementer's lineage could
+    request ``architect`` or ``test_adequacy`` at REVIEW and judge its own
+    work — three roles legal at the boundary, one fenced. A hardcoded list here
+    would rot the day a fourth is catalogued, which is #11673's class.
+    """
+    read_only_at_review = {
+        role
+        for role, entry in WORKER_CATALOG.items()
+        if DriverPhase.REVIEW in entry.allowed_phases
+        and entry.write_scope is WriteScope.NONE
+    }
+    assert read_only_at_review, "no read-only REVIEW role — the rule has no subject"
+    for role in read_only_at_review:
+        assert WORKER_CATALOG[role].independent_of_implementer is True, role
 
 
-def test_reviewer_never_holds_worktree_write_scope() -> None:
-    assert (
-        WORKER_CATALOG[WorkerRole.REVIEWER].write_scope is not WriteScope.ISSUE_WORKTREE
+def test_no_independence_fenced_role_can_write() -> None:
+    """The coherence rule ``_write_scope_is_coherent`` enforces, read back off
+    the assembled catalogue rather than off one role."""
+    for role, entry in WORKER_CATALOG.items():
+        if entry.independent_of_implementer:
+            assert entry.write_scope is not WriteScope.ISSUE_WORKTREE, role
+
+
+def test_a_request_for_a_fenced_role_must_carry_its_lineage() -> None:
+    """Refused at CONSTRUCTION, so a director's reply is discarded as malformed
+    before it can reach a route (#11543).
+
+    ``requesting_spawn_id`` defaulted to ``None`` and nothing in ``src/`` writes
+    it, so the only producer was the director model's own JSON — the fence could
+    only ever refuse a request where the party being fenced volunteered the
+    value that refused it.
+    """
+    with pytest.raises(ValidationError, match="requesting_spawn_id"):
+        _request(worker_role=WorkerRole.REVIEWER)
+
+
+def test_an_unfenced_role_still_needs_no_lineage() -> None:
+    """Negative control: the requirement is about independence, not about
+    lineage in general. A director's own depth-1 explorer has no parent spawn."""
+    assert _request(worker_role=WorkerRole.EXPLORER).requesting_spawn_id is None
+
+
+def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too() -> None:
+    """The belt under the validator, reached the way validation is skipped.
+
+    ``model_copy`` (like ``model_construct``) does not revalidate, so a fenced
+    request CAN exist with no lineage. The fence must not depend on how the
+    value was built — that is the assumption that left the original branch
+    admitting, and it is why this reports its own code rather than
+    ``SELF_REVIEW_FORBIDDEN``: nothing here establishes that the requester
+    implemented anything.
+    """
+    valid = _request(
+        worker_role=WorkerRole.REVIEWER, requesting_spawn_id="spawn-director"
     )
+    stripped = valid.model_copy(update={"requesting_spawn_id": None})
+
+    reason = _admit(
+        request=stripped,
+        lease=_lease(phase=DriverPhase.REVIEW, expected_stage_label="hydraflow-review"),
+        live_stage_label="hydraflow-review",
+        implementer_spawn_ids=frozenset({"spawn-impl-1"}),
+    )
+
+    assert reason is RejectionReason.LINEAGE_UNKNOWN
 
 
 def test_explorer_is_read_only() -> None:
@@ -432,7 +493,11 @@ def test_a_live_label_changed_by_a_human_preempts_the_driver() -> None:
 
 
 def test_a_role_forbidden_in_the_current_phase_is_rejected() -> None:
-    reason = _admit(request=_request(worker_role=WorkerRole.REVIEWER))
+    reason = _admit(
+        request=_request(
+            worker_role=WorkerRole.REVIEWER, requesting_spawn_id="spawn-director"
+        )
+    )
 
     assert reason is RejectionReason.ROLE_PHASE_FORBIDDEN
 
@@ -518,7 +583,13 @@ def test_an_exhausted_budget_is_rejected() -> None:
 def test_ownership_fencing_is_evaluated_before_catalog_legality() -> None:
     # A request that is BOTH stale-epoch and role-phase-illegal reports the
     # ownership failure, so recovery reasons never hide behind catalog noise.
-    reason = _admit(request=_request(epoch=2, worker_role=WorkerRole.REVIEWER))
+    reason = _admit(
+        request=_request(
+            epoch=2,
+            worker_role=WorkerRole.REVIEWER,
+            requesting_spawn_id="spawn-director",
+        )
+    )
 
     assert reason is RejectionReason.STALE_EPOCH
 

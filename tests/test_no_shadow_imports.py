@@ -23,10 +23,33 @@ _FIXED_FILES = [
     "events.py",
     "dashboard_routes/_routes.py",
     "pr_manager.py",
-    "pr_unsticker.py",
+    # ``pr_unsticker.py`` became a package (#11547 batch 7). Naming the
+    # DIRECTORY keeps the whole former file guarded, slices added later
+    # included; naming one slice would quietly narrow a whole-file guard down
+    # to whichever slice happened to hold the fixed imports on the day.
+    "pr_unsticker/",
     "triage_phase.py",
     "acceptance_criteria.py",
 ]
+
+
+def _expand(rel: str) -> list[str]:
+    """Resolve one roster entry to the source files it guards.
+
+    A god-class split turns a guarded module into a guarded package, and a
+    non-recursive membership test stops seeing its own subject the moment that
+    happens (#11673) — silently, because a list that matches nothing asserts
+    nothing. A directory entry expands to every module under it.
+    """
+    path = SRC_DIR / rel
+    if path.is_dir():
+        found = sorted(p.relative_to(SRC_DIR).as_posix() for p in path.rglob("*.py"))
+        assert found, f"{rel} is an empty package — the guard covers nothing"
+        return found
+    return [rel]
+
+
+_FIXED_PATHS = [p for rel in _FIXED_FILES for p in _expand(rel)]
 
 
 def _module_level_names(tree: ast.Module) -> set[str]:
@@ -67,7 +90,7 @@ def _inline_shadow_imports(tree: ast.Module) -> list[tuple[int, str]]:
     return violations
 
 
-@pytest.mark.parametrize("rel_path", _FIXED_FILES)
+@pytest.mark.parametrize("rel_path", _FIXED_PATHS)
 def test_no_inline_shadow_imports(rel_path: str) -> None:
     """Files fixed in #3040 must not regress with new inline shadow imports."""
     path = SRC_DIR / rel_path

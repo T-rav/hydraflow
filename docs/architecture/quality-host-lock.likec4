@@ -13,7 +13,7 @@ model {
       description 'src/base_runner.py::_verify_quality — runs `make quality` in a worktree, killed on attempt end'
     }
     workspace = container 'WorkspaceManager' {
-      description 'src/workspace.py — destroys the worktree when the attempt ends (#11433)'
+      description 'src/workspace/_manager.py — destroys the worktree when the attempt ends (#11433)'
     }
     make = container 'make quality' {
       description 'Makefile:522 — uv run python scripts/quality_host_lock.py -- make quality-unlocked'

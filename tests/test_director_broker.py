@@ -115,6 +115,10 @@ def _request(
         reason="the issue needs code",
         expected_route_policy_revision=route_revision,
         idempotency_key=key,
+        # A fenced role must carry lineage (#11543); an unfenced one may, and
+        # a director-originated request naming no implementer spawn is the
+        # ordinary case, so one value serves every role this helper builds.
+        requesting_spawn_id="spawn-director",
     )
 
 

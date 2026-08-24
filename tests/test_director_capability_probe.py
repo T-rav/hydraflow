@@ -50,22 +50,25 @@ FIXTURE = (
 # --------------------------------------------------------------------------
 
 
-def test_scrubbed_env_drops_a_real_provider_key() -> None:
-    env = build_scrubbed_env(
-        {"ANTHROPIC_API_KEY": "sk-live", "PATH": "/bin"}, home="/h", config_dir="/c"
-    )
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("ANTHROPIC_API_KEY", "sk-live"),
+        ("ANTHROPIC_AUTH_TOKEN", "inherited"),
+        ("HYDRAFLOW_GATEWAY_TOKEN", "control"),
+        ("SSH_AUTH_SOCK", "/tmp/agent.sock"),
+    ],
+    ids=[
+        "scrubbed_env_drops_a_real_provider_key",
+        "scrubbed_env_drops_an_inherited_auth_token_not_passed_explicitly",
+        "scrubbed_env_drops_the_gateway_control_token",
+        "scrubbed_env_drops_the_ssh_agent_socket",
+    ],
+)
+def test_scrubbed_env_drops_an_inherited_secret(name: str, value: str) -> None:
+    env = build_scrubbed_env({name: value, "PATH": "/bin"}, home="/h", config_dir="/c")
 
-    assert "ANTHROPIC_API_KEY" not in env
-
-
-def test_scrubbed_env_drops_an_inherited_auth_token_not_passed_explicitly() -> None:
-    env = build_scrubbed_env(
-        {"ANTHROPIC_AUTH_TOKEN": "inherited", "PATH": "/bin"},
-        home="/h",
-        config_dir="/c",
-    )
-
-    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert name not in env
 
 
 def test_scrubbed_env_keeps_only_the_explicitly_passed_virtual_key() -> None:
@@ -77,24 +80,6 @@ def test_scrubbed_env_keeps_only_the_explicitly_passed_virtual_key() -> None:
     )
 
     assert env["ANTHROPIC_AUTH_TOKEN"] == "hf-virtual-fresh"
-
-
-def test_scrubbed_env_drops_the_gateway_control_token() -> None:
-    env = build_scrubbed_env(
-        {"HYDRAFLOW_GATEWAY_TOKEN": "control", "PATH": "/bin"},
-        home="/h",
-        config_dir="/c",
-    )
-
-    assert "HYDRAFLOW_GATEWAY_TOKEN" not in env
-
-
-def test_scrubbed_env_drops_the_ssh_agent_socket() -> None:
-    env = build_scrubbed_env(
-        {"SSH_AUTH_SOCK": "/tmp/agent.sock", "PATH": "/bin"}, home="/h", config_dir="/c"
-    )
-
-    assert "SSH_AUTH_SOCK" not in env
 
 
 def test_scrubbed_env_overwrites_an_inherited_home() -> None:

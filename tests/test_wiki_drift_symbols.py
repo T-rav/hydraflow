@@ -17,6 +17,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from wiki_drift_detector import detect_drift
 
 
@@ -72,60 +74,33 @@ def test_flags_missing_class_symbol(tmp_path: Path) -> None:
     assert "src/foo.py:Ghost" in finding.missing_symbols
 
 
-def test_passes_when_class_symbol_exists(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("source", "symbol"),
+    [
+        ("class Ghost:\n    pass\n", "Ghost"),
+        ("def ghost():\n    return None\n", "ghost"),
+        ("async def go():\n    pass\n", "go"),
+        (
+            "class Container:\n    def the_method(self):\n        pass\n",
+            "the_method",
+        ),
+    ],
+    ids=[
+        "passes_when_class_symbol_exists",
+        "passes_when_function_symbol_exists",
+        "passes_for_async_function",
+        "passes_for_indented_method",
+    ],
+)
+def test_passes_when_cited_symbol_is_defined(
+    tmp_path: Path, source: str, symbol: str
+) -> None:
     tracked_root = tmp_path / "repo_wiki"
     repo_root = tmp_path / "repo"
     (repo_root / "src").mkdir(parents=True)
-    (repo_root / "src" / "foo.py").write_text("class Ghost:\n    pass\n")
+    (repo_root / "src" / "foo.py").write_text(source)
 
-    _write_entry(tracked_root, "o/r", "patterns", body="Cited `src/foo.py:Ghost`.")
-
-    result = detect_drift(
-        tracked_root=tracked_root, repo_root=repo_root, repo_slug="o/r"
-    )
-
-    assert result.findings == []
-
-
-def test_passes_when_function_symbol_exists(tmp_path: Path) -> None:
-    tracked_root = tmp_path / "repo_wiki"
-    repo_root = tmp_path / "repo"
-    (repo_root / "src").mkdir(parents=True)
-    (repo_root / "src" / "foo.py").write_text("def ghost():\n    return None\n")
-
-    _write_entry(tracked_root, "o/r", "patterns", body="Cited `src/foo.py:ghost`.")
-
-    result = detect_drift(
-        tracked_root=tracked_root, repo_root=repo_root, repo_slug="o/r"
-    )
-
-    assert result.findings == []
-
-
-def test_passes_for_async_function(tmp_path: Path) -> None:
-    tracked_root = tmp_path / "repo_wiki"
-    repo_root = tmp_path / "repo"
-    (repo_root / "src").mkdir(parents=True)
-    (repo_root / "src" / "foo.py").write_text("async def go():\n    pass\n")
-
-    _write_entry(tracked_root, "o/r", "patterns", body="Cited `src/foo.py:go`.")
-
-    result = detect_drift(
-        tracked_root=tracked_root, repo_root=repo_root, repo_slug="o/r"
-    )
-
-    assert result.findings == []
-
-
-def test_passes_for_indented_method(tmp_path: Path) -> None:
-    tracked_root = tmp_path / "repo_wiki"
-    repo_root = tmp_path / "repo"
-    (repo_root / "src").mkdir(parents=True)
-    (repo_root / "src" / "foo.py").write_text(
-        "class Container:\n    def the_method(self):\n        pass\n"
-    )
-
-    _write_entry(tracked_root, "o/r", "patterns", body="Cited `src/foo.py:the_method`.")
+    _write_entry(tracked_root, "o/r", "patterns", body=f"Cited `src/foo.py:{symbol}`.")
 
     result = detect_drift(
         tracked_root=tracked_root, repo_root=repo_root, repo_slug="o/r"

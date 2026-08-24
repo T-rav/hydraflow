@@ -38,4 +38,4 @@ Kill-switch: `enabled_cb("pr_unsticker")` and `config.pr_unsticker_loop_enabled`
 - [ADR-0049](0049-trust-loop-kill-switch-convention.md) — kill-switch convention
 - [ADR-0075](0075-merge-state-watcher-loop.md) — `MergeStateWatcherLoop` (complementary)
 - `src/pr_unsticker_loop.py:PRUnstickerLoop`
-- `src/pr_unsticker.py:PRUnsticker`
+- `src/pr_unsticker/_unsticker.py:PRUnsticker`

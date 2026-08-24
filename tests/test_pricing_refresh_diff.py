@@ -13,30 +13,24 @@ from pricing_refresh_diff import (
 )
 
 
-def test_normalize_strips_bedrock_prefix() -> None:
-    assert (
-        normalize_litellm_key("anthropic.claude-haiku-4-5-20251001-v1:0")
-        == "claude-haiku-4-5-20251001"
-    )
-
-
-def test_normalize_strips_bedrock_at_suffix() -> None:
-    assert (
-        normalize_litellm_key("anthropic.claude-haiku-4-5@20251001")
-        == "claude-haiku-4-5-20251001"
-    )
-
-
-def test_normalize_passthrough_canonical() -> None:
-    assert (
-        normalize_litellm_key("claude-haiku-4-5-20251001")
-        == "claude-haiku-4-5-20251001"
-    )
-
-
-def test_normalize_strips_only_v1_zero() -> None:
-    # Other v-suffixes preserved as-is — only v1:0 is the Bedrock convention.
-    assert normalize_litellm_key("claude-future-v2:1") == "claude-future-v2:1"
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("anthropic.claude-haiku-4-5-20251001-v1:0", "claude-haiku-4-5-20251001"),
+        ("anthropic.claude-haiku-4-5@20251001", "claude-haiku-4-5-20251001"),
+        ("claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"),
+        # Other v-suffixes preserved as-is — only v1:0 is the Bedrock convention.
+        ("claude-future-v2:1", "claude-future-v2:1"),
+    ],
+    ids=[
+        "normalize_strips_bedrock_prefix",
+        "normalize_strips_bedrock_at_suffix",
+        "normalize_passthrough_canonical",
+        "normalize_strips_only_v1_zero",
+    ],
+)
+def test_normalize_litellm_key(raw: str, expected: str) -> None:
+    assert normalize_litellm_key(raw) == expected
 
 
 def test_filter_keeps_only_anthropic_provider() -> None:

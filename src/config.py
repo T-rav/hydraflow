@@ -1532,10 +1532,19 @@ class HydraFlowConfig(BaseModel):
         default="",
         max_length=512,
         description=(
-            "Canonical 'owner/repo' whose REVIEW boundaries may dispatch a real "
-            "brokered Opus reviewer under execution_runtime='fable_director'. "
-            "Empty (the default) dispatches nothing anywhere; clearing it is the "
-            "one-action rollback. Independent of fable_plan_canary_repo and "
+            "Canonical 'owner/repo' whose REVIEW boundaries may dispatch real "
+            "brokered READ-ONLY Opus judges under "
+            "execution_runtime='fable_director': the reviewer, the architect "
+            "and the test-adequacy reader — every REVIEW role whose write scope "
+            "is NONE, and no others. It arms NO writer. The catalogue also "
+            "legalises a debugger at REVIEW and a debugger holds the issue "
+            "worktree; widening the write boundary is "
+            "fable_implement_canary_repo's decision to make, never a side "
+            "effect of arming a reviewer (review_broker."
+            "review_roles_for_review_phase filters the menu, and a test pins "
+            "that every role on it writes nothing). Empty (the default) "
+            "dispatches nothing anywhere; clearing it is the one-action "
+            "rollback. Independent of fable_plan_canary_repo and "
             "fable_implement_canary_repo: arming one arms nothing about the "
             "others. Deliberately NOT an env override, for ADR-0141 D5's reason. "
             "NOT WIRED YET (#11543): nothing constructs a ReviewWorkerRunner, "

@@ -256,15 +256,26 @@ def _parse_model_field_names(config_py: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_local_module(dotted: str, src_dir: Path) -> Path | None:
+def _resolve_local_module(dotted: str, src_dir: Path) -> list[Path]:
+    """Every file ``dotted`` names: one module, or a whole package.
+
+    A package resolves to ALL of its modules, not just ``__init__.py``. Under
+    the god-class recipe (#11547) a decomposed module's ``__init__`` is a
+    re-export facade with no logic left in it, so resolving ``import
+    pr_unsticker`` to that facade shrinks the one-hop scan to nothing and the
+    rendered row silently loses every model role the class actually resolves
+    — the same "stops seeing its subject when a module becomes a package"
+    failure as #11673, but in a generator, where the only symptom is a table
+    cell quietly turning into a dash.
+    """
     parts = dotted.split(".")
     as_file = src_dir.joinpath(*parts).with_suffix(".py")
     if as_file.is_file():
-        return as_file
+        return [as_file]
     as_pkg = src_dir.joinpath(*parts) / "__init__.py"
     if as_pkg.is_file():
-        return as_pkg
-    return None
+        return sorted(as_pkg.parent.rglob("*.py"))
+    return []
 
 
 def _one_hop_imports(module_path: Path, src_dir: Path) -> list[Path]:
@@ -277,9 +288,7 @@ def _one_hop_imports(module_path: Path, src_dir: Path) -> list[Path]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                resolved = _resolve_local_module(alias.name, src_dir)
-                if resolved:
-                    found.add(resolved)
+                found.update(_resolve_local_module(alias.name, src_dir))
         elif isinstance(node, ast.ImportFrom):
             if node.level:
                 base = module_path.parent
@@ -292,13 +301,11 @@ def _one_hop_imports(module_path: Path, src_dir: Path) -> list[Path]:
             module = node.module or ""
             dotted = f"{dotted_prefix}.{module}".strip(".") if dotted_prefix else module
             if dotted:
-                resolved = _resolve_local_module(dotted, src_dir)
-                if resolved:
-                    found.add(resolved)
+                found.update(_resolve_local_module(dotted, src_dir))
                 for alias in node.names:
-                    sub = _resolve_local_module(f"{dotted}.{alias.name}", src_dir)
-                    if sub:
-                        found.add(sub)
+                    found.update(
+                        _resolve_local_module(f"{dotted}.{alias.name}", src_dir)
+                    )
     return sorted(
         p for p in found if p.stem not in _SCAN_EXCLUDED_MODULES or p.parent != src_dir
     )

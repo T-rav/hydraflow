@@ -212,7 +212,7 @@ Key implementation details:
 ## Related
 
 - Source memory: Issue #1682 — *[Memory] Epic release creation architecture*
-- `src/epic.py:EpicManager._try_auto_close`, `src/epic.py:EpicCompletionChecker._create_release_for_epic` — the epic-close entry point (which has **not** called the release primitive since PR #2689) and the release primitive itself
+- `src/epic/_children.py:EpicChildEventsMixin._try_auto_close`, `src/epic/_completion.py:EpicCompletionChecker._create_release_for_epic` — the epic-close entry point (which has **not** called the release primitive since PR #2689) and the release primitive itself
 - `src/pr_manager_branches.py:PRManagerBranchesMixin.resolve_remote_branch_sha` — resolves the promoted `main` SHA the tag targets (#11517)
 - `src/pr_manager_artifacts.py:PRManagerArtifactsMixin.create_tag`, `src/pr_manager_artifacts.py:PRManagerArtifactsMixin.create_release` — the two-step tag-then-release operations
 - `src/models.py:Release`, `src/models.py:StateData.releases` — the release model and where release state is persisted

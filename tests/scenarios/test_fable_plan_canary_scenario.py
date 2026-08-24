@@ -245,6 +245,9 @@ def _dispatch(lease: dict[str, Any], role: str, family: str, n: int) -> dict[str
         "reason": "the plan needs it",
         "expected_route_policy_revision": ROUTE_REVISION,
         "idempotency_key": f"key-{n}",
+        # The architect is independence-fenced, so the director must say where
+        # the request comes from (#11543) — the prompt asks for it by name.
+        "requesting_spawn_id": "spawn-director",
     }
 
 

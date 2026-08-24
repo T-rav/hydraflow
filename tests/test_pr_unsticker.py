@@ -15,7 +15,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models import ConflictResolutionResult, HITLItem, LoopResult
-from pr_unsticker import FailureCause, PRUnsticker, _classify_cause
+from pr_unsticker import PRUnsticker
+from pr_unsticker._causes import FailureCause, _classify_cause
 from tests.conftest import HITLResultFactory, IssueFactory, make_state
 from tests.helpers import ConfigFactory
 
@@ -1330,7 +1331,7 @@ class TestCITimeoutResolution:
 
     def test_ci_timeout_priority_ordering(self) -> None:
         """CI_TIMEOUT should sort before CI_FAILURE in priority."""
-        from pr_unsticker import _CAUSE_PRIORITY
+        from pr_unsticker._causes import _CAUSE_PRIORITY
 
         assert (
             _CAUSE_PRIORITY[FailureCause.CI_TIMEOUT]

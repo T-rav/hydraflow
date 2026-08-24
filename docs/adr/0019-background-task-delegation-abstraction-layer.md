@@ -116,7 +116,9 @@ Adopt the following rules for background-task delegation in HydraFlow workers:
 ## Related
 
 - Source memory: #1793
-- `src/epic.py` — `EpicManager.release_epic`, `EpicChecker.check_and_close_epics`, `EpicManager.on_child_completed`
+- `src/epic/_release.py:EpicReleaseMixin.release_epic` — the delegated release primitive
+- `src/epic/_completion.py:EpicCompletionChecker.check_and_close_epics` — the auto-close entry point
+- `src/epic/_children.py:EpicChildEventsMixin.on_child_completed` — the child-completion callback that triggers it
 - `src/post_merge_handler.py` — `PostMergeHandler._handle_merge` (delegation call-site)
 - `src/issue_fetcher.py` — collaborator cache TTL pattern
 - `src/dashboard_routes/_epic_routes.py` — `release_epic` API entry-point

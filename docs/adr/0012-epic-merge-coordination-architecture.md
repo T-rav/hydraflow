@@ -183,7 +183,7 @@ an epic body directive parsed during registration.
 - Source memory: #1684
 - ADR issue: #1702
 - `src/post_merge_handler.py` (`handle_approved`, `_should_defer_merge` — merge interception)
-- `src/epic.py:EpicManager.on_child_approved`, `src/epic.py:EpicManager._handle_bundled_ready`, `src/epic.py:EpicManager._handle_ordered_ready`, `src/epic.py:EpicManager._get_merge_order` — child-approval and merge-order coordination methods
+- `src/epic/_children.py:EpicChildEventsMixin.on_child_approved`, `src/epic/_merge_order.py:EpicMergeOrderMixin._handle_bundled_ready`, `src/epic/_merge_order.py:EpicMergeOrderMixin._handle_ordered_ready`, `src/epic/_merge_order.py:EpicMergeOrderMixin._get_merge_order` — child-approval and merge-order coordination methods
 - `src/models.py` (`EpicState` — model to extend)
 - `src/review_phase/_self_fix.py:SelfFixMixin._handle_approved_merge` — review-to-merge flow
 - `src/epic_monitor_loop.py` (stale epic detection — relevant for held bundles)

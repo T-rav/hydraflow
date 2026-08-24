@@ -160,17 +160,17 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     ),
     AuditTarget(
         "pr_unsticker_ci_fix",
-        "pr_unsticker.PRUnsticker._build_ci_fix_prompt",
+        "pr_unsticker._prompts.PRUnstickerPromptMixin._build_ci_fix_prompt",
         "tests/fixtures/prompts/pr_unsticker_ci_fix.json",
         "Review",
-        "src/pr_unsticker.py:498",
+        "src/pr_unsticker/_prompts.py:34",
     ),
     AuditTarget(
         "pr_unsticker_ci_timeout",
-        "pr_unsticker.PRUnsticker._build_ci_timeout_fix_prompt",
+        "pr_unsticker._prompts.PRUnstickerPromptMixin._build_ci_timeout_fix_prompt",
         "tests/fixtures/prompts/pr_unsticker_ci_timeout.json",
         "Review",
-        "src/pr_unsticker.py:846",
+        "src/pr_unsticker/_prompts.py:88",
     ),
     # HITL
     AuditTarget(

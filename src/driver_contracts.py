@@ -258,6 +258,21 @@ class RejectionReason(StrEnum):
     capacity for, applied to worker authority as well.
     """
 
+    # Added by #11543, when REVIEW became the boundary independence binds at.
+    # Additive member only; no field changed, so the schema version is unmoved.
+
+    LINEAGE_UNKNOWN = "lineage_unknown"
+    """A role that must be independent of the implementer cannot say where it
+    came from.
+
+    Deliberately NOT folded into :attr:`SELF_REVIEW_FORBIDDEN`, which asserts a
+    fact — *this requester implemented the change* — that an absent lineage
+    cannot establish. An operator reading this code is looking at a caller that
+    failed to stamp provenance, not at a worker caught grading its own homework,
+    and the two have different remedies. Both refuse, because "independent"
+    is a claim, and a claim nothing can check is not one.
+    """
+
 
 def has_anthropic_provenance(served_model: str) -> bool:
     """True when *served_model*'s id is an Anthropic one by the allow-list.
@@ -383,6 +398,7 @@ WORKER_CATALOG: dict[WorkerRole, WorkerCatalogEntry] = {
             write_scope=WriteScope.NONE,
             default_model=_literal("claude-opus"),
             max_concurrency=1,
+            independent_of_implementer=True,
         ),
         WorkerCatalogEntry(
             role=WorkerRole.IMPLEMENTER,
@@ -406,6 +422,7 @@ WORKER_CATALOG: dict[WorkerRole, WorkerCatalogEntry] = {
             write_scope=WriteScope.NONE,
             default_model=_literal("claude-opus"),
             max_concurrency=1,
+            independent_of_implementer=True,
         ),
         WorkerCatalogEntry(
             role=WorkerRole.REVIEWER,
@@ -417,7 +434,16 @@ WORKER_CATALOG: dict[WorkerRole, WorkerCatalogEntry] = {
         ),
     )
 }
-"""The seven proposal roles. A request for a role absent here is rejected."""
+"""The seven proposal roles. A request for a role absent here is rejected.
+
+Every read-only role legal at ``REVIEW`` carries ``independent_of_implementer``.
+An earlier reading fenced ``REVIEWER`` alone, which left the other two judges of
+a change — the architect and the test-adequacy reader — free to be requested
+from the implementer's own lineage and grade its work. "Independent review"
+that three roles can perform and one is fenced on is not a property; it is a
+name. ``test_driver_contracts`` derives the rule rather than listing the roles,
+so a role added at ``REVIEW`` inherits it or reddens.
+"""
 
 
 class DriverLease(BaseModel):
@@ -503,7 +529,48 @@ class WorkerDispatchRequest(BaseModel):
     Load-bearing for the self-review fence: admission compares this against the
     known implementer spawns, because ``request_id`` is minted fresh by the
     director and lives in a different namespace from a spawn id.
+
+    Optional in general — a director's own depth-1 child legitimately has no
+    parent spawn — but **required** for a role the catalogue fences
+    (:attr:`WorkerCatalogEntry.independent_of_implementer`). See
+    :meth:`_a_fenced_role_carries_its_lineage`.
     """
+
+    @model_validator(mode="after")
+    def _a_fenced_role_carries_its_lineage(self) -> WorkerDispatchRequest:
+        """An independence-fenced role must say where it came from.
+
+        The default of ``None`` used to *admit*, which made the fence
+        unreachable: nothing in ``src/`` writes this field, so the only producer
+        is the director model's own JSON, and the only request the fence could
+        ever refuse was one where the party being fenced volunteered the value
+        that got its own request refused. A guard whose subject has to opt in is
+        the shape #11670 and #11673 swept — green forever, guarding nothing.
+
+        Refusing at construction rather than only at admission is deliberate:
+        ``_parse_command`` validates the director's reply through this model, so
+        a fenced dispatch that omits provenance is discarded as malformed at the
+        contract boundary and never reaches a route. ``admit_dispatch`` still
+        refuses the same shape (:attr:`RejectionReason.LINEAGE_UNKNOWN`),
+        because a value built through ``model_construct`` or ``model_copy``
+        skips validation and the fence must not depend on how it was built.
+
+        This does not make a self-reported lineage *trusted* — a director could
+        state one that is not its own. It makes an **absent** one loud, which is
+        the half a schema can close; making the value authoritative means
+        stamping it from the spawning side, which is what the caller does when
+        it has a spawn to stamp.
+        """
+        entry = WORKER_CATALOG.get(self.worker_role)
+        fenced = entry is not None and entry.independent_of_implementer
+        if fenced and not (self.requesting_spawn_id or "").strip():
+            raise ValueError(
+                f"role {self.worker_role} must be independent of the "
+                "implementer, so its request must carry requesting_spawn_id; "
+                "an unstated lineage cannot be compared against the known "
+                "implementer spawns"
+            )
+        return self
 
     @model_validator(mode="after")
     def _director_never_names_a_concrete_model(self) -> WorkerDispatchRequest:
@@ -742,8 +809,18 @@ def admit_dispatch(
     # the director and could never collide with a spawn id, which would leave
     # this fence permanently unreachable. A write-capable role may proceed only
     # if it already holds the single-writer lease.
+    #
+    # An ABSENT lineage refuses too, and separately (#11543). The earlier
+    # reading admitted it as "no parent spawn, therefore fresh by definition",
+    # which inverted the burden of proof: independence is a claim, and the party
+    # making it was the only party that could supply the evidence against it.
+    # `WorkerDispatchRequest` now refuses to *construct* such a request, so this
+    # arm catches the values that skip validation — model_construct, model_copy,
+    # a future default change — rather than the ordinary path.
+    fenced = entry.independent_of_implementer
+    lineage_unknown = fenced and not (request.requesting_spawn_id or "").strip()
     self_review = (
-        entry.independent_of_implementer
+        fenced
         and request.requesting_spawn_id is not None
         and request.requesting_spawn_id in implementer_spawn_ids
     )
@@ -766,6 +843,7 @@ def admit_dispatch(
             request.worker_role not in allowed_roles,
             RejectionReason.ROLE_NOT_IN_CAPSULE,
         ),
+        (lineage_unknown, RejectionReason.LINEAGE_UNKNOWN),
         (self_review, RejectionReason.SELF_REVIEW_FORBIDDEN),
         (
             request.expected_route_policy_revision != route_policy_revision,

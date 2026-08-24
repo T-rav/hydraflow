@@ -772,7 +772,8 @@ also resets the worktree, discarding partial commits).
 the SAME label to issue and PR. For most transitions this is correct (e.g.
 review→fixed, both go fixed). But across the ready/review boundary it
 dragged PRs back to `hydraflow-ready` when an issue was released from HITL
-back to its pre-HITL origin (`pr_unsticker.py:312-322` before fix).
+back to its pre-HITL origin (`pr_unsticker.py:312-322` before fix; the
+module is now the `pr_unsticker/` package).
 
 **Rule:** When issue and PR live at *different* pipeline stages (e.g. issue
 at ready waiting for impl, PR at review awaiting human), call
@@ -786,7 +787,7 @@ at ready waiting for impl, PR at review awaiting human), call
   "tags": ["state-machine", "ADR-0002", "pr-unsticker", "label-drift"],
   "rule": "Across the ready/review boundary, swap issue and PR with separate calls.",
   "anti_pattern": "swap_pipeline_labels(issue, ready_label, pr_number=pr) when PR has commits",
-  "code_refs": ["src/pr_unsticker.py:_resolve_or_release_back_to_hitl"],
+  "code_refs": ["src/pr_unsticker/_unsticker.py:_process_item"],
   "fixed_in_pr": "#8715",
   "added": "2026-05-07"
 }
@@ -902,10 +903,10 @@ A test whose input includes host state (`Path.home()`, installed tools, a live p
 
 `git worktree add <dir> <branch>` fails when `<dir>` already exists, but in one chained shell invocation the later `cd <dir>` + `git merge`/`git commit` still execute and report success — against whatever stale branch the reused directory name was left on. `.claude/worktrees/` accumulates stale directories (nothing sweeps them: `WorkspaceGCLoop` reaps only factory `issue-<N>` worktrees), so any name an agent picks can already exist. Three same-session incidents; the worst staged 1469 files from a merge into the wrong branch and was caught only by a hand-run `git rev-parse --abbrev-ref HEAD`.
 
-**Rule:** create worktrees with `scripts/hf_worktree.sh <dir> <branch>` (or `make worktree DIR=<dir> BRANCH=<branch>`). It creates when the directory is absent, is idempotent when already on the requested branch, and fails loudly on a mismatch — printing expected vs actual branch plus the exact `git worktree remove <dir>` command, never deleting the existing worktree (it may hold uncommitted hand-written work; the factory path in `src/workspace.py::_create_workspace` rmtree's instead only because factory issue worktrees are disposable). And after ANY worktree creation, verify branch identity with `git rev-parse --abbrev-ref HEAD` before editing — same class as verifying subagent DONE claims: never trust that a step did what it said.
+**Rule:** create worktrees with `scripts/hf_worktree.sh <dir> <branch>` (or `make worktree DIR=<dir> BRANCH=<branch>`). It creates when the directory is absent, is idempotent when already on the requested branch, and fails loudly on a mismatch — printing expected vs actual branch plus the exact `git worktree remove <dir>` command, never deleting the existing worktree (it may hold uncommitted hand-written work; the factory path in `src/workspace/_manager.py::_create_unlocked` rmtree's instead only because factory issue worktrees are disposable). And after ANY worktree creation, verify branch identity with `git rev-parse --abbrev-ref HEAD` before editing — same class as verifying subagent DONE claims: never trust that a step did what it said.
 
 ```json:entry
-{"id":"WORKTREE-BRANCH-VERIFY-001","source_type":"manual","topic":"gotchas","tags":["worktree","git","wrong-branch","agent-safety","branch-identity","hf-worktree-sh"],"rule":"Create agent worktrees with scripts/hf_worktree.sh <dir> <branch> (or make worktree DIR=<dir> BRANCH=<branch>), never a bare git worktree add: on a reused directory name the add fails but the chained cd/merge still run against the stale branch. Verify branch identity (git rev-parse --abbrev-ref HEAD) inside any newly created worktree before editing. The helper is idempotent on a matching branch and fails loudly on mismatch, printing the git worktree remove command; it never deletes an existing worktree (unlike the disposable factory path in src/workspace.py).","anti_pattern":"Bare git worktree add <dir> <branch> inside a chained shell invocation: the add failure (directory already exists) is masked by the subsequent cd + merge succeeding against whatever branch the stale directory was left on","code_refs":["scripts/hf_worktree.sh","src/workspace.py","docs/adr/0003-git-worktrees-for-isolation.md","CLAUDE.md"],"source_issue":11501,"added":"2026-08-20"}
+{"id":"WORKTREE-BRANCH-VERIFY-001","source_type":"manual","topic":"gotchas","tags":["worktree","git","wrong-branch","agent-safety","branch-identity","hf-worktree-sh"],"rule":"Create agent worktrees with scripts/hf_worktree.sh <dir> <branch> (or make worktree DIR=<dir> BRANCH=<branch>), never a bare git worktree add: on a reused directory name the add fails but the chained cd/merge still run against the stale branch. Verify branch identity (git rev-parse --abbrev-ref HEAD) inside any newly created worktree before editing. The helper is idempotent on a matching branch and fails loudly on mismatch, printing the git worktree remove command; it never deletes an existing worktree (unlike the disposable factory path in src/workspace/_manager.py::_create_unlocked).","anti_pattern":"Bare git worktree add <dir> <branch> inside a chained shell invocation: the add failure (directory already exists) is masked by the subsequent cd + merge succeeding against whatever branch the stale directory was left on","code_refs":["scripts/hf_worktree.sh","src/workspace/_manager.py","docs/adr/0003-git-worktrees-for-isolation.md","CLAUDE.md"],"source_issue":11501,"added":"2026-08-20"}
 ```
 
 ## One-shot CLI spawns must request the JSON envelope — bare text records as a failed $0 inference

@@ -11,9 +11,8 @@ import logging
 import shutil
 import stat
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from subprocess_util import run_subprocess
 
 logger = logging.getLogger("hydraflow.workspace")
@@ -364,9 +363,3 @@ class WorkspaceProvisionMixin:
             logger.info("Auto-detected UI dirs: %s", detected)
             return sorted(detected)
         return list(self._config.ui_dirs)
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from credentials import Credentials
