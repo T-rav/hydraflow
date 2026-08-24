@@ -36,4 +36,4 @@ Kill-switch: `enabled_cb("epic_monitor")` and `config.epic_monitor_loop_enabled`
 - [ADR-0049](0049-trust-loop-kill-switch-convention.md) — kill-switch convention
 - [ADR-0081](0081-epic-sweeper-loop.md) — `EpicSweeperLoop` (complementary auto-close)
 - `src/epic_monitor_loop.py:EpicMonitorLoop`
-- `src/epic.py:EpicManager`
+- `src/epic/_manager.py:EpicManager`

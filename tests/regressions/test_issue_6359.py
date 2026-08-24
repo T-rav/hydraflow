@@ -5,9 +5,15 @@ locations. These are operational errors (network, rate-limit, transient
 GitHub 5xx) — not code bugs — and should use ``logger.warning`` so they
 do NOT fire Sentry alerts.
 
-The test parses ``src/epic.py`` via the AST and asserts that the five
+The test parses the epic sources via the AST and asserts that the five
 known catch-and-continue blocks log at WARNING level (not EXCEPTION /
 ERROR).
+
+``src/epic.py`` became the ``src/epic/`` package (#11547 batch 7) and the five
+sites now sit in three different slices, so the scan walks the package rather
+than one file. The ``missing`` assertion below is what makes that safe: a scan
+pointed at the wrong tree finds none of the five and fails loudly instead of
+passing with an empty match set.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-EPIC_PY = Path(__file__).resolve().parents[2] / "src" / "epic.py"
+EPIC_SRC = Path(__file__).resolve().parents[2] / "src" / "epic"
 
 # The five logger.exception call sites from the issue, identified by
 # the unique substring in the log message so the test survives minor
@@ -54,9 +60,15 @@ class TestEpicTransientLoggingLevel:
     """All five catch-and-continue sites must use logger.warning, not logger.exception."""
 
     def test_no_logger_exception_for_transient_failures(self) -> None:
-        source = EPIC_PY.read_text()
-        tree = ast.parse(source, filename=str(EPIC_PY))
-        calls = _find_logger_calls(tree)
+        sources = sorted(EPIC_SRC.rglob("*.py"))
+        assert sources, f"no epic sources under {EPIC_SRC}"
+        calls: list[tuple[str, int, str]] = []
+        for path in sources:
+            tree = ast.parse(path.read_text(), filename=str(path))
+            calls.extend(
+                (method, lineno, msg)
+                for method, lineno, msg in _find_logger_calls(tree)
+            )
 
         violations: list[str] = []
         matched_messages: set[str] = set()
@@ -68,7 +80,7 @@ class TestEpicTransientLoggingLevel:
                     matched_messages.add(expected_prefix)
                     if method != "warning":
                         violations.append(
-                            f"epic.py:{lineno} uses logger.{method}() "
+                            f"epic/:{lineno} uses logger.{method}() "
                             f"for transient failure ({msg!r}); "
                             f"should be logger.warning(..., exc_info=True)"
                         )
@@ -76,7 +88,7 @@ class TestEpicTransientLoggingLevel:
         # Ensure we actually found all five sites (guard against message changes).
         missing = EXPECTED_WARNING_MESSAGES - matched_messages
         assert not missing, (
-            f"Could not locate these expected log messages in epic.py "
+            f"Could not locate these expected log messages under src/epic/ "
             f"(test may need updating): {missing}"
         )
 

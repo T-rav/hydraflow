@@ -139,6 +139,38 @@ def test_synthetic_model_role_found_via_one_hop_import(synthetic_repo: Path):
     assert gadget.long_llm_cycle is False
 
 
+def test_synthetic_model_role_survives_helper_becoming_a_package(
+    synthetic_repo: Path,
+):
+    """A decomposed helper still contributes its slices to the one-hop scan.
+
+    The god-class recipe (#11547) turns a module into a package whose
+    ``__init__`` is a re-export facade with no logic left in it. Resolving the
+    import to that facade alone shrinks the scan to nothing and the row's model
+    role silently becomes a dash — a generator-side instance of "stops seeing
+    its subject when a module becomes a package" (#11673), and one that no
+    assertion anywhere else would redden.
+    """
+    helper = synthetic_repo / "src/gadget_helper.py"
+    helper.unlink()
+    pkg = synthetic_repo / "src/gadget_helper"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(
+        "from ._impl import helper\n\n__all__ = ['helper']\n"
+    )
+    (pkg / "_impl.py").write_text(
+        "def helper(config):\n    return config.gadget_model\n"
+    )
+
+    rows = _collect(synthetic_repo)
+    assert rows is not None
+    gadget = next(r for r in rows if r.worker == "gadget")
+    assert gadget.model_fields == ["gadget_model"], (
+        "the model role was lost when the helper became a package — the "
+        "one-hop scan resolved the import to the facade __init__ only"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Synthetic tree — fail-loud contract
 # ---------------------------------------------------------------------------

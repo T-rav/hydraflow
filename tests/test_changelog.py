@@ -477,24 +477,41 @@ def _make_epic_issue(number: int, sub_issues: list[int]) -> GitHubIssue:
 
 class TestEpicChangelogIntegration:
     @pytest.mark.asyncio
-    async def test_epic_close_skips_release_when_changelog_empty(self) -> None:
+    async def test_epic_close_skips_release_when_changelog_empty(
+        self, tmp_path: Path
+    ) -> None:
         epic = _make_epic_issue(100, [1])
         sub_issues = {
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
         }
-        config = ConfigFactory.create(epic_label=["hydraflow-epic"])
+        # ``changelog_file`` MUST be set: the generation call sits behind
+        # ``if self._config.changelog_file:`` and its default is "". Without it
+        # this test closed the epic and never generated a changelog at all,
+        # while `create_release.assert_not_called()` passed anyway (#11547 b7).
+        changelog_path = tmp_path / "CHANGELOG.md"
+        config = ConfigFactory.create(epic_label=["hydraflow-epic"], repo_root=tmp_path)
+        config.changelog_file = "CHANGELOG.md"
         prs = AsyncMock()
         fetcher = AsyncMock()
         fetcher.fetch_issues_by_labels = AsyncMock(return_value=[epic])
         fetcher.fetch_issue_by_number = AsyncMock(side_effect=sub_issues.get)
         checker = EpicCompletionChecker(config, prs, fetcher)
 
-        with patch("epic.generate_changelog", AsyncMock(return_value="")):
+        with patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value="")
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
-        # No release when changelog is empty
+        # The patch target follows the CALL SITE: generate_changelog is bound in
+        # epic._completion. Asserting the mock was consulted is what makes the
+        # repoint honest — patching a module that merely re-exports a name
+        # succeeds and no-ops, and a weak assertion passes anyway (#11547 b7).
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
+        # An empty changelog is written nowhere...
+        assert not changelog_path.exists()
+        # ...and the close path never mints a release (ADR-0011).
         prs.create_release.assert_not_called()
 
     @pytest.mark.asyncio
@@ -521,23 +538,31 @@ class TestEpicChangelogIntegration:
 
         changelog_content = "## [epic-100] - 2026-02-28\n\n### Features\n- stuff\n"
         with patch(
-            "epic.generate_changelog", AsyncMock(return_value=changelog_content)
-        ):
+            "epic._completion.generate_changelog",
+            AsyncMock(return_value=changelog_content),
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         assert changelog_path.exists()
         content = changelog_path.read_text()
         assert "Features" in content
 
     @pytest.mark.asyncio
-    async def test_changelog_generation_failure_doesnt_block_close(self) -> None:
+    async def test_changelog_generation_failure_doesnt_block_close(
+        self, tmp_path: Path
+    ) -> None:
         epic = _make_epic_issue(100, [1])
         sub_issues = {
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
         }
-        config = ConfigFactory.create(epic_label=["hydraflow-epic"])
+        # See the note above: without ``changelog_file`` the generator this
+        # test makes fail was never reached, so "failure doesn't block close"
+        # was asserting nothing.
+        config = ConfigFactory.create(epic_label=["hydraflow-epic"], repo_root=tmp_path)
+        config.changelog_file = "CHANGELOG.md"
         prs = AsyncMock()
         fetcher = AsyncMock()
         fetcher.fetch_issues_by_labels = AsyncMock(return_value=[epic])
@@ -545,11 +570,12 @@ class TestEpicChangelogIntegration:
         checker = EpicCompletionChecker(config, prs, fetcher)
 
         with patch(
-            "epic.generate_changelog",
+            "epic._completion.generate_changelog",
             AsyncMock(side_effect=RuntimeError("API failure")),
-        ):
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         # Epic should still be closed despite changelog failure
         prs.close_issue.assert_called_once_with(100)
         # No release when changelog generation fails
@@ -583,9 +609,12 @@ class TestEpicChangelogIntegration:
         checker = EpicCompletionChecker(config, prs, fetcher)
 
         new_entry = "## [1.0.0] - 2026-02-28\n\n### Features\n- new thing\n"
-        with patch("epic.generate_changelog", AsyncMock(return_value=new_entry)):
+        with patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value=new_entry)
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         content = changelog_path.read_text()
         # Heading must be first; new entry must precede old entry
         assert content.startswith("# Changelog\n")
@@ -622,9 +651,12 @@ class TestEpicChangelogIntegration:
         checker = EpicCompletionChecker(config, prs, fetcher)
 
         new_entry = "## [1.0.0] - 2026-02-28\n\n### Features\n- new thing\n"
-        with patch("epic.generate_changelog", AsyncMock(return_value=new_entry)):
+        with patch(
+            "epic._completion.generate_changelog", AsyncMock(return_value=new_entry)
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         content = changelog_path.read_text()
         new_pos = content.index("## [1.0.0]")
         old_pos = content.index("## [0.9.0]")
@@ -656,10 +688,12 @@ class TestEpicChangelogIntegration:
 
         changelog_content = "## [epic-100]\n\n### Features\n- stuff\n"
         with patch(
-            "epic.generate_changelog", AsyncMock(return_value=changelog_content)
-        ):
+            "epic._completion.generate_changelog",
+            AsyncMock(return_value=changelog_content),
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         assert not evil_path.exists()
         prs.close_issue.assert_called_once_with(100)
 
@@ -689,10 +723,12 @@ class TestEpicChangelogIntegration:
 
         changelog_content = "## [epic-100]\n\n### Features\n- stuff\n"
         with patch(
-            "epic.generate_changelog", AsyncMock(return_value=changelog_content)
-        ):
+            "epic._completion.generate_changelog",
+            AsyncMock(return_value=changelog_content),
+        ) as mock_gen:
             await checker.check_and_close_epics(1)
 
+        assert mock_gen.await_count == 1, "patch target wrong — mock never consulted"
         # The traversal target must not have been written
         outside_path = (tmp_path / "../../outside.md").resolve()
         assert not outside_path.exists()

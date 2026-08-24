@@ -59,7 +59,9 @@ def _find_falsy_guards(filepath: Path, attr_names: set[str]) -> list[tuple[int, 
 # ---------------------------------------------------------------------------
 
 _KNOWN_VIOLATIONS = [
-    ("pr_unsticker.py", {"_hitl_runner"}),
+    # ``pr_unsticker`` became a package (#11547 batch 7); the
+    # ``self._hitl_runner`` guard this pins lives in the resolve slice.
+    ("pr_unsticker/_resolve.py", {"_hitl_runner"}),
 ]
 
 
@@ -76,10 +78,19 @@ class TestFalsyGuardsOnOptionalAttributes:
     ) -> None:
         filepath = SRC_ROOT / filename
         assert filepath.exists(), f"{filename} does not exist"
+        # Guard the guard: a file that never mentions the attribute yields no
+        # violations for the same reason a fixed file does. After a
+        # decomposition that is exactly how a roster entry pointed at the wrong
+        # slice reads as green (#11673).
+        source = filepath.read_text()
+        absent = sorted(a for a in attrs if a not in source)
+        assert not absent, (
+            f"{filename} never mentions {absent} — the pin moved off the code "
+            "it guards; find the slice that owns the attribute."
+        )
 
         violations = _find_falsy_guards(filepath, attrs)
         assert violations == [], (
             f"{filename} uses 'if not self.<attr>' instead of 'is None' "
             f"(violates avoided-patterns.md): {violations}"
         )
-

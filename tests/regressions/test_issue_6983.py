@@ -57,19 +57,24 @@ REQUIRED_GUARD = RERAISE_GUARD
 #: kept as separate rows so each finding stays traceable, but note that the
 #: method-scoped scan checks every broad handler in the method — so the two rows
 #: assert the same (strictly stronger) property.
+#: ``epic.py`` became the ``epic/`` package (#11547 batch 7). The file column
+#: names the SLICE the anchor method moved to, not the old basename: an entry
+#: naming a file that no longer exists fails on the ``exists()`` assertion
+#: below, and one naming the wrong slice fails inside ``unguarded_handlers``,
+#: which raises when the method is not in the tree it parsed.
 KNOWN_UNGUARDED_SITES: list[tuple[str, str, str]] = [
     (
-        "epic.py",
+        "epic/_detail.py",
         "refresh_cache",
         "refresh_cache broad except Exception swallows AuthenticationError",
     ),
     (
-        "epic.py",
+        "epic/_staleness.py",
         "check_stale_epics",
         "check_stale_epics post_comment broad except Exception swallows fatal errors",
     ),
     (
-        "epic.py",
+        "epic/_staleness.py",
         "check_stale_epics",
         "check_stale_epics bus.publish broad except Exception swallows fatal errors",
     ),

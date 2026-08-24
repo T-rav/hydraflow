@@ -40,4 +40,4 @@ Kill-switch: `enabled_cb("epic_sweeper")` and `config.epic_sweeper_loop_enabled`
 - [ADR-0049](0049-trust-loop-kill-switch-convention.md) — kill-switch convention
 - [ADR-0080](0080-epic-monitor-loop.md) — `EpicMonitorLoop` (complementary stale detection)
 - `src/epic_sweeper_loop.py:EpicSweeperLoop`
-- `src/epic.py:parse_epic_sub_issues`, `check_all_checkboxes`
+- `src/epic/_parse.py:parse_epic_sub_issues`, `check_all_checkboxes`

@@ -359,7 +359,16 @@ def _seam_block(
     foreign_methods = sorted(
         n for n in (used_methods | used_attrs) - owned if n in all_methods
     )
-    foreign_attrs = sorted(n for n in used_attrs - owned if n not in all_methods)
+    # A CALLABLE collaborator attribute (``self._suggest_memory(...)``, a
+    # callback, an injected policy object) reads as a call, so ``_self_attrs``
+    # files it under *called* rather than *read* — and it is not a method of
+    # the class, so it falls out of ``foreign_methods`` too. Before this union
+    # it landed in NEITHER list and the mixin declared no seam for it at all
+    # (#11547 batch 7: ``_suggest_memory`` in two ``pr_unsticker`` slices).
+    # Attribute or method, a name the class does not own needs a seam.
+    foreign_attrs = sorted(
+        n for n in (used_attrs | used_methods) - owned if n not in all_methods
+    )
     if not foreign_methods and not foreign_attrs:
         return ""
     out = [_SEAM_BANNER.format(cls=cls_name)]

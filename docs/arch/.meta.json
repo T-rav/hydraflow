@@ -10,10 +10,10 @@
       "content_sha": "b2c2c8e82d5224ed76c3ce8ffe2295af9f96522e30f8d65969f111e31b7dcbe9"
     },
     "adr-falsifiability.md": {
-      "content_sha": "199c2704f5ec1b69f2578bf4a1666e58a1656bbdd8e9aaec80ba276e82e83371"
+      "content_sha": "2a68f6fdaed08a9067e786bdc0ab1144232c46e9f3252e4b802bf9bdca2af3bd"
     },
     "adr_xref.md": {
-      "content_sha": "dbfef228bd66e261f75ecc4a849510c123498d0e76a4ad07de92fdc1b52924f0"
+      "content_sha": "5a3e0c7eb998cfd46e7eee05b1dfcdfbf6a67a4c4ff97ce67b9019cd08c5cc48"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
@@ -22,7 +22,7 @@
       "content_sha": "a2f313db50a91f02f177d1a6c61824439da8050dd53ff8f42c9f4412dc43eaeb"
     },
     "events.md": {
-      "content_sha": "0279b5ce3f6e4b2c4ba8a9d5acbbab6ecf8474ee10441f26bdf47956976c9344"
+      "content_sha": "b7fff31d940305ba7ae0b4da94f077dc63cce097efec10707b97936df10b69a2"
     },
     "functional_areas.md": {
       "content_sha": "3c3b9de0704a206621a37309d6cc30aa51be09918a03171c5db1ab16ee0783e4"
@@ -40,7 +40,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "9381053fdfb5518e27cf3fce7f31999e207477353aaf95ea6a2aaa6de14a92da"
+      "content_sha": "4e8526a126630435520c7c90875bba9332325a85fec16fe795a7f656ba709a1d"
     },
     "ports.md": {
       "content_sha": "67fc7b123d0d9952a7dcfd7e0ba0eb2979fd95b97d27e950655b05a71147689f"
@@ -55,5 +55,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "41037b77aae89c6d49ba25dc96a1479e07aa4b8c1dce51507d093cb1b32939a2"
+  "content_sha": "2d70a0affaeb6ea9236075715ed045d3fa9467e63e49c1f8f6e533d3c920bb55"
 }
