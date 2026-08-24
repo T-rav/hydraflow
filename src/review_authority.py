@@ -17,11 +17,18 @@ Three properties fall out of that, each a separate criterion:
 - **cannot self-approve** — ``APPROVE`` requires ``findings == ()``; a proposal
   that recommends approval while carrying a blocking finding is adjudicated
   ``REQUEST_CHANGES``. The recommendation loses to its own evidence.
-- **cannot hide findings** — findings are carried on the proposal and counted
-  by the adjudicator, so suppressing one changes the verdict rather than the
-  presentation. An empty findings list with a ``REQUEST_CHANGES``
-  recommendation is a contradiction, and is resolved *toward* the stricter
-  reading (:data:`STRICTER`), never away from it.
+- **cannot present a finding cosmetically** — findings are carried on the
+  proposal and counted by the adjudicator, so filing one and then recommending
+  approval changes the verdict rather than the presentation. An empty findings
+  list with a ``REQUEST_CHANGES`` recommendation is a contradiction, and is
+  resolved *toward* the stricter reading (:data:`STRICTER`), never away from it.
+
+  Deliberately narrower than P5's "cannot hide findings", which no adjudicator
+  over a proposal can deliver: a reviewer that simply never puts a finding in
+  ``findings`` has hidden it completely, and this returns ``APPROVE``. What is
+  closed is the gap between what a reviewer *says* and what the verdict *is*.
+  Closing the other half means checking the review against the diff, which is
+  a second reviewer's job, not a rule's.
 - **cannot weaken CI/HITL** — ``ci_green`` and ``hitl_required`` are
   deterministic inputs the proposal has no field for. A reviewer cannot assert
   them, so it cannot relax them.

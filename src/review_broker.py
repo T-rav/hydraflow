@@ -200,8 +200,13 @@ def reviewer_independence_refusal(
     entry = WORKER_CATALOG.get(role)
     if entry is None or not entry.independent_of_implementer:
         return None
-    if not (requesting_spawn_id or "").strip():
+    # One normalisation for both halves, matching ``admit_dispatch``: stripping
+    # for the presence test and not for the membership test let a padded
+    # " spawn-impl-1 " count as a stated lineage and then miss the spawn it
+    # names — two readings of one value inside one rule.
+    stated = (requesting_spawn_id or "").strip()
+    if not stated:
         return RejectionReason.LINEAGE_UNKNOWN
-    if requesting_spawn_id in set(implementer_spawn_ids):
+    if stated in set(implementer_spawn_ids):
         return RejectionReason.SELF_REVIEW_FORBIDDEN
     return None
