@@ -85,12 +85,15 @@ SETTINGS: dict[str, SettingSpec] = {
     "fable_plan_canary_repo": SettingSpec("Scheduling", live=True, order=27),
     "fable_plan_worker_timeout_seconds": SettingSpec("Scheduling", live=True, order=28),
     "fable_implement_canary_repo": SettingSpec("Scheduling", live=True, order=29),
-    "fable_review_canary_repo": SettingSpec("Scheduling", live=True, order=30),
-    "fable_review_worker_timeout_seconds": SettingSpec(
-        "Scheduling", live=True, order=31
-    ),
     "fable_implement_worker_timeout_seconds": SettingSpec(
         "Scheduling", live=True, order=30
+    ),
+    # 31/32, not a second 30: the three canaries read as repo-then-budget pairs
+    # in the settings UI, and a duplicated order made the review dial sort
+    # against the implement budget on name alone.
+    "fable_review_canary_repo": SettingSpec("Scheduling", live=True, order=31),
+    "fable_review_worker_timeout_seconds": SettingSpec(
+        "Scheduling", live=True, order=32
     ),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),

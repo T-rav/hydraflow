@@ -377,6 +377,13 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     # else is discarded) — because a worker that knows the bound produces fewer
     # answers the fence has to throw away.
     "implement_worker_task": frozenset(),
+    # #11543, held to the same standard as the two above and shipping clean for
+    # the same reason: written against the rubric, not baselined against its own
+    # first draft. That draft failed 2 and 4 — it stated obligations without one
+    # binding word and showed a JSON schema with no worked instance — and both
+    # were real gaps for a prompt whose entire output contract is one object a
+    # deterministic adjudicator then reads.
+    "review_worker_task": frozenset(),
     "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),
     "agent_build_prompt_with_prior_failure": frozenset({1}),

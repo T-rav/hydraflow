@@ -39,10 +39,14 @@ added.
 
 Air-gap: the spawn goes through ``runner_utils.run_lightweight_agent``, which
 this module names lexically, so it carries a ``SANDBOX_SEAMS`` row. The seam
-kind is ``config_disable`` because the sandbox pins
+kind is ``config_disable``. Today nothing constructs this runner at all (see
+:class:`ReviewWorkerRunner`), so the row is declared **ahead** of the wiring
+rather than after it — a seam added with the actuator cannot be forgotten with
+the actuator, which is how s51/s56/s57 each wedged a sandbox. The two pins that
+will hold it once it is wired are already in place: the sandbox forces
 ``execution_runtime=stage_subprocess``, under which nothing constructs a
-director; the sandbox additionally clears ``fable_review_canary_repo``, so even
-a director that did exist would find every boundary outside the canary's bound.
+director, and it clears ``fable_review_canary_repo``, so even a director that
+did exist would find every boundary outside the canary's bound.
 """
 
 from __future__ import annotations
@@ -259,12 +263,22 @@ class ReviewWorkerArtifact:
 class ReviewWorkerRunner:
     """Dispatches admitted REVIEW requests as fresh children and mints receipts.
 
-    Constructed at the ``build_services`` composition root under
+    **Nothing constructs one yet, and that is stated rather than implied.**
+    ``FableDirector`` has no ``review_dispatcher``, ``service_registry`` has no
+    builder for it, and ``CanaryDispatchMixin._dispatch`` has no REVIEW branch —
+    so arming ``fable_review_canary_repo`` today dispatches nothing. The
+    blocker is upstream of the wiring: no code anywhere produces a
+    :class:`review_evidence.ReviewEvidence`, and a runner wired in ahead of its
+    evidence would have to assemble the diff and the test result itself, which
+    is the boundary #11543's next seam owns. Landing the actuator first is the
+    same order P5's three pure seams landed in.
+
+    When it *is* wired, it must be built **unconditionally** under
     ``execution_runtime=fable_director``, armed or not, and gated only by
-    ``review_broker.review_canary_covers``. Unconditional construction is
-    #11657's correction inherited rather than relearned: making it conditional
-    on the dial reads as a stronger default-off proof and is in fact the bug
-    that makes *arming* require a restart while only disarming stays live.
+    ``review_broker.review_canary_covers``. That is #11657's correction
+    inherited rather than relearned: making construction conditional on the
+    dial reads as a stronger default-off proof and is in fact the bug that
+    makes *arming* require a restart while only disarming stays live.
     """
 
     def __init__(
@@ -725,7 +739,8 @@ What you produce, and what you do not decide:
   filing a blocking finding resolves to `request-changes`, and filing any
   finding at all means the result is no stronger than `comment`.
 - You cannot withhold a finding in order to reach a recommendation. Every
-  concern goes in `findings`; they are counted, not read for tone.
+  concern you have must appear in `findings`; they are counted, not read for
+  tone.
 - You have no shell, no file access, no repository access and no network. You
   cannot merge a pull request, approve one, move a label, push a commit, run a
   test or start a process. Do not describe doing any of those and do not make
@@ -759,6 +774,29 @@ Edge cases, and what to do about each:
   A stated gap is a useful review; an assumption presented as a finding is not.
 - Otherwise, if you are unsure whether something belongs in `findings`, ask
   whether you would block a merge on it. If not, it is `"blocking": false`.
+
+<example>
+For a diff that removes a bounds check and adds no test for it, a good reply is
+exactly this and nothing else:
+
+{{
+  "recommended": "request-changes",
+  "summary": "Removes the upper-bound check in `resize()` so a caller can allocate past the pool limit. The plan asked for the lower bound only.",
+  "findings": [
+    {{
+      "summary": "`resize()` no longer rejects a length above `pool_max`, so an oversized request now allocates instead of raising.",
+      "file": "alloc/pool.py",
+      "line": 214,
+      "blocking": true
+    }},
+    {{
+      "summary": "No test covers the removed bound; the suite would stay green if it were removed again.",
+      "file": "tests/test_pool.py",
+      "blocking": false
+    }}
+  ]
+}}
+</example>
 
 <issue number="{payload["issue_number"]}" title="{_attr(payload["issue_title"])}">
 {payload["issue_goal"]}
@@ -871,12 +909,17 @@ def parse_review_proposal(text: str) -> ReviewProposal | None:
             MAX_FINDINGS,
         )
         return None
+    # Splatted rather than passed by keyword so this module needs no name for
+    # ``ReviewVerdict``: pydantic coerces the string, and an unknown one raises
+    # below. Importing the enum to satisfy a type checker would put the verdict
+    # vocabulary inside the one module that must not be able to reach a verdict.
+    fields: dict[str, Any] = {
+        "recommended": raw.get("recommended"),
+        "findings": tuple(_finding(entry) for entry in findings),
+        "summary": _text(raw.get("summary"), MAX_PROPOSAL_SUMMARY_CHARS),
+    }
     try:
-        return ReviewProposal(
-            recommended=raw.get("recommended"),  # type: ignore[arg-type]
-            findings=tuple(_finding(entry) for entry in findings),
-            summary=_text(raw.get("summary"), MAX_PROPOSAL_SUMMARY_CHARS),
-        )
+        return ReviewProposal(**fields)
     except (ValueError, TypeError):
         # An unknown ``recommended``, or a finding that survived coercion and
         # still would not validate. Pydantic raises ``ValidationError``, which

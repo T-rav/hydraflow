@@ -235,15 +235,19 @@ SANDBOX_SEAMS: dict[str, str] = {
     "implement_worker_runner": "config_disable",
     # The Fable Review canary's actuator (#11543) — a real
     # ``run_lightweight_agent`` (``claude``) spawn per admitted reviewer, the
-    # same wedge class as the two rows above. Three independent pins hold it:
-    # the runner is only constructed under ``execution_runtime=fable_director``,
-    # which ``_apply_sandbox_config_overrides`` forces to ``stage_subprocess``;
-    # it additionally clears ``fable_review_canary_repo`` there, so even a
-    # director that somehow existed would find every boundary outside the bound
-    # (the runner re-reads that dial per request, so the clear takes effect
-    # without a restart); and the ``SubprocessRunner`` it hands the seam is
-    # injected at the composition root, so the sandbox's
-    # ``FakeSubprocessRunner`` replaces the spawn if it ever did run.
+    # same wedge class as the two rows above. Declared with the actuator, which
+    # is EARLIER than it is needed: nothing constructs a ``ReviewWorkerRunner``
+    # yet, because no code produces the canonical ``ReviewEvidence`` its prompt
+    # is built from. A seam added with the actuator cannot be forgotten with the
+    # actuator, and forgetting it is how s51/s56/s57 each wedged a sandbox.
+    # The pins that will hold it once the director wires it are already here:
+    # ``_apply_sandbox_config_overrides`` forces
+    # ``execution_runtime=stage_subprocess``, under which no director exists,
+    # and clears ``fable_review_canary_repo``, so even a director that somehow
+    # existed would find every boundary outside the bound (the runner re-reads
+    # that dial per request, so the clear needs no restart). The
+    # ``SubprocessRunner`` is injected, so the sandbox's ``FakeSubprocessRunner``
+    # replaces the spawn if it ever did run.
     "review_worker_runner": "config_disable",
 }
 
