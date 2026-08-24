@@ -21,9 +21,15 @@ is to give it no path, not to filter it on the way past.
 
 **It returns a proposal, never a verdict.** A child's reply is parsed into a
 :class:`review_authority.ReviewProposal` — which has no verdict field, no merge
-instruction, no label and no CI waiver — and :func:`review_authority.adjudicate`
-stays the only function in the codebase that produces a
-:class:`models.ReviewVerdict`. This module does not import it. A reviewer that
+instruction, no label and no CI waiver — and this module never turns that
+proposal into a :class:`models.ReviewVerdict`. It does not import
+:func:`review_authority.adjudicate`, and the guard below is an AST assertion
+that the name is absent from THIS module, which is the whole of what is
+enforced. Fifteen other modules name a ``ReviewVerdict`` member (the Classic
+reviewer's parser among them), so "the only function that produces one" — as
+an earlier wording here, and two tests quoting it, all had it — was false by
+fifteen and invited a reader to conclude that verdict authority is centralised
+when what is actually pinned is that *this* path cannot reach it. A reviewer that
 recommends approval while filing a blocking finding is resolved against by the
 adjudicator, and nothing here can pre-empt that.
 

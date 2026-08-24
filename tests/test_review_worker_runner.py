@@ -475,7 +475,7 @@ class TestAReviewerCannotReviewItsOwnWork:
 
 class TestItProducesAProposalAndNeverAVerdict:
     def test_the_module_does_not_reach_the_adjudicator(self) -> None:
-        """``adjudicate`` is the only function that produces a verdict, and this
+        """``adjudicate`` is the only P5 function that produces a verdict, and this
         module cannot call it: it imports no such name, binds no such name, and
         calls nothing by that name. Read from the AST rather than from the text
         so the prose that *explains* the rule cannot satisfy the test for it."""

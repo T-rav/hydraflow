@@ -825,3 +825,173 @@ class TestTheReviewResolverSaysWhichBoundItFell_Outside:
             REFUSAL_CODES[PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW]
             is RejectionReason.ROLE_PHASE_FORBIDDEN
         )
+
+
+class TestTheBadgesOffSwitchAndCanonicalisation:
+    """The same two clauses as the brokers, one level up — and unpinned again.
+
+    #11543's badge tests named the off-switch guard in their own docstring
+    ("carrying the same ``armed is not None`` guard") and never isolated it:
+    two cases were short-circuited by ``uses_fable_director()`` and the other
+    two supplied canonicalisable repos on both sides. Deleting
+    ``armed is not None and`` survived 1069 tests, in all THREE badges.
+
+    Sentence copied, parametrize not — for the third time in this chain, which
+    is why all three siblings are pinned here rather than only the review one.
+    """
+
+    @staticmethod
+    def _directed(**kwargs: object) -> HydraFlowConfig:
+        return HydraFlowConfig(
+            repo="acme/widget",
+            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    @pytest.mark.parametrize(
+        "badge",
+        [
+            "fable_review_canary_armed",
+            "fable_plan_canary_armed",
+            "fable_implement_canary_armed",
+        ],
+    )
+    def test_an_empty_dial_is_disarmed_even_when_the_repo_is_unidentifiable(
+        self, badge: str
+    ) -> None:
+        """The case that isolates ``armed is not None``.
+
+        With a resolvable repo the comparison answers False for its own
+        reason. With ``repo=""`` — reachable when env and git-remote detection
+        both fail — dropping the guard leaves ``None == None``: a disarmed dial
+        reporting ARMED on the operator's dashboard.
+
+        ``model_copy`` because the config resolves an empty repo from the git
+        remote at construction, so the state has to be reached the way the
+        runtime reaches it rather than the way a constructor would.
+        """
+        blind = self._directed().model_copy(update={"repo": ""})
+
+        assert getattr(blind, badge)() is False
+
+    @pytest.mark.parametrize(
+        ("badge", "dial"),
+        [
+            ("fable_review_canary_armed", "fable_review_canary_repo"),
+            ("fable_plan_canary_armed", "fable_plan_canary_repo"),
+            ("fable_implement_canary_armed", "fable_implement_canary_repo"),
+        ],
+    )
+    def test_the_repo_side_is_canonicalised_too(self, badge: str, dial: str) -> None:
+        """Clause 2 normalises BOTH operands, and neither side was pinned.
+
+        ``canonicalize_repo`` lower-cases; neither validator does. A slug that
+        auto-detects as ``Acme/Widget`` against a dial an operator typed as
+        ``acme/widget`` is the single most likely real configuration — and
+        dropping the call on the repo side made an armed canary silently cover
+        nothing, in six statements of this one rule.
+        """
+        config = self._directed(**{dial: "acme/widget"}).model_copy(
+            update={"repo": "Acme/Widget"}
+        )
+
+        assert getattr(config, badge)() is True
+
+    def test_a_genuinely_different_repository_is_still_disarmed(self) -> None:
+        """Non-vacuity: canonicalising both sides must not make everything match."""
+        config = self._directed(fable_review_canary_repo="acme/other")
+
+        assert config.fable_review_canary_armed() is False
+
+
+class TestTheBoundCanonicalisesTheRepoSide:
+    """The broker half of the same clause — three more unpinned statements."""
+
+    @pytest.mark.parametrize(
+        ("covers", "phase"),
+        [
+            (review_canary_covers, CANARY_PHASE),
+            (plan_canary_covers, DriverPhase.PLAN),
+        ],
+    )
+    def test_a_case_only_difference_still_matches(self, covers, phase) -> None:
+        assert covers(_Dials("Acme/Widget", "acme/widget"), phase=phase) is True
+
+    def test_a_different_repository_still_does_not(self) -> None:
+        assert (
+            review_canary_covers(
+                _Dials("acme/other", "acme/widget"), phase=CANARY_PHASE
+            )
+            is False
+        )
+
+
+class TestTheTwoLineageArmsAreMutuallyExclusive:
+    """A collision #11543's own both-operands fix opened.
+
+    Stripping both sides made ``"" in {"   "}`` true, so a blank lineage
+    satisfied ``lineage_unknown`` AND ``self_review`` at once and only the row
+    ORDER decided which an operator saw — swapping the rows survived. The
+    honest answer is LINEAGE_UNKNOWN: nothing here establishes that the
+    requester implemented anything. Now true by construction, matching
+    ``review_broker``, rather than by tuple arrangement.
+
+    Note for whoever runs the gauntlet next: deleting the guard alone is an
+    EQUIVALENT mutant, because the row order still yields the same code. What
+    the guard buys is order-INDEPENDENCE, and only a compound mutation shows
+    it — swap the two rows and the test still passes; swap them *and* delete
+    the guard and it fails. Recorded because a single-mutation run reports
+    this as a survivor and the natural next move is to delete a guard that is
+    doing real work.
+    """
+
+    def test_a_blank_lineage_against_a_blank_implementer_set_is_lineage_unknown(
+        self,
+    ) -> None:
+        now = datetime.now(UTC)
+        lease = DriverLease(
+            driver_id="drv-1",
+            epoch=0,
+            repo_slug="acme/widget",
+            issue_number=1,
+            phase=DriverPhase.REVIEW,
+            expected_stage_label="hydraflow-review",
+            phase_attempt=0,
+            expires_at=now + timedelta(hours=1),
+        )
+        valid = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=WorkerRole.REVIEWER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="review it",
+            reason="needs review",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+            requesting_spawn_id="spawn-director",
+        )
+
+        reason = admit_dispatch(
+            request=valid.model_copy(update={"requesting_spawn_id": "   "}),
+            lease=lease,
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-review",
+            writer_lease=WriterLease(
+                driver_id="drv-1",
+                epoch=0,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.REVIEWER}),
+            remaining_usd_budget=10.0,
+            implementer_spawn_ids=frozenset({"   "}),
+        )
+
+        assert reason is RejectionReason.LINEAGE_UNKNOWN

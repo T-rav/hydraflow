@@ -853,9 +853,18 @@ def admit_dispatch(
     # Both operands normalised. Stripping only the request's meant two
     # byte-identical padded ids compared unequal and the fence admitted an
     # implementer reviewing itself (#11543).
-    self_review = fenced and stated_lineage in {
-        (spawn or "").strip() for spawn in implementer_spawn_ids
-    }
+    # `stated_lineage` guards the membership test so the two arms cannot both
+    # be true. Stripping BOTH operands (the previous fix) made `"" in {"   "}`
+    # true, so a blank lineage satisfied `lineage_unknown` AND `self_review`
+    # at once, and only the row order below decided which an operator saw —
+    # an unpinned tuple position standing in for a rule. `review_broker`'s
+    # copy is safe by construction because it returns on `not stated` first;
+    # this one now is too, rather than by arrangement.
+    self_review = (
+        fenced
+        and bool(stated_lineage)
+        and stated_lineage in {(spawn or "").strip() for spawn in implementer_spawn_ids}
+    )
     # Writer-lease checks apply only to roles that can actually take the lease.
     # A read-only explorer must not be blocked because the lease has not been
     # re-minted at the current epoch, and a lease lagging its driver's epoch is

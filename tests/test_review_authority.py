@@ -188,7 +188,17 @@ def test_a_forgetful_caller_fails_loudly_rather_than_adjudicating_fail_open() ->
         pytest.param(
             {"reviewer_independent": False, "hitl_required": True, "ci_green": False},
             AdjudicationReason.NOT_INDEPENDENT,
-            id="independence-outranks-hitl",
+            id="independence-outranks-snapshot",
+        ),
+        pytest.param(
+            {
+                "hitl_required": True,
+                "ci_green": False,
+                "evidence_head_sha": "a" * 40,
+                "current_head_sha": "b" * 40,
+            },
+            AdjudicationReason.EVIDENCE_STALE,
+            id="snapshot-outranks-hitl",
         ),
         pytest.param(
             {"hitl_required": True, "ci_green": False},
@@ -205,17 +215,22 @@ def test_a_forgetful_caller_fails_loudly_rather_than_adjudicating_fail_open() ->
 def test_every_adjacency_in_the_strictness_order_is_pinned(
     kwargs: dict[str, bool], expected: AdjudicationReason
 ) -> None:
-    """Five checks make FOUR adjacencies; one was pinned.
+    """Five checks make FOUR adjacencies. Every one is pinned here.
 
     Every deterministic block returns ``REQUEST_CHANGES``, so swapping two of
     them moves only the REASON — which is the product, per this module's own
-    "one code cannot say two things". Swapping the ``hitl_required`` and
-    ``not ci_green`` blocks changed no test. Each case below trips its rule
-    AND every rule below it, so it can only pass if the order holds.
+    "one code cannot say two things". Each case below trips its rule AND every
+    rule below it, so it can only pass if the order holds.
 
-    The snapshot adjacency is covered by
-    ``test_a_review_of_a_moved_snapshot_is_not_a_review_of_what_would_merge``,
-    which supplies a stale pair alongside a blocking finding.
+    An earlier version of this docstring claimed the snapshot adjacency was
+    already covered by
+    ``test_a_review_of_a_moved_snapshot_is_not_a_review_of_what_would_merge``.
+    It is not: that test passes ``_CLEAN`` with fully permissive facts, so it
+    trips exactly one rule and can pin no adjacency at all. Moving the
+    snapshot block below the HITL and CI blocks survived — a moved snapshot
+    would have reported ``HITL_REQUIRED`` instead of ``EVIDENCE_STALE``. A
+    coverage claim in a docstring is precisely what stops the next reader
+    checking, which is the defect class this whole file was repaired for.
     """
     _, reason = adjudicate(_BLOCKING, **_DETERMINISTIC | kwargs)
 

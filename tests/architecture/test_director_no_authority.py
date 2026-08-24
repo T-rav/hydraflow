@@ -476,7 +476,7 @@ def test_the_review_actuator_cannot_reach_the_adjudicator() -> None:
     """The one thing this actuator must not be able to do that its siblings
     have no equivalent of: turn a proposal into a verdict.
 
-    ``review_authority.adjudicate`` is the only function that produces a
+    ``review_authority.adjudicate`` is the only P5 function that produces a
     ``ReviewVerdict``, and a reviewer that could call it would own the decision
     whatever the prose around it said. Read from the AST rather than the text,
     so the docstrings *explaining* the rule cannot satisfy the test for it.
