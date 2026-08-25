@@ -33,19 +33,47 @@ def test_flat_repo_has_no_root_packages(tmp_path: Path) -> None:
     assert layout.root_packages(tmp_path) == ()
 
 
-def test_packaged_repo_is_discovered_from_project_name(tmp_path: Path) -> None:
-    _write(tmp_path, "src/memoiq/__init__.py")
-    _write(tmp_path, "pyproject.toml", '[project]\nname = "memoiq"\n')
+#: ``root_packages`` cases where ``src/<pkg>/`` is on disk and a
+#: ``pyproject.toml`` sits beside it. All three wrote the same two ``_write``
+#: calls and made the same assertion; only the pyproject body and the expected
+#: identifier ever varied, which is what ``pytest.param`` is for — the idiom
+#: ``_BUILD_BACKENDS`` below already uses in this very file. Collapsed from
+#: three copy-paste tests; ids keep each scenario named in the failure output.
+_DECLARED_NAME_CASES = [
+    pytest.param(
+        "memoiq",
+        '[project]\nname = "memoiq"\n',
+        ("memoiq",),
+        id="discovered",
+    ),
+    pytest.param(
+        # ``KernelSpec.pkg`` lowercases and dash-to-underscores ``project.name``.
+        "my_app",
+        '[project]\nname = "My-App"\n',
+        ("my_app",),
+        id="normalised",
+    ),
+    pytest.param(
+        # Unparseable TOML is not a declaration, so the lone ``src/*/`` wins.
+        "memoiq",
+        "this is not = [ valid toml\n",
+        ("memoiq",),
+        id="unparseable-fallback",
+    ),
+]
 
-    assert layout.root_packages(tmp_path) == ("memoiq",)
 
+@pytest.mark.parametrize(("package", "pyproject", "expected"), _DECLARED_NAME_CASES)
+def test_a_package_on_disk_resolves_through_its_pyproject(
+    tmp_path: Path, package: str, pyproject: str, expected: tuple[str, ...]
+) -> None:
+    """Three scenarios, one shape: the name as declared, the name normalised to
+    an import identifier, and an unparseable pyproject falling back to the
+    filesystem."""
+    _write(tmp_path, f"src/{package}/__init__.py")
+    _write(tmp_path, "pyproject.toml", pyproject)
 
-def test_project_name_is_normalised_to_an_import_identifier(tmp_path: Path) -> None:
-    """``KernelSpec.pkg`` lowercases and dash-to-underscores ``project.name``."""
-    _write(tmp_path, "src/my_app/__init__.py")
-    _write(tmp_path, "pyproject.toml", '[project]\nname = "My-App"\n')
-
-    assert layout.root_packages(tmp_path) == ("my_app",)
+    assert layout.root_packages(tmp_path) == expected
 
 
 def test_declared_package_absent_on_disk_is_dropped(tmp_path: Path) -> None:
@@ -100,13 +128,6 @@ def test_declared_package_wins_over_the_filesystem_ordering(tmp_path: Path) -> N
 
 def test_missing_src_directory_yields_no_packages(tmp_path: Path) -> None:
     assert layout.root_packages(tmp_path) == ()
-
-
-def test_unparseable_pyproject_falls_back_to_the_filesystem(tmp_path: Path) -> None:
-    _write(tmp_path, "src/memoiq/__init__.py")
-    _write(tmp_path, "pyproject.toml", "this is not = [ valid toml\n")
-
-    assert layout.root_packages(tmp_path) == ("memoiq",)
 
 
 _BUILD_BACKENDS = [
