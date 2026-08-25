@@ -39,6 +39,7 @@ resolver, not the allowlist.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -66,14 +67,15 @@ def _path_segments(node: ast.expr) -> list[str | None]:
 
     The base of the chain is dropped: ``ctx.root``, ``root`` and ``self.root``
     all lead to the same hazard, and the gate is about what follows. A
-    ``Path("src")`` base and an embedded ``"src/ports.py"`` are expanded, so
-    neither spelling evades the scan.
+    ``Path("src")`` base, an ``os.path.join`` spelling and an embedded
+    ``"src/ports.py"`` separator are all expanded, so none of them evades the
+    scan.
     """
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         return [*_path_segments(node.left), *_literal(node.right)]
     if isinstance(node, ast.Call):
         func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == "joinpath":
+        if isinstance(func, ast.Attribute) and func.attr in {"joinpath", "join"}:
             base = _path_segments(func.value)
             args = [seg for arg in node.args for seg in _literal(arg)]
             return [*base, *args]
@@ -83,12 +85,65 @@ def _path_segments(node: ast.expr) -> list[str | None]:
 
 
 def _is_flat_source_literal(node: ast.expr) -> bool:
-    """True when the expression names ``src`` and a literal child of it."""
+    """True when the expression names a literal ``src`` with ANYTHING under it.
+
+    The child need not itself be a literal. ``ctx.root / "src" / name`` and
+    ``ctx.root / "src" / f"{name}.py"`` hardcode the source root just as firmly
+    as ``ctx.root / "src" / "ports.py"``, and are exactly as blind to
+    ``src/<pkg>/``. Only a bare ``ctx.root / "src"`` — the root of an rglob
+    walk — is layout-agnostic, and that is what this permits.
+    """
     segments = _path_segments(node)
-    for index, segment in enumerate(segments):
-        if segment == "src" and index + 1 < len(segments):
-            return segments[index + 1] is not None
-    return False
+    return any(
+        segment == "src" and index + 1 < len(segments)
+        for index, segment in enumerate(segments)
+    )
+
+
+#: ``src/`` immediately followed by a path segment, with no path before it.
+#: ``"src/"`` alone (an rglob root, or the word in prose) does not match.
+_SRC_CHILD_RE = re.compile(r"(?<![\w/.-])src/[A-Za-z_][\w.-]*")
+
+
+def _docstring_constants(tree: ast.AST) -> set[int]:
+    """``id()`` of every docstring Constant — prose may name a flat path."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            ids.add(id(body[0].value))
+    return ids
+
+
+def _string_offenders(tree: ast.AST) -> list[int]:
+    """Lines where a *string* hardcodes ``src/<child>`` outside a docstring.
+
+    The scan above only sees path ARITHMETIC. The same blindness ships as a
+    plain string just as easily — ``path.startswith("src/ui/")``, a
+    ``re.compile(r"^src/ui/...")`` source, or a ``_PORTS_REL = "src/ports.py"``
+    constant fed to a ``/`` one line later. P10.6 held the first two of those
+    and they failed a stamped repo's audit gate outright, so this arm is not
+    hypothetical. Docstrings are exempt: prose explaining the layout is what a
+    docstring is for.
+    """
+    exempt = _docstring_constants(tree)
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in exempt
+        and _SRC_CHILD_RE.search(node.value)
+    ]
 
 
 def _offenders(root: Path) -> dict[str, list[int]]:
@@ -105,6 +160,7 @@ def _offenders(root: Path) -> dict[str, list[int]]:
                 if isinstance(node, ast.BinOp | ast.Call)
                 and _is_flat_source_literal(node)
             }
+            | set(_string_offenders(tree))
         )
         if lines:
             found[py.relative_to(audit_root).as_posix()] = lines
@@ -170,13 +226,24 @@ _FORBIDDEN_SHAPES = [
     pytest.param(
         'p = ctx.root.joinpath("src/mockworld", "fakes")\n', id="joinpath-embedded"
     ),
+    pytest.param('p = ctx.root / "src" / name\n', id="variable-segment"),
+    pytest.param('p = ctx.root / "src" / f"{name}.py"\n', id="fstring-segment"),
+    pytest.param(
+        'p = os.path.join(str(ctx.root), "src", "ports.py")\n', id="os-path-join"
+    ),
+    pytest.param('ui_only = path.startswith("src/ui/")\n', id="string-prefix"),
+    pytest.param('UI_TEST_RE = re.compile(r"^src/ui/.*")\n', id="regex-source"),
+    pytest.param('_PORTS_REL = "src/ports.py"\n', id="named-constant"),
 ]
 
 _ALLOWED_SHAPES = [
     pytest.param('src = ctx.root / "src"\n', id="bare-src-root"),
     pytest.param('src = ctx.root.joinpath("src")\n', id="bare-src-joinpath"),
-    pytest.param('p = ctx.root / "src" / name\n', id="variable-segment"),
     pytest.param("p = src.joinpath(pkg, *parts)\n", id="starred-segments"),
+    pytest.param(
+        'msg = "no *_DATA_ROOT override found in src/"\n', id="bare-src-prose"
+    ),
+    pytest.param('def f():\n    """Probes src/ports.py."""\n', id="docstring-prose"),
     pytest.param('p = ctx.root / "tests" / "scenarios"\n', id="not-src"),
     pytest.param('p = ctx.src_module("ports")\n', id="the-resolver"),
 ]
@@ -184,7 +251,7 @@ _ALLOWED_SHAPES = [
 
 def _detect(body: str) -> bool:
     tree = ast.parse(body)
-    return any(
+    return bool(_string_offenders(tree)) or any(
         _is_flat_source_literal(node)
         for node in ast.walk(tree)
         if isinstance(node, ast.BinOp | ast.Call)

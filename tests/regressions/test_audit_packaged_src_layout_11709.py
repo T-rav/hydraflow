@@ -30,7 +30,9 @@ used as a proxy for a module identity), Refs #6855 (a gate that went missing).
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -42,8 +44,11 @@ from scripts.hydraflow_audit.checks import (  # noqa: F401
     p7_observability,
     p8_superpowers,
     p9_persistence,
+    p10_tdd,
 )
 from scripts.hydraflow_audit.models import CheckContext, Finding, Status
+
+from false_close import UI_TEST_RE
 
 PKG = "memoiq"
 
@@ -588,3 +593,128 @@ def test_no_domain_sample_message_names_the_packaged_paths(tmp_path: Path) -> No
     assert finding.status is Status.NA
     assert f"src/{PKG}/models.py" in finding.message
     assert f"src/{PKG}/domain/" in finding.message
+
+
+# --- P10.6: the UI prefix is a STRING, and it was flat too ----------------
+#
+# The one converted site that is not a Path expression. P10.6 classifies
+# git-diff paths against a `src/ui/` string prefix, and `false_close.UI_TEST_RE`
+# anchors on the same literal. On a packaged repo a UI-only fix's paths all
+# start with `src/<pkg>/ui/`, so `ui_only` was False, the UI-test escape hatch
+# never opened, and P10.6 fell through to WARN — which is NOT in
+# `runner._NON_BLOCKING_WARN_CHECKS`, so it failed the audit gate outright.
+# A blind Path probe returns a wrong verdict; this one blocked the PR.
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        },
+    )
+
+
+def _ui_fix_pr(root: Path, files: dict[str, str]) -> None:
+    """A packaged repo whose branch carries one UI-only ``fix(ui): …`` commit."""
+    _materialize(root, _EMPTY_PACKAGED_REPO)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "chore: base")
+    _git(root, "checkout", "-q", "-b", "fix/ui")
+    _materialize(root, files)
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "fix(ui): cap the dots")
+
+
+def test_packaged_ui_only_fix_with_a_ui_test_delta_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ui_fix_pr(
+        tmp_path,
+        {
+            f"src/{PKG}/ui/src/StreamView.jsx": "cap\n",
+            f"src/{PKG}/ui/src/__tests__/StreamView.test.jsx": "t\n",
+        },
+    )
+    monkeypatch.setenv("HYDRAFLOW_AUDIT_PR_BASE", "main")
+
+    result = _run("P10.6", tmp_path)
+
+    assert result.status is Status.PASS, (
+        f"P10.6 blocked a packaged UI-only fix: {result.message!r}"
+    )
+    assert "UI" in (result.message or "")
+
+
+def test_packaged_ui_only_fix_without_a_ui_test_still_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate must still bite — the fix widens the layout, not the rule."""
+    _ui_fix_pr(tmp_path, {f"src/{PKG}/ui/src/StreamView.jsx": "cap\n"})
+    monkeypatch.setenv("HYDRAFLOW_AUDIT_PR_BASE", "main")
+
+    result = _run("P10.6", tmp_path)
+
+    assert result.status is Status.WARN
+    assert f"src/{PKG}/ui/" in (result.message or "")
+
+
+def test_flat_ui_only_fix_still_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Widening the prefix must not stop the flat layout from matching."""
+    _materialize(tmp_path, {"src/app.py": "x = 1\n"})
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "chore: base")
+    _git(tmp_path, "checkout", "-q", "-b", "fix/ui")
+    _materialize(
+        tmp_path,
+        {
+            "src/ui/src/StreamView.jsx": "cap\n",
+            "src/ui/src/__tests__/StreamView.test.jsx": "t\n",
+        },
+    )
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "fix(ui): cap the dots")
+    monkeypatch.setenv("HYDRAFLOW_AUDIT_PR_BASE", "main")
+
+    result = _run("P10.6", tmp_path)
+
+    assert result.status is Status.PASS
+    assert "UI" in (result.message or "")
+
+
+_UI_TEST_PATHS = [
+    pytest.param("src/ui/src/__tests__/View.jsx", id="flat-tests-dir"),
+    pytest.param("src/ui/src/View.test.tsx", id="flat-dot-test"),
+    pytest.param(f"src/{PKG}/ui/src/__tests__/View.jsx", id="packaged-tests-dir"),
+    pytest.param(f"src/{PKG}/ui/src/View.test.tsx", id="packaged-dot-test"),
+]
+
+
+@pytest.mark.parametrize("path", _UI_TEST_PATHS)
+def test_ui_test_regex_matches_both_layouts(path: str) -> None:
+    assert UI_TEST_RE.match(path)
+
+
+_NOT_UI_TEST_PATHS = [
+    pytest.param("src/ui/src/View.jsx", id="ui-product-not-a-test"),
+    pytest.param(f"src/{PKG}/ui/src/View.jsx", id="packaged-ui-product"),
+    pytest.param("docs/ui/__tests__/View.jsx", id="not-under-src"),
+    pytest.param(f"src/{PKG}/deep/ui/src/View.test.tsx", id="two-segments-deep"),
+]
+
+
+@pytest.mark.parametrize("path", _NOT_UI_TEST_PATHS)
+def test_ui_test_regex_stays_anchored(path: str) -> None:
+    """Widened by exactly one optional package segment — not turned into `.*`."""
+    assert not UI_TEST_RE.match(path)
