@@ -582,73 +582,228 @@ def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> 
     )
 
 
-#: The four raw spawn forms a decision-path module could reach for, and whether
-#: the import rule above ACTUALLY catches each one — measured against a victim
-#: file by the test below, not asserted from prose. ``subprocess.Popen`` and
-#: ``subprocess.run`` ARE caught: reaching either requires importing
-#: ``subprocess``. ``os.system`` and ``os.popen`` are NOT — ``os`` is
-#: deliberately absent from ``_SPAWN_MACHINERY`` because decision-path modules
-#: import it for ``environ`` and paths, and no other gate in the repo names
-#: ``system``/``popen`` either (bandit rates ``os.system`` B605 *Low* and the
-#: Makefile gates at *medium*). Two of the four forms are therefore uncovered.
-#: That is #11724's open policy question; this table states the gap instead of
-#: hiding it, and a ``False`` row reddens the day somebody closes it — which is
-#: the prompt to update the table rather than a reason to widen it here.
-_RAW_SPAWNS: tuple[tuple[str, bool], ...] = (
-    ("subprocess.Popen", True),
-    ("subprocess.run", True),
-    ("os.system", False),
-    ("os.popen", False),
+#: Attribute names on the ``os`` module that reach a process (#11724).
+#:
+#: ``_called_names`` above flattens ``mod.f(...)`` to ``f``, and that flattening
+#: is *why* the rule that does the work had to be on imports: ``run``,
+#: ``system`` and ``popen`` are far too common as BARE attribute names to
+#: sweep. That reasoning does not extend to an ``ast.Attribute`` whose value is
+#: the Name ``os`` — ``os.system(...)`` is unambiguous — and ``os`` is
+#: deliberately absent from ``_SPAWN_MACHINERY`` because every module on
+#: ``DECISION_PATH_MODULES`` legitimately imports it for ``environ`` and paths.
+#: So the ``os``-qualified call was the one shape neither rule saw, and no
+#: other gate in the repo covered it either: bandit rates ``os.system`` B605
+#: *Low* while the Makefile gates at *medium*, ruff does not select ``S``, and
+#: ``SPAWN_PRIMITIVES`` names only HydraFlow's sanctioned helpers. Four gates,
+#: four different reasons, one hole.
+#:
+#: PREFIXES rather than an enumeration, per the rule this chain keeps
+#: relearning: a fix written against a finding's prose inherits the prose's
+#: scope. #11724 named five attributes; ``os`` offers about twenty ways to
+#: reach a process. Nothing in ``os`` beginning ``exec``/``spawn``/
+#: ``posix_spawn``/``popen``/``fork`` is anything OTHER than a way to reach
+#: one, so the prefix is exact here and covers ``execvpe``, ``spawnlpe`` and
+#: ``posix_spawnp`` without anyone remembering to add them.
+#:
+#: ``fork`` is included although the repo-wide raw-spawn ratchet deliberately
+#: excludes it — "fork" is a GitHub-domain verb in this codebase, so a BARE
+#: ``.fork()`` would be a false positive there. Requiring the ``os`` qualifier
+#: is exactly what makes it safe to include here.
+_OS_SPAWN_PREFIXES: tuple[str, ...] = (
+    "exec",
+    "fork",
+    "popen",
+    "posix_spawn",
+    "spawn",
+)
+
+#: ``os`` spawn attributes with no useful prefix. ``startfile`` is Windows-only
+#: and cannot appear on this repo's hosts, but the guard reads the SOURCE, not
+#: the platform: deriving the subject from ``dir(os)`` would make the rule
+#: depend on which OS ran the test, which is the host-dependence class this
+#: repo has been bitten by before.
+_OS_SPAWN_EXACT: frozenset[str] = frozenset({"system", "startfile"})
+
+
+def _is_os_spawn(attr: str) -> bool:
+    return attr in _OS_SPAWN_EXACT or attr.startswith(_OS_SPAWN_PREFIXES)
+
+
+def _os_aliases(tree: ast.Module) -> set[str]:
+    """Local names bound to the ``os`` MODULE in *tree*.
+
+    Resolved rather than assumed, so ``import os as _o`` followed by
+    ``_o.system(...)`` cannot walk out of the guard by renaming. ``import
+    os.path`` binds the root ``os`` too; ``import os.path as p`` binds ``p`` to
+    the SUBmodule, which owns no spawn attribute, so it is deliberately not
+    treated as an alias for ``os``.
+    """
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import):
+            continue
+        for alias in node.names:
+            if alias.name.split(".")[0] != "os":
+                continue
+            if alias.asname is None:
+                aliases.add("os")
+            elif alias.name == "os":
+                aliases.add(alias.asname)
+    return aliases
+
+
+def reachable_os_spawns(tree: ast.Module) -> set[str]:
+    """Every way *tree* reaches a process through ``os``, as dotted names.
+
+    Two shapes, because closing only the first leaves a one-line evasion:
+
+    * a qualified call — ``os.system(...)``, ``_o.popen(...)``;
+    * a ``from os import system`` binding, whose call site is then a bare name
+      the flattening detector cannot tell from any other ``system``. Caught at
+      the import instead, where it is unambiguous.
+
+    Stated limits, because an overstated guard is the defect this exists to
+    fix. NOT caught: dynamic dispatch (``getattr(os, "system")(...)``,
+    ``__import__("os").system(...)``, ``eval``). A lexical AST scan cannot see
+    those, and unlike a plain ``os.system(...)`` they do not read as an
+    ordinary diff — which was #11724's actual complaint. The negative control
+    below pins that limit as a row rather than leaving it to prose.
+    """
+    aliases = _os_aliases(tree)
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            callee = node.func
+            if (
+                isinstance(callee, ast.Attribute)
+                and isinstance(callee.value, ast.Name)
+                and callee.value.id in aliases
+                and _is_os_spawn(callee.attr)
+            ):
+                found.add(f"{callee.value.id}.{callee.attr}")
+        elif (
+            isinstance(node, ast.ImportFrom) and node.module == "os" and node.level == 0
+        ):
+            found.update(
+                f"os.{alias.name}" for alias in node.names if _is_os_spawn(alias.name)
+            )
+    return found
+
+
+@pytest.mark.parametrize("module", DECISION_PATH_MODULES)
+def test_the_decision_path_cannot_reach_a_process_through_os(module: str) -> None:
+    reached = reachable_os_spawns(_tree(module))
+    assert not reached, (
+        f"{module} reaches a process through {sorted(reached)}. Every module on "
+        "this list says in its own docstring that it does not spawn, and until "
+        "#11724 this was the shape that said it while passing every gate in the "
+        "repo: the import rule permits `os` on purpose, the call-site guard "
+        "flattens `os.system` to `system`, bandit rates it B605 Low under a "
+        "medium gate, and ruff does not select S. A module that needs to spawn "
+        "belongs behind a declared seam."
+    )
+
+
+def test_the_spawn_guards_have_a_subject() -> None:
+    """A scan with nothing to scan must not pass silently.
+
+    ``DECISION_PATH_MODULES`` is what every guard in this file parametrises
+    over, and pytest reports an EMPTY parametrisation as no tests rather than
+    as a failure — so emptying the tuple, or renaming a module out from under
+    it, would turn this entire file green while covering nothing. The same is
+    true of the two attribute sets: an empty ``_OS_SPAWN_*`` makes
+    ``reachable_os_spawns`` a function that always returns the empty set, and
+    every assertion above it passes.
+
+    That is the ``as_payload``/vacuous-anchor class the chain that produced
+    #11724 has now hit at several sites. The guard is worth no more than the
+    proof that it has a subject.
+    """
+    assert DECISION_PATH_MODULES, "no decision-path modules — every guard is vacuous"
+    assert _OS_SPAWN_PREFIXES and _OS_SPAWN_EXACT, (
+        "the os-spawn subject is empty — reachable_os_spawns cannot fire"
+    )
+
+    missing = [m for m in DECISION_PATH_MODULES if not (REPO_ROOT / m).is_file()]
+    assert not missing, (
+        f"these modules are guarded but do not exist: {missing}. A renamed or "
+        "deleted module must redden here, not quietly stop being covered."
+    )
+
+
+#: Every raw-spawn shape a decision-path module could reach for, the source it
+#: would have to contain, and the NAME of the rule that catches it — measured
+#: against a victim file by the test below, never asserted from prose.
+#:
+#: The version this table replaces parametrised over four bare strings and
+#: never invoked a guard: both of its assertions were properties of its own
+#: hardcoded input, and the ``| {"os"}`` in the second was precisely what let
+#: the two then-UNCAUGHT ``os`` forms read as coverage (#11724).
+#:
+#: Three rules can fire, and the row names which one must:
+#:
+#: * ``"import"`` — ``_SPAWN_MACHINERY``. Reaching ``subprocess`` at all
+#:   requires importing it, so the import is the cheapest true signal.
+#: * ``"os"`` — ``reachable_os_spawns``. The qualified form, added by #11724.
+#: * ``None`` — nothing here fires. A hole, recorded as a row so it cannot be
+#:   mistaken for coverage; closing it reddens this table, which is the prompt
+#:   to update it.
+#:
+#: ``"call-site"`` (``SPAWN_PRIMITIVES``) is a fourth possible value and no row
+#: expects it: that guard knows only HydraFlow's sanctioned helper names. It is
+#: still measured, so the day ``run`` or ``system`` becomes a sanctioned
+#: primitive this test says so instead of quietly double-covering.
+_RAW_SPAWNS: tuple[tuple[str, str, str, str | None], ...] = (
+    (
+        "popen-via-subprocess",
+        "import subprocess",
+        "subprocess.Popen(['true'])",
+        "import",
+    ),
+    ("run-via-subprocess", "import subprocess", "subprocess.run(['true'])", "import"),
+    ("os-system", "import os", "os.system('true')", "os"),
+    ("os-popen", "import os", "os.popen('true')", "os"),
+    ("os-execv", "import os", "os.execv('/bin/true', ['true'])", "os"),
+    ("os-spawnl", "import os", "os.spawnl(os.P_WAIT, '/bin/true', 'true')", "os"),
+    # The two evasions a name-based rule invites, pinned so closing the
+    # qualified form cannot be mistaken for closing the shape.
+    ("os-aliased", "import os as _o", "_o.system('true')", "os"),
+    ("os-from-import", "from os import system", "system('true')", "os"),
+    # The stated limit. A lexical AST scan cannot follow dynamic dispatch, and
+    # this row is the executable form of saying so.
+    ("os-getattr", "import os", "getattr(os, 'system')('true')", None),
 )
 
 
-@pytest.mark.parametrize(("raw", "caught_by_the_import_rule"), _RAW_SPAWNS)
-def test_the_import_rule_is_what_catches_a_raw_spawn(
-    raw: str, caught_by_the_import_rule: bool, tmp_path: Path
+@pytest.mark.parametrize(("_id", "imports", "statement", "rule"), _RAW_SPAWNS)
+def test_a_raw_spawn_is_caught_by_exactly_the_rule_the_table_names(
+    _id: str, imports: str, statement: str, rule: str | None, tmp_path: Path
 ) -> None:
-    """Negative control: run both detectors over a module that really spawns.
+    """Negative control: run the real detectors over a module that really spawns.
 
-    The version this replaces parametrised over the same four strings and never
-    invoked a guard. Both of its assertions were properties of its own
-    hardcoded input, and the ``| {"os"}`` in the second was precisely what let
-    the two UNCAUGHT forms pass as though they were covered (#11724). This one
-    writes a victim file — the shape ``test_vitals_conformance_seam.py`` uses —
-    and asserts what the detectors actually see.
-
-    What they see, stated plainly so the next reader is not misled twice:
-
-    * The call-site guard (``SPAWN_PRIMITIVES``) is blind to all four.
-      ``run``/``system``/``popen`` are far too common as bare attribute names to
-      sweep, which is *why* the rule that does the work is on imports.
-    * The import rule catches ``subprocess.Popen`` and ``subprocess.run``.
-    * The import rule does **not** catch ``os.system`` or ``os.popen``, and
-      neither does anything else in this repo. Half this parametrisation is a
-      documented hole, not coverage.
+    Writes a victim file — the shape ``test_vitals_conformance_seam.py`` uses —
+    and asserts which rules actually fire, rather than restating the detectors'
+    inputs back to themselves.
     """
-    root = raw.split(".", maxsplit=1)[0]
-    attr = raw.rsplit(".", 1)[1]
     victim = tmp_path / "victim.py"
     victim.write_text(
-        f"import {root}\n\n\ndef reach_a_process() -> None:\n    {raw}('true')\n",
+        f"{imports}\n\n\ndef reach_a_process() -> None:\n    {statement}\n",
         encoding="utf-8",
     )
     tree = ast.parse(victim.read_text(encoding="utf-8"), filename=str(victim))
 
-    assert not (_called_names(tree) & SPAWN_PRIMITIVES), (
-        f"the call-site guard now sees {raw}: {attr} has become a sanctioned "
-        "primitive name, so the import rule is no longer the only thing "
-        "standing between a decision-path module and a raw spawn"
-    )
+    fired = set()
+    if _imported_roots(tree) & _SPAWN_MACHINERY:
+        fired.add("import")
+    if reachable_os_spawns(tree):
+        fired.add("os")
+    if _called_names(tree) & SPAWN_PRIMITIVES:
+        fired.add("call-site")
 
-    reached = _imported_roots(tree) & _SPAWN_MACHINERY
-    if caught_by_the_import_rule:
-        assert reached == {root}, (
-            f"the import rule no longer catches {raw}, and no other gate in the "
-            f"repo does: {root} has left _SPAWN_MACHINERY, so a decision-path "
-            "module could spawn with nothing firing"
-        )
-    else:
-        assert not reached, (
-            f"{raw} is now caught by the import rule — good, but _RAW_SPAWNS "
-            "still records it as a hole. Update this table, and #11724 with it"
-        )
+    expected = {rule} if rule else set()
+    assert fired == expected, (
+        f"{statement} fires {sorted(fired) or 'nothing'}; _RAW_SPAWNS says it "
+        f"must fire {sorted(expected) or 'nothing'}. If a rule was widened on "
+        "purpose, update the table — a row that overstates coverage is the "
+        "defect #11724 was filed for."
+    )
