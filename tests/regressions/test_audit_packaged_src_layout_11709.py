@@ -30,9 +30,6 @@ used as a proxy for a module identity), Refs #6855 (a gate that went missing).
 
 from __future__ import annotations
 
-import os
-import re
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -51,53 +48,23 @@ from scripts.hydraflow_audit.checks._helpers import finding
 from scripts.hydraflow_audit.models import CheckContext, Finding, Status
 
 from false_close import UI_TEST_RE
-
-PKG = "memoiq"
-
-#: What ``kernel_writer._pyproject`` stamps, trimmed to the parts that matter
-#: for package discovery.
-_PYPROJECT = f"""[project]
-name = "{PKG}"
-version = "0.1.0"
-
-[project.scripts]
-{PKG} = "{PKG}.cli:main"
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-"""
+from tests.regressions._audit_layout_fixtures import (
+    CONFORMANT,
+    EMPTY_PACKAGED,
+    FLAT,
+    PKG,
+    PROBE_EXIT_RE,
+    PYPROJECT,
+    git,
+    materialize,
+    probe_exit_findings,
+)
 
 # --- fixture repos --------------------------------------------------------
-
-_PORTS_CONFORMANT = """
-from typing import Protocol
-
-
-class VCSPort(Protocol):
-    def push(self) -> None: ...
-
-
-class ObservabilityPort(Protocol):
-    def emit(self) -> None: ...
-"""
 
 _PORTS_NO_PROTOCOL = """
 class VCSPort:
     def push(self) -> None: ...
-"""
-
-_CONFIG_CONFORMANT = """
-from pathlib import Path
-
-from pydantic import BaseModel, Field
-
-
-class Settings(BaseModel):
-    data_root: Path = Field(default=Path(".data"))
-    ready_label: str = Field(default="ready")
-    building_label: str = Field(default="building")
-    review_label: str = Field(default="review")
-    done_label: str = Field(default="done")
 """
 
 _CONFIG_NO_DATA_ROOT = """
@@ -108,73 +75,17 @@ class Settings(BaseModel):
     ready_label: str = Field(default="ready")
 """
 
-_ORCHESTRATOR_CONFORMANT = """
-import asyncio
-
-
-async def main() -> None:
-    await asyncio.gather(loop_a(), loop_b())
-"""
-
 _ORCHESTRATOR_NO_CONCURRENCY = """
 async def main() -> None:
     await loop_a()
     await loop_b()
 """
 
-#: A conformant packaged repo: every module the converted checks probe, at
-#: ``src/<pkg>/…`` and nowhere else.
-_CONFORMANT: dict[str, str] = {
-    "pyproject.toml": _PYPROJECT,
-    f"src/{PKG}/__init__.py": "",
-    f"src/{PKG}/ports.py": _PORTS_CONFORMANT,
-    f"src/{PKG}/service_registry.py": "REGISTRY = {}\n",
-    f"src/{PKG}/models.py": (
-        "class Order:\n    def total(self) -> int:\n        return 0\n"
-    ),
-    f"src/{PKG}/domain/order_policy.py": (
-        "class OrderPolicy:\n    def apply(self) -> None: ...\n"
-    ),
-    f"src/{PKG}/orchestrator.py": _ORCHESTRATOR_CONFORMANT,
-    f"src/{PKG}/config.py": _CONFIG_CONFORMANT,
-    f"src/{PKG}/base_background_loop.py": (
-        "class BaseBackgroundLoop:\n    async def run(self) -> None: ...\n"
-    ),
-    f"src/{PKG}/pr_manager.py": (
-        "class PRManager:\n    def swap_pipeline_labels(self) -> None: ...\n"
-    ),
-    f"src/{PKG}/repo_wiki.py": (
-        "class RepoWiki:\n"
-        "    def ingest(self) -> None: ...\n"
-        "    def query(self) -> None: ...\n"
-        "    def lint(self) -> None: ...\n"
-    ),
-    f"src/{PKG}/base_runner.py": (
-        "class BaseRunner:\n"
-        "    def build(self) -> None:\n"
-        "        self._inject_repo_wiki()\n"
-    ),
-    f"src/{PKG}/trace_collector.py": (
-        "import subprocess\n\n\ndef collect() -> None:\n"
-        "    subprocess.run(['git', 'status'], check=False)  # writes the trace\n"
-    ),
-    f"src/{PKG}/mockworld/fakes/fake_clock.py": (
-        "class FakeClock:\n    def now(self) -> int:\n        return 0\n"
-    ),
-    f"src/{PKG}/mockworld/fakes/fake_vcs.py": (
-        "class FakeVCS:\n    def push(self) -> None: ...\n"
-    ),
-    f"src/{PKG}/mockworld/fakes/fake_wiki.py": (
-        "class FakeWiki:\n    def ingest(self) -> None: ...\n"
-    ),
-    f"src/{PKG}/ui/app.tsx": "export const App = () => null;\n",
-}
-
 #: The same packaged repo with each probed module PRESENT but NOT conformant.
 #: This is the half that proves the check reached its real assessment: a flat
 #: literal cannot tell this repo from the one above — it sees neither.
 _PRESENT_BUT_NONCONFORMANT: dict[str, str] = {
-    **_CONFORMANT,
+    **CONFORMANT,
     f"src/{PKG}/ports.py": _PORTS_NO_PROTOCOL,
     f"src/{PKG}/orchestrator.py": _ORCHESTRATOR_NO_CONCURRENCY,
     f"src/{PKG}/config.py": _CONFIG_NO_DATA_ROOT,
@@ -182,34 +93,16 @@ _PRESENT_BUT_NONCONFORMANT: dict[str, str] = {
 }
 
 
-def _materialize(root: Path, spec: dict[str, str]) -> Path:
-    for rel, body in spec.items():
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
-    return root
-
-
 @pytest.fixture
 def packaged_repo(tmp_path: Path) -> Path:
     """A conformant repo in the layout ``kernel_writer`` stamps."""
-    return _materialize(tmp_path, _CONFORMANT)
+    return materialize(tmp_path, CONFORMANT)
 
 
 @pytest.fixture
 def packaged_repo_noncompliant(tmp_path: Path) -> Path:
     """Same layout; the probed modules exist but violate their checks."""
-    return _materialize(tmp_path, _PRESENT_BUT_NONCONFORMANT)
-
-
-#: The exact shape of a "exited at the path probe" message: a resolved source
-#: path followed immediately by ``missing``, optionally with a trailing
-#: ``— <clause>``. Deliberately narrower than a bare ``"missing" in message``:
-#: real content verdicts say ``... — concurrent loop shape missing`` and
-#: ``src/<pkg>/repo_wiki.py missing operations: ...``, and neither is a probe
-#: exit. A crude substring test would flag those and get relaxed into
-#: uselessness the first time it did.
-_PROBE_EXIT_RE = re.compile(r"src/\S+ missing(?: —[^:]*)?$")
+    return materialize(tmp_path, _PRESENT_BUT_NONCONFORMANT)
 
 
 def _run(check_id: str, root: Path) -> Finding:
@@ -280,7 +173,7 @@ def test_no_check_reports_a_missing_path_on_a_packaged_repo(
     """The exact #11709 symptom, asserted on the reason rather than the verdict."""
     message = _run(check_id, packaged_repo).message
 
-    assert not _PROBE_EXIT_RE.search(message), (
+    assert not PROBE_EXIT_RE.search(message), (
         f"{check_id} exited at a path probe on a packaged repo: {message!r}"
     )
 
@@ -319,7 +212,7 @@ def test_check_fails_for_the_content_reason_not_a_missing_path(
         f"{finding.message!r}. 'FAIL: <path> missing' and 'FAIL: assessed and "
         "non-conformant' are indistinguishable from the exit code alone."
     )
-    assert not _PROBE_EXIT_RE.search(finding.message)
+    assert not PROBE_EXIT_RE.search(finding.message)
 
 
 # --- messages name the path actually probed -------------------------------
@@ -327,9 +220,9 @@ def test_check_fails_for_the_content_reason_not_a_missing_path(
 
 def test_absent_module_message_names_the_packaged_path(tmp_path: Path) -> None:
     """A stamped repo missing ``ports.py`` must be told about ITS path."""
-    _materialize(
+    materialize(
         tmp_path,
-        {"pyproject.toml": _PYPROJECT, f"src/{PKG}/__init__.py": ""},
+        {"pyproject.toml": PYPROJECT, f"src/{PKG}/__init__.py": ""},
     )
 
     finding = _run("P2.2", tmp_path)
@@ -340,19 +233,13 @@ def test_absent_module_message_names_the_packaged_path(tmp_path: Path) -> None:
 
 # --- the flat layout is unchanged -----------------------------------------
 
-_FLAT: dict[str, str] = {
-    rel.replace(f"src/{PKG}/", "src/"): body
-    for rel, body in _CONFORMANT.items()
-    if rel != f"src/{PKG}/__init__.py"
-}
-
 
 @pytest.mark.parametrize(("check_id", "expected"), _CONFORMANT_EXPECTATIONS)
 def test_flat_layout_verdicts_are_unchanged(
     tmp_path: Path, check_id: str, expected: Status
 ) -> None:
     """The safety property of a 24-site conversion: flat repos resolve as before."""
-    root = _materialize(tmp_path, _FLAT)
+    root = materialize(tmp_path, FLAT)
 
     assert CheckContext(root=root).src_packages == ()
     assert _run(check_id, root).status is expected
@@ -385,19 +272,19 @@ _CONTENT_VERDICT_MESSAGES = [
 
 @pytest.mark.parametrize("message", _PROBE_EXIT_MESSAGES)
 def test_probe_exit_detector_catches_a_probe_exit(message: str) -> None:
-    assert _PROBE_EXIT_RE.search(message)
+    assert PROBE_EXIT_RE.search(message)
 
 
 @pytest.mark.parametrize("message", _CONTENT_VERDICT_MESSAGES)
 def test_probe_exit_detector_ignores_real_content_verdicts(message: str) -> None:
-    assert not _PROBE_EXIT_RE.search(message)
+    assert not PROBE_EXIT_RE.search(message)
 
 
 def test_the_packaged_fixture_actually_hides_the_flat_paths() -> None:
     """Guard the fixture: a stray flat module would make every case vacuous."""
     flat_modules = [
         rel
-        for rel in _CONFORMANT
+        for rel in CONFORMANT
         if rel.startswith("src/") and not rel.startswith(f"src/{PKG}/")
     ]
 
@@ -489,10 +376,10 @@ _SINGLE_CANDIDATE_CASES = [
 def test_each_alternative_candidate_resolves_on_its_own(
     tmp_path: Path, check_id: str, rel: str, body: str
 ) -> None:
-    root = _materialize(
+    root = materialize(
         tmp_path,
         {
-            "pyproject.toml": _PYPROJECT,
+            "pyproject.toml": PYPROJECT,
             f"src/{PKG}/__init__.py": "",
             # P6 checks self-mark NA off shape detection, which is itself one
             # of the converted probes; without a marker the case would pass on
@@ -521,10 +408,10 @@ _ORCHESTRATION_MARKERS = [
 @pytest.mark.parametrize("rel", _ORCHESTRATION_MARKERS)
 def test_each_orchestration_marker_is_seen_on_its_own(tmp_path: Path, rel: str) -> None:
     """``_detect_orchestration`` ORs two probes; a fixture with both hides one."""
-    root = _materialize(
+    root = materialize(
         tmp_path,
         {
-            "pyproject.toml": _PYPROJECT,
+            "pyproject.toml": PYPROJECT,
             f"src/{PKG}/__init__.py": "",
             f"src/{PKG}/{rel}": "x = 1\n",
         },
@@ -537,10 +424,10 @@ def test_packaged_ui_is_seen_without_a_repo_root_ui_directory(
     tmp_path: Path,
 ) -> None:
     """``_detect_ui`` ORs ``<root>/ui`` with the source-tree probe."""
-    root = _materialize(
+    root = materialize(
         tmp_path,
         {
-            "pyproject.toml": _PYPROJECT,
+            "pyproject.toml": PYPROJECT,
             f"src/{PKG}/__init__.py": "",
             f"src/{PKG}/ui/app.tsx": "export const App = () => null;\n",
         },
@@ -559,14 +446,9 @@ def test_packaged_ui_is_seen_without_a_repo_root_ui_directory(
 # a repo whose source root is `src/<pkg>/`. Per-site mutation caught these two
 # as vacuous; these cases are what made them red.
 
-_EMPTY_PACKAGED_REPO = {
-    "pyproject.toml": _PYPROJECT,
-    f"src/{PKG}/__init__.py": "",
-}
-
 
 def test_missing_fakes_message_names_the_packaged_directory(tmp_path: Path) -> None:
-    root = _materialize(tmp_path, _EMPTY_PACKAGED_REPO)
+    root = materialize(tmp_path, EMPTY_PACKAGED)
 
     finding = _run("P3.3", root)
 
@@ -578,7 +460,7 @@ def test_missing_fakes_message_names_the_packaged_directory(tmp_path: Path) -> N
 def test_missing_clock_fake_message_names_the_packaged_directory(
     tmp_path: Path,
 ) -> None:
-    root = _materialize(tmp_path, _EMPTY_PACKAGED_REPO)
+    root = materialize(tmp_path, EMPTY_PACKAGED)
 
     finding = _run("P3.13", root)
 
@@ -588,7 +470,7 @@ def test_missing_clock_fake_message_names_the_packaged_directory(
 
 
 def test_no_domain_sample_message_names_the_packaged_paths(tmp_path: Path) -> None:
-    root = _materialize(tmp_path, _EMPTY_PACKAGED_REPO)
+    root = materialize(tmp_path, EMPTY_PACKAGED)
 
     finding = _run("P2.8", root)
 
@@ -608,32 +490,16 @@ def test_no_domain_sample_message_names_the_packaged_paths(tmp_path: Path) -> No
 # A blind Path probe returns a wrong verdict; this one blocked the PR.
 
 
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        env={
-            **os.environ,
-            "GIT_AUTHOR_NAME": "t",
-            "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t",
-            "GIT_COMMITTER_EMAIL": "t@t",
-        },
-    )
-
-
 def _ui_fix_pr(root: Path, files: dict[str, str]) -> None:
     """A packaged repo whose branch carries one UI-only ``fix(ui): …`` commit."""
-    _materialize(root, _EMPTY_PACKAGED_REPO)
-    _git(root, "init", "-q", "-b", "main")
-    _git(root, "add", ".")
-    _git(root, "commit", "-q", "-m", "chore: base")
-    _git(root, "checkout", "-q", "-b", "fix/ui")
-    _materialize(root, files)
-    _git(root, "add", ".")
-    _git(root, "commit", "-q", "-m", "fix(ui): cap the dots")
+    materialize(root, EMPTY_PACKAGED)
+    git(root, "init", "-q", "-b", "main")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "chore: base")
+    git(root, "checkout", "-q", "-b", "fix/ui")
+    materialize(root, files)
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "fix(ui): cap the dots")
 
 
 def test_packaged_ui_only_fix_with_a_ui_test_delta_passes(
@@ -673,20 +539,20 @@ def test_flat_ui_only_fix_still_passes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Widening the prefix must not stop the flat layout from matching."""
-    _materialize(tmp_path, {"src/app.py": "x = 1\n"})
-    _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-q", "-m", "chore: base")
-    _git(tmp_path, "checkout", "-q", "-b", "fix/ui")
-    _materialize(
+    materialize(tmp_path, {"src/app.py": "x = 1\n"})
+    git(tmp_path, "init", "-q", "-b", "main")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-q", "-m", "chore: base")
+    git(tmp_path, "checkout", "-q", "-b", "fix/ui")
+    materialize(
         tmp_path,
         {
             "src/ui/src/StreamView.jsx": "cap\n",
             "src/ui/src/__tests__/StreamView.test.jsx": "t\n",
         },
     )
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-q", "-m", "fix(ui): cap the dots")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-q", "-m", "fix(ui): cap the dots")
     monkeypatch.setenv("HYDRAFLOW_AUDIT_PR_BASE", "main")
 
     result = _run("P10.6", tmp_path)
@@ -750,10 +616,10 @@ _MULTI_CANDIDATE_PROBES = [
 def test_multi_candidate_failure_names_every_packaged_path(
     tmp_path: Path, check_id: str, modules: tuple[str, ...]
 ) -> None:
-    root = _materialize(
+    root = materialize(
         tmp_path,
         {
-            **_EMPTY_PACKAGED_REPO,
+            **EMPTY_PACKAGED,
             # P6 self-marks NA off shape detection unless a marker is present.
             f"src/{PKG}/orchestrator.py": "import asyncio\n",
         },
@@ -779,10 +645,10 @@ def test_multi_candidate_success_names_the_packaged_path(
         "P7.3c": "def build():\n    _inject_repo_wiki()\n",
         "P8.6": "import subprocess  # writes the trace\n",
     }
-    root = _materialize(
+    root = materialize(
         tmp_path,
         {
-            **_EMPTY_PACKAGED_REPO,
+            **EMPTY_PACKAGED,
             f"src/{PKG}/orchestrator.py": "import asyncio\n",
             f"src/{PKG}/{modules[0]}": bodies[check_id],
         },
@@ -802,10 +668,10 @@ def test_scan_root_reaches_into_the_package(tmp_path: Path) -> None:
     this pins the property that made P9.2 immune, so a future "fix" cannot
     narrow the scan roots to the package and reintroduce the asymmetry.
     """
-    root = _materialize(
+    root = materialize(
         tmp_path,
         {
-            **_EMPTY_PACKAGED_REPO,
+            **EMPTY_PACKAGED,
             f"src/{PKG}/settings.py": 'import os\nX = os.environ["APP_DATA_ROOT"]\n',
         },
     )
@@ -839,20 +705,9 @@ def test_scan_root_reaches_into_the_package(tmp_path: Path) -> None:
 # difference between this and `_CONFORMANT_EXPECTATIONS` above.
 
 
-def _probe_exit_findings(root: Path) -> dict[str, str]:
-    """``{check_id: message}`` for every check that exits at a path probe."""
-    ctx = context.build(root)
-    offenders: dict[str, str] = {}
-    for check_id, fn in sorted(registry.all_registered().items()):
-        message = fn(ctx).message or ""
-        if _PROBE_EXIT_RE.search(message):
-            offenders[check_id] = message
-    return offenders
-
-
 def test_no_registered_check_exits_at_a_path_probe(packaged_repo: Path) -> None:
     """The spelling-independent backstop for the whole #11709 class."""
-    offenders = _probe_exit_findings(packaged_repo)
+    offenders = probe_exit_findings(packaged_repo)
 
     assert offenders == {}, (
         f"These checks never assessed a packaged repo, they missed at the path "
@@ -881,7 +736,7 @@ def test_the_sweep_catches_a_flat_probe_the_literal_gate_cannot_see(
                 return finding("ZZ.1", Status.FAIL, f"{ctx.rel(probe)} missing")
             return finding("ZZ.1", Status.PASS)
 
-        offenders = _probe_exit_findings(packaged_repo)
+        offenders = probe_exit_findings(packaged_repo)
     finally:
         registry._restore_for_tests(snapshot)
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import shutil
 from pathlib import Path
 
@@ -64,19 +63,6 @@ class WorkspaceManager(
         """Return a per-repo lock for workspace create/destroy operations."""
         key = f"wt:{self._config.repo_slug}"
         return _WORKTREE_LOCKS.setdefault(key, asyncio.Lock())
-
-    # One pattern covers every origin form git emits: scp-style
-    # (``git@github.com:o/r.git``), HTTPS, ``ssh://``, and token-in-URL. The
-    # ``[/:]`` class matches scp's ``:`` as well as a path ``/``, and this is
-    # ``.search``, so any prefix before ``github.com`` is irrelevant — a
-    # separate SSH pattern was provably unreachable (#11703).
-    #
-    # The repo segment is ``[^/]+?`` and NOT ``[^/.]+?``: GitHub allows dots in
-    # repo names (``socket.io``, ``next.js``), and excluding them made this
-    # pattern miss such origins entirely, which fails the guard OPEN. The
-    # non-greedy ``+?`` still lets the anchored ``(?:\.git)?$`` strip the
-    # suffix: ``vercel/next.js.git`` -> ``vercel/next.js`` (#11703).
-    _ORIGIN_URL_RE = re.compile(r"github\.com[/:]([^/]+/[^/]+?)(?:\.git)?$")
 
     # ------------------------------------------------------------------
     # Git hygiene — startup, pre-work, and post-work cleanup

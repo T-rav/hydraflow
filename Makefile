@@ -635,13 +635,17 @@ quality-unlocked:
 # the pre-push gate and must stay fast (lint + typecheck + security only, no
 # test suites of any kind). UI drift is still caught by `make quality` locally
 # and by CI's Dashboard Build job on every PR.
-# Invoked through $(UV), NOT the bare $(VENV)/bin/... binaries. A bare
-# `.venv/bin/pyright` resolves its interpreter without VIRTUAL_ENV set, so in a
-# WORKTREE it analyses against a different environment than `make quality` and
-# CI do — and reports errors neither of them sees (a `models.SessionLog`
-# constructor inferring as `Unknown` on clean origin/staging, #11645). This is
-# the pre-push hook: a false red here blocks every push from every worktree, so
-# it must run the same way the authoritative gate does.
+# Invoked through $(UV), NOT the bare $(VENV)/bin/... binaries — every tool
+# here resolves from the same environment the authoritative gate uses.
+# pyright specifically USED to disagree with itself: a bare `.venv/bin/pyright`
+# resolves its interpreter without VIRTUAL_ENV set, lost site-packages, and
+# every py.typed dependency degraded to `Unknown`. That showed up as false RED
+# in a worktree (a `models.SessionLog` constructor inferring as `Unknown` on
+# clean origin/staging, #11645) AND as false GREEN anywhere (attribute checking
+# silently stopping on every pydantic model, #11707). `venvPath`/`venv` in
+# [tool.pyright] now make the config self-sufficient, so the invocation no
+# longer changes the answer. The canary that reddens if that ever stops being
+# true: tests/regressions/test_issue_11707_pyright_dependency_blindness.py
 quality-lite: deps
 	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
