@@ -71,6 +71,18 @@ mechanics in `tests/architecture/conformance_offline_scan.py`:
    a fixed point, including relative imports and re-exports through
    `__init__.py`, with cycles handled by a visited set.
 
+   A dynamic import counts too, and it is recognised by **resolving the
+   argument, not the callee**. Three versions of that check tried to recognise
+   the callee — literal spelling, then resolved `ImportFrom` bindings — and each
+   was walked past by the next binding form somebody thought of (`import_module
+   as im`, then `from importlib import *` and `load = importlib.import_module`).
+   The callee's identity is unbounded; the first positional argument is a string
+   literal or it is not. So `import_module("boto3")` is caught however it is
+   bound, and so are `pytest.importorskip("boto3")` and
+   `mock.patch("boto3.client")`, which import as a side effect and which nobody
+   had enumerated. Measured across the 1471 files the conformance roots reach:
+   zero calls take a remote-client name as their first positional argument.
+
 2. **No conformance file spawns its way out of the checkout.** An argv is a
    reach an import sweep cannot see: `subprocess.run(["curl", …])` imports
    nothing. Every spawn call is read — the stdlib primitives, `os.exec*`/
@@ -166,7 +178,20 @@ static checks name but cannot reach:
 - `git fetch`/`push` against a remote configured elsewhere, where the argv
   names no host;
 - an argv assembled entirely from non-literal values (`subprocess.run(cmd)`),
-  where there is no string for a parser to read;
+  where there is no string for a parser to read — and the same for a module
+  name that is not a first-positional string literal (computed at runtime, read
+  from a variable, or passed as `import_module(name="boto3")`);
+- a dynamically imported FIRST-PARTY module, which is deliberately not followed
+  as a graph edge: 195 first-positional literals in the corpus resolve to a
+  local module and essentially all are `monkeypatch.setattr("state.x", …)`
+  targets rather than imports, so turning them into edges would put whole
+  subtrees behind a coincidence — and the import rule has no waiver mechanism
+  to undo a false positive. Static imports of those modules are followed as
+  normal;
+- a callee rebound in a way no argument reveals — the same limit `_SpawnNames`
+  has for `spawn = subprocess.run`. This is a *declared* boundary, not an
+  oversight: per-file resolution that does not chase arbitrary rebinding is the
+  line, and the argument rule above is what makes the line affordable;
 - a conformance check that calls a first-party helper which does the spawning —
   the subprocess rule reads the conformance file's own call sites, because
   following spawns transitively would flag every test that imports a module

@@ -387,11 +387,22 @@ def test_the_network_binary_list_is_not_empty() -> None:
 # --------------------------------------------------------------------------
 
 
-def _write(root: Path, spec: dict[str, str]) -> None:
+def _write(root: Path, spec: dict[str, str]) -> ImportGraph:
+    """Materialise a synthetic tree and return a graph built OVER it.
+
+    Returning the graph is not a convenience. ``ImportGraph`` caches directory
+    listings, so one built before a file exists never sees that file — and a
+    control that writes a second tree, reuses the first graph and then asserts
+    ``find(...) is None`` passes for the wrong reason. Two of the controls below
+    were written that way and were vacuous until this helper made the order
+    impossible to get wrong. (The real sweep builds one graph over a tree that
+    does not change under it, which is what the cache is for.)
+    """
     for rel, body in spec.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
+    return ImportGraph((root,))
 
 
 def test_the_remote_client_detector_actually_fires(tmp_path: Path) -> None:
@@ -401,14 +412,13 @@ def test_the_remote_client_detector_actually_fires(tmp_path: Path) -> None:
     Without this, deleting the detector's body leaves a green test that has
     never observed a violation — the shape this whole standard exists to stop.
     """
-    _write(
+    graph = _write(
         tmp_path,
         {
             "test_victim.py": "import boto3\n\n\ndef test_x():\n    assert boto3\n",
             "test_nested.py": "def test_x():\n    import swamp\n\n    assert swamp\n",
         },
     )
-    graph = ImportGraph((tmp_path,))
 
     direct = graph.find(tmp_path / "test_victim.py", _REMOTE_CLIENTS)
     assert direct is not None and direct.names == ("boto3",)
@@ -446,7 +456,7 @@ def test_a_transitive_reach_is_caught(tmp_path: Path) -> None:
     redden, and the depth is deliberate: two hops, an ``__init__`` re-export and
     a relative import, because ``src`` packages are shaped exactly like that.
     """
-    _write(
+    graph = _write(
         tmp_path,
         {
             "test_check.py": "from vendor import Client\n\n\ndef test_x():\n    assert Client\n",
@@ -454,7 +464,6 @@ def test_a_transitive_reach_is_caught(tmp_path: Path) -> None:
             "vendor/client.py": "import boto3\n\n\nclass Client:\n    session = boto3\n",
         },
     )
-    graph = ImportGraph((tmp_path,))
 
     reach = graph.find(tmp_path / "test_check.py", _REMOTE_CLIENTS)
     assert reach is not None, (
@@ -470,7 +479,7 @@ def test_a_transitive_reach_is_caught(tmp_path: Path) -> None:
     assert "vendor/client.py" in reach.describe(tmp_path)
 
     # And the shape that must NOT fire: the same two hops ending at httpx.
-    _write(
+    graph = _write(
         tmp_path,
         {
             "test_gateway.py": "from gw import mint\n\n\ndef test_x():\n    assert mint\n",
@@ -486,7 +495,7 @@ def test_a_transitive_reach_is_caught(tmp_path: Path) -> None:
 
 def test_an_import_cycle_does_not_hang_the_closure(tmp_path: Path) -> None:
     """Cycles are real in ``src``; a naive walk would recurse forever."""
-    _write(
+    graph = _write(
         tmp_path,
         {
             "test_cycle.py": "import a\n\n\ndef test_x():\n    assert a\n",
@@ -494,76 +503,117 @@ def test_an_import_cycle_does_not_hang_the_closure(tmp_path: Path) -> None:
             "b.py": "import a\nimport requests\n",
         },
     )
-    graph = ImportGraph((tmp_path,))
     reach = graph.find(tmp_path / "test_cycle.py", _REMOTE_CLIENTS)
     assert reach is not None and reach.names == ("requests",)
 
 
-def test_a_dynamic_import_is_caught(tmp_path: Path) -> None:
-    """``importlib.import_module("boto3")`` is an import no ``ast.Import`` records.
+def test_a_dynamic_import_is_caught_whatever_binds_it(tmp_path: Path) -> None:
+    """``import_module("boto3")`` is an import no ``ast.Import`` records.
 
     #11706's census put ``importlib`` next to ``subprocess`` in the escape
     hatches carried by 73 of the 673 swept files. A statement-only sweep reads
     it as ordinary code.
+
+    Every case below is a DIFFERENT binding of the same call, and that is the
+    point of the parametrisation. Two earlier versions of the detector matched
+    the callee — first its literal spelling, then its resolved ``ImportFrom``
+    binding — and each was walked past by the next binding form somebody
+    thought of (``as`` alias, then ``import *`` and plain rebinding). The rule
+    now resolves the ARGUMENT, so the list below is a demonstration rather than
+    an enumeration: none of these cases is special-cased anywhere.
     """
-    _write(
-        tmp_path,
-        {
-            "test_dyn.py": (
-                "import importlib\n\n\ndef test_x():\n"
-                '    assert importlib.import_module("boto3")\n'
-            ),
-            "test_builtin.py": 'def test_x():\n    assert __import__("requests")\n',
-            "test_hop.py": "import loader\n\n\ndef test_x():\n    assert loader\n",
-            "loader.py": 'import importlib\n\nmod = importlib.import_module("swamp")\n',
-            # ALIASED. The first version of the detector compared the call's
-            # spelling against two literal strings, and this walked straight
-            # past it — a guard parametrised over a proxy for an identity
-            # instead of the identity (#11723's shape), in the same file where
-            # ``_SpawnNames`` already resolved aliases correctly.
-            "test_alias_dyn.py": (
-                'from importlib import import_module as im\n\nmod = im("aiohttp")\n'
-            ),
-            "test_alias_mod.py": (
-                'import importlib as il\n\nmod = il.import_module("botocore")\n'
-            ),
-        },
-    )
-    graph = ImportGraph((tmp_path,))
-    for rel, expected in (
-        ("test_dyn.py", "boto3"),
-        ("test_builtin.py", "requests"),
-        ("test_hop.py", "swamp"),
-        ("test_alias_dyn.py", "aiohttp"),
-        ("test_alias_mod.py", "botocore"),
-    ):
+    cases = {
+        "test_plain.py": 'import importlib\n\nm = importlib.import_module("boto3")\n',
+        "test_builtin.py": 'm = __import__("requests")\n',
+        "test_alias_fn.py": (
+            'from importlib import import_module as im\n\nm = im("aiohttp")\n'
+        ),
+        "test_alias_mod.py": (
+            'import importlib as il\n\nm = il.import_module("botocore")\n'
+        ),
+        # The two the callee-based version was blind to.
+        "test_star.py": 'from importlib import *\n\nm = import_module("swamp")\n',
+        "test_rebind.py": (
+            'import importlib\n\n_load = importlib.import_module\nm = _load("ftplib")\n'
+        ),
+        # And three nobody had enumerated, which the inverted rule gets free.
+        "test_getattr.py": (
+            "import importlib\n\n"
+            '_fn = getattr(importlib, "import_module")\nm = _fn("telnetlib")\n'
+        ),
+        "test_importorskip.py": 'import pytest\n\nm = pytest.importorskip("smtplib")\n',
+        "test_patch.py": (
+            'from unittest import mock\n\np = mock.patch("xmlrpc.client.ServerProxy")\n'
+        ),
+    }
+    graph = _write(tmp_path, cases)
+    for rel in cases:
         reach = graph.find(tmp_path / rel, _REMOTE_CLIENTS)
-        assert reach is not None, f"{rel}: dynamic import not followed"
-        assert reach.names == (expected,)
+        assert reach is not None, f"{rel}: dynamic import not seen"
+        assert "names as a module argument" in reach.describe(tmp_path), (
+            f"{rel}: reported as a static import, which it is not"
+        )
 
-    # A dynamic import of something local is not a network reach.
-    _write(
+    # Through a local hop, like any other reach.
+    graph = _write(
         tmp_path,
         {
-            "test_local_dyn.py": 'import importlib\n\nm = importlib.import_module("helper")\n',
-            "helper.py": "VALUE = 1\n",
+            "test_hop.py": "import loader\n\n\ndef test_x():\n    assert loader\n",
+            "loader.py": 'import importlib\n\nm = importlib.import_module("boto3")\n',
         },
     )
-    assert graph.find(tmp_path / "test_local_dyn.py", _REMOTE_CLIENTS) is None
+    hop = graph.find(tmp_path / "test_hop.py", _REMOTE_CLIENTS)
+    assert hop is not None and [x.name for x in hop.chain] == [
+        "test_hop.py",
+        "loader.py",
+    ]
 
-    # And the other direction: a bare name that was never bound to a dynamic
-    # import is not one. Resolving against the binding is what makes the
-    # aliased cases above work; matching the spelling would make this fire.
-    _write(
+
+def test_naming_a_module_is_not_the_same_as_naming_anything(tmp_path: Path) -> None:
+    """The inverted rule's false-positive surface, pinned.
+
+    Resolving the argument means the callee is irrelevant — which is what makes
+    the case above exhaustive, and which also means an unrelated call passing a
+    client's name as its first argument would fire. Measured across the 1471
+    files the conformance roots reach: zero do. The shape that looks like a hit
+    and is not is the ``frozenset({...})`` that DEFINES ``_REMOTE_CLIENTS`` in
+    this very file — excluded because its first argument is a set, not a string.
+    """
+    graph = _write(
         tmp_path,
         {
-            "test_shadow.py": (
-                "def import_module(name):\n    return name\n\n\n"
-                'VALUE = import_module("boto3")\n'
-            )
+            "test_defines.py": 'CLIENTS = frozenset({"boto3", "requests"})\n',
+            "test_nested.py": 'run(["a"], ["boto3"])\n',
+            "test_second.py": 'parametrize("name", ["requests"])\n',
+            "test_other.py": 'log("hello")\nlog("state")\n',
         },
     )
-    assert graph.find(tmp_path / "test_shadow.py", _REMOTE_CLIENTS) is None
+    for rel in ("test_defines.py", "test_nested.py", "test_second.py", "test_other.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
+            f"{rel} fired — the rule is reading more than the first positional "
+            "string argument"
+        )
+
+    # The declared limit, asserted rather than assumed: a name that is not a
+    # first-positional literal is NOT seen. Closing this needs the
+    # egress-blocked lane, not a bigger parser.
+    graph = _write(
+        tmp_path,
+        {
+            "test_computed.py": (
+                "import importlib\n\n_N = 'boto' + '3'\n"
+                "m = importlib.import_module(_N)\n"
+            ),
+            "test_keyword.py": (
+                'import importlib\n\nm = importlib.import_module(name="boto3")\n'
+            ),
+        },
+    )
+    for rel in ("test_computed.py", "test_keyword.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
+            f"{rel} was caught — good, but the standard records it as a "
+            "residual; update the standard rather than this assertion"
+        )
 
 
 def test_a_dotted_import_keeps_the_edge_into_the_package(tmp_path: Path) -> None:
@@ -578,7 +628,7 @@ def test_a_dotted_import_keeps_the_edge_into_the_package(tmp_path: Path) -> None
     NAME — is NOT the trigger: that raises at import time, so it never reaches
     a sweep. A control written against an unreachable scenario proves nothing.
     """
-    _write(
+    graph = _write(
         tmp_path,
         {
             "test_dotted.py": "import pkg.sub\n\n\ndef test_x():\n    assert pkg\n",
@@ -590,7 +640,6 @@ def test_a_dotted_import_keeps_the_edge_into_the_package(tmp_path: Path) -> None
         "the control needs `sub` to be a namespace package, or it is not "
         "exercising the fallback at all"
     )
-    graph = ImportGraph((tmp_path,))
     reach = graph.find(tmp_path / "test_dotted.py", _REMOTE_CLIENTS)
     assert reach is not None and reach.names == ("requests",)
 

@@ -69,63 +69,58 @@ def remote_hosts(text: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-#: Functions that perform an import at runtime.
-_DYNAMIC_IMPORT_FUNCS: Final[frozenset[str]] = frozenset(
-    {"import_module", "__import__"}
-)
+def _named_module_argument(call: ast.Call) -> str | None:
+    """The module name a call's FIRST POSITIONAL argument names, if it is a literal.
 
-
-class _DynamicImportNames:
-    """What ``importlib.import_module`` is called *in one file*.
+    This rule resolves the ARGUMENT, not the CALLEE, and that inversion is the
+    whole point.
 
     #11706's census found ``importlib`` sitting alongside ``subprocess`` in the
-    conformance roots' escape hatches. A dynamic import is a real import that no
-    ``ast.Import`` node records, so a sweep reading only import statements treats
-    ``import_module(name)`` as ordinary code.
+    conformance roots' escape hatches, and a sweep reading only
+    ``ast.Import``/``ImportFrom`` treats a dynamic import as ordinary code. Two
+    earlier versions of this function tried to recognise the *callee*: first by
+    literal spelling (walked past by ``import_module as im``), then by resolving
+    the file's own ``ImportFrom`` bindings (walked past by ``from importlib
+    import *`` and by ``load = importlib.import_module``). Each fix was one more
+    arm on an enumeration of binding forms, which is #11723's shape and the
+    thing PR #11717 stopped doing after five spellings.
 
-    Alias resolution is the whole reason this is a class and not a two-string
-    match. The first version compared the call's SPELLING, which
-    ``from importlib import import_module as im`` walks straight past — a guard
-    parametrised over a proxy for an identity rather than the identity itself,
-    the #11723 shape. ``_SpawnNames`` below already resolves against what a name
-    is BOUND to; this does the same, from the same file's own imports.
+    So stop enumerating. The callee's identity is unbounded — aliases, star
+    imports, rebinding, ``getattr``, cross-file re-export, wrappers like
+    ``pytest.importorskip`` and ``mock.patch`` that import as a side effect. The
+    ARGUMENT is a literal or it is not. A call that hands a remote client's
+    module name to something is doing something with that client, whatever the
+    something is called; the sweep intersects what comes back with
+    ``_REMOTE_CLIENTS`` and nothing else, so every other string is inert.
 
-    Only string LITERALS are resolvable; a module name computed at runtime is a
-    residual the standard records, same as an argv built from non-literals.
+    Measured across all 1471 files the conformance roots reach: zero calls take
+    a remote-client name as their first positional argument. The one shape that
+    looks like a hit and is not — the ``frozenset({...})`` literal that DEFINES
+    the client set — is excluded because its first argument is a set, not a
+    string.
+
+    THE DECLARED LIMIT, which is not enumerable away and is recorded in the
+    standard rather than patched around:
+
+    - a module name that is not a first-positional string literal — computed at
+      runtime, read from a variable, or passed by keyword. Same residual class
+      as an argv assembled from non-literals.
+    - a dynamically imported FIRST-PARTY module is not followed as a graph edge.
+      195 first-positional literals in the corpus resolve to a local module and
+      essentially all are ``monkeypatch.setattr("state.x", …)`` targets rather
+      than imports; turning those into edges would put whole subtrees behind a
+      coincidence, and the import rule has no waiver mechanism to undo a false
+      positive. Static imports of those modules are followed as normal.
+
+    The same limit already applies to ``_SpawnNames`` below, which resolves
+    ``import subprocess as sp`` but not ``spawn = subprocess.run``.
     """
-
-    def __init__(self, tree: ast.Module) -> None:
-        #: ``__import__`` is a builtin — always bound, never imported.
-        self.bare: set[str] = {"__import__"}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                if node.module.split(".")[0] not in {"importlib", "builtins"}:
-                    continue
-                for alias in node.names:
-                    if alias.name in _DYNAMIC_IMPORT_FUNCS:
-                        self.bare.add(alias.asname or alias.name)
-
-    def target(self, call: ast.Call) -> str | None:
-        """The module a dynamic-import call names, if it is a literal."""
-        func = call.func
-        if isinstance(func, ast.Name):
-            if func.id not in self.bare:
-                return None
-        elif isinstance(func, ast.Attribute):
-            # ``importlib.import_module`` under any module alias, and any other
-            # attribute of that name. Deliberately not narrowed to a resolved
-            # ``importlib`` receiver: ``self._importlib.import_module(...)``
-            # imports just as hard, and narrowing here would fail open.
-            if func.attr not in _DYNAMIC_IMPORT_FUNCS:
-                return None
-        else:
-            return None
-        if not call.args:
-            return None
-        first = call.args[0]
-        if isinstance(first, ast.Constant) and isinstance(first.value, str):
-            return first.value
+    if not call.args:
         return None
+    first = call.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,9 +135,13 @@ class Reach:
     chain: tuple[Path, ...]
     names: tuple[str, ...]
 
+    via: str = "imports"
+    """How the last hop reaches them — an import statement, or a module name
+    handed to a call. Worth saying, because the fix differs."""
+
     def describe(self, root: Path) -> str:
         hops = " -> ".join(str(p.relative_to(root)) for p in self.chain)
-        return f"{hops} imports {list(self.names)}"
+        return f"{hops} {self.via} {list(self.names)}"
 
 
 class ImportGraph:
@@ -162,6 +161,7 @@ class ImportGraph:
     def __init__(self, bases: Sequence[Path]) -> None:
         self._bases = tuple(bases)
         self._edges: dict[Path, tuple[frozenset[str], frozenset[Path]]] = {}
+        self._named: dict[Path, frozenset[str]] = {}
         self._modules: dict[str, Path | None] = {}
         self._listings: dict[Path, frozenset[str]] = {}
 
@@ -255,6 +255,7 @@ class ImportGraph:
             return cached
         external: set[str] = set()
         local: set[Path] = set()
+        named: set[str] = set()
 
         def consider(dotted: str) -> bool:
             """Follow *dotted*, or the longest prefix of it that resolves.
@@ -280,10 +281,7 @@ class ImportGraph:
                 parts.pop()
             return False
 
-        tree = self._parse(path)
-        dynamic = _DynamicImportNames(tree)
-
-        for node in ast.walk(tree):
+        for node in ast.walk(self._parse(path)):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if not consider(alias.name):
@@ -303,13 +301,25 @@ class ImportGraph:
                 if not resolved and node.level == 0:
                     external.add(base.split(".")[0])
             elif isinstance(node, ast.Call):
-                target = dynamic.target(node)
-                if target and not consider(target):
-                    external.add(target.split(".")[0])
+                literal = _named_module_argument(node)
+                if literal:
+                    named.add(literal.split(".")[0])
 
         result = (frozenset(external), frozenset(local))
         self._edges[path] = result
+        self._named[path] = frozenset(named)
         return result
+
+    def named_roots(self, path: Path) -> frozenset[str]:
+        """Top-level module names *path* hands to a call as a string literal.
+
+        Kept out of :meth:`edges` deliberately: these are evidence about a
+        NAME, not an edge in the graph. They are only ever intersected with the
+        caller's target set, so an unrelated string literal is inert.
+        """
+        if path not in self._named:
+            self.edges(path)
+        return self._named[path]
 
     @staticmethod
     def _parse(path: Path) -> ast.Module:
@@ -335,6 +345,13 @@ class ImportGraph:
             hit = external & wanted
             if hit:
                 return Reach(chain=chains[current], names=tuple(sorted(hit)))
+            hit = self.named_roots(current) & wanted
+            if hit:
+                return Reach(
+                    chain=chains[current],
+                    names=tuple(sorted(hit)),
+                    via="names as a module argument to a call —",
+                )
             for nxt in local:
                 if nxt not in chains:
                     chains[nxt] = (*chains[current], nxt)
