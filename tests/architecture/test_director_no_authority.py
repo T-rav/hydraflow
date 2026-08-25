@@ -655,9 +655,15 @@ def _os_aliases(tree: ast.Module) -> set[str]:
 def reachable_os_spawns(tree: ast.Module) -> set[str]:
     """Every way *tree* reaches a process through ``os``, as dotted names.
 
+    Matched on the ATTRIBUTE, not on the call. Requiring call position would
+    have left ``s = os.system`` followed by ``s(...)`` — and ``@os.system`` —
+    passing, and a rebinding reads as an ordinary diff in exactly the way
+    #11724 is about. Referencing one of these attributes at all is the signal;
+    a decision-path module has no legitimate reason to name one, called or not.
+
     Two shapes, because closing only the first leaves a one-line evasion:
 
-    * a qualified call — ``os.system(...)``, ``_o.popen(...)``;
+    * an ``os``-qualified reference — ``os.system(...)``, ``_o.popen``;
     * a ``from os import system`` binding, whose call site is then a bare name
       the flattening detector cannot tell from any other ``system``. Caught at
       the import instead, where it is unambiguous.
@@ -672,15 +678,13 @@ def reachable_os_spawns(tree: ast.Module) -> set[str]:
     aliases = _os_aliases(tree)
     found: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            callee = node.func
+        if isinstance(node, ast.Attribute):
             if (
-                isinstance(callee, ast.Attribute)
-                and isinstance(callee.value, ast.Name)
-                and callee.value.id in aliases
-                and _is_os_spawn(callee.attr)
+                isinstance(node.value, ast.Name)
+                and node.value.id in aliases
+                and _is_os_spawn(node.attr)
             ):
-                found.add(f"{callee.value.id}.{callee.attr}")
+                found.add(f"{node.value.id}.{node.attr}")
         elif (
             isinstance(node, ast.ImportFrom) and node.module == "os" and node.level == 0
         ):
@@ -765,10 +769,13 @@ _RAW_SPAWNS: tuple[tuple[str, str, str, str | None], ...] = (
     ("os-popen", "import os", "os.popen('true')", "os"),
     ("os-execv", "import os", "os.execv('/bin/true', ['true'])", "os"),
     ("os-spawnl", "import os", "os.spawnl(os.P_WAIT, '/bin/true', 'true')", "os"),
-    # The two evasions a name-based rule invites, pinned so closing the
-    # qualified form cannot be mistaken for closing the shape.
+    # The three evasions a name-based rule invites, pinned so closing the
+    # qualified CALL cannot be mistaken for closing the shape. The rebound row
+    # is why the detector matches the attribute rather than the call: `s(...)`
+    # is a bare name by the time it is invoked.
     ("os-aliased", "import os as _o", "_o.system('true')", "os"),
     ("os-from-import", "from os import system", "system('true')", "os"),
+    ("os-rebound", "import os\n\n_s = os.system", "_s('true')", "os"),
     # The stated limit. A lexical AST scan cannot follow dynamic dispatch, and
     # this row is the executable form of saying so.
     ("os-getattr", "import os", "getattr(os, 'system')('true')", None),
