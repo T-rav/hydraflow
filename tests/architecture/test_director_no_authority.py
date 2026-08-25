@@ -716,21 +716,18 @@ def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> 
 #: excludes it — "fork" is a GitHub-domain verb in this codebase, so a BARE
 #: ``.fork()`` would be a false positive there. Requiring the ``os`` qualifier
 #: is exactly what makes it safe to include here.
-#: A frozenset rather than the tuple ``str.startswith`` wants, on purpose:
-#: ``guard_enumeration_registry.declared_deny_lists`` derives the deny-lists it
-#: floors from the module-level frozensets of strings in this file, so a tuple
-#: here would be a name-set of exactly the same kind sitting outside the
-#: mechanism that protects the other five. Spelling it as a frozenset is what
-#: makes ``DENY_LIST_FLOORS`` notice it; the ``tuple(...)`` at the call site is
-#: the whole cost.
-_OS_SPAWN_PREFIXES: frozenset[str] = frozenset(
-    {
-        "exec",
-        "fork",
-        "popen",
-        "posix_spawn",
-        "spawn",
-    }
+#: A tuple, because ``str.startswith`` takes one — the natural spelling, kept.
+#: It was briefly respelled as a frozenset to make
+#: ``guard_enumeration_registry.declared_deny_lists`` see it, which fixed this
+#: list and left the gate blind to the next tuple-spelled one. The derivation
+#: now sweeps every string sequence regardless of container, so this can be
+#: written the way it wants to be written and is floored anyway.
+_OS_SPAWN_PREFIXES: tuple[str, ...] = (
+    "exec",
+    "fork",
+    "popen",
+    "posix_spawn",
+    "spawn",
 )
 
 #: ``os`` spawn attributes with no useful prefix. ``startfile`` is Windows-only
@@ -742,7 +739,7 @@ _OS_SPAWN_EXACT: frozenset[str] = frozenset({"system", "startfile"})
 
 
 def _is_os_spawn(attr: str) -> bool:
-    return attr in _OS_SPAWN_EXACT or attr.startswith(tuple(_OS_SPAWN_PREFIXES))
+    return attr in _OS_SPAWN_EXACT or attr.startswith(_OS_SPAWN_PREFIXES)
 
 
 def _os_aliases(tree: ast.Module) -> set[str]:

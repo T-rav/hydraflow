@@ -429,7 +429,14 @@ def _live_deny_lists() -> dict[str, frozenset[str]]:
         "test_director_no_authority.WRITE_PRIMITIVES": director.WRITE_PRIMITIVES,
         "test_director_no_authority._SPAWN_MACHINERY": director._SPAWN_MACHINERY,  # noqa: SLF001
         "test_director_no_authority._OS_SPAWN_EXACT": director._OS_SPAWN_EXACT,  # noqa: SLF001
-        "test_director_no_authority._OS_SPAWN_PREFIXES": director._OS_SPAWN_PREFIXES,  # noqa: SLF001
+        # A tuple in the source — `str.startswith` takes one — coerced here
+        # purely so the set algebra below has a set. The coercion is NOT what
+        # makes the gate see it: `declared_deny_lists` sweeps string sequences
+        # of any container type, which is what stops the NEXT tuple-spelled
+        # deny-list arriving unfloored and unnoticed (#11724).
+        "test_director_no_authority._OS_SPAWN_PREFIXES": frozenset(
+            director._OS_SPAWN_PREFIXES  # noqa: SLF001
+        ),
     }
 
 
