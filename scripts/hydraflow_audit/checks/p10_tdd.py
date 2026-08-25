@@ -55,7 +55,7 @@ def _every_module_has_a_test(ctx: CheckContext) -> Finding:
     src = ctx.src_root()
     tests = ctx.root / "tests"
     if not src.is_dir():
-        return finding("P10.2", Status.NA, "no src/")
+        return finding("P10.2", Status.NA, f"no {ctx.rel(src)}/")
     if not tests.is_dir():
         return finding("P10.2", Status.FAIL, "tests/ missing")
 
@@ -101,7 +101,8 @@ def _every_module_has_a_test(ctx: CheckContext) -> Finding:
     return finding(
         "P10.2",
         Status.WARN,
-        f"{len(orphans)}/{total} src/ modules have no test_<module>.py counterpart ({sample})",
+        f"{len(orphans)}/{total} {ctx.rel(src)}/ modules have no "
+        f"test_<module>.py counterpart ({sample})",
     )
 
 

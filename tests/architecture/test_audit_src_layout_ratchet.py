@@ -66,11 +66,17 @@ _OWNER = "layout.py"
 _GRANDFATHERED: frozenset[str] = frozenset()
 
 #: ``src`` as a path token: the bare directory name, or the head of a path.
-#: Deliberately NOT a bare substring test — ``"source"``, ``"src_root"`` and
-#: prose like ``"no *_DATA_ROOT override found in src/"`` (a trailing slash with
-#: no child) are not hazards, and a gate that flagged them would be relaxed into
-#: uselessness the first time it did.
-_SRC_TOKEN_RE = re.compile(r"(?<![\w/.-])src(?:/[A-Za-z_][\w.-]*|$)")
+#:
+#: There is deliberately NO character class for what follows the slash. An
+#: earlier version required an identifier char there, to let message prose like
+#: ``"no src/ directory"`` through — and that class was itself a little
+#: enumeration, which drifted exactly the way the AST-shape arms did:
+#: ``"src/%s.py" % name`` and ``"src/{}.py".format(name)`` both walked straight
+#: past it, and both are ordinary things to write. So the class is gone and the
+#: prose was converted to the vocabulary instead. ``src`` must be followed by a
+#: separator or end of string, which is what makes it a directory name rather
+#: than a prefix of ``src_root`` or a suffix of ``mysrc``.
+_SRC_TOKEN_RE = re.compile(r"(?<!\w)src(?:/|$)")
 
 #: Stand-in for a runtime slot inside a composed string, so ``f"src/{name}.py"``
 #: renders as a path with a child rather than a bare ``"src/"``.
@@ -269,6 +275,13 @@ _FORBIDDEN_SHAPES = [
     pytest.param('ui_only = path.startswith("src/ui/")\n', id="string-prefix"),
     pytest.param('UI_TEST_RE = re.compile(r"^src/ui/.*")\n', id="regex-source"),
     pytest.param('_PORTS_REL = "src/ports.py"\n', id="named-constant"),
+    # --- pass-5 evasions: format placeholders the child class did not cover ---
+    pytest.param('p = ctx.root / ("src/%s.py" % name)\n', id="percent-format"),
+    pytest.param('p = ctx.root / "src/{}.py".format(name)\n', id="str-format"),
+    pytest.param('ui = path.startswith("src/%s/" % pkg)\n', id="percent-prefix"),
+    pytest.param('p = ctx.root / "./src" / "ports.py"\n', id="dot-relative"),
+    pytest.param('p = ctx.root / "../src" / "ports.py"\n', id="dotdot-relative"),
+    pytest.param('m = "no *_DATA_ROOT override found in src/"\n', id="message-prose"),
 ]
 
 _ALLOWED_SHAPES = [
@@ -278,9 +291,8 @@ _ALLOWED_SHAPES = [
     pytest.param("p = src.joinpath(pkg, *parts)\n", id="starred-segments"),
     pytest.param('p = ctx.root / "tests" / "scenarios"\n', id="not-src"),
     pytest.param('p = ctx.root / "source" / "x.py"\n', id="src-is-not-a-substring"),
-    pytest.param(
-        'm = "no *_DATA_ROOT override found in src/"\n', id="prose-trailing-slash"
-    ),
+    pytest.param("root = ctx.src_root_override\n", id="src_root-is-not-src"),
+    pytest.param('p = ctx.root / "mysrc" / "x.py"\n', id="suffix-is-not-src"),
     pytest.param('m = f"{ctx.rel(p)} missing"\n', id="fstring-resolved-path"),
     pytest.param('m = "looked under " + probed + "/ and tests/"\n', id="concat-clean"),
     pytest.param('def f():\n    """Probes src/ports.py."""\n', id="docstring-prose"),

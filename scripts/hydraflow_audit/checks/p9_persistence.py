@@ -38,7 +38,7 @@ _ENV_OVERRIDE_RE = re.compile(r"\b[A-Z]+_DATA_ROOT\b|os\.environ\[.*DATA_ROOT")
 def _data_root_env_override(ctx: CheckContext) -> Finding:
     src = ctx.src_root()
     if not src.is_dir():
-        return finding("P9.2", Status.FAIL, "src/ missing")
+        return finding("P9.2", Status.FAIL, f"{ctx.rel(src)}/ missing")
     for py in src.rglob("*.py"):
         text = py.read_text(encoding="utf-8", errors="replace")
         if _ENV_OVERRIDE_RE.search(text):
@@ -46,7 +46,7 @@ def _data_root_env_override(ctx: CheckContext) -> Finding:
     return finding(
         "P9.2",
         Status.FAIL,
-        "no *_DATA_ROOT env var override found in src/",
+        f"no *_DATA_ROOT env var override found in {ctx.rel(src)}/",
     )
 
 
@@ -59,7 +59,7 @@ _REPO_SLUG_SCOPE_RE = re.compile(
 def _repo_slug_scoping(ctx: CheckContext) -> Finding:
     src = ctx.src_root()
     if not src.is_dir():
-        return finding("P9.3", Status.FAIL, "src/ missing")
+        return finding("P9.3", Status.FAIL, f"{ctx.rel(src)}/ missing")
     for py in src.rglob("*.py"):
         text = py.read_text(encoding="utf-8", errors="replace")
         if _REPO_SLUG_SCOPE_RE.search(text):
@@ -97,7 +97,8 @@ def _state_tracker(ctx: CheckContext) -> Finding:
     return finding(
         "P9.4",
         Status.FAIL,
-        "no StateTracker/StateManager/StateStore class in src/ — state writes scatter",
+        f"no StateTracker/StateManager/StateStore class in "
+        f"{ctx.rel(ctx.src_root())}/ — state writes scatter",
     )
 
 
@@ -109,7 +110,8 @@ def _dedup_store(ctx: CheckContext) -> Finding:
     return finding(
         "P9.5",
         Status.FAIL,
-        "no DedupStore/IdempotencyStore class in src/ — restart-safe idempotency missing",
+        f"no DedupStore/IdempotencyStore class in {ctx.rel(ctx.src_root())}/ "
+        "— restart-safe idempotency missing",
     )
 
 
@@ -122,7 +124,7 @@ _ATOMIC_WRITE_RE = re.compile(
 def _atomic_writes(ctx: CheckContext) -> Finding:
     src = ctx.src_root()
     if not src.is_dir():
-        return finding("P9.6", Status.FAIL, "src/ missing")
+        return finding("P9.6", Status.FAIL, f"{ctx.rel(src)}/ missing")
     for py in src.rglob("*.py"):
         text = py.read_text(encoding="utf-8", errors="replace")
         if _ATOMIC_WRITE_RE.search(text):
@@ -130,7 +132,8 @@ def _atomic_writes(ctx: CheckContext) -> Finding:
     return finding(
         "P9.6",
         Status.FAIL,
-        "no atomic write pattern (os.replace / atomic_write / NamedTemporaryFile) in src/",
+        "no atomic write pattern (os.replace / atomic_write / "
+        f"NamedTemporaryFile) in {ctx.rel(src)}/",
     )
 
 
@@ -163,7 +166,7 @@ def _no_writes_in_src(ctx: CheckContext) -> Finding:
     """
     src = ctx.src_root()
     if not src.is_dir():
-        return finding("P9.8", Status.NA, "no src/")
+        return finding("P9.8", Status.NA, f"no {ctx.rel(src)}/")
     offenders: list[str] = []
     for py in src.rglob("*.py"):
         try:
@@ -185,7 +188,7 @@ def _no_writes_in_src(ctx: CheckContext) -> Finding:
     return finding(
         "P9.8",
         Status.WARN,
-        f"literal-path writes in src/: {'; '.join(offenders)}",
+        f"literal-path writes in {ctx.rel(src)}/: {'; '.join(offenders)}",
     )
 
 

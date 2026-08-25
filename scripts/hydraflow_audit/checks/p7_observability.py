@@ -157,7 +157,7 @@ def _runner_injects_wiki(ctx: CheckContext) -> Finding:
 def _no_bare_except(ctx: CheckContext) -> Finding:
     src = ctx.src_root()
     if not src.is_dir():
-        return finding("P7.4", Status.NA, "no src/ directory")
+        return finding("P7.4", Status.NA, f"no {ctx.rel(src)}/ directory")
     offenders: list[str] = []
     for py in src.rglob("*.py"):
         try:
@@ -195,7 +195,7 @@ def _logger_error_has_format(ctx: CheckContext) -> Finding:
     """Use AST so matches inside string literals and comments don't count."""
     src = ctx.src_root()
     if not src.is_dir():
-        return finding("P7.5", Status.NA, "no src/ directory")
+        return finding("P7.5", Status.NA, f"no {ctx.rel(src)}/ directory")
     offenders: list[str] = []
     for py in src.rglob("*.py"):
         try:
