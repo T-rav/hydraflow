@@ -43,6 +43,11 @@ def _manager(repo: str):
     config.main_branch = "main"
     config.dry_run = False
     config.ui_dirs = []
+    # Explicit, never MagicMock-derived: an auto-created attribute is truthy,
+    # so the #11720 fail-closed flag would read as ON regardless of intent and
+    # the host would reach ``re.escape`` as a Mock.
+    config.github_host = "github.com"
+    config.origin_guard_fail_closed = True
     with patch.object(WorkspaceManager, "_detect_ui_dirs", return_value=[]):
         return WorkspaceManager(config)
 
@@ -58,9 +63,9 @@ def _manager(repo: str):
 )
 def test_dotted_repo_name_parses(url: str, slug: str) -> None:
     """The root cause: ``[^/.]+?`` refused a dot, so these parsed to nothing."""
-    from workspace import WorkspaceManager
+    from workspace._remote import origin_url_pattern
 
-    match = WorkspaceManager._ORIGIN_URL_RE.search(url)
+    match = origin_url_pattern("github.com").search(url)
     assert match is not None, f"{url!r} did not parse — the guard would fail open"
     assert match.group(1) == slug
 
@@ -96,9 +101,12 @@ async def test_dotted_origin_match_is_validated_not_skipped(
 def test_dead_ssh_pattern_stays_deleted() -> None:
     """``_ORIGIN_SSH_RE`` was unreachable; the surviving pattern covers scp-style."""
     from workspace import WorkspaceManager
+    from workspace._remote import origin_url_pattern
 
     assert not hasattr(WorkspaceManager, "_ORIGIN_SSH_RE")
     assert (
-        WorkspaceManager._ORIGIN_URL_RE.search("git@github.com:owner/repo.git").group(1)
+        origin_url_pattern("github.com")
+        .search("git@github.com:owner/repo.git")
+        .group(1)
         == "owner/repo"
     )

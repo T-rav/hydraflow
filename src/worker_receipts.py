@@ -17,6 +17,12 @@ shipped canary's receipts, which is a decision for the phase that owns that
 behaviour rather than a side effect of adding a third actuator.
 
 Pure: no I/O beyond the pricing table's own lazy load, no clock, no spawn.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations

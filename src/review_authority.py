@@ -36,6 +36,12 @@ Three properties fall out of that, each a separate criterion:
 Merge authority is not modelled here at all, which is deliberate: the way to
 make something unreachable is to give it no representation, not to give it a
 field and then check the field.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations

@@ -620,6 +620,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ),
     ("sampled_audit_model", "HYDRAFLOW_SAMPLED_AUDIT_MODEL", ""),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
+    ("github_host", "HYDRAFLOW_GITHUB_HOST", "github.com"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
     ("docker_network", "HYDRAFLOW_DOCKER_NETWORK", ""),
@@ -759,6 +760,7 @@ _ENV_INT_OVERRIDES += [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("origin_guard_fail_closed", "HYDRAFLOW_ORIGIN_GUARD_FAIL_CLOSED", True),
     ("factory_autostart", "HYDRAFLOW_FACTORY_AUTOSTART", True),
     (
         "test_adequacy_verifier_enabled",
@@ -1255,6 +1257,29 @@ class HydraFlowConfig(BaseModel):
     repo: str = Field(
         default="",
         description="GitHub repo (owner/name); auto-detected from git remote if empty",
+    )
+    github_host: str = Field(
+        default="github.com",
+        min_length=1,
+        description=(
+            "Git host the origin-remote guard expects (#11720). Default "
+            "github.com; set to a GitHub Enterprise Server host (e.g. "
+            "github.mycorp.com) so `WorkspaceManager._assert_origin_matches_repo` "
+            "can parse and verify that deployment's origin URLs instead of "
+            "refusing them."
+        ),
+    )
+    origin_guard_fail_closed: bool = Field(
+        default=True,
+        description=(
+            "Raise when the origin remote cannot be parsed and so cannot be "
+            "verified, instead of warning and continuing (#11720). Default ON "
+            "(fail-closed): the guard exists to stop HydraFlow mutating the "
+            "wrong repo, and 'could not verify' is not a pass. Set False to "
+            "restore the pre-#11720 fail-open behaviour — needed only for "
+            "checkouts whose origin is a filesystem path or another non-"
+            "github_host remote. Prefer setting github_host first."
+        ),
     )
 
     # Worker configuration — managed via config JSON file and dashboard UI,
