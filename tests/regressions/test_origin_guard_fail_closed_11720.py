@@ -140,6 +140,10 @@ async def test_raise_message_is_self_sufficient() -> None:
         "https://evil.com/github.com/owner/repo",
         "https://evil.com/github.com/owner/repo.git",
         "/srv/mirror/github.com/owner/repo",
+        # A doubled slash anywhere in a path satisfies a bare ``//``
+        # boundary; only the full scheme separator ``://`` rejects it.
+        "https://evil.com//github.com/owner/repo",
+        "/srv//github.com/owner/repo",
         # Userinfo trick: the real host appears before an ``@``, not after it.
         "https://github.com@evil.com/owner/repo",
     ],
@@ -150,6 +154,8 @@ async def test_raise_message_is_self_sufficient() -> None:
         "host_as_path_segment",
         "host_as_path_segment_suffix",
         "host_in_local_mirror_path",
+        "host_after_doubled_slash",
+        "host_after_doubled_slash_local",
         "host_in_userinfo",
     ],
 )

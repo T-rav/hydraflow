@@ -30,21 +30,26 @@ def origin_url_pattern(host: str) -> re.Pattern[str]:
     ``[/:]`` class matches scp's ``:`` as well as a path ``/``, and the call is
     ``.search``, so a separate SSH pattern is unreachable (#11703).
 
-    ``(?:^|@|//)`` is the **host boundary**, and it is load-bearing. Without any
+    ``(?:^|@|://)`` is the **host boundary**, and it is load-bearing. Without any
     boundary the unanchored search matches the host inside a longer one, so
     ``https://evilgithub.com/owner/repo`` parsed as ``owner/repo`` and was
     *accepted* by the guard whose entire job is to reject the wrong repository
     (#11720).
 
-    The alternation is deliberately ``@|//`` and NOT ``[@/]``: a single ``/``
-    also matches the host appearing as a **path segment** of a foreign origin,
-    which is the same hole one level down —
-    ``https://evil.com/github.com/owner/repo`` and
-    ``/srv/mirror/github.com/owner/repo`` both parsed as ``owner/repo``.
-    Requiring the scheme separator ``//``, a userinfo ``@``, or start-of-string
-    admits every real origin form (scp ``git@host:``, ``https://host/``,
-    ``ssh://git@host/``, token-in-URL ``…@host/``, bare ``host/o/r``) while
-    matching the host only where a host can actually appear.
+    The alternation is deliberately ``@|://`` and NOT ``[@/]`` or ``@|//``, and
+    each widening was tried and rejected against a real bypass:
+
+    - ``[@/]`` — a single ``/`` matches the host as a **path segment** of a
+      foreign origin: ``https://evil.com/github.com/owner/repo`` and
+      ``/srv/mirror/github.com/owner/repo`` both parsed as ``owner/repo``.
+    - ``//`` — still matches a **doubled slash** anywhere in a path:
+      ``https://evil.com//github.com/owner/repo`` parsed as ``owner/repo``.
+
+    Requiring the full scheme separator ``://``, a userinfo ``@``, or
+    start-of-string matches the host only where a host can actually appear, and
+    admits every real origin form: scp ``git@host:o/r``, ``https://host/o/r``,
+    ``ssh://git@host/o/r``, ``git://host/o/r``, token-in-URL ``…@host/o/r``, and
+    bare ``host/o/r``.
 
     The repo segment is ``[^/]+?`` and NOT ``[^/.]+?``: GitHub allows dots in
     repo names (``socket.io``, ``next.js``), and excluding them made the pattern
@@ -55,7 +60,7 @@ def origin_url_pattern(host: str) -> re.Pattern[str]:
     *host* is interpolated with :func:`re.escape`, so a configured
     ``github.mycorp.com`` cannot inject pattern syntax and its dots stay literal.
     """
-    return re.compile(rf"(?:^|@|//){re.escape(host)}[/:]([^/]+/[^/]+?)(?:\.git)?$")
+    return re.compile(rf"(?:^|@|://){re.escape(host)}[/:]([^/]+/[^/]+?)(?:\.git)?$")
 
 
 class WorkspaceRemoteMixin:

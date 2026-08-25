@@ -561,6 +561,10 @@ class TestOriginUrlPattern:
             "https://evil.com/github.com/owner/repo",
             "https://evil.com/github.com/owner/repo.git",
             "/srv/mirror/github.com/owner/repo",
+            # A doubled slash anywhere in a path satisfies a bare ``//``
+            # boundary; only the full scheme separator ``://`` rejects it.
+            "https://evil.com//github.com/owner/repo",
+            "/srv//github.com/owner/repo",
             # Host in the userinfo, before the ``@`` rather than after it.
             "https://github.com@evil.com/owner/repo",
         ],
