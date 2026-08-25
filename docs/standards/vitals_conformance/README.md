@@ -50,15 +50,42 @@ server, the rule is not enforced here — it is *reported* here, which is vitals
 absent. A conformance check that stops running must fail, not pass.
 
 ## Enforcement
+Registration is manual and explicit, in
+`tests/architecture/vitals_conformance_registry.py`, for the same reason
+`path_membership_registry` is: discovery-by-convention is the failure mode one
+level up, a rule that quietly stops seeing its subject.
 
-### What the static check does and does not prove
+Adding a check that enforces a rule? Register it as conformance. Adding a
+counter? Register it as vitals, and it may go to the data plane.
 
-The enforced check is: **no conformance file imports a client that can only
-mean a remote service** (`boto3`, `swamp`, `requests`, `aiohttp`, …). That has
-zero false positives here.
+### What is actually enforced
 
-Two broader proxies were tried and rejected, and the reasons matter more than
-the outcome:
+Two static properties, both in
+`tests/architecture/test_vitals_conformance_seam.py`, both reading the
+mechanics in `tests/architecture/conformance_offline_scan.py`:
+
+1. **No conformance file reaches a remote client — transitively.** The remote
+   clients are the ones that can *only* mean a remote service (`boto3`,
+   `swamp`, `requests`, `aiohttp`, …). The reach follows first-party imports —
+   `src/` then the repo root, the two entries the suite puts on `sys.path` — to
+   a fixed point, including relative imports and re-exports through
+   `__init__.py`, with cycles handled by a visited set.
+
+2. **No conformance file spawns its way out of the checkout.** An argv is a
+   reach an import sweep cannot see: `subprocess.run(["curl", …])` imports
+   nothing. Every spawn call is read — the stdlib primitives, `os.exec*`/
+   `spawn*`, `asyncio.create_subprocess_*`, and HydraFlow's own bounded-spawn
+   wrappers, which is the path `test_subprocess_reap_guard.py` *requires*
+   production code to use — and its argv literals are checked against
+   `NETWORK_CAPABLE_BINARIES` and against the hosts they name.
+
+Each property carries a vacuity guard, because both passed on the day they
+landed and a check that has never observed a violation is a claim about
+nothing: the sweep must have a subject, the closure must actually leave the
+file it starts from, and the spawn scanner must still recognise the ~165 spawn
+sites the conformance roots really contain.
+
+### What was tried and rejected, and why it still matters
 
 - *"imports an HTTP library"* — flagged three regression tests that build an
   in-process `httpx.MockTransport` against RFC-2606 `.test` hostnames. Entirely
@@ -70,15 +97,63 @@ Both would have needed an allow-list to stay green, and an allow-list that
 grows until it *is* the rule is the fail-open shape this standard exists to
 prevent.
 
-**So the static check is a floor, not a proof.** The proof that conformance runs
-offline is a CI-lane property: run the conformance suite with egress blocked and
-require it to pass. That is a lane configuration rather than a unit test, and it
-is the thing to build when there is a data plane worth being tempted by.
+Going transitive made the first judgement **more** load-bearing, not less: 396
+of the 673 swept files reach `httpx` through `hydraflow_gateway` /
+`gateway_mint_client` without importing it themselves. Transitivity widens what
+the sweep can *see*; it must not widen what counts as a reach. If closing the
+non-transitivity hole turns those files red, the closure is wrong — the
+carriers are not.
 
-`tests/architecture/vitals_conformance_registry.py`. Registration is manual and
-explicit for the same reason `path_membership_registry` is: discovery-by-
-convention is the failure mode one level up, a rule that quietly stops seeing
-its subject.
+The URL proxy does come back, in the one place it has no false positives:
+inside a spawn's argv. `https://github.com/x` in fixture data is data; the same
+string in `["git", "clone", …]` is a fetch. Scope, not the pattern, was what
+made the repo-wide version wrong — and it is what lets `git` stay off the
+binary list. 129 of the ~165 spawn sites are `git` driving a throwaway repo
+under `tmp_path`; listing it would need a ~130-entry allow-list, while the host
+rule catches `git clone https://…` and `git@host:repo` for free.
 
-Adding a check that enforces a rule? Register it as conformance. Adding a
-counter? Register it as vitals, and it may go to the data plane.
+### The binary list, and its exclusions
+
+`NETWORK_CAPABLE_BINARIES` (in the registry) is drawn at *the binary's own
+purpose*, not at "could conceivably reach a network": transfer tools and raw
+sockets, forge and cloud control planes, package managers, registries and model
+CLIs. Adding one tightens the rule and needs no ceremony. Removing one is the
+loosening move and deserves the scrutiny a new waiver gets.
+
+Deliberately excluded: `git` (above); `make` / `pytest` / `mkdocs`, which are
+orchestrators that reach a network only through what they are configured to
+invoke — a property of `Makefile` / `mkdocs.yml`, not of the argv, and
+therefore invisible to any parser; and `python` / `sys.executable`, since
+`python -m pip` is caught by `pip` appearing as an argv token.
+
+### Waivers
+
+`SUBPROCESS_WAIVERS` is the one allow-list here, and it exists because an
+import is a fact about the file while an argv can be a fact about a call the
+test never makes — monkeypatching is invisible to a parser. It is registered
+alongside the claims, keyed by `(path, binary)` rather than by a line number
+that would rot, carries a written reason, must still match a live spawn (a dead
+waiver pre-approves whatever lands in that file next), and is capped by
+`SUBPROCESS_WAIVER_CEILING`, **which may only ever be lowered**. It holds one
+entry.
+
+### The floor, and what is still above it
+
+**These are static proxies, not proofs.** They are a floor. The proof that
+conformance runs offline is a CI-lane property: run the conformance suite with
+egress blocked and require it to pass, with a negative control proving the lane
+fires. That remains unbuilt (#11706), and it is what covers the residuals the
+static checks name but cannot reach:
+
+- an orchestrator whose *configuration* reaches out (`mkdocs build --strict` is
+  offline today only because `mkdocs.yml` enables `search`, `mermaid2` and
+  `git-revision-date-localized`; adding the social-card plugin fetches Google
+  Fonts at build time and nothing static would redden);
+- `git fetch`/`push` against a remote configured elsewhere, where the argv
+  names no host;
+- an argv assembled entirely from non-literal values (`subprocess.run(cmd)`),
+  where there is no string for a parser to read;
+- a conformance check that calls a first-party helper which does the spawning —
+  the subprocess rule reads the conformance file's own call sites, because
+  following spawns transitively would flag every test that imports a module
+  capable of shelling `gh`, which is most of them.

@@ -20,8 +20,12 @@ from pathlib import Path
 
 __all__ = [
     "CONFORMANCE_ROOTS",
+    "NETWORK_CAPABLE_BINARIES",
+    "SUBPROCESS_WAIVER_CEILING",
+    "SUBPROCESS_WAIVERS",
     "Claim",
     "ClaimKind",
+    "SubprocessWaiver",
     "registered_claims",
     "repo_root",
 ]
@@ -60,6 +64,135 @@ CONFORMANCE_ROOTS: tuple[str, ...] = (
     "tests/architecture",
     "tests/regressions",
 )
+
+
+#: Binaries whose ORDINARY JOB is talking to something remote. A conformance
+#: check that spawns one has left the checkout, and an import sweep cannot see
+#: it: ``subprocess.run(["curl", ...])`` imports nothing (#11706).
+#:
+#: The line is drawn at *the binary's own purpose*, not at "could conceivably
+#: reach a network", and three exclusions are deliberate:
+#:
+#: - ``git`` — 129 of the ~165 spawn sites in the conformance roots are ``git``,
+#:   every one of them driving a throwaway repo under ``tmp_path``. Listing it
+#:   would need a ~130-entry waiver list, which is the allow-list-that-becomes-
+#:   the-rule shape this standard exists to prevent. Its network subcommands are
+#:   caught by the second rule instead: ``git clone https://…`` and
+#:   ``git@host:repo`` carry a remote host in the argv, and that reddens.
+#: - ``make``/``pytest``/``mkdocs`` — orchestrators. They reach a network only
+#:   through what they are configured to invoke, which is a property of
+#:   ``Makefile``/``mkdocs.yml`` rather than of the argv. Static analysis cannot
+#:   see it; the egress-blocked lane can. Recorded as residual in the standard.
+#: - ``python``/``sys.executable`` — ``python -m pip`` is caught by ``pip``
+#:   appearing as an argv token, which is the part that means the network.
+#:
+#: Adding a binary TIGHTENS the rule and needs no ceremony. Removing one is the
+#: loosening move and deserves the scrutiny a new waiver gets.
+NETWORK_CAPABLE_BINARIES: frozenset[str] = frozenset(
+    {
+        # Transfer and raw sockets.
+        "curl",
+        "wget",
+        "nc",
+        "ncat",
+        "netcat",
+        "telnet",
+        "ftp",
+        "sftp",
+        "ssh",
+        "scp",
+        "rsync",
+        # Forge and cloud control planes.
+        "gh",
+        "glab",
+        "hub",
+        "aws",
+        "gcloud",
+        "az",
+        "kubectl",
+        "helm",
+        "terraform",
+        "flyctl",
+        "wrangler",
+        "vercel",
+        # Package managers — an index fetch is the default behaviour.
+        "pip",
+        "pip3",
+        "pipx",
+        "uv",
+        "uvx",
+        "poetry",
+        "conda",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "bower",
+        "cargo",
+        "composer",
+        "brew",
+        "apt",
+        "apt-get",
+        "yum",
+        "dnf",
+        "apk",
+        # Registries and model planes.
+        "docker",
+        "docker-compose",
+        "podman",
+        "skopeo",
+        "ollama",
+        "huggingface-cli",
+        "claude",
+        "codex",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SubprocessWaiver:
+    """One conformance file permitted to name one network binary in an argv.
+
+    Keyed by ``(path, binary)`` and NOT by line number, on purpose: every
+    line-window anchor in this repo was already vacuous when someone finally
+    looked (#11670), two of them pointing past end-of-file. A waiver anchored
+    to a line rots into a waiver for whatever moved into that line.
+    """
+
+    path: str
+    """Repo-relative."""
+
+    binary: str
+    why: str
+    """Why the argv names it without the check leaving the checkout."""
+
+
+#: The registered exceptions. An unregistered allow-list would be #11706 one
+#: level up — a rule kept green by a set nobody classified.
+SUBPROCESS_WAIVERS: tuple[SubprocessWaiver, ...] = (
+    SubprocessWaiver(
+        path="tests/regressions/test_reap_processlookuperror.py",
+        binary="gh",
+        why=(
+            "argv is ['gh', 'issue', 'list'] but the test monkeypatches "
+            "asyncio.create_subprocess_exec to return a dead-process double "
+            "before calling run_simple, so nothing is ever spawned. The argv is "
+            "documentary — it models the shape of the real call whose reap "
+            "semantics (#9794/#9814) are under test. A static reader cannot see "
+            "a monkeypatch; rewriting the argv to appease it would trade a "
+            "faithful fixture for a green sweep."
+        ),
+    ),
+)
+
+#: The waiver count on the day the subprocess dimension landed (#11706).
+#:
+#: This number may only ever be LOWERED. Raising it is precisely how an
+#: allow-list grows until it *is* the rule, which is the fail-open shape the
+#: whole standard exists to stop — so a new exception is a conversation, not an
+#: edit. A waiver that no longer matches a live spawn must be deleted, not left
+#: to cover the next thing that lands in that file.
+SUBPROCESS_WAIVER_CEILING: int = 1
 
 
 def registered_claims() -> tuple[Claim, ...]:
@@ -147,6 +280,16 @@ def registered_claims() -> tuple[Claim, ...]:
             why=(
                 "'every path-membership entry resolves, and membership follows a "
                 "module into a package' (#11673). Repo knowledge; unsamplable."
+            ),
+        ),
+        Claim(
+            name="offline_conformance.scan",
+            kind=ClaimKind.CONFORMANCE,
+            path="tests/architecture/conformance_offline_scan.py",
+            why=(
+                "'no conformance check reaches a remote client, transitively or "
+                "by spawning one' (#11706). Pure AST over the checkout; the day "
+                "it needs a service to answer, the rule it enforces is gone."
             ),
         ),
         Claim(

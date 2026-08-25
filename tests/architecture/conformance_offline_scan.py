@@ -1,0 +1,467 @@
+"""Static machinery behind the offline-conformance rule (#11688, #11706).
+
+The rule lives in ``docs/standards/vitals_conformance/README.md``; the policy
+(which names count) lives in ``vitals_conformance_registry`` and in
+``test_vitals_conformance_seam``. This module is the *mechanics* those two
+share, and it exists because the first version of the check had two structural
+holes that made it green by luck rather than by observation (#11706):
+
+1. **It parsed one file.** ``_imported_roots(path)`` collected a single file's
+   own top-level imports, so a conformance check that imported a local module
+   which imported a remote client was invisible. :class:`ImportGraph` resolves
+   first-party imports to files and walks them to a fixed point instead.
+
+2. **``subprocess`` walked straight past it.** A check that shells out to
+   ``curl``/``gh``/``aws`` satisfies an import sweep completely.
+   :func:`spawn_sites` reads the argv of every spawn call instead.
+
+Both are *static* proxies and neither is a proof. The proof that the
+conformance suite runs offline is an egress-blocked CI lane, which the standard
+names and this module does not replace.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from collections import deque
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final
+
+__all__ = [
+    "LOCAL_HOST_RE",
+    "URL_RE",
+    "ImportGraph",
+    "Reach",
+    "SpawnSite",
+    "remote_hosts",
+    "spawn_sites",
+]
+
+# --------------------------------------------------------------------------
+# Hosts
+# --------------------------------------------------------------------------
+
+#: Hosts that are not a remote service: loopback, and the TLDs RFC 2606
+#: reserves precisely so a test can name a host it will never contact.
+LOCAL_HOST_RE: Final = re.compile(
+    r"^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::\d+)?$|"
+    r"\.(?:test|invalid|example|localhost)$",
+    re.IGNORECASE,
+)
+
+URL_RE: Final = re.compile(r"(?:https?|ftp|ftps|git|ssh|rsync)://([^/\s\"']+)")
+
+#: ``git@github.com:owner/repo`` — scp-style, no scheme, still a network reach.
+_SCP_RE: Final = re.compile(r"\b[\w.-]+@([\w.-]+\.[a-z]{2,}):", re.IGNORECASE)
+
+
+def remote_hosts(text: str) -> list[str]:
+    """Hosts in *text* that are neither loopback nor an RFC-2606 sentinel."""
+    found = set(URL_RE.findall(text)) | set(_SCP_RE.findall(text))
+    return sorted(h for h in found if not LOCAL_HOST_RE.search(h))
+
+
+# --------------------------------------------------------------------------
+# First-party import graph
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Reach:
+    """One file's shortest path to a name the caller asked about.
+
+    ``chain`` starts at the swept file and ends at the module that does the
+    importing, so the failure message can name the hop that carries it rather
+    than only the file that is blamed.
+    """
+
+    chain: tuple[Path, ...]
+    names: tuple[str, ...]
+
+    def describe(self, root: Path) -> str:
+        hops = " -> ".join(str(p.relative_to(root)) for p in self.chain)
+        return f"{hops} imports {list(self.names)}"
+
+
+class ImportGraph:
+    """First-party imports resolved to files and walked to a fixed point.
+
+    *bases* are the roots a dotted module name resolves against, in order.
+    For this repo that is ``src/`` then the repo root, mirroring what
+    ``tests/conftest.py`` puts on ``sys.path``. A dotted name that resolves
+    under one of them is **first-party** and the walk follows it; anything else
+    is a leaf that contributes its top-level root.
+
+    Cycles are real here (``src`` packages import each other), so the walk is a
+    visited-set BFS rather than recursion: it terminates, and because it is
+    breadth-first the reported chain is a shortest one.
+    """
+
+    def __init__(self, bases: Sequence[Path]) -> None:
+        self._bases = tuple(bases)
+        self._edges: dict[Path, tuple[frozenset[str], frozenset[Path]]] = {}
+        self._modules: dict[str, Path | None] = {}
+        self._listings: dict[Path, frozenset[str]] = {}
+
+    # -- resolution --------------------------------------------------------
+
+    def _names_in(self, directory: Path) -> frozenset[str]:
+        cached = self._listings.get(directory)
+        if cached is None:
+            try:
+                cached = frozenset(child.name for child in directory.iterdir())
+            except OSError:
+                cached = frozenset()
+            self._listings[directory] = cached
+        return cached
+
+    def _resolve_under(self, base: Path, parts: Sequence[str]) -> Path | None:
+        """Resolve *parts* under *base*, matching case EXACTLY.
+
+        ``Path.is_file()`` is case-insensitive on macOS and case-sensitive on
+        the Linux runners, so ``from vendor import Client`` resolves
+        ``vendor/client.py`` on a laptop and nothing in CI. That is a
+        host-dependent import graph: the same tree yields different chains, and
+        a guard whose answer depends on the developer's filesystem is not a
+        guard. Directory listings are compared instead, and cached.
+        """
+        current = base
+        for part in parts[:-1]:
+            if part not in self._names_in(current):
+                return None
+            current = current / part
+        last = parts[-1]
+        names = self._names_in(current)
+        module = current / f"{last}.py"
+        if f"{last}.py" in names and module.is_file():
+            return module
+        package = current / last / "__init__.py"
+        if last in names and package.is_file():
+            return package
+        return None
+
+    def module_file(self, dotted: str) -> Path | None:
+        """The file a dotted first-party module name names, or ``None``."""
+        if dotted in self._modules:
+            return self._modules[dotted]
+        resolved: Path | None = None
+        parts = dotted.split(".")
+        if all(parts):
+            for base in self._bases:
+                resolved = self._resolve_under(base, parts)
+                if resolved is not None:
+                    break
+        self._modules[dotted] = resolved
+        return resolved
+
+    def _package_of(self, path: Path) -> str:
+        """Dotted package containing *path*, for resolving relative imports."""
+        for base in self._bases:
+            try:
+                rel = path.relative_to(base)
+            except ValueError:
+                continue
+            return ".".join(rel.parts[:-1])
+        return ""
+
+    def _absolute(self, node: ast.ImportFrom, path: Path) -> str:
+        """``from . import x`` resolved against the importing file's package.
+
+        Relative imports were dropped entirely by the pre-#11706 sweep. That is
+        fine for a one-file parse — a relative import cannot name a third-party
+        client — but fatal for a transitive one: every ``src`` package re-exports
+        through ``__init__`` with ``from ._impl import ...``, so ignoring level
+        > 0 stops the walk dead at the first package boundary.
+        """
+        if node.level == 0:
+            return node.module or ""
+        parts = self._package_of(path).split(".")
+        parts = [p for p in parts if p]
+        climb = node.level - 1
+        if climb:
+            parts = parts[: len(parts) - climb] if climb <= len(parts) else []
+        if node.module:
+            parts = [*parts, node.module]
+        return ".".join(parts)
+
+    # -- edges -------------------------------------------------------------
+
+    def edges(self, path: Path) -> tuple[frozenset[str], frozenset[Path]]:
+        """(third-party roots imported here, first-party files imported here)."""
+        cached = self._edges.get(path)
+        if cached is not None:
+            return cached
+        external: set[str] = set()
+        local: set[Path] = set()
+
+        def consider(dotted: str) -> bool:
+            resolved = self.module_file(dotted)
+            if resolved is None:
+                return False
+            local.add(resolved)
+            return True
+
+        for node in ast.walk(self._parse(path)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if not consider(alias.name):
+                        external.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                base = self._absolute(node, path)
+                if not base:
+                    continue
+                resolved = consider(base)
+                for alias in node.names:
+                    # ``from pkg import mod`` — the name may be a submodule,
+                    # and following it is the difference between reaching
+                    # ``pkg/__init__.py`` and reaching the module that carries
+                    # the client.
+                    if alias.name != "*":
+                        consider(f"{base}.{alias.name}")
+                if not resolved and node.level == 0:
+                    external.add(base.split(".")[0])
+
+        result = (frozenset(external), frozenset(local))
+        self._edges[path] = result
+        return result
+
+    @staticmethod
+    def _parse(path: Path) -> ast.Module:
+        try:
+            return ast.parse(path.read_text(errors="replace"), filename=str(path))
+        except (SyntaxError, ValueError, OSError):  # pragma: no cover
+            # A file that will not parse fails in its own suite; it must not
+            # take the sweep down with it.
+            return ast.Module(body=[], type_ignores=[])
+
+    # -- walks -------------------------------------------------------------
+
+    def find(self, start: Path, targets: Iterable[str]) -> Reach | None:
+        """Shortest chain from *start* to a file importing one of *targets*."""
+        wanted = frozenset(targets)
+        if not wanted:
+            return None
+        chains: dict[Path, tuple[Path, ...]] = {start: (start,)}
+        queue: deque[Path] = deque([start])
+        while queue:
+            current = queue.popleft()
+            external, local = self.edges(current)
+            hit = external & wanted
+            if hit:
+                return Reach(chain=chains[current], names=tuple(sorted(hit)))
+            for nxt in local:
+                if nxt not in chains:
+                    chains[nxt] = (*chains[current], nxt)
+                    queue.append(nxt)
+        return None
+
+    def reach(self, start: Path) -> tuple[frozenset[str], frozenset[Path]]:
+        """Every third-party root and first-party file reachable from *start*."""
+        external: set[str] = set()
+        seen: set[Path] = {start}
+        queue: deque[Path] = deque([start])
+        while queue:
+            current = queue.popleft()
+            own_external, local = self.edges(current)
+            external |= own_external
+            for nxt in local:
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
+        seen.discard(start)
+        return frozenset(external), frozenset(seen)
+
+
+# --------------------------------------------------------------------------
+# Spawn sites
+# --------------------------------------------------------------------------
+
+#: Stdlib entry points that start a process. Keyed by the module they live on
+#: so ``import subprocess as sp`` and ``from subprocess import run`` both
+#: resolve without treating every ``run(...)`` in the repo as a spawn.
+_STDLIB_SPAWNS: Final[dict[str, frozenset[str]]] = {
+    "subprocess": frozenset(
+        {
+            "run",
+            "Popen",
+            "call",
+            "check_call",
+            "check_output",
+            "getoutput",
+            "getstatusoutput",
+        }
+    ),
+    "os": frozenset(
+        {
+            "system",
+            "popen",
+            "execl",
+            "execlp",
+            "execv",
+            "execve",
+            "execvp",
+            "execvpe",
+            "spawnl",
+            "spawnlp",
+            "spawnv",
+            "spawnve",
+            "spawnvp",
+            "spawnvpe",
+            "posix_spawn",
+            "posix_spawnp",
+        }
+    ),
+    "asyncio": frozenset({"create_subprocess_exec", "create_subprocess_shell"}),
+}
+
+#: HydraFlow's own bounded-spawn seam. ``tests/architecture/
+#: test_subprocess_reap_guard.py`` forbids raw spawns inside ``src`` precisely
+#: so that everything goes through these, which means a sweep that watched only
+#: the stdlib primitives would watch the one path production code may not use.
+_WRAPPER_SPAWNS: Final[frozenset[str]] = frozenset(
+    {
+        "run_subprocess",
+        "run_subprocess_result",
+        "run_simple",
+        "stream_claude_process",
+    }
+)
+
+#: Shell metacharacters that start a new command inside a ``-c`` script.
+_SHELL_SPLIT: Final = re.compile(r"[;&|\n()`]+")
+
+
+@dataclass(frozen=True, slots=True)
+class SpawnSite:
+    """One call that starts a process, and what its argv literals say."""
+
+    path: str
+    """Repo-relative."""
+
+    line: int
+    call: str
+    """Dotted callee, so the message can point at the shape, not just the line."""
+
+    argv: tuple[str, ...]
+    """Whitespace/shell-separator tokens of every string literal in the argv."""
+
+    def binaries(self, network_binaries: Iterable[str]) -> tuple[str, ...]:
+        """Network binaries named ANYWHERE in the argv, not only at position 0.
+
+        Deliberately fail-closed. Restricting the match to "command position"
+        would read better and would drop a hypothetical false positive (a
+        commit message containing the word ``uv``), but it means enumerating
+        every way a command can start — ``bash -c``, ``python -m``, ``sudo``,
+        ``env``, ``xargs``, ``nohup``, a shell chain — and a position this code
+        failed to anticipate is a reach it silently misses. A guard written
+        against fail-open cannot be the one that fails open. Zero false
+        positives across the ~165 real spawn sites; if one appears, it is a
+        registered waiver, which is visible.
+        """
+        wanted = frozenset(network_binaries)
+        return tuple(sorted({token for token in self.argv if token in wanted}))
+
+    def hosts(self) -> tuple[str, ...]:
+        return tuple(remote_hosts(" ".join(self.argv)))
+
+
+def _dotted_call(func: ast.expr) -> tuple[str, ...] | None:
+    parts: list[str] = []
+    node: ast.expr = func
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return tuple(reversed(parts))
+    return None
+
+
+class _SpawnNames:
+    """What the spawn primitives are called *in one file*."""
+
+    def __init__(self, tree: ast.Module) -> None:
+        self.aliases: dict[str, str] = {}
+        self.bare: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    if root in _STDLIB_SPAWNS:
+                        self.aliases[alias.asname or alias.name] = root
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                root = node.module.split(".")[0]
+                funcs = _STDLIB_SPAWNS.get(root, frozenset())
+                for alias in node.names:
+                    if alias.name in funcs:
+                        self.bare.add(alias.asname or alias.name)
+
+    def is_spawn(self, func: ast.expr) -> bool:
+        dotted = _dotted_call(func)
+        if dotted is None:
+            return False
+        last = dotted[-1]
+        if last in _WRAPPER_SPAWNS:
+            return True
+        if len(dotted) == 1:
+            return last in self.bare
+        owner = dotted[-2]
+        module = self.aliases.get(owner, owner if owner in _STDLIB_SPAWNS else None)
+        return module is not None and last in _STDLIB_SPAWNS[module]
+
+
+def _argv_nodes(call: ast.Call) -> list[ast.expr]:
+    """The positional arguments that are argv.
+
+    ``subprocess.run(["git", ...])`` puts argv in one list; ``run_subprocess(
+    "git", "status")`` and ``create_subprocess_exec("gh", "pr", ...)`` spread it
+    across positionals. Reading only ``args[0]`` in the second shape sees the
+    binary and misses the URL it is pointed at.
+    """
+    if not call.args:
+        return []
+    first = call.args[0]
+    if isinstance(first, ast.List | ast.Tuple):
+        return [first]
+    return list(call.args)
+
+
+def _argv_tokens(call: ast.Call) -> tuple[str, ...]:
+    tokens: list[str] = []
+    for arg in _argv_nodes(call):
+        for node in ast.walk(arg):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for chunk in _SHELL_SPLIT.split(node.value):
+                    tokens.extend(chunk.split())
+    return tuple(tokens)
+
+
+def spawn_sites(path: Path, rel: str) -> list[SpawnSite]:
+    """Every process-spawning call in *path*, with its argv literals.
+
+    Only real ``ast.Call`` nodes count. Several conformance checks embed spawn
+    source in a *string* to feed a scanner fixture — those are data, and a
+    text-level grep would flag every one of them.
+    """
+    try:
+        tree = ast.parse(path.read_text(errors="replace"), filename=str(path))
+    except (SyntaxError, ValueError, OSError):  # pragma: no cover
+        return []
+    names = _SpawnNames(tree)
+    sites: list[SpawnSite] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not names.is_spawn(node.func):
+            continue
+        dotted = _dotted_call(node.func) or ()
+        sites.append(
+            SpawnSite(
+                path=rel,
+                line=node.lineno,
+                call=".".join(dotted),
+                argv=_argv_tokens(node),
+            )
+        )
+    return sites
