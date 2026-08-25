@@ -40,8 +40,17 @@ __all__ = [
 
 
 def artifact_digest(text: str) -> str:
-    """The content address of one child's retained output."""
-    return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:64]}"
+    """The content address of one child's retained output.
+
+    The **whole** digest. This read ``hexdigest()[:64]`` until #11718 — a slice
+    of a 64-character hexdigest to 64 characters, so a bound that bounded
+    nothing while reading like a deliberate truncation. Dropping it changes no
+    address the factory has ever minted. The real bound is
+    ``WorkerReceipt.artifact_digest``'s 128-character field, which ``sha256:``
+    plus 64 hex characters fits with room to spare, and which fails loudly
+    rather than silently shortening a content address.
+    """
+    return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
 
 
 def estimate_worker_cost(model: str, usage: object) -> float:
