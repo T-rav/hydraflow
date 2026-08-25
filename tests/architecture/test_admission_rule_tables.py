@@ -196,6 +196,12 @@ class RowWitness:
 
     reason: RejectionReason
     scene: dict[str, Any] = field(default_factory=dict)
+    masked_by_a_fallback: bool = False
+    """This row's reason is also produced elsewhere, so its witness cannot
+    prove the row's own deletion reddens. Deletion is still caught, by the
+    order equality; recorded so the weaker guarantee is visible rather than
+    assumed."""
+
     also_trips: tuple[RejectionReason, ...] = ()
     """Rows BELOW this one that the same input also satisfies.
 
@@ -234,6 +240,17 @@ FENCING_WITNESSES: tuple[RowWitness, ...] = (
         # the catalog has never heard of — ``WORKER_CATALOG`` is total over
         # ``WorkerRole`` and a separate test keeps it that way.
         {"request": _request().model_copy(update={"worker_role": "ghost-role"})},
+        # The ONE row whose witness does not prove its own deletion reddens.
+        # ``admit_dispatch`` re-derives this reason three lines below the table
+        # as a type narrowing (``if entry is None: return ROLE_NOT_IN_CATALOG``),
+        # so deleting the row leaves the witness answered identically — the
+        # "gate masked by an upstream pin" shape this repo has hit before.
+        # Deleting it still reddens, via the order equality in
+        # ``test_the_witnesses_are_the_table_in_order``; it is the per-row
+        # claim that is weaker here, not the gate's end-to-end property.
+        # Removing the fallback would fix it properly and is a change to
+        # ``admit_dispatch``'s failure mode, so it belongs to that module.
+        masked_by_a_fallback=True,
     ),
 )
 
@@ -311,8 +328,14 @@ def _row_is_reachable(table: str, reason_value: str) -> bool:
     goes False, which is what "the drop reddens" means for an ordered table.
     """
     for witness in _TABLES[table]:
-        if witness.reason.value == reason_value:
-            return _admit(**witness.scene) is witness.reason
+        if witness.reason.value != reason_value:
+            continue
+        if witness.masked_by_a_fallback:
+            # Answering True here would be the claim the witness cannot make.
+            # The row is protected by the order equality instead, which is
+            # asserted unconditionally and is what actually reddens.
+            return False
+        return _admit(**witness.scene) is witness.reason
     return False
 
 

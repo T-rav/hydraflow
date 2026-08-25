@@ -137,17 +137,44 @@ applied to call names), and it catches a shape mismatch on the way in —
 `called_names` records `run`, not `subprocess.run`, so a dotted member would
 sit in a deny-list forever catching nothing.
 
-Known limit, stated rather than hidden: a floor catches a plain drop, not a
-swap that removes one member and adds another in the same edit. A derivation
-would; there isn't one.
+### Known limits, stated rather than hidden
+
+Each of these was found by reviewing the gate against its own rule, and each is
+recorded because an unstated limit is how the next author over-reads a guard.
+
+- **A floor catches a plain drop, not a swap** that removes one member and adds
+  another in the same edit. A derivation would; there isn't one.
+- **Nothing proves a deny-list member is a name anything would ever call.**
+  The per-member witness pins something narrower: that the member is a bare
+  identifier the extractor records as an attribute call (a dotted
+  `subprocess.run` fails), and — with its negative control — that the
+  intersection with the deny-list is what decides the answer. An earlier draft
+  claimed it stopped entries "rotting into a name nothing could ever match";
+  it did not, and a fabricated name added to both the list and its floor
+  stayed green. A third check was tried for that gap — *"the subject does not
+  already call it"* — and dropped: the real guard already forbids exactly
+  that, so the assertion was satisfied by an upstream pin and deleting it
+  reddened nothing. An unfalsifiable defence is the shape this document is
+  about, so it does not get to live here on the grounds of good intentions.
+- **One ordered-table row is masked at its source.** `admit_dispatch`
+  re-derives `ROLE_NOT_IN_CATALOG` below the table as a type narrowing, so its
+  witness is answered identically with the row deleted. The deletion still
+  reddens — via the row-order equality — so the row carries a named
+  `undetected_members` exemption rather than a claim it cannot make.
+- **The scan sees module-level names and calls to module-level or imported
+  functions.** An imported *sequence*, or a comprehension over one, must be
+  registered by hand. Widening the scan from names to calls is what revealed
+  `registered_claims()`, which had been parametrised over and unclassified all
+  along — the reason the ratchet on undetected subjects moved 4 → 5. That mark
+  moves for a subject the scan newly *reveals*, never for one newly *written*.
 
 ### Four ways a gate like this goes vacuous, and the property that stops each
 
 1. **The sweep has no subject.** An empty registry, or one whose rows resolve
    to nothing, passes every parametrised assertion because there is nothing to
-   assert. `test_the_registry_is_not_empty` and
-   `test_every_subject_resolves_to_a_non_empty_sequence` are the answer, and
-   the second must *resolve*, not check presence.
+   assert. `test_the_sweep_has_a_subject`, `test_an_empty_registry_fails_the_sweep`
+   and `test_a_subject_that_resolves_to_nothing_fails_the_sweep` are the
+   answer, and the last must *resolve*, not check presence.
 2. **The gate asserts presence instead of resolution.** A sibling PR shipped
    `test_the_owner_still_owns_it`, which asserted a literal was present in a
    file and was vacuously satisfiable. Every property here calls the live
@@ -175,13 +202,22 @@ would; there isn't one.
 Add a row to `registered_enumerations()` in
 `tests/architecture/guard_enumeration_registry.py`:
 
-- `name` — `<module>.<ATTRIBUTE>`, unique.
-- `members` — resolved **by reference** from the live literal
-  (`director_guard.DECISION_PATH_MODULES`), never re-typed.
+- `name` — `<module>.<ATTRIBUTE>`, matching what the scan produces
+  (`test_director_no_authority.DECISION_PATH_MODULES`).
+- `members` — resolved **by reference** from the live literal, never re-typed.
+- `kind` — `SUBJECT` or `CORPUS`. Required, no default, and the difference is
+  the one above, not cosmetic.
 - `detects_drop` — a callable over one member that exercises the **live**
   machinery and answers "would removing this member be caught?". Not a
   re-implementation of the guard; the guard itself.
 - `why` — what silently stops being guarded when a member goes uncovered.
+- `undetected_reason` — required whenever `detects_drop` is `None`, whether
+  the row is a corpus or a subject nobody has wired yet. Subjects without a
+  detector are ratcheted shrink-only.
+- `undetected_members` — per-member exemptions, each naming the *different*
+  mechanism that catches that member's drop. Also ratcheted. Exempt rather
+  than delete: a member dropped from `members` is a member nobody looks at
+  again, which is the trap this whole document is about.
 
 Registration is manual and explicit for the same reason
 `path_membership_registry`'s is: discovery-by-convention would be the failure

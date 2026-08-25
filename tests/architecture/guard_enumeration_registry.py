@@ -38,18 +38,20 @@ registry from being "did the author remember" one level up.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
 __all__ = [
+    "ALLOW_LIST_NAMES",
     "DENY_LIST_FLOORS",
     "EnumerationKind",
     "call_witness",
+    "declared_deny_lists",
     "floor_protects",
     "import_witness",
     "GuardedEnumeration",
@@ -113,6 +115,15 @@ class GuardedEnumeration:
     undetected_reason: str | None = None
     """Why this sequence has no drop-detector. Required when there is none."""
 
+    undetected_members: Mapping[str, str] = field(default_factory=dict)
+    """Members whose drop is caught by a DIFFERENT mechanism, and which one.
+
+    Kept as an exemption rather than dropped from :attr:`members`, because a
+    member removed from the parametrisation is a member nobody looks at again
+    — the shrinking-set trap this gate is about. Each entry names the
+    mechanism that does protect it, and the total is ratcheted shrink-only.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Derivations and witnesses used by the rows below
@@ -126,14 +137,20 @@ def _source_of(relative: str) -> str:
 def call_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
     """Does the live call-name guard flag *subject* once it calls *member*?
 
-    The witness is the REAL module the guard reads, with one call appended —
-    not a synthetic stub — and the expression is the guard's own:
-    ``called_names(tree) & <deny list>``. Both halves matter. Running the
-    extractor alone would answer "yes" for any name at all and never consult
-    the set, which is the vacuous shape this gate exists to catch; running the
-    set alone would not notice that ``called_names`` records ``run`` rather
-    than ``subprocess.run``, so a dotted member would sit in the list catching
-    nothing.
+    Deliberately narrow, and the narrowness is the point. Read with
+    ``test_the_deny_list_operand_is_load_bearing``, which passes a name the
+    list does NOT carry: together they say the extractor sees this spelling
+    AND the intersection with the deny-list decides the answer. Alone, the
+    positive half answers ``True`` for any bare identifier — which is what an
+    earlier draft shipped, and why a fabricated member added to both the list
+    and its floor stayed green.
+
+    What it does NOT prove: that the name is one anything would ever call. A
+    third check was tried for that — "the subject does not already call it" —
+    and dropped, because the real guard already forbids exactly that, so the
+    assertion was satisfied by an upstream pin and deleting it reddened
+    nothing. An unfalsifiable defence is the shape this file exists to catch.
+    See "Known limits" in ``docs/standards/parametrised_guards/README.md``.
     """
     from tests.architecture.test_director_no_authority import called_names
 
@@ -144,11 +161,54 @@ def call_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
 
 
 def import_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
-    """Does the live import guard flag *subject* once it imports *member*?"""
+    """The import guard's half of :func:`call_witness`, same contract."""
     from tests.architecture.test_director_no_authority import import_roots
 
     injected = f"{_source_of(subject)}\n\nimport {member}\n"
     return member in (import_roots(ast.parse(injected)) & deny_list)
+
+
+#: Module-level frozensets in ``test_director_no_authority`` that are allow-lists
+#: rather than deny-lists. An allow-list states a COMPLETE surface and is pinned
+#: by equality against the live class, which is a stronger guard than a floor
+#: and a different shape.
+ALLOW_LIST_NAMES: frozenset[str] = frozenset({"ALLOWED_BROKER_METHODS"})
+
+
+def declared_deny_lists() -> frozenset[str]:
+    """Every module-level name-set in ``test_director_no_authority``.
+
+    The derivation :data:`DENY_LIST_FLOORS` is pinned against, so a FIFTH
+    deny-list cannot arrive unfloored. Without it the floors, the live-list map
+    and the witness-subject map are three hand-written tables agreeing with
+    each other — "did the author remember" one level up, which is the defect
+    this module exists to remove.
+    """
+    from tests.architecture import test_director_no_authority as director
+
+    # Names ASSIGNED in that module, read from its source — not ``vars()``,
+    # which also returns what it imports. ``SPAWN_PRIMITIVES`` is a deny-list,
+    # but it belongs to ``sandbox_seam_scan`` and is floored by that module's
+    # own guards; claiming it here would be this registry reaching across a
+    # boundary to protect something it does not own.
+    tree = ast.parse(_source_of("tests/architecture/test_director_no_authority.py"))
+    assigned: set[str] = set()
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        assigned.update(t.id for t in targets if isinstance(t, ast.Name))
+
+    return frozenset(
+        f"test_director_no_authority.{name}"
+        for name in assigned
+        if name not in ALLOW_LIST_NAMES
+        and isinstance(value := getattr(director, name, None), frozenset)
+        and value
+        and all(isinstance(member, str) for member in value)
+    )
 
 
 #: Shrink-only floors for the deny-lists, which have no derivation.
@@ -297,6 +357,12 @@ def parametrised_module_sequences() -> tuple[GateSequence, ...]:
     Deliberately a scan and not a list. A list here would be the same defect
     one level up: an enumeration of enumerations that nobody notices going
     stale.
+
+    Two shapes are seen: a bare module-level name, and a call to a
+    module-level function (``registered_claims()``), which is how this repo
+    usually spells a registry. Known blind spots, stated rather than implied:
+    an imported name, and a comprehension over one. Both must be registered by
+    hand — see "Known limits" in the standard.
     """
     found: list[GateSequence] = []
     root = repo_root()
@@ -305,6 +371,21 @@ def parametrised_module_sequences() -> tuple[GateSequence, ...]:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         bound: set[str] = set()
+        # Defined here OR imported. Imported is the common case and the one
+        # that matters: ``registered_claims`` lives in
+        # ``vitals_conformance_registry`` and is imported by the test that
+        # parametrises over it. Restricting this to local defs would have kept
+        # the blind spot it was widened to close.
+        defined: set[str] = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        } | {
+            alias.asname or alias.name
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
         for node in tree.body:
             targets: Iterable[ast.expr]
             if isinstance(node, ast.Assign):
@@ -321,10 +402,27 @@ def parametrised_module_sequences() -> tuple[GateSequence, ...]:
             if not (isinstance(func, ast.Attribute) and func.attr == "parametrize"):
                 continue
             for arg in node.args[1:]:
+                # A bare module-level name: ``parametrize("x", MEMBERSHIPS)``.
                 if isinstance(arg, ast.Name) and arg.id in bound:
                     found.append(
                         GateSequence(
                             f"{path.stem}.{arg.id}", str(path.relative_to(root))
+                        )
+                    )
+                # A module-level CALL: ``parametrize("x", registered_claims())``.
+                # This repo's dominant idiom for a registry — four of them are
+                # spelled that way — so a scan that saw only bare names would
+                # be blind to the natural way of writing the next one, and
+                # ``registered_claims()`` was already live and unclassified.
+                elif (
+                    isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Name)
+                    and arg.func.id in defined
+                ):
+                    found.append(
+                        GateSequence(
+                            f"{path.stem}.{arg.func.id}()",
+                            str(path.relative_to(root)),
                         )
                     )
     return tuple(sorted(set(found), key=lambda s: s.name))
@@ -349,6 +447,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_ratchet_baseline_keys_resolve as baselines
     from tests.architecture import test_runtime_caches_not_tracked as caches
     from tests.architecture import test_wiki_runtime_caches_untracked as wiki_caches
+    from tests.architecture import vitals_conformance_registry as vitals
 
     decision_path = director.claiming_modules()
     actuators = director.brokered_actuator_modules()
@@ -496,6 +595,15 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             ),
             kind=EnumerationKind.SUBJECT,
             detects_drop=admission.fencing_row_is_reachable,
+            undetected_members={
+                "role_not_in_catalog": (
+                    "admit_dispatch re-derives this reason below the table as "
+                    "a type narrowing, so the witness is answered identically "
+                    "with the row deleted. Caught instead by "
+                    "test_the_witnesses_are_the_table_in_order, which compares "
+                    "the AST-extracted row order against the witness tuple."
+                )
+            },
             why=(
                 "The first-match fence table. A dropped row makes its reason "
                 "unreachable and the request falls through to a weaker one — "
@@ -570,6 +678,25 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             undetected_reason=(
                 "Same gap as WIKI_9537_CACHES, and the two lists being "
                 "hand-copies of each other is the finding underneath both."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_vitals_conformance_seam.registered_claims()",
+            members=tuple(claim.name for claim in vitals.registered_claims()),
+            kind=EnumerationKind.SUBJECT,
+            why=(
+                "A dropped row stops an artifact being classified vitals or "
+                "conformance, so nothing checks that a rule which must be "
+                "answerable offline still is — 'a conformance check that stops "
+                "running must fail, not pass', unenforced for that artifact."
+            ),
+            undetected_reason=(
+                "The derivation is 'every gate and artifact in the repo', "
+                "which that registry documents as manual on purpose. Same "
+                "shape as MEMBERSHIPS: a registry of registries, and its own "
+                "open problem rather than this gate's. Surfaced here by the "
+                "scan rather than by anyone remembering, which is the scan "
+                "doing its job."
             ),
         ),
         # --- CORPORA ----------------------------------------------------

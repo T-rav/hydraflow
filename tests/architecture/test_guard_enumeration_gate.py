@@ -36,6 +36,7 @@ failure this file is designed against.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 
 import pytest
@@ -45,6 +46,7 @@ from tests.architecture.guard_enumeration_registry import (
     EnumerationKind,
     GuardedEnumeration,
     call_witness,
+    declared_deny_lists,
     import_witness,
     parametrised_module_sequences,
     proposal_keys_read_by_parser,
@@ -60,10 +62,18 @@ DETECTED: tuple[GuardedEnumeration, ...] = tuple(
 )
 
 #: Shrink-only ratchet over subjects with no drop-detector. Lower it when you
-#: wire one; never raise it. Raising it means a new guard was allowed to
-#: parametrise over a sequence nobody can drop a member from safely — which is
-#: this file's entire subject, re-admitted by exception.
-UNDETECTED_SUBJECTS_MAX = 4
+#: wire one.
+#:
+#: Raise it for exactly one reason, and say which in the PR: the SCAN started
+#: seeing a subject that was already there. A guard newly WRITTEN without a
+#: detector is the defect this file exists to catch, re-admitted by exception,
+#: and must not move this number.
+#:
+#: 4 -> 5 (#11723): widening the scan to call-expression argvalues revealed
+#: ``test_vitals_conformance_seam.registered_claims()``, which had been
+#: parametrised over and unclassified all along. The mark moved because the
+#: eyes got better, not because a new guard was let in.
+UNDETECTED_SUBJECTS_MAX = 5
 
 
 def _member_cases() -> list[tuple[GuardedEnumeration, str]]:
@@ -88,6 +98,12 @@ def check_member(row: GuardedEnumeration, member: str) -> None:
     ever exercised on the passing case is a property nobody has seen work.
     """
     assert row.detects_drop is not None, row.name
+    if member in row.undetected_members:
+        assert row.undetected_members[member].strip(), (
+            f"{row.name}::{member} is exempt from drop-detection with no "
+            "reason, which is indistinguishable from an oversight"
+        )
+        return
     assert row.detects_drop(member), (
         f"{row.name} would not notice losing {member!r}: the live machinery "
         f"does not derive or witness it, so deleting the entry reddens "
@@ -176,7 +192,9 @@ def test_a_degenerate_detector_is_a_failure(row: GuardedEnumeration) -> None:
     assumed: swapping the callable changes the outcome, so the callable is
     what the gate reads.
     """
-    degenerate = dataclasses.replace(row, detects_drop=lambda _member: False)
+    degenerate = dataclasses.replace(
+        row, detects_drop=lambda _member: False, undetected_members={}
+    )
 
     with pytest.raises(AssertionError, match="would not notice losing"):
         check_member(degenerate, row.members[0])
@@ -185,6 +203,36 @@ def test_a_degenerate_detector_is_a_failure(row: GuardedEnumeration) -> None:
 #: A member no subject has ever carried. Any detector that answers True for it
 #: is answering without looking.
 _FABRICATED_MEMBER = "__a_member_that_was_never_in_any_subject__"
+
+
+#: Shrink-only. Members exempted from drop-detection because a DIFFERENT named
+#: mechanism catches them. Lower it when the mechanism is fixed at the source;
+#: raise it only for a masking you can name, and name it in the row.
+EXEMPT_MEMBERS_MAX = 1
+
+
+def test_every_member_exemption_names_a_mechanism() -> None:
+    exempt = {
+        f"{row.name}::{member}": reason
+        for row in ENUMERATIONS
+        for member, reason in row.undetected_members.items()
+    }
+
+    assert not [key for key, reason in exempt.items() if not reason.strip()]
+    assert len(exempt) <= EXEMPT_MEMBERS_MAX, (
+        f"{len(exempt)} members are exempt from drop-detection "
+        f"(ratchet: {EXEMPT_MEMBERS_MAX}): {sorted(exempt)}."
+    )
+
+
+def test_every_exempt_member_is_really_a_member() -> None:
+    """An exemption for a member that no longer exists exempts nothing and
+    reads as progress — the #11669 class applied to the exemption list."""
+    for row in ENUMERATIONS:
+        stale = set(row.undetected_members) - set(row.members)
+        assert not stale, (
+            f"{row.name} exempts members it does not have: {sorted(stale)}"
+        )
 
 
 @pytest.mark.parametrize("row", DETECTED, ids=[row.name for row in DETECTED])
@@ -403,9 +451,54 @@ def test_a_deny_list_only_grows(name: str) -> None:
 
 
 def test_every_registered_deny_list_has_a_floor() -> None:
-    """A new deny-list must not be able to arrive unprotected."""
+    """A FIFTH deny-list must not be able to arrive unprotected.
+
+    The three tables here — the floors, the live-list map and the
+    witness-subject map — are all hand-written, so comparing them with each
+    other proves only that one author typed consistently. The load-bearing
+    assertion is the first: the set of deny-lists is DERIVED from the module
+    that declares them, so a new one reddens instead of being silently
+    unfloored. Without it this test was "did the author remember" one level
+    up, which is the defect the registry exists to remove.
+    """
+    declared = declared_deny_lists()
+
+    assert declared, "no deny-list found in test_director_no_authority"
+    assert declared == set(DENY_LIST_FLOORS), (
+        f"unfloored deny-lists: {sorted(declared - set(DENY_LIST_FLOORS))}. "
+        f"Floored but no longer declared: {sorted(set(DENY_LIST_FLOORS) - declared)}."
+    )
     assert set(DENY_LIST_FLOORS) == set(_live_deny_lists())
     assert set(DENY_LIST_FLOORS) == set(_WITNESS_SUBJECTS)
+
+
+#: A call name no deny-list carries. The negative half of the witness.
+_UNDENIED_NAME = "a_call_no_deny_list_has_ever_carried"
+
+
+@pytest.mark.parametrize("name", sorted(DENY_LIST_FLOORS))
+def test_the_deny_list_operand_is_load_bearing(name: str) -> None:
+    """The witness must consult the LIST, not just the extractor.
+
+    ``call_witness`` injects a call and asks whether the guard's own
+    expression — ``called_names(tree) & <deny list>`` — contains it. Drop the
+    ``& <deny list>`` half and it answers True for any identifier, which is
+    what an earlier draft of this file did: a fabricated member added to the
+    list and its floor stayed green everywhere.
+
+    This is the control that makes that half falsifiable. A name the list does
+    not carry must not trip the guard.
+    """
+    subject, extractor = _WITNESS_SUBJECTS[name]
+    live = _live_deny_lists()[name]
+    witness = call_witness if extractor == "call" else import_witness
+
+    assert _UNDENIED_NAME not in live
+    assert not witness(subject, _UNDENIED_NAME, live), (
+        f"{name}'s witness flags {_UNDENIED_NAME!r}, which the list does not "
+        "carry. It is reading the extractor and ignoring the set, so every "
+        "member it 'sees' is unproven."
+    )
 
 
 def _denied_cases() -> list[tuple[str, str]]:
@@ -439,4 +532,52 @@ def test_the_guard_can_actually_see_every_denied_name(name: str, member: str) ->
         f"{name} lists {member!r}, but injecting it into {subject} does not "
         "trip the guard: the extractor cannot see that shape, so the entry "
         "forbids nothing."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The standard's own anchors
+# ---------------------------------------------------------------------------
+
+STANDARD = "docs/standards/parametrised_guards/README.md"
+
+
+def test_every_test_the_standard_names_exists() -> None:
+    """A written anchor pointing at nothing is this standard's own subject.
+
+    The first draft named three: ``test_the_registry_is_not_empty`` (a real
+    test, but in a different gate over a different registry),
+    ``test_every_subject_resolves_to_a_non_empty_sequence`` (never existed),
+    and a ``director_guard`` module that does not exist. A reader following
+    them would have concluded the properties were absent.
+
+    Checked mechanically rather than by proofreading, because "the anchor
+    still resolves" is exactly the class the repo has already been bitten by
+    at eleven path-membership sites and every line-window assertion it had.
+    """
+    import re
+
+    from tests.architecture.guard_enumeration_registry import repo_root
+
+    root = repo_root()
+    text = (root / STANDARD).read_text(encoding="utf-8")
+    named = set(re.findall(r"`(test_[a-z0-9_]+)`", text))
+
+    assert named, f"{STANDARD} names no tests; this guard has no subject"
+
+    defined: set[str] = set()
+    for path in sorted((root / "tests").rglob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        defined.update(
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        )
+        defined.add(path.stem)
+
+    missing = sorted(named - defined)
+    assert not missing, (
+        f"{STANDARD} names these tests, and none of them exist: {missing}. "
+        "Fix the name or write the test — a standard whose anchors do not "
+        "resolve is the defect it documents."
     )
