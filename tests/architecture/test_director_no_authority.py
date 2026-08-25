@@ -555,17 +555,25 @@ def test_every_module_claiming_purity_is_on_the_list() -> None:
 _SPAWN_MACHINERY: frozenset[str] = frozenset({"subprocess", "multiprocessing"})
 
 
-@pytest.mark.parametrize("module", DECISION_PATH_MODULES)
-def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> None:
-    tree = _tree(module)
+def _imported_roots(tree: ast.Module) -> set[str]:
+    """Top-level package names *tree* imports, by either import form.
+
+    Extracted from the guard below so the negative control can run the REAL
+    detector over a victim module rather than restate the detector's inputs
+    back to itself (#11724).
+    """
     roots: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             roots.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             roots.add(node.module.split(".")[0])
+    return roots
 
-    reached = roots & _SPAWN_MACHINERY
+
+@pytest.mark.parametrize("module", DECISION_PATH_MODULES)
+def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> None:
+    reached = _imported_roots(_tree(module)) & _SPAWN_MACHINERY
     assert not reached, (
         f"{module} imports {sorted(reached)}. Every module on this list says it "
         "does not spawn; the call-site guards only know the sanctioned helper "
@@ -574,17 +582,73 @@ def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> 
     )
 
 
-@pytest.mark.parametrize(
-    "raw", ["os.system", "os.popen", "subprocess.Popen", "subprocess.run"]
+#: The four raw spawn forms a decision-path module could reach for, and whether
+#: the import rule above ACTUALLY catches each one — measured against a victim
+#: file by the test below, not asserted from prose. ``subprocess.Popen`` and
+#: ``subprocess.run`` ARE caught: reaching either requires importing
+#: ``subprocess``. ``os.system`` and ``os.popen`` are NOT — ``os`` is
+#: deliberately absent from ``_SPAWN_MACHINERY`` because decision-path modules
+#: import it for ``environ`` and paths, and no other gate in the repo names
+#: ``system``/``popen`` either (bandit rates ``os.system`` B605 *Low* and the
+#: Makefile gates at *medium*). Two of the four forms are therefore uncovered.
+#: That is #11724's open policy question; this table states the gap instead of
+#: hiding it, and a ``False`` row reddens the day somebody closes it — which is
+#: the prompt to update the table rather than a reason to widen it here.
+_RAW_SPAWNS: tuple[tuple[str, bool], ...] = (
+    ("subprocess.Popen", True),
+    ("subprocess.run", True),
+    ("os.system", False),
+    ("os.popen", False),
 )
-def test_the_import_rule_is_what_catches_a_raw_spawn(raw: str) -> None:
-    """Negative control, and the honest statement of why the rule is on
-    imports rather than call names: ``run``/``system``/``popen`` are far too
-    common as bare attribute names to sweep, so the call-site guard cannot see
-    them and the import guard is what does the work."""
-    attr = raw.rsplit(".", 1)[1]
 
-    assert attr not in SPAWN_PRIMITIVES, (
-        f"{attr} is now a sanctioned primitive; the import rule may be redundant"
+
+@pytest.mark.parametrize(("raw", "caught_by_the_import_rule"), _RAW_SPAWNS)
+def test_the_import_rule_is_what_catches_a_raw_spawn(
+    raw: str, caught_by_the_import_rule: bool, tmp_path: Path
+) -> None:
+    """Negative control: run both detectors over a module that really spawns.
+
+    The version this replaces parametrised over the same four strings and never
+    invoked a guard. Both of its assertions were properties of its own
+    hardcoded input, and the ``| {"os"}`` in the second was precisely what let
+    the two UNCAUGHT forms pass as though they were covered (#11724). This one
+    writes a victim file — the shape ``test_vitals_conformance_seam.py`` uses —
+    and asserts what the detectors actually see.
+
+    What they see, stated plainly so the next reader is not misled twice:
+
+    * The call-site guard (``SPAWN_PRIMITIVES``) is blind to all four.
+      ``run``/``system``/``popen`` are far too common as bare attribute names to
+      sweep, which is *why* the rule that does the work is on imports.
+    * The import rule catches ``subprocess.Popen`` and ``subprocess.run``.
+    * The import rule does **not** catch ``os.system`` or ``os.popen``, and
+      neither does anything else in this repo. Half this parametrisation is a
+      documented hole, not coverage.
+    """
+    root = raw.split(".", maxsplit=1)[0]
+    attr = raw.rsplit(".", 1)[1]
+    victim = tmp_path / "victim.py"
+    victim.write_text(
+        f"import {root}\n\n\ndef reach_a_process() -> None:\n    {raw}('true')\n",
+        encoding="utf-8",
     )
-    assert raw.split(".", maxsplit=1)[0] in _SPAWN_MACHINERY | {"os"}
+    tree = ast.parse(victim.read_text(encoding="utf-8"), filename=str(victim))
+
+    assert not (_called_names(tree) & SPAWN_PRIMITIVES), (
+        f"the call-site guard now sees {raw}: {attr} has become a sanctioned "
+        "primitive name, so the import rule is no longer the only thing "
+        "standing between a decision-path module and a raw spawn"
+    )
+
+    reached = _imported_roots(tree) & _SPAWN_MACHINERY
+    if caught_by_the_import_rule:
+        assert reached == {root}, (
+            f"the import rule no longer catches {raw}, and no other gate in the "
+            f"repo does: {root} has left _SPAWN_MACHINERY, so a decision-path "
+            "module could spawn with nothing firing"
+        )
+    else:
+        assert not reached, (
+            f"{raw} is now caught by the import rule — good, but _RAW_SPAWNS "
+            "still records it as a hole. Update this table, and #11724 with it"
+        )
