@@ -129,11 +129,24 @@ detector answers False for a live member the floor does not carry. **Adding a
 member to a deny-list means adding it to `DENY_LIST_FLOORS` too** — the
 failure message says so.
 
-Yes, that is a second copy of the vocabulary, and no, there is no way around
-it: two objects that must agree is the only arrangement in which losing one is
-visible at all. It is the same bargain a ratchet baseline makes. What a copy
-must not become is one nobody re-reads, which is what the per-member witness
-below is for.
+**Why equality, and not containment.** `floor ⊆ live` alone is the tempting
+rule: it catches every drop and lets a deny-list grow without ceremony. It also
+decays. A member added *after* the floor was written sits in `live` and not in
+`floor`, so dropping it again still satisfies `floor ⊆ live` and reddens
+nothing — the new member is unprotected from the moment it arrives. Measured on
+`FORBIDDEN_MUTATIONS`: fifteen later additions leave the floor covering 15 of
+30 names and passing the whole time. That is F2 — a mechanism that looks total
+while covering a subset — reproduced inside the thing built to catch it.
+
+So the containment reading is not a softer version of the rule, it is the bug.
+Equality costs one line in one file when you widen a deny-list, and the failure
+message names the file. Decay costs coverage you cannot see yourself losing.
+
+That does make the floor a second copy of the vocabulary, and there is no way
+around it: two objects that must agree is the only arrangement in which losing
+one is visible at all. It is the same bargain a ratchet baseline makes. What a
+copy must not become is one nobody re-reads, which is what the per-member
+witness below is for.
 
 The floor is kept honest by the witness it replaced, applied to *live* members
 rather than used as the detector: every member of every deny-list is injected

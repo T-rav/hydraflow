@@ -229,6 +229,14 @@ def declared_deny_lists() -> frozenset[str]:
 #: ``floor_protects`` answers False for a live member the floor does not
 #: carry. Adding a member means adding it here too.
 #:
+#: Equality rather than containment, and the difference is not strictness for
+#: its own sake. Under ``floor <= live`` alone, a member added after the floor
+#: was written is absent from the floor, so dropping it again satisfies the
+#: containment and reddens nothing — it is unprotected from arrival. The floor
+#: would then cover a shrinking fraction of the list while passing: 15 of 30
+#: names after fifteen additions. That is F2 reproduced inside the mechanism
+#: built to catch F2, which is why the convenient reading is the bug.
+#:
 #: A second copy is the cost, and it is the price of a drop reddening at all:
 #: two objects that must agree is the only arrangement where losing one is
 #: visible, which is the same reason a ratchet baseline is a copy. What it
