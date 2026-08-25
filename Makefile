@@ -90,6 +90,19 @@ GATEWAY_PACKAGE_TEST_IGNORES := $(addprefix --ignore=,$(wildcard $(GATEWAY_PACKA
 GATEWAY_PACKAGE_COVERAGE_MIN := 85
 GATEWAY_PACKAGE_COVERAGE_CMD := PYTHONPATH=src $(UV) pytest $(GATEWAY_PACKAGE_TEST_PATHS) --cov=hydraflow_gateway --cov-branch --cov-fail-under=$(GATEWAY_PACKAGE_COVERAGE_MIN) --cov-report=term-missing
 
+# #11730 — the ungated aggregate-ratchet lane. These gates measure a quantity
+# summed over a WHOLE tree (every module under tests/, every module under src/,
+# recent merge history) and compare it to a committed mark. CI decides whether
+# to run a gate from a dorny/paths-filter allowlist, so any such gate that is
+# path-triggered can be breached by a change inside its subject but outside its
+# trigger — the number moves and no gate sees it. The `aggregate-ratchets` CI
+# job runs this list UNGATED, on every PR and on every push to main/staging, so
+# the trigger cannot be narrower than the subject and a breach assembled from
+# individually-green PRs is measured against the real merged tree.
+# The registry that explains each entry — and the guard that keeps this list
+# equal to it — is tests/architecture/aggregate_gate_registry.py.
+AGGREGATE_RATCHET_PATHS := tests/architecture/test_suite_hygiene_ratchet.py tests/architecture/test_no_ignored_active_tests.py tests/architecture/test_adr0023_test_local_class_instantiation.py tests/architecture/test_duration_ratchet.py tests/test_disturbance_ratchet.py
+
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3
 MODEL ?= opus
@@ -893,6 +906,14 @@ escape-list: ## List escape-ledger findings still awaiting a human resolution.
 
 escape-resolve: ## Record a human resolution for an escape (ARGS="<id> --encoded-as <encoding>" and/or "--confidence <level>").
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/resolve_escape.py resolve $(ARGS)
+
+.PHONY: aggregate-ratchets
+
+## aggregate-ratchets — run the whole-tree ratchets (the ungated CI lane, #11730)
+aggregate-ratchets: deps
+	@echo "$(BLUE)Running whole-tree aggregate ratchets...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(AGGREGATE_RATCHET_PATHS) -q
+	@echo "$(GREEN)Aggregate ratchets passed$(RESET)"
 
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
