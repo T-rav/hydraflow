@@ -170,6 +170,22 @@ exclude = [
     "repo_wiki",
     "repo_wiki/**",
 ]
+# venvPath/venv make this config self-sufficient (#11707). Without them
+# pyright's answer depends on HOW it is invoked: `uv run pyright` (what
+# `make quality` and CI use) resolves the project's site-packages, but a bare
+# `.venv/bin/pyright` resolves a different interpreter, cannot see them, and
+# every py.typed dependency — BaseModel, FastAPI, httpx.AsyncClient — degrades
+# to `Unknown`, silently switching off attribute checking on everything derived
+# from them. The reportMissingImports/reportMissingTypeStubs suppressions below
+# hide the two diagnostics that would have announced it, so the type check just
+# goes green. Kept RELATIVE so a git worktree resolves its OWN .venv, matching
+# what `make quality` runs against there. A checkout without one (a fresh
+# worktree, or the agent image, which keeps its venv at /opt/hydraflow-venv and
+# exports it on PATH) is not a regression: pyright warns once and falls back to
+# the PATH interpreter search it used before these lines existed.
+# Guarded by tests/regressions/test_issue_11707_pyright_dependency_blindness.py.
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "standard"
 reportMissingImports = false
 reportMissingTypeStubs = false
