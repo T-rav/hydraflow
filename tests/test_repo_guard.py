@@ -234,28 +234,55 @@ class TestWorktreeOriginValidation:
         with patch.object(WorkspaceManager, "_detect_ui_dirs", return_value=[]):
             return WorkspaceManager(config)
 
+    # ------------------------------------------------------------------
+    # The origin-URL table. Every form ``git remote get-url origin`` can
+    # emit, including the dotted repo names (``socket.io``, ``next.js``)
+    # that GitHub permits and the old ``[^/.]+?`` repo segment silently
+    # refused to parse — failing this safety guard OPEN (#11703).
+    # ------------------------------------------------------------------
+    ORIGIN_TABLE: tuple[tuple[str, str, str], ...] = (
+        # (id, origin URL as git prints it, expected owner/repo slug)
+        ("scp_style", "git@github.com:owner/repo.git", "owner/repo"),
+        ("scp_style_no_suffix", "git@github.com:owner/repo", "owner/repo"),
+        ("https", "https://github.com/owner/repo.git", "owner/repo"),
+        ("https_no_suffix", "https://github.com/owner/repo", "owner/repo"),
+        ("ssh_url", "ssh://git@github.com/owner/repo.git", "owner/repo"),
+        ("ssh_url_no_suffix", "ssh://git@github.com/owner/repo", "owner/repo"),
+        (
+            "token_in_url",
+            "https://x-access-token:ghp_TOKEN@github.com/owner/repo.git",
+            "owner/repo",
+        ),
+        # Dotted repo names — the #11703 fail-open class.
+        ("dotted_scp", "git@github.com:socketio/socket.io.git", "socketio/socket.io"),
+        ("dotted_https", "https://github.com/vercel/next.js", "vercel/next.js"),
+        (
+            "dotted_https_suffix",
+            "https://github.com/vercel/next.js.git",
+            "vercel/next.js",
+        ),
+        ("dotted_ssh_url", "ssh://git@github.com/vercel/next.js.git", "vercel/next.js"),
+        ("dotted_owner", "git@github.com:my.org/my.repo.git", "my.org/my.repo"),
+    )
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "url",
-        [
-            "https://github.com/owner/repo.git\n",
-            "git@github.com:owner/repo.git\n",
-            "https://github.com/owner/repo\n",
-            "ssh://git@github.com/owner/repo.git\n",
-        ],
-        ids=["https", "ssh-scp", "https-no-suffix", "ssh-url"],
+        ("url", "slug"),
+        [(url, slug) for _, url, slug in ORIGIN_TABLE],
+        ids=[case_id for case_id, _, _ in ORIGIN_TABLE],
     )
     async def test_matching_origin_url_is_accepted(
-        self, url: str, caplog: pytest.LogCaptureFixture
+        self, url: str, slug: str, caplog: pytest.LogCaptureFixture
     ) -> None:
-        wm = self._make_wt_manager("owner/repo")
+        """Every origin form parses to its slug and is accepted when it matches."""
+        wm = self._make_wt_manager(slug)
         with (
             caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
             patch(
                 "workspace._remote.run_subprocess", new_callable=AsyncMock
             ) as mock_run,
         ):
-            mock_run.return_value = url
+            mock_run.return_value = f"{url}\n"
             result = await wm._assert_origin_matches_repo()
         # The mock must be the thing that answered: a stale patch target lets
         # the real subprocess run, fail, and get swallowed at _remote.py's
@@ -263,30 +290,66 @@ class TestWorktreeOriginValidation:
         # two apart (#11547 review).
         mock_run.assert_awaited_once()
         # And the URL must have been *parsed*, not merely tolerated. Without
-        # this, breaking the origin regexes leaves every case green: an
-        # unparseable URL only logs a warning and returns None.
-        assert "Could not parse origin URL" not in caplog.text
+        # this, breaking the origin regex leaves every case green: an
+        # unrecognised URL only logs a warning and returns None (#11703).
+        assert "Origin validation SKIPPED" not in caplog.text
         assert result is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "url",
-        [
-            "https://github.com/other/project.git\n",
-            "git@github.com:other/project.git\n",
-            "https://github.com/other/project\n",
-        ],
-        ids=["https", "ssh-scp", "https-no-suffix"],
+        ("url", "slug"),
+        [(url, slug) for _, url, slug in ORIGIN_TABLE],
+        ids=[case_id for case_id, _, _ in ORIGIN_TABLE],
     )
-    async def test_mismatch_raises(self, url: str) -> None:
-        wm = self._make_wt_manager("owner/repo")
-        with patch(
-            "workspace._remote.run_subprocess", new_callable=AsyncMock
-        ) as mock_run:
-            mock_run.return_value = url
-            with pytest.raises(RuntimeError, match="expected 'owner/repo'"):
+    async def test_mismatched_origin_raises_for_every_url_form(
+        self, url: str, slug: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The guard RAISES on a foreign origin — for every URL form it parses.
+
+        The point of the guard is this raise, and #11670 found guards whose
+        regression had never been watched go red. Pairing it with the accept
+        table means a pattern that stops parsing a form cannot hide here: a
+        skipped guard returns None, which fails ``pytest.raises`` loudly.
+        """
+        wm = self._make_wt_manager("owner/expected-repo")
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+            patch(
+                "workspace._remote.run_subprocess", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = f"{url}\n"
+            with pytest.raises(RuntimeError) as excinfo:
                 await wm._assert_origin_matches_repo()
         mock_run.assert_awaited_once()
+        # The message names the slug the regex extracted, so this asserts the
+        # parse as well as the raise.
+        assert f"resolves to {slug!r}" in str(excinfo.value)
+        assert "expected 'owner/expected-repo'" in str(excinfo.value)
+        assert "Origin validation SKIPPED" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_dotted_repo_name_is_validated_not_skipped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A dotted repo name reaches the comparison instead of failing open.
+
+        The #11703 canary. With the old ``[^/.]+?`` repo segment this origin
+        parsed to nothing, the guard warned and returned, and a checkout of the
+        wrong repo sailed through. Reverting the widening must redden this.
+        """
+        wm = self._make_wt_manager("socketio/socket.io")
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+            patch(
+                "workspace._remote.run_subprocess", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = "git@github.com:evilcorp/socket.io.git\n"
+            with pytest.raises(RuntimeError, match="expected 'socketio/socket.io'"):
+                await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+        assert "Origin validation SKIPPED" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_case_insensitive_match(
@@ -302,14 +365,21 @@ class TestWorktreeOriginValidation:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
         mock_run.assert_awaited_once()
-        assert "Could not parse origin URL" not in caplog.text
+        assert "Origin validation SKIPPED" not in caplog.text
         assert result is None  # case-insensitive match succeeds
 
     @pytest.mark.asyncio
-    async def test_unparseable_origin_url_warns_and_does_not_raise(
+    async def test_unrecognised_origin_url_warns_that_validation_was_skipped(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A URL neither regex understands is tolerated, loudly."""
+        """A non-GitHub origin is tolerated, and the log says the guard did not run.
+
+        Fail-open is the deliberate, unchanged behaviour here (#11703): flipping
+        it to a raise aborts factory runs on any origin form the pattern does
+        not handle, which is an operator decision. What the log must NOT do is
+        read like a cosmetic parse miss — it has to say the safety check was
+        SKIPPED.
+        """
         wm = self._make_wt_manager("owner/repo")
         with (
             caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
@@ -320,7 +390,8 @@ class TestWorktreeOriginValidation:
             mock_run.return_value = "https://gitlab.example/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
         mock_run.assert_awaited_once()
-        assert "Could not parse origin URL" in caplog.text
+        assert "Origin validation SKIPPED" in caplog.text
+        assert "did NOT run" in caplog.text
         assert result is None
 
     @pytest.mark.asyncio
@@ -333,3 +404,37 @@ class TestWorktreeOriginValidation:
         # The short-circuit is the point: no subprocess is spawned at all.
         expect_unconsulted(mock_run, "empty repo short-circuits before any git call")
         assert result is None
+
+
+class TestOriginUrlPatternHasNoDeadArm:
+    """``_ORIGIN_SSH_RE`` was unreachable: the surviving pattern already wins.
+
+    Deleting dead code needs proof it was dead. This asserts the property that
+    made it so — ``[/:]`` matches scp-style's ``:`` and the search is unanchored
+    — over the same table the behavioural tests use, so a future narrowing of
+    the pattern that would resurrect the need for an SSH arm reddens here (#11703).
+    """
+
+    def test_single_pattern_parses_every_origin_form(self) -> None:
+        from workspace import WorkspaceManager
+
+        for case_id, url, slug in TestWorktreeOriginValidation.ORIGIN_TABLE:
+            match = WorkspaceManager._ORIGIN_URL_RE.search(url)
+            assert match is not None, f"{case_id}: {url!r} did not parse"
+            assert match.group(1) == slug, f"{case_id}: {url!r} -> {match.group(1)!r}"
+
+    def test_dead_ssh_pattern_is_gone(self) -> None:
+        from workspace import WorkspaceManager
+
+        assert not hasattr(WorkspaceManager, "_ORIGIN_SSH_RE")
+
+    def test_non_github_origin_does_not_parse(self) -> None:
+        """The pattern stays a GitHub-origin check; it does not match anything."""
+        from workspace import WorkspaceManager
+
+        assert (
+            WorkspaceManager._ORIGIN_URL_RE.search(
+                "https://gitlab.example/owner/repo.git"
+            )
+            is None
+        )

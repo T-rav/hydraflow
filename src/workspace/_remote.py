@@ -29,8 +29,7 @@ class WorkspaceRemoteMixin:
     # runtime ``...`` body is a real class attribute and would win the MRO
     # over the sibling that really implements it (#11629).
     # ------------------------------------------------------------------
-    _ORIGIN_HTTPS_RE: re.Pattern[str]
-    _ORIGIN_SSH_RE: re.Pattern[str]
+    _ORIGIN_URL_RE: re.Pattern[str]
     _config: HydraFlowConfig
     _credentials: Credentials
     _repo_root: Path
@@ -40,7 +39,15 @@ class WorkspaceRemoteMixin:
         def _repo_fetch_lock(self) -> asyncio.Lock: ...  # provided by _manager
 
     async def _assert_origin_matches_repo(self) -> None:
-        """Raise ``RuntimeError`` if origin remote doesn't match the configured repo."""
+        """Raise ``RuntimeError`` if origin remote doesn't match the configured repo.
+
+        **Fails open by design.** An origin URL the pattern does not recognise —
+        a non-GitHub host, a ``file://`` or filesystem origin — is logged as a
+        SKIPPED validation and execution continues; it is not an error. Whether
+        that should instead abort is an open operator decision (#11703), because
+        this runs on every workspace creation and a hard raise would turn one
+        misconfigured origin into a factory-wide stall.
+        """
         expected = self._config.repo
         if not expected:
             return
@@ -54,14 +61,22 @@ class WorkspaceRemoteMixin:
                 gh_token=self._credentials.gh_token,
             )
             url = output.strip()
-            match = self._ORIGIN_HTTPS_RE.search(url) or self._ORIGIN_SSH_RE.search(url)
+            match = self._ORIGIN_URL_RE.search(url)
             if match:
                 actual = match.group(1)
                 if actual.lower() != expected.lower():
                     msg = f"Origin remote {url!r} resolves to {actual!r}, expected {expected!r}"
                     raise RuntimeError(msg)
             else:
-                logger.warning("Could not parse origin URL %r for repo validation", url)
+                # Fail-open, but say so honestly: the guard did not run, so
+                # nothing below has verified this checkout's identity. The
+                # old wording ('could not parse') read like a cosmetic parse
+                # miss rather than a skipped safety check (#11703).
+                logger.warning(
+                    "Origin validation SKIPPED for %r: origin URL not recognised, "
+                    "so the repo-identity guard did NOT run for this checkout",
+                    url,
+                )
         except RuntimeError:
             raise
         except Exception:
