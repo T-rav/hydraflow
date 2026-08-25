@@ -57,7 +57,6 @@ did exist would find every boundary outside the canary's bound.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
@@ -175,6 +174,21 @@ _REFUSAL_CODES = REFUSAL_CODES
 #: forbidden keys is fail-open the moment somebody invents a new one, and the
 #: key an untrusted reviewer would invent is precisely the one nobody listed.
 #:
+#: Every way an untrusted string can break a JSON parser, fail-closed to a
+#: refusal. Copied from ``hydraflow_gateway.observer``'s
+#: ``_JSON_OBSERVER_ERRORS`` rather than re-derived — this repo already worked
+#: out the tuple for exactly this hazard at two other untrusted-JSON
+#: boundaries, and a third hand-written version is how they drift.
+#:
+#: ``RecursionError`` is the one a ``JSONDecodeError``-only handler misses, and
+#: it is not exotic: ~2 KB of nested brackets — far inside
+#: :data:`MAX_PARSE_CHARS` — raises it out of ``json``. It is a ``RuntimeError``,
+#: so it is not in ``FATAL_EXCEPTIONS`` either; it simply escaped ``_run_child``
+#: to the allocator, breaking this module's promise that a child's failure
+#: becomes a receipt (#11543). The parser one layer down bounds its own
+#: recursion deliberately; the hostile one did not.
+_UNTRUSTED_JSON_ERRORS = (UnicodeDecodeError, ValueError, RecursionError)
+
 #: Scope, stated exactly (#11543). NEITHER constant is what closes the
 #: boundary: a proposal is assembled by naming its three fields explicitly and
 #: a finding by naming its four, so an unlisted key has no path to either
@@ -914,6 +928,12 @@ def _bounded_diff(diff: str) -> str:
         return "(the diff supplied with this evidence is empty)"
     if len(diff) <= MAX_DIFF_CHARS:
         return diff
+    # The HEAD, not the tail: file headers and the first hunks are what orient
+    # a reviewer, and the banner below says the change "continues past the end
+    # of this block" — which is a lie if the tail is what survived. Both the
+    # slice direction and the banner's position ahead of the excerpt are
+    # pinned; every earlier test used homogeneous fill, so head and tail were
+    # indistinguishable to all of them (#11543).
     return (
         f"(TRUNCATED at {MAX_DIFF_CHARS} characters; the change continues past "
         "the end of this block and you are not being shown the rest)\n"
@@ -953,7 +973,7 @@ def parse_review_proposal(text: str) -> ReviewProposal | None:
     """
     try:
         raw = extract_json(text)
-    except json.JSONDecodeError:
+    except _UNTRUSTED_JSON_ERRORS:
         return None
     if not isinstance(raw, dict):
         return None

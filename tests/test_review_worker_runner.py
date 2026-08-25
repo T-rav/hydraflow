@@ -40,6 +40,7 @@ from review_worker_runner import (
     MAX_DIFF_CHARS,
     MAX_FINDING_SUMMARY_CHARS,
     MAX_FINDINGS,
+    MAX_PARSE_CHARS,
     NO_SUMMARY_PLACEHOLDER,
     ReviewWorkerRunner,
     build_review_worker_prompt,
@@ -889,6 +890,37 @@ class TestTheReceiptIsTheEvidence:
         assert receipts[0].output_contract_ok is False
         assert "req-1" not in runner.last_proposals
         assert runner.artifacts[0].proposal is None
+
+    @pytest.mark.asyncio
+    async def test_a_reply_past_the_parse_window_is_refused_not_read_whole(
+        self, tmp_path: Path
+    ) -> None:
+        """``MAX_PARSE_CHARS`` bounds what a receipt path reads (#11543).
+
+        Its docstring argues the point at length — *"a receipt path must not
+        read an unbounded string"* — and deleting the slice survived every
+        test, including the one directly above it, because that one only
+        proves a reply UNDER the window still parses.
+
+        The observable difference is a reply whose JSON extends PAST the
+        window: the slice cuts it mid-object, so it cannot parse and the
+        contract is honestly reported unmet. Without the slice it parses, and
+        the module has read an unbounded string off a child's stdout.
+        """
+        reply = json.dumps(
+            {
+                "recommended": "comment",
+                "summary": "s" * (MAX_PARSE_CHARS + 5_000),
+                "findings": [],
+            }
+        )
+        assert len(reply) > MAX_PARSE_CHARS, "the fixture must exceed the window"
+        runner = _runner(tmp_path, SpawnRecorder(stdout=reply))
+
+        receipts = await _dispatch(runner, [_request()])
+
+        assert runner.last_proposals.get("req-1") is None
+        assert receipts[0].output_contract_ok is False
 
     @pytest.mark.asyncio
     async def test_a_proposal_longer_than_the_retained_artifact_still_parses(

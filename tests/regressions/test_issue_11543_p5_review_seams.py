@@ -42,8 +42,14 @@ from driver_contracts import (
     WriteScope,
     admit_dispatch,
 )
+from implement_broker import implement_canary_armed
 from models import ReviewVerdict
-from plan_broker import REFUSAL_CODES, PlanRouteReason, plan_canary_covers
+from plan_broker import (
+    REFUSAL_CODES,
+    PlanRouteReason,
+    plan_canary_armed,
+    plan_canary_covers,
+)
 from review_authority import (
     AdjudicationReason,
     ReviewFinding,
@@ -61,10 +67,14 @@ from review_broker import (
 )
 from review_evidence import CANONICAL_FIELDS, ReviewEvidence, build_review_evidence
 from review_worker_runner import (
+    _UNTRUSTED_JSON_ERRORS,
     MAX_DIFF_CHARS,
+    MAX_PARSE_CHARS,
     _bounded_diff,
     _finding,
     _refusal,
+    build_review_worker_prompt,
+    parse_review_proposal,
 )
 from scheduling_model import ExecutionRuntime, SchedulingModel
 from worker_receipts import unresolved_decision
@@ -550,7 +560,7 @@ class TestOneVocabularyForOneLineage:
 
 
 class _Dials:
-    """A stand-in for the two config fields the bound reads. Nothing else.
+    """A stand-in for the config fields the bound reads. Nothing else.
 
     Copied from ``tests/test_implement_broker.py`` deliberately: the point of
     the test below is that the sibling already had it and this module did not.
@@ -558,8 +568,14 @@ class _Dials:
 
     def __init__(self, repo: str, canary: str) -> None:
         self.repo = repo
+        # All three dials carry the same value so one stand-in serves every
+        # sibling. Tests that need them to DIFFER set the one they mean with
+        # setattr — welding them together silently would make a cross-wiring
+        # defect invisible here, which is a hole `test_review_broker` covers
+        # and this file should not rely on.
         self.fable_review_canary_repo = canary
         self.fable_plan_canary_repo = canary
+        self.fable_implement_canary_repo = canary
 
 
 class TestTheOffSwitchClauseHasASubject:
@@ -1270,12 +1286,32 @@ class TestTheBrokerArmedPredicateRejectsALossyDial:
     plan copies were only ever exercised with the dial EMPTY, so a bare
     truthiness check on the dial text survived in both."""
 
-    @pytest.mark.parametrize("lossy", ["widget", "acme/widget/extra", "acme-widget"])
-    def test_a_lossy_review_dial_arms_nothing(self, lossy: str) -> None:
-        assert review_canary_armed(_Dials("acme/widget", lossy)) is False
+    #: The enumeration the class docstring names. Parametrised over it rather
+    #: than pinning one member, which is the N-vs-N-1 trap this whole chain
+    #: keeps falling into: a fix whose rationale counts three sites and covers
+    #: one. Pass 10 caught exactly that here — plan was still unpinned.
+    _ARMED = [
+        pytest.param(review_canary_armed, "fable_review_canary_repo", id="review"),
+        pytest.param(plan_canary_armed, "fable_plan_canary_repo", id="plan"),
+        pytest.param(
+            implement_canary_armed, "fable_implement_canary_repo", id="implement"
+        ),
+    ]
 
-    def test_a_canonical_review_dial_does_arm(self) -> None:
-        assert review_canary_armed(_Dials("acme/widget", "acme/widget")) is True
+    @pytest.mark.parametrize(("armed", "dial"), _ARMED)
+    @pytest.mark.parametrize("lossy", ["widget", "acme/widget/extra", "acme-widget"])
+    def test_a_lossy_dial_arms_nothing(self, armed, dial: str, lossy: str) -> None:
+        dials = _Dials("acme/widget", "")
+        setattr(dials, dial, lossy)
+
+        assert armed(dials) is False
+
+    @pytest.mark.parametrize(("armed", "dial"), _ARMED)
+    def test_a_canonical_dial_does_arm(self, armed, dial: str) -> None:
+        dials = _Dials("acme/widget", "")
+        setattr(dials, dial, "acme/widget")
+
+        assert armed(dials) is True
 
 
 class TestLineageUnknownOutranksBookkeeping:
@@ -1336,3 +1372,205 @@ class TestLineageUnknownOutranksBookkeeping:
         )
 
         assert reason is RejectionReason.LINEAGE_UNKNOWN
+
+
+class TestAnUntrustedReplyCannotEscapeAsAnException:
+    """A ~2 KB reply crashed through ``dispatch()`` to the allocator.
+
+    ``parse_review_proposal`` caught only ``json.JSONDecodeError``. Nested
+    brackets far inside ``MAX_PARSE_CHARS`` raise ``RecursionError`` — a
+    ``RuntimeError``, so not in ``FATAL_EXCEPTIONS`` either — and it escaped
+    ``_run_child``'s closed ``try``, breaking this module's stated contract
+    that a child's failure becomes a receipt.
+
+    The tuple is COPIED from ``hydraflow_gateway.observer``: this repo had
+    already worked it out at two other untrusted-JSON boundaries. A third
+    hand-written version is how they drift.
+    """
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            pytest.param(
+                '{"recommended":"approve","summary":"ok","findings":'
+                + "[" * 995
+                + "]" * 995
+                + "}",
+                id="recursion-bomb",
+            ),
+            pytest.param("not json at all", id="not-json"),
+            pytest.param('{"recommended":', id="truncated-json"),
+            pytest.param("", id="empty"),
+        ],
+    )
+    def test_every_hostile_shape_refuses_instead_of_raising(self, reply: str) -> None:
+        assert parse_review_proposal(reply) is None
+
+    def test_a_legal_reply_still_parses(self) -> None:
+        """Non-vacuity: a parser that returned None always would pass above."""
+        proposal = parse_review_proposal(
+            '{"recommended":"approve","summary":"ok","findings":[]}'
+        )
+
+        assert proposal is not None
+        assert proposal.recommended is ReviewVerdict.APPROVE
+
+    def test_the_tuple_matches_the_sibling_it_was_copied_from(self) -> None:
+        """One vocabulary. A second hand-written copy is how they drift."""
+        from hydraflow_gateway.observer import _JSON_OBSERVER_ERRORS
+
+        assert set(_UNTRUSTED_JSON_ERRORS) == set(_JSON_OBSERVER_ERRORS)
+
+
+class TestEveryCanonicalFieldReachesThePrompt:
+    """The DROPS direction, at the layer that actually reaches the model.
+
+    ``as_payload``'s guard protects the PAYLOAD; the prompt builder is a
+    second, independent allow-list — and only its ADDS direction was pinned
+    (structurally, by literal indexing). Blanking any of NINE of the thirteen
+    canonical fields out of the prompt left the whole suite green.
+
+    Derived from ``CANONICAL_FIELDS`` rather than listed, so a field added to
+    the evidence model must reach the reviewer or redden — which is exactly
+    what ``as_payload``'s docstring already promises ("a field added to the
+    model reaches the prompt") and could not deliver.
+    """
+
+    #: Sentinel values distinctive enough that finding them in the prompt
+    #: cannot be an accident of the surrounding template text.
+    _MARKERS = {
+        "issue_number": 424242,
+        "issue_title": "ZZTITLEZZ",
+        "issue_goal": "ZZGOALZZ",
+        "acceptance_criteria": ("ZZCRITERIONZZ",),
+        "plan_summary": "ZZPLANZZ",
+        "branch": "ZZBRANCHZZ",
+        "base_sha": "b" * 40,
+        "head_sha": "h" * 40,
+        "diff": "ZZDIFFZZ",
+        "changed_files": ("ZZFILEZZ",),
+        "test_command": "ZZCOMMANDZZ",
+        "test_summary": "ZZSUMMARYZZ",
+        "test_failures": ("ZZFAILUREZZ",),
+    }
+
+    def test_the_marker_table_covers_the_allow_list(self) -> None:
+        """The parametrize below is only total if this table is."""
+        assert set(self._MARKERS) == CANONICAL_FIELDS
+
+    @pytest.mark.parametrize("field", sorted(CANONICAL_FIELDS))
+    def test_the_field_is_visible_to_the_reviewer(self, field: str) -> None:
+        evidence = build_review_evidence(dict(self._MARKERS))
+        prompt = build_review_worker_prompt(role="reviewer", evidence=evidence)
+        marker = self._MARKERS[field]
+        needle = str(marker[0]) if isinstance(marker, tuple) else str(marker)
+
+        assert needle in prompt, f"{field} never reaches the reviewer"
+
+
+class TestTheDiffCutIsTheHeadAndTheBannerLeads:
+    """Length was pinned; direction and position were not.
+
+    Every earlier test used homogeneous fill (``"d" * n``), so head and tail
+    were indistinguishable to all of them and ``diff[:N]`` -> ``diff[-N:]``
+    survived. The banner says the change "continues past the end of this
+    block" — a lie if the tail is what survived, and the head is what orients
+    a reviewer: file headers and the first hunks.
+    """
+
+    def test_the_head_survives_and_the_tail_does_not(self) -> None:
+        marked = "HEADMARKER" + ("d" * MAX_DIFF_CHARS) + "TAILMARKER"
+
+        bounded = _bounded_diff(marked)
+
+        assert "HEADMARKER" in bounded
+        assert "TAILMARKER" not in bounded
+
+    def test_the_banner_precedes_the_excerpt(self) -> None:
+        """ADR-0087's placement argument: a reader must know the block is
+        partial BEFORE reading it, not after."""
+        bounded = _bounded_diff("HEADMARKER" + "d" * MAX_DIFF_CHARS)
+
+        assert bounded.index("TRUNCATED") < bounded.index("HEADMARKER")
+
+    def test_a_whitespace_only_diff_says_so(self) -> None:
+        """``not diff.strip()`` -> ``not diff`` survived, so a whitespace-only
+        diff rendered as a blank block instead of saying it is empty."""
+        assert "empty" in _bounded_diff("   \n\t  ")
+
+
+class TestTheReplyIsSlicedBeforeItIsParsed:
+    """``MAX_PARSE_CHARS``'s docstring argues at length that "a receipt path
+    must not read an unbounded string". Deleting the slice survived, and it is
+    the bound the recursion bomb above sits behind."""
+
+    # The slice itself is pinned end-to-end in
+    # ``test_review_worker_runner.test_a_reply_past_the_parse_window_is_refused_not_read_whole``
+    # — a reply whose JSON extends past the window must fail to parse. An
+    # earlier version of this class asserted `len(s[:N]) == N`, which is
+    # arithmetic about the stdlib and pins nothing: the mutation that deletes
+    # the slice survived it.
+
+    def test_a_reply_past_the_window_still_refuses_rather_than_raising(self) -> None:
+        """End to end through the parser: an enormous hostile reply is a
+        refusal, never an exception."""
+        assert parse_review_proposal("[" * (MAX_PARSE_CHARS // 2)) is None
+
+
+class TestTheTheftCounterIsNotDowngradedToAStaleFence:
+    """The sharpest of the ordered-table adjacencies.
+
+    ``admit_dispatch``'s comment states the rule and names the counter it
+    protects: "a lease lagging its driver's epoch is a stale fence rather than
+    ownership theft — so it reports LEASE_EXPIRED, not DRIVER_IDENTITY_MISMATCH,
+    which B5's bar counts as a theft event." The ordinary theft shape trips
+    BOTH predicates, and swapping those two rows survived — downgrading a theft
+    event to a stale fence in the evidence the canary is judged by.
+    """
+
+    def test_a_foreign_writer_lease_reports_theft_not_staleness(self) -> None:
+        now = datetime.now(UTC)
+        lease = DriverLease(
+            driver_id="drv-mine",
+            epoch=7,
+            repo_slug="acme/widget",
+            issue_number=1,
+            phase=DriverPhase.IMPLEMENT,
+            expected_stage_label="hydraflow-implementing",
+            phase_attempt=0,
+            expires_at=now + timedelta(hours=1),
+        )
+        request = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-mine",
+            epoch=7,
+            phase_attempt=0,
+            worker_role=WorkerRole.IMPLEMENTER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+            ),
+            task_contract="write it",
+            reason="needs code",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+        )
+
+        reason = admit_dispatch(
+            request=request,
+            lease=lease,
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-implementing",
+            # Foreign driver AND a lagging epoch: both predicates true.
+            writer_lease=WriterLease(
+                driver_id="drv-thief",
+                epoch=9,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.IMPLEMENTER}),
+            remaining_usd_budget=10.0,
+        )
+
+        assert reason is RejectionReason.DRIVER_IDENTITY_MISMATCH
