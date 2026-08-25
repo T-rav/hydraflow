@@ -69,26 +69,63 @@ def remote_hosts(text: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-def _dynamic_import_target(call: ast.Call) -> str | None:
-    """``importlib.import_module("boto3")`` / ``__import__("boto3")``.
+#: Functions that perform an import at runtime.
+_DYNAMIC_IMPORT_FUNCS: Final[frozenset[str]] = frozenset(
+    {"import_module", "__import__"}
+)
+
+
+class _DynamicImportNames:
+    """What ``importlib.import_module`` is called *in one file*.
 
     #11706's census found ``importlib`` sitting alongside ``subprocess`` in the
     conformance roots' escape hatches. A dynamic import is a real import that no
-    ``ast.Import`` node records, so a sweep that reads only import statements
-    treats ``import_module(name)`` as ordinary code. Only string LITERALS are
-    resolvable here; a name computed at runtime is a residual the standard
-    records, same as an argv built from non-literals.
+    ``ast.Import`` node records, so a sweep reading only import statements treats
+    ``import_module(name)`` as ordinary code.
+
+    Alias resolution is the whole reason this is a class and not a two-string
+    match. The first version compared the call's SPELLING, which
+    ``from importlib import import_module as im`` walks straight past — a guard
+    parametrised over a proxy for an identity rather than the identity itself,
+    the #11723 shape. ``_SpawnNames`` below already resolves against what a name
+    is BOUND to; this does the same, from the same file's own imports.
+
+    Only string LITERALS are resolvable; a module name computed at runtime is a
+    residual the standard records, same as an argv built from non-literals.
     """
-    func = call.func
-    name = func.attr if isinstance(func, ast.Attribute) else None
-    if isinstance(func, ast.Name):
-        name = func.id
-    if name not in {"import_module", "__import__"} or not call.args:
+
+    def __init__(self, tree: ast.Module) -> None:
+        #: ``__import__`` is a builtin — always bound, never imported.
+        self.bare: set[str] = {"__import__"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.split(".")[0] not in {"importlib", "builtins"}:
+                    continue
+                for alias in node.names:
+                    if alias.name in _DYNAMIC_IMPORT_FUNCS:
+                        self.bare.add(alias.asname or alias.name)
+
+    def target(self, call: ast.Call) -> str | None:
+        """The module a dynamic-import call names, if it is a literal."""
+        func = call.func
+        if isinstance(func, ast.Name):
+            if func.id not in self.bare:
+                return None
+        elif isinstance(func, ast.Attribute):
+            # ``importlib.import_module`` under any module alias, and any other
+            # attribute of that name. Deliberately not narrowed to a resolved
+            # ``importlib`` receiver: ``self._importlib.import_module(...)``
+            # imports just as hard, and narrowing here would fail open.
+            if func.attr not in _DYNAMIC_IMPORT_FUNCS:
+                return None
+        else:
+            return None
+        if not call.args:
+            return None
+        first = call.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            return first.value
         return None
-    first = call.args[0]
-    if isinstance(first, ast.Constant) and isinstance(first.value, str):
-        return first.value
-    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,11 +259,17 @@ class ImportGraph:
         def consider(dotted: str) -> bool:
             """Follow *dotted*, or the longest prefix of it that resolves.
 
-            ``import pkg.thing`` where ``pkg`` is first-party but ``pkg/thing.py``
-            is not a file (a re-exported name, a namespace package) would
-            otherwise record ``pkg`` as a third-party leaf and drop the edge into
-            ``pkg/__init__.py`` — which is exactly where a package puts the
-            import that carries the client.
+            The reachable trigger is a submodule this resolver cannot see as a
+            file: a PEP 420 namespace package (a directory with no
+            ``__init__.py``) or a compiled extension. ``import pkg.sub`` is then
+            a perfectly valid import that resolves to no ``.py``, and without
+            the fallback ``pkg`` is recorded as a third-party leaf — dropping
+            the edge into ``pkg/__init__.py``, which is exactly where a package
+            puts the import that carries the client.
+
+            NOT the trigger, despite being the obvious guess: ``import
+            pkg.Thing`` where ``Thing`` is a re-exported NAME. That raises at
+            import time, so it cannot reach a sweep.
             """
             parts = dotted.split(".")
             while parts:
@@ -237,7 +280,10 @@ class ImportGraph:
                 parts.pop()
             return False
 
-        for node in ast.walk(self._parse(path)):
+        tree = self._parse(path)
+        dynamic = _DynamicImportNames(tree)
+
+        for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if not consider(alias.name):
@@ -257,9 +303,9 @@ class ImportGraph:
                 if not resolved and node.level == 0:
                     external.add(base.split(".")[0])
             elif isinstance(node, ast.Call):
-                dynamic = _dynamic_import_target(node)
-                if dynamic and not consider(dynamic):
-                    external.add(dynamic.split(".")[0])
+                target = dynamic.target(node)
+                if target and not consider(target):
+                    external.add(target.split(".")[0])
 
         result = (frozenset(external), frozenset(local))
         self._edges[path] = result
@@ -397,6 +443,14 @@ class SpawnSite:
         against fail-open cannot be the one that fails open. Zero false
         positives across the ~165 real spawn sites; if one appears, it is a
         registered waiver, which is visible.
+
+        The known false-positive shape, for whoever meets it first: a local path
+        whose final component happens to equal a listed binary, e.g.
+        ``git -C /tmp/x/docker status``, because ``_argv_tokens`` also emits
+        basenames so ``/usr/bin/curl`` is ``curl``. Nothing collides across the
+        current sites. Narrowing the basename to "command position" would fix it
+        and open a hole for ``sudo /usr/bin/curl``, so the collision stays a
+        waiver rather than a special case.
         """
         wanted = frozenset(network_binaries)
         return tuple(sorted({token for token in self.argv if token in wanted}))

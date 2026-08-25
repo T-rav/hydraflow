@@ -516,6 +516,17 @@ def test_a_dynamic_import_is_caught(tmp_path: Path) -> None:
             "test_builtin.py": 'def test_x():\n    assert __import__("requests")\n',
             "test_hop.py": "import loader\n\n\ndef test_x():\n    assert loader\n",
             "loader.py": 'import importlib\n\nmod = importlib.import_module("swamp")\n',
+            # ALIASED. The first version of the detector compared the call's
+            # spelling against two literal strings, and this walked straight
+            # past it — a guard parametrised over a proxy for an identity
+            # instead of the identity (#11723's shape), in the same file where
+            # ``_SpawnNames`` already resolved aliases correctly.
+            "test_alias_dyn.py": (
+                'from importlib import import_module as im\n\nmod = im("aiohttp")\n'
+            ),
+            "test_alias_mod.py": (
+                'import importlib as il\n\nmod = il.import_module("botocore")\n'
+            ),
         },
     )
     graph = ImportGraph((tmp_path,))
@@ -523,6 +534,8 @@ def test_a_dynamic_import_is_caught(tmp_path: Path) -> None:
         ("test_dyn.py", "boto3"),
         ("test_builtin.py", "requests"),
         ("test_hop.py", "swamp"),
+        ("test_alias_dyn.py", "aiohttp"),
+        ("test_alias_mod.py", "botocore"),
     ):
         reach = graph.find(tmp_path / rel, _REMOTE_CLIENTS)
         assert reach is not None, f"{rel}: dynamic import not followed"
@@ -538,20 +551,44 @@ def test_a_dynamic_import_is_caught(tmp_path: Path) -> None:
     )
     assert graph.find(tmp_path / "test_local_dyn.py", _REMOTE_CLIENTS) is None
 
+    # And the other direction: a bare name that was never bound to a dynamic
+    # import is not one. Resolving against the binding is what makes the
+    # aliased cases above work; matching the spelling would make this fire.
+    _write(
+        tmp_path,
+        {
+            "test_shadow.py": (
+                "def import_module(name):\n    return name\n\n\n"
+                'VALUE = import_module("boto3")\n'
+            )
+        },
+    )
+    assert graph.find(tmp_path / "test_shadow.py", _REMOTE_CLIENTS) is None
+
 
 def test_a_dotted_import_keeps_the_edge_into_the_package(tmp_path: Path) -> None:
-    """``import pkg.thing`` where ``thing`` is a re-exported NAME, not a module.
+    """``import pkg.sub`` where ``sub`` is a PEP 420 namespace package.
 
-    Without the prefix fallback the resolver records ``pkg`` as a third-party
-    leaf and the walk never enters ``pkg/__init__.py`` — where the client
-    import actually lives.
+    A directory with no ``__init__.py`` is a perfectly importable subpackage
+    that this resolver cannot see as a file. Without the prefix fallback it
+    records ``pkg`` as a third-party leaf and the walk never enters
+    ``pkg/__init__.py`` — where the client import actually lives.
+
+    The obvious guess — ``import pkg.Thing`` where ``Thing`` is a re-exported
+    NAME — is NOT the trigger: that raises at import time, so it never reaches
+    a sweep. A control written against an unreachable scenario proves nothing.
     """
     _write(
         tmp_path,
         {
-            "test_dotted.py": "import pkg.Thing\n\n\ndef test_x():\n    assert pkg\n",
-            "pkg/__init__.py": "import requests\n\nThing = requests\n",
+            "test_dotted.py": "import pkg.sub\n\n\ndef test_x():\n    assert pkg\n",
+            "pkg/__init__.py": "import requests\n\nCLIENT = requests\n",
+            "pkg/sub/mod.py": "VALUE = 1\n",
         },
+    )
+    assert not (tmp_path / "pkg/sub/__init__.py").exists(), (
+        "the control needs `sub` to be a namespace package, or it is not "
+        "exercising the fallback at all"
     )
     graph = ImportGraph((tmp_path,))
     reach = graph.find(tmp_path / "test_dotted.py", _REMOTE_CLIENTS)
