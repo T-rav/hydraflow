@@ -26,8 +26,9 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from pydantic import ConfigDict, ValidationError, computed_field
+from pydantic import ConfigDict, Field, ValidationError, computed_field
 
+from config import HydraFlowConfig
 from driver_contracts import (
     WORKER_CATALOG,
     DriverLease,
@@ -41,7 +42,14 @@ from driver_contracts import (
     WriteScope,
     admit_dispatch,
 )
+from implement_broker import implement_canary_armed
 from models import ReviewVerdict
+from plan_broker import (
+    REFUSAL_CODES,
+    PlanRouteReason,
+    plan_canary_armed,
+    plan_canary_covers,
+)
 from review_authority import (
     AdjudicationReason,
     ReviewFinding,
@@ -50,10 +58,26 @@ from review_authority import (
 )
 from review_broker import (
     CANARY_PHASE,
+    resolve_review_model,
+    review_canary_armed,
+    review_canary_covers,
+    review_canary_repo,
     review_roles_for_review_phase,
     reviewer_independence_refusal,
 )
 from review_evidence import CANONICAL_FIELDS, ReviewEvidence, build_review_evidence
+from review_worker_runner import (
+    _UNTRUSTED_JSON_ERRORS,
+    MAX_DIFF_CHARS,
+    MAX_PARSE_CHARS,
+    _bounded_diff,
+    _finding,
+    _refusal,
+    build_review_worker_prompt,
+    parse_review_proposal,
+)
+from scheduling_model import ExecutionRuntime, SchedulingModel
+from worker_receipts import unresolved_decision
 
 _PERMISSIVE = {"ci_green": True, "hitl_required": False, "reviewer_independent": True}
 
@@ -379,7 +403,8 @@ class TestTheAllowListGuardsWhatIsRENDERED:
     ``as_payload`` compared ``model_fields`` and its docstring claimed it
     guarded what got rendered. Those are different sets — ``model_dump()``'s
     keys are a superset — so two subclass shapes walked past it and put
-    ``implementer_transcript`` into a reviewer's prompt with every test green.
+    ``implementer_transcript`` into the rendered payload with every test green. (Payload, not prompt:
+        the prompt builder is a second allow-list keyed by canonical name.)
 
     That is the defect class this whole file exists to repair, landing one
     layer inside the repair itself: a guard whose stated subject is not the
@@ -402,6 +427,57 @@ class TestTheAllowListGuardsWhatIsRENDERED:
 
         with pytest.raises(ValueError, match="canonical field set"):
             ViaExtra(issue_number=1, implementer_transcript="smuggled").as_payload()
+
+    def test_a_subclass_cannot_hide_a_canonical_field_from_the_reviewer(self) -> None:
+        """The other half of ``!=``, and the more dangerous direction.
+
+        Every other test here is an *adds* test, so weakening the guard to
+        ``if rendered - CANONICAL_FIELDS:`` — the natural simplification once a
+        reader notices that — left the whole suite green, with ``missing``
+        computed on a path nothing reached.
+
+        Adds shows a reviewer something extra. **Drops hides the change from
+        the reviewer**: excluding ``diff`` renders a review of a change with no
+        change in it. Reachable with a stock ``Field`` keyword — no custom
+        serializer, though ``exclude=True`` is itself a serialization directive.
+
+        The ``drops ['diff']`` pattern is load-bearing, but not for the
+        mutation an earlier draft of this docstring named: the adds-only
+        weakening raises nothing at all, so ``pytest.raises`` kills it whatever
+        the pattern says. What the pattern actually catches is the message's
+        two halves being swapped — ``extra``/``missing`` transposed — which a
+        generic ``match="canonical field set"`` lets through.
+        """
+
+        class ViaExcluded(ReviewEvidence):
+            diff: str = Field(default="", exclude=True)
+
+        with pytest.raises(ValueError, match=r"drops \['diff'\]"):
+            ViaExcluded(issue_number=1).as_payload()
+
+    def test_a_subclass_cannot_swap_a_canonical_field_for_a_private_one(self) -> None:
+        """Both failure modes at once — and the only one that survived ``!=``.
+
+        Pass 4 pinned *adds*; the sibling above pins *drops*. Nobody pinned the
+        case that is both, and it is the one a real subclass produces: you
+        exclude a field **because** you replaced it. Every existing subject
+        changes the payload's cardinality, so weakening the guard to
+        ``len(rendered) != len(CANONICAL_FIELDS)`` kept every test green while
+        this rendered a reviewer a change with no diff in it *and* the
+        implementer's transcript to read instead.
+
+        Asserting on both halves of the message is what makes cardinality
+        insufficient: a swap is exactly the shape a length check cannot see.
+        """
+
+        class Swap(ReviewEvidence):
+            model_config = ConfigDict(extra="allow", frozen=True)
+            diff: str = Field(default="", exclude=True)
+
+        with pytest.raises(ValueError, match=r"adds \['implementer_transcript'\]"):
+            Swap(issue_number=1, implementer_transcript="smuggled").as_payload()
+        with pytest.raises(ValueError, match=r"drops \['diff'\]"):
+            Swap(issue_number=1, implementer_transcript="smuggled").as_payload()
 
     def test_the_ordinary_payload_still_renders(self) -> None:
         """Non-vacuity: the guard must not refuse the thing it exists to pass."""
@@ -481,3 +557,1020 @@ class TestOneVocabularyForOneLineage:
         )
 
         assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+
+class _Dials:
+    """A stand-in for the config fields the bound reads. Nothing else.
+
+    Copied from ``tests/test_implement_broker.py`` deliberately: the point of
+    the test below is that the sibling already had it and this module did not.
+    """
+
+    def __init__(self, repo: str, canary: str) -> None:
+        self.repo = repo
+        # All three dials carry the same value so one stand-in serves every
+        # sibling. Tests that need them to DIFFER set the one they mean with
+        # setattr — welding them together silently would make a cross-wiring
+        # defect invisible here, which is a hole `test_review_broker` covers
+        # and this file should not rely on.
+        self.fable_review_canary_repo = canary
+        self.fable_plan_canary_repo = canary
+        self.fable_implement_canary_repo = canary
+
+
+class TestTheOffSwitchClauseHasASubject:
+    """The clause every canary docstring names, pinned in only one of three.
+
+    ``review_canary_covers``'s docstring calls clause 1 "the dial is armed at
+    all — the off-switch". Deleting ``if armed is None: return False``
+    **survived the whole suite** for both the review and plan brokers;
+    ``implement_canary_covers`` was killed by its own
+    ``test_an_empty_dial_covers_nothing``. #11543 copied the sibling's prose
+    and not its test — the chain's signature failure, in the module that
+    exists to hold the bound.
+
+    The second case is the one that isolates the clause. With a real
+    repository the comparison answers ``False`` for its own reason and the
+    clause is invisible behind it. With a repository whose identity is *also*
+    unparseable, deleting the clause leaves ``canonicalize_repo("") == None``
+    — ``None == None`` — i.e. **True**: a disarmed dial covering every
+    boundary. ``config.repo`` really can be empty: it falls back to env, then
+    git-remote detection, then "".
+    """
+
+    @pytest.mark.parametrize(
+        "repo",
+        [
+            pytest.param("acme/widget", id="a-real-repository"),
+            pytest.param("", id="an-unidentifiable-repository"),
+        ],
+    )
+    def test_an_empty_review_dial_covers_nothing(self, repo: str) -> None:
+        assert review_canary_covers(_Dials(repo, ""), phase=CANARY_PHASE) is False
+
+    @pytest.mark.parametrize(
+        "repo",
+        [
+            pytest.param("acme/widget", id="a-real-repository"),
+            pytest.param("", id="an-unidentifiable-repository"),
+        ],
+    )
+    def test_an_empty_plan_dial_covers_nothing(self, repo: str) -> None:
+        """The same hole, in the sibling that also lacked the test."""
+        assert plan_canary_covers(_Dials(repo, ""), phase=DriverPhase.PLAN) is False
+
+
+class TestBothOperandsOfTheLineageComparison:
+    """ "One vocabulary, one normalisation" normalised ONE operand.
+
+    #11543 stripped the request's ``requesting_spawn_id`` and compared it
+    against a raw ``implementer_spawn_ids``. The direction that was pinned —
+    padded request, clean set — is the direction the code got right. The other
+    two were admitted, and the third is the damning one: two **byte-identical**
+    padded strings compared unequal, so the fence admitted a reviewer that was
+    literally the implementer.
+    """
+
+    @pytest.mark.parametrize(
+        ("requesting", "known"),
+        [
+            pytest.param("  spawn-impl-1  ", ["spawn-impl-1"], id="padded-request"),
+            pytest.param("spawn-impl-1", ["  spawn-impl-1  "], id="padded-set"),
+            pytest.param("  spawn-impl-1  ", ["  spawn-impl-1  "], id="both-padded"),
+        ],
+    )
+    def test_the_fence_matches_whichever_side_carries_the_padding(
+        self, requesting: str, known: list[str]
+    ) -> None:
+        assert (
+            reviewer_independence_refusal(
+                role=WorkerRole.REVIEWER,
+                requesting_spawn_id=requesting,
+                implementer_spawn_ids=known,
+            )
+            is RejectionReason.SELF_REVIEW_FORBIDDEN
+        )
+
+    @pytest.mark.parametrize(
+        ("requesting", "known"),
+        [
+            pytest.param("  spawn-impl-1  ", ["spawn-impl-1"], id="padded-request"),
+            pytest.param("spawn-impl-1", ["  spawn-impl-1  "], id="padded-set"),
+            pytest.param("  spawn-impl-1  ", ["  spawn-impl-1  "], id="both-padded"),
+        ],
+    )
+    def test_admit_dispatch_normalises_both_operands_too(
+        self, requesting: str, known: list[str]
+    ) -> None:
+        """The SECOND table, pinned separately — for the third time.
+
+        The first gauntlet on this fix left exactly this mutation alive:
+        un-stripping the set side in ``admit_dispatch`` changed no test,
+        because the new cases above only reach ``review_broker``. Two
+        descriptions of one rule need two subjects, and knowing that has not
+        once been enough to remember it.
+        """
+        now = datetime.now(UTC)
+        lease = DriverLease(
+            driver_id="drv-1",
+            epoch=0,
+            repo_slug="acme/widget",
+            issue_number=1,
+            phase=DriverPhase.REVIEW,
+            expected_stage_label="hydraflow-review",
+            phase_attempt=0,
+            expires_at=now + timedelta(hours=1),
+        )
+        request = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=WorkerRole.REVIEWER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="review the change",
+            reason="the change needs review",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+            requesting_spawn_id=requesting,
+        )
+
+        reason = admit_dispatch(
+            request=request,
+            lease=lease,
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-review",
+            writer_lease=WriterLease(
+                driver_id="drv-1",
+                epoch=0,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.REVIEWER}),
+            remaining_usd_budget=10.0,
+            implementer_spawn_ids=frozenset(known),
+        )
+
+        assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+    def test_a_genuinely_different_spawn_is_still_admitted(self) -> None:
+        """Non-vacuity: normalising both sides must not make everything match."""
+        assert (
+            reviewer_independence_refusal(
+                role=WorkerRole.REVIEWER,
+                requesting_spawn_id="spawn-fresh",
+                implementer_spawn_ids=["  spawn-impl-1  "],
+            )
+            is None
+        )
+
+
+class TestTheArmedBadgeIsExecutedSomewhere:
+    """``fable_review_canary_armed`` had zero callers AND zero tests.
+
+    Replacing its whole body with ``return True`` survived 348 tests. Both
+    siblings have a dedicated default-off file; this one had nothing, while
+    carrying the same ``armed is not None`` guard the class above shows was
+    unpinned. It is a live operator badge, which is the thing
+    ``settings_registry`` forbids lying about.
+    """
+
+    def test_the_default_is_disarmed(self) -> None:
+        assert HydraFlowConfig().fable_review_canary_armed() is False
+
+    def test_naming_the_repository_alone_does_not_arm_it(self) -> None:
+        """Two operator decisions, not one: the runtime must also be Fable."""
+        config = HydraFlowConfig(
+            fable_review_canary_repo="acme/widget", repo="acme/widget"
+        )
+        assert config.uses_fable_director() is False
+        assert config.fable_review_canary_armed() is False
+
+    def test_both_halves_together_arm_it(self) -> None:
+        """Non-vacuity: without this, `return False` would pass the two above."""
+        config = HydraFlowConfig(
+            fable_review_canary_repo="acme/widget",
+            repo="acme/widget",
+            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+        )
+        assert config.fable_review_canary_armed() is True
+
+    def test_another_repository_is_not_armed(self) -> None:
+        config = HydraFlowConfig(
+            fable_review_canary_repo="acme/other",
+            repo="acme/widget",
+            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+        )
+        assert config.fable_review_canary_armed() is False
+
+
+class TestTheCeilingsAreExactWhereTheySay:
+    """The ceiling MESSAGES name exact numbers; the tests used 2000-deep and
+    infinite, so both ``>=`` could become ``>`` with nothing red."""
+
+    def test_the_sequence_ceiling_is_off_by_none(self) -> None:
+        at = build_review_evidence(
+            {"issue_number": 1, "changed_files": ["f"] * 50_000}
+        ).as_payload()
+        assert len(at["changed_files"]) == 50_000
+        with pytest.raises(ValueError, match="exceeds"):
+            build_review_evidence({"issue_number": 1, "changed_files": ["f"] * 50_001})
+
+    def test_the_depth_ceiling_is_off_by_none(self) -> None:
+        def nest(levels: int) -> object:
+            v: object = "x"
+            for _ in range(levels):
+                v = [v]
+            return v
+
+        # 8 levels of iterable is the last accepted shape; the model then
+        # refuses the nesting itself, which is a DIFFERENT error than the walk.
+        with pytest.raises(ValidationError):
+            build_review_evidence({"issue_number": 1, "changed_files": nest(8)})
+        with pytest.raises(ValueError, match="nests deeper"):
+            build_review_evidence({"issue_number": 1, "changed_files": nest(9)})
+
+
+class TestTheScrubDecodesRatherThanDropping:
+    """``errors="replace"`` vs ``"ignore"`` had no subject, though the
+    docstring argues for it: "A mangled character is visible; an unscrubbed
+    credential is not." Dropping bytes silently shortens a diff."""
+
+    def test_an_undecodable_byte_is_marked_not_dropped(self) -> None:
+        payload = build_review_evidence(
+            {"issue_number": 1, "diff": b"before\xffafter"}
+        ).as_payload()
+        assert "\ufffd" in payload["diff"]
+        assert payload["diff"] == "before\ufffdafter"
+
+
+class TestTheReviewResolverSaysWhichBoundItFell_Outside:
+    """``PHASE_NOT_REVIEW`` mapped to ``ROLE_PHASE_FORBIDDEN`` — the exact
+    conflation ``OUTSIDE_CANARY_BOUND`` was minted to end, still standing in
+    the shared refusal table. It had no subject: flipping it back changed
+    nothing, because the runner's step-1 bound check refuses first and masks
+    it. ``resolve_review_model`` is exported and callable directly, so the
+    mask is a fence in front of a wrong answer, not an absence of one.
+    """
+
+    def _request(self) -> WorkerDispatchRequest:
+        return WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=WorkerRole.REVIEWER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="review it",
+            reason="needs review",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+            requesting_spawn_id="spawn-director",
+        )
+
+    def test_a_non_review_phase_is_outside_the_bound_not_a_role_verdict(self) -> None:
+        decision = resolve_review_model(
+            self._request(), phase=DriverPhase.PLAN, route_policy_revision="rev-7"
+        )
+
+        assert REFUSAL_CODES[decision.reason] is RejectionReason.OUTSIDE_CANARY_BOUND
+
+    def test_an_uncatalogued_role_still_gets_the_catalogue_verdict(self) -> None:
+        """Non-vacuity: the sibling member must keep saying ROLE_PHASE_FORBIDDEN,
+        or the fix has merely moved the conflation rather than ended it."""
+        assert (
+            REFUSAL_CODES[PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW]
+            is RejectionReason.ROLE_PHASE_FORBIDDEN
+        )
+
+
+class TestTheBadgesOffSwitchAndCanonicalisation:
+    """The same two clauses as the brokers, one level up — and unpinned again.
+
+    #11543's badge tests named the off-switch guard in their own docstring
+    ("carrying the same ``armed is not None`` guard") and never isolated it:
+    two cases were short-circuited by ``uses_fable_director()`` and the other
+    two supplied canonicalisable repos on both sides. Deleting
+    ``armed is not None and`` survived 1069 tests, in all THREE badges.
+
+    Sentence copied, parametrize not — for the third time in this chain, which
+    is why all three siblings are pinned here rather than only the review one.
+    """
+
+    @staticmethod
+    def _directed(**kwargs: object) -> HydraFlowConfig:
+        return HydraFlowConfig(
+            repo="acme/widget",
+            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    @pytest.mark.parametrize(
+        "badge",
+        [
+            "fable_review_canary_armed",
+            "fable_plan_canary_armed",
+            "fable_implement_canary_armed",
+        ],
+    )
+    def test_an_empty_dial_is_disarmed_even_when_the_repo_is_unidentifiable(
+        self, badge: str
+    ) -> None:
+        """The case that isolates ``armed is not None``.
+
+        With a resolvable repo the comparison answers False for its own
+        reason. With ``repo=""`` — reachable when env and git-remote detection
+        both fail — dropping the guard leaves ``None == None``: a disarmed dial
+        reporting ARMED on the operator's dashboard.
+
+        ``model_copy`` because the config resolves an empty repo from the git
+        remote at construction, so the state has to be reached the way the
+        runtime reaches it rather than the way a constructor would.
+        """
+        blind = self._directed().model_copy(update={"repo": ""})
+
+        assert getattr(blind, badge)() is False
+
+    @pytest.mark.parametrize(
+        ("badge", "dial"),
+        [
+            ("fable_review_canary_armed", "fable_review_canary_repo"),
+            ("fable_plan_canary_armed", "fable_plan_canary_repo"),
+            ("fable_implement_canary_armed", "fable_implement_canary_repo"),
+        ],
+    )
+    def test_the_repo_side_is_canonicalised_too(self, badge: str, dial: str) -> None:
+        """Clause 2 normalises BOTH operands, and neither side was pinned.
+
+        ``canonicalize_repo`` lower-cases; neither validator does. A slug that
+        auto-detects as ``Acme/Widget`` against a dial an operator typed as
+        ``acme/widget`` is the single most likely real configuration — and
+        dropping the call on the repo side made an armed canary silently cover
+        nothing, in six statements of this one rule.
+        """
+        config = self._directed(**{dial: "acme/widget"}).model_copy(
+            update={"repo": "Acme/Widget"}
+        )
+
+        assert getattr(config, badge)() is True
+
+    def test_a_genuinely_different_repository_is_still_disarmed(self) -> None:
+        """Non-vacuity: canonicalising both sides must not make everything match."""
+        config = self._directed(fable_review_canary_repo="acme/other")
+
+        assert config.fable_review_canary_armed() is False
+
+
+class TestTheBoundCanonicalisesTheRepoSide:
+    """The broker half of the same clause — three more unpinned statements."""
+
+    @pytest.mark.parametrize(
+        ("covers", "phase"),
+        [
+            (review_canary_covers, CANARY_PHASE),
+            (plan_canary_covers, DriverPhase.PLAN),
+        ],
+    )
+    def test_a_case_only_difference_still_matches(self, covers, phase) -> None:
+        assert covers(_Dials("Acme/Widget", "acme/widget"), phase=phase) is True
+
+    def test_a_different_repository_still_does_not(self) -> None:
+        assert (
+            review_canary_covers(
+                _Dials("acme/other", "acme/widget"), phase=CANARY_PHASE
+            )
+            is False
+        )
+
+
+class TestTheTwoLineageArmsAreMutuallyExclusive:
+    """A collision #11543's own both-operands fix opened.
+
+    Stripping both sides made ``"" in {"   "}`` true, so a blank lineage
+    satisfied ``lineage_unknown`` AND ``self_review`` at once and only the row
+    ORDER decided which an operator saw — swapping the rows survived. The
+    honest answer is LINEAGE_UNKNOWN: nothing here establishes that the
+    requester implemented anything. Now true by construction, matching
+    ``review_broker``, rather than by tuple arrangement.
+
+    Note for whoever runs the gauntlet next: deleting the guard alone is an
+    EQUIVALENT mutant, because the row order still yields the same code. What
+    the guard buys is order-INDEPENDENCE, and only a compound mutation shows
+    it — swap the two rows and the test still passes; swap them *and* delete
+    the guard and it fails. Recorded because a single-mutation run reports
+    this as a survivor and the natural next move is to delete a guard that is
+    doing real work.
+    """
+
+    def test_a_blank_lineage_against_a_blank_implementer_set_is_lineage_unknown(
+        self,
+    ) -> None:
+        now = datetime.now(UTC)
+        lease = DriverLease(
+            driver_id="drv-1",
+            epoch=0,
+            repo_slug="acme/widget",
+            issue_number=1,
+            phase=DriverPhase.REVIEW,
+            expected_stage_label="hydraflow-review",
+            phase_attempt=0,
+            expires_at=now + timedelta(hours=1),
+        )
+        valid = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=WorkerRole.REVIEWER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="review it",
+            reason="needs review",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+            requesting_spawn_id="spawn-director",
+        )
+
+        reason = admit_dispatch(
+            request=valid.model_copy(update={"requesting_spawn_id": "   "}),
+            lease=lease,
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-review",
+            writer_lease=WriterLease(
+                driver_id="drv-1",
+                epoch=0,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.REVIEWER}),
+            remaining_usd_budget=10.0,
+            implementer_spawn_ids=frozenset({"   "}),
+        )
+
+        assert reason is RejectionReason.LINEAGE_UNKNOWN
+
+
+class TestAnUnlistedKeyHasNoPathToAFinding:
+    """What closes this boundary, asserted against the boundary rather than
+    against a constant.
+
+    An earlier version of this class was called
+    ``TestTheFindingAllowListActuallyFilters`` and claimed to pin
+    ``_FINDING_KEYS``. It did not: every member is read back out by name, so
+    filtered-vs-unfiltered is unobservable through the return value, and the
+    thing that killed ``dict(entry)`` was an unreachable ``AssertionError``
+    added alongside it. The assertion is gone and the constant is documented
+    as the redundant belt it is. These assertions are unchanged in substance —
+    they were always testing the ``.get()`` calls, which is the honest subject.
+    """
+
+    def test_an_unlisted_key_cannot_reach_a_finding(self) -> None:
+        finding = _finding(
+            {
+                "summary": "real finding",
+                "blocking": True,
+                "verdict": "approve",
+                "merge": True,
+            }
+        )
+
+        assert finding.summary == "real finding"
+        assert not hasattr(finding, "verdict")
+        assert set(type(finding).model_fields) == {
+            "summary",
+            "file",
+            "line",
+            "blocking",
+        }
+
+    def test_the_listed_keys_still_arrive(self) -> None:
+        """Non-vacuity: a filter that dropped everything would pass the above."""
+        finding = _finding(
+            {"summary": "s", "file": "src/x.py", "line": 12, "blocking": False}
+        )
+
+        assert (finding.summary, finding.file, finding.line, finding.blocking) == (
+            "s",
+            "src/x.py",
+            12,
+            False,
+        )
+
+
+class TestTheAnnouncedDiffCeilingIsExact:
+    """The third announced ceiling, left out of the ceiling test that exists
+    for exactly this class: ``len(diff) <= MAX_DIFF_CHARS`` -> ``<`` survived."""
+
+    def test_a_diff_exactly_at_the_ceiling_is_not_truncated(self) -> None:
+        exact = "d" * MAX_DIFF_CHARS
+
+        assert _bounded_diff(exact) == exact
+
+    def test_one_character_over_is_announced(self) -> None:
+        over = _bounded_diff("d" * (MAX_DIFF_CHARS + 1))
+
+        assert over != "d" * (MAX_DIFF_CHARS + 1)
+        assert len(over) > MAX_DIFF_CHARS or "truncat" in over.lower()
+
+
+class TestTheCatalogueDerivesTheFenceEverywhere:
+    """The rule all three sites state, pinned at one.
+
+    ``reviewer_independence_refusal``'s docstring says it out loud — "a role
+    list here would be a second description of the catalogue and would go
+    stale the day a role is added, which is the failure class #11673 swept" —
+    and ``admit_dispatch`` and the constructor validator restate it, the
+    latter citing #11670/#11673 by name.
+
+    Hardcoding either of those two to ``WorkerRole.REVIEWER`` survived the
+    whole suite, and the pair together admits an ARCHITECT whose requesting
+    spawn IS the implementer's. Only ``review_broker`` had architect and
+    test_adequacy cases, which is why only its mutation died. The runner is
+    safe today because it routes through that one.
+    """
+
+    @pytest.mark.parametrize(
+        "role", [WorkerRole.ARCHITECT, WorkerRole.TEST_ADEQUACY, WorkerRole.REVIEWER]
+    )
+    def test_the_constructor_fences_every_catalogued_role(
+        self, role: WorkerRole
+    ) -> None:
+        with pytest.raises(ValidationError, match="requesting_spawn_id"):
+            WorkerDispatchRequest(
+                request_id="req-1",
+                driver_id="drv-1",
+                epoch=0,
+                phase_attempt=0,
+                worker_role=role,
+                model_requirement=ModelRequirement(
+                    kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+                ),
+                task_contract="judge it",
+                reason="needs judging",
+                expected_route_policy_revision="rev-7",
+                idempotency_key="key-1",
+            )
+
+    @pytest.mark.parametrize(
+        "role", [WorkerRole.ARCHITECT, WorkerRole.TEST_ADEQUACY, WorkerRole.REVIEWER]
+    )
+    def test_admission_fences_every_catalogued_role(self, role: WorkerRole) -> None:
+        now = datetime.now(UTC)
+        request = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=role,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="judge it",
+            reason="needs judging",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+            requesting_spawn_id="spawn-impl-1",
+        )
+
+        reason = admit_dispatch(
+            request=request,
+            lease=DriverLease(
+                driver_id="drv-1",
+                epoch=0,
+                repo_slug="acme/widget",
+                issue_number=1,
+                phase=DriverPhase.REVIEW,
+                expected_stage_label="hydraflow-review",
+                phase_attempt=0,
+                expires_at=now + timedelta(hours=1),
+            ),
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-review",
+            writer_lease=WriterLease(
+                driver_id="drv-1",
+                epoch=0,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({role}),
+            remaining_usd_budget=10.0,
+            implementer_spawn_ids=frozenset({"spawn-impl-1"}),
+        )
+
+        assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+
+class TestTheAnnouncedDiffCutActuallyCuts:
+    """MAX_DIFF_CHARS states two clauses and pinned one.
+
+    The ceiling test added earlier pins ``<=`` vs ``<``. Deleting the SLICE —
+    so the reviewer gets the TRUNCATED banner *and* the whole unbounded diff —
+    survived. The sibling has the exact assertion this copy lacked:
+    ``test_implement_worker_runner`` asserts ``len(excerpt) == MAX_DIFF_CHARS``.
+    """
+
+    def test_a_long_diff_is_bounded_not_merely_announced(self) -> None:
+        oversized = "d" * (MAX_DIFF_CHARS * 3)
+        bounded = _bounded_diff(oversized)
+
+        assert oversized not in bounded
+        # Bounded on TOTAL length, with only a banner's worth of slack. The
+        # nearest existing guard allows ~6 KB of overshoot on a diff 500 chars
+        # over the ceiling, so it cannot see an unbounded one; this can.
+        assert len(bounded) <= MAX_DIFF_CHARS + 400
+
+
+class TestARefusalNeverClaimsTheContractHeld:
+    """``output_contract_ok=False`` on a refusal: four copies, zero pins.
+
+    It is published verbatim into the worker tree, which is where ADR-0137
+    B5's evidence is read from. ``_refusal``'s docstring pins the served-model
+    half of receipt honesty; the contract half was stated nowhere.
+    """
+
+    def test_a_refused_request_reports_the_contract_as_unmet(self) -> None:
+        blank = unresolved_decision("rev-7")
+        receipt = _refusal(
+            WorkerDispatchRequest(
+                request_id="req-1",
+                driver_id="drv-1",
+                epoch=0,
+                phase_attempt=0,
+                worker_role=WorkerRole.REVIEWER,
+                model_requirement=ModelRequirement(
+                    kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+                ),
+                task_contract="review it",
+                reason="needs review",
+                expected_route_policy_revision="rev-7",
+                idempotency_key="key-1",
+                requesting_spawn_id="spawn-director",
+            ),
+            RejectionReason.OUTSIDE_CANARY_BOUND,
+            blank,
+        )
+
+        assert receipt.output_contract_ok is False
+        assert receipt.served_model is None
+
+
+class TestTheDialOperandIsCanonicalisedToo:
+    """The mirror of the fix one commit ago, and it was left unpinned.
+
+    That commit's own headline was that clause 2 "normalises two operands and
+    pinned NEITHER" — then it pinned the REPO operand in six places and left
+    the DIAL operand unpinned in all six. Replacing ``canonicalize_repo(dial)``
+    with a bare ``.strip() or None`` survived everywhere.
+
+    Reachable: the load validator only rejects a dial that fails to
+    canonicalise at all. ``canonicalize_repo("Acme/Widget") == "acme/widget"``,
+    so a dial typed the way GitHub DISPLAYS a slug passes validation, is stored
+    raw, and then arms nothing against an auto-detected lowercase repo.
+    """
+
+    @pytest.mark.parametrize(
+        ("badge", "dial"),
+        [
+            ("fable_review_canary_armed", "fable_review_canary_repo"),
+            ("fable_plan_canary_armed", "fable_plan_canary_repo"),
+            ("fable_implement_canary_armed", "fable_implement_canary_repo"),
+        ],
+    )
+    def test_a_display_cased_dial_still_arms(self, badge: str, dial: str) -> None:
+        config = HydraFlowConfig(
+            repo="acme/widget",
+            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+            **{dial: "Acme/Widget"},  # type: ignore[arg-type]
+        )
+
+        assert getattr(config, badge)() is True
+
+    def test_the_broker_dial_is_canonicalised(self) -> None:
+        assert review_canary_repo(_Dials("acme/widget", "Acme/Widget")) == "acme/widget"
+
+    def test_a_display_cased_dial_covers_the_bound(self) -> None:
+        assert (
+            review_canary_covers(
+                _Dials("acme/widget", "Acme/Widget"), phase=CANARY_PHASE
+            )
+            is True
+        )
+
+    def test_a_different_dial_is_still_refused(self) -> None:
+        """Non-vacuity: canonicalising must not make every dial match."""
+        assert (
+            review_canary_covers(
+                _Dials("acme/widget", "Acme/Other"), phase=CANARY_PHASE
+            )
+            is False
+        )
+
+
+class TestTheBrokerArmedPredicateRejectsALossyDial:
+    """``implement_canary_armed`` is pinned against a lossy dial; the review and
+    plan copies were only ever exercised with the dial EMPTY, so a bare
+    truthiness check on the dial text survived in both."""
+
+    #: The enumeration the class docstring names. Parametrised over it rather
+    #: than pinning one member, which is the N-vs-N-1 trap this whole chain
+    #: keeps falling into: a fix whose rationale counts three sites and covers
+    #: one. Pass 10 caught exactly that here — plan was still unpinned.
+    _ARMED = [
+        pytest.param(review_canary_armed, "fable_review_canary_repo", id="review"),
+        pytest.param(plan_canary_armed, "fable_plan_canary_repo", id="plan"),
+        pytest.param(
+            implement_canary_armed, "fable_implement_canary_repo", id="implement"
+        ),
+    ]
+
+    @pytest.mark.parametrize(("armed", "dial"), _ARMED)
+    @pytest.mark.parametrize("lossy", ["widget", "acme/widget/extra", "acme-widget"])
+    def test_a_lossy_dial_arms_nothing(self, armed, dial: str, lossy: str) -> None:
+        dials = _Dials("acme/widget", "")
+        setattr(dials, dial, lossy)
+
+        assert armed(dials) is False
+
+    @pytest.mark.parametrize(("armed", "dial"), _ARMED)
+    def test_a_canonical_dial_does_arm(self, armed, dial: str) -> None:
+        dials = _Dials("acme/widget", "")
+        setattr(dials, dial, "acme/widget")
+
+        assert armed(dials) is True
+
+
+class TestLineageUnknownOutranksBookkeeping:
+    """Its sibling's precedence is pinned; this row's was not.
+
+    ``test_self_review_outranks_a_bookkeeping_rejection`` pins
+    SELF_REVIEW_FORBIDDEN above the duplicate-key row. Demoting only the
+    LINEAGE_UNKNOWN row to the bottom of the ``legality`` tuple survived, and
+    an integrity failure then reported ``duplicate_idempotency_key`` — a
+    bookkeeping code standing in for a fence, in the field B5 counts. Two rows
+    of one rule; one was pinned.
+    """
+
+    def test_an_integrity_fence_is_not_masked_by_a_duplicate_key(self) -> None:
+        now = datetime.now(UTC)
+        valid = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-1",
+            epoch=0,
+            phase_attempt=0,
+            worker_role=WorkerRole.REVIEWER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-opus"
+            ),
+            task_contract="review it",
+            reason="needs review",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="idem-1",
+            requesting_spawn_id="spawn-director",
+        )
+
+        reason = admit_dispatch(
+            request=valid.model_copy(update={"requesting_spawn_id": None}),
+            lease=DriverLease(
+                driver_id="drv-1",
+                epoch=0,
+                repo_slug="acme/widget",
+                issue_number=1,
+                phase=DriverPhase.REVIEW,
+                expected_stage_label="hydraflow-review",
+                phase_attempt=0,
+                expires_at=now + timedelta(hours=1),
+            ),
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-review",
+            writer_lease=WriterLease(
+                driver_id="drv-1",
+                epoch=0,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.REVIEWER}),
+            remaining_usd_budget=10.0,
+            seen_idempotency_keys=frozenset({"idem-1"}),
+            implementer_spawn_ids=frozenset({"spawn-impl-1"}),
+        )
+
+        assert reason is RejectionReason.LINEAGE_UNKNOWN
+
+
+class TestAnUntrustedReplyCannotEscapeAsAnException:
+    """A ~2 KB reply crashed through ``dispatch()`` to the allocator.
+
+    ``parse_review_proposal`` caught only ``json.JSONDecodeError``. Nested
+    brackets far inside ``MAX_PARSE_CHARS`` raise ``RecursionError`` — a
+    ``RuntimeError``, so not in ``FATAL_EXCEPTIONS`` either — and it escaped
+    ``_run_child``'s closed ``try``, breaking this module's stated contract
+    that a child's failure becomes a receipt.
+
+    The tuple is COPIED from ``hydraflow_gateway.observer``: this repo had
+    already worked it out at two other untrusted-JSON boundaries. A third
+    hand-written version is how they drift.
+    """
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            pytest.param(
+                '{"recommended":"approve","summary":"ok","findings":'
+                + "[" * 995
+                + "]" * 995
+                + "}",
+                id="recursion-bomb",
+            ),
+            pytest.param("not json at all", id="not-json"),
+            pytest.param('{"recommended":', id="truncated-json"),
+            pytest.param("", id="empty"),
+        ],
+    )
+    def test_every_hostile_shape_refuses_instead_of_raising(self, reply: str) -> None:
+        assert parse_review_proposal(reply) is None
+
+    def test_a_legal_reply_still_parses(self) -> None:
+        """Non-vacuity: a parser that returned None always would pass above."""
+        proposal = parse_review_proposal(
+            '{"recommended":"approve","summary":"ok","findings":[]}'
+        )
+
+        assert proposal is not None
+        assert proposal.recommended is ReviewVerdict.APPROVE
+
+    def test_the_tuple_matches_the_sibling_it_was_copied_from(self) -> None:
+        """One vocabulary. A second hand-written copy is how they drift."""
+        from hydraflow_gateway.observer import _JSON_OBSERVER_ERRORS
+
+        assert set(_UNTRUSTED_JSON_ERRORS) == set(_JSON_OBSERVER_ERRORS)
+
+
+class TestEveryCanonicalFieldReachesThePrompt:
+    """The DROPS direction, at the layer that actually reaches the model.
+
+    ``as_payload``'s guard protects the PAYLOAD; the prompt builder is a
+    second, independent allow-list — and only its ADDS direction was pinned
+    (structurally, by literal indexing). Blanking any of NINE of the thirteen
+    canonical fields out of the prompt left the whole suite green.
+
+    Derived from ``CANONICAL_FIELDS`` rather than listed, so a field added to
+    the evidence model must reach the reviewer or redden — which is exactly
+    what ``as_payload``'s docstring already promises ("a field added to the
+    model reaches the prompt") and could not deliver.
+    """
+
+    #: Sentinel values distinctive enough that finding them in the prompt
+    #: cannot be an accident of the surrounding template text.
+    _MARKERS = {
+        "issue_number": 424242,
+        "issue_title": "ZZTITLEZZ",
+        "issue_goal": "ZZGOALZZ",
+        "acceptance_criteria": ("ZZCRITERIONZZ",),
+        "plan_summary": "ZZPLANZZ",
+        "branch": "ZZBRANCHZZ",
+        "base_sha": "b" * 40,
+        "head_sha": "h" * 40,
+        "diff": "ZZDIFFZZ",
+        "changed_files": ("ZZFILEZZ",),
+        "test_command": "ZZCOMMANDZZ",
+        "test_summary": "ZZSUMMARYZZ",
+        "test_failures": ("ZZFAILUREZZ",),
+    }
+
+    def test_the_marker_table_covers_the_allow_list(self) -> None:
+        """The parametrize below is only total if this table is."""
+        assert set(self._MARKERS) == CANONICAL_FIELDS
+
+    @pytest.mark.parametrize("field", sorted(CANONICAL_FIELDS))
+    def test_the_field_is_visible_to_the_reviewer(self, field: str) -> None:
+        evidence = build_review_evidence(dict(self._MARKERS))
+        prompt = build_review_worker_prompt(role="reviewer", evidence=evidence)
+        marker = self._MARKERS[field]
+        needle = str(marker[0]) if isinstance(marker, tuple) else str(marker)
+
+        assert needle in prompt, f"{field} never reaches the reviewer"
+
+
+class TestTheDiffCutIsTheHeadAndTheBannerLeads:
+    """Length was pinned; direction and position were not.
+
+    Every earlier test used homogeneous fill (``"d" * n``), so head and tail
+    were indistinguishable to all of them and ``diff[:N]`` -> ``diff[-N:]``
+    survived. The banner says the change "continues past the end of this
+    block" — a lie if the tail is what survived, and the head is what orients
+    a reviewer: file headers and the first hunks.
+    """
+
+    def test_the_head_survives_and_the_tail_does_not(self) -> None:
+        marked = "HEADMARKER" + ("d" * MAX_DIFF_CHARS) + "TAILMARKER"
+
+        bounded = _bounded_diff(marked)
+
+        assert "HEADMARKER" in bounded
+        assert "TAILMARKER" not in bounded
+
+    def test_the_banner_precedes_the_excerpt(self) -> None:
+        """ADR-0087's placement argument: a reader must know the block is
+        partial BEFORE reading it, not after."""
+        bounded = _bounded_diff("HEADMARKER" + "d" * MAX_DIFF_CHARS)
+
+        assert bounded.index("TRUNCATED") < bounded.index("HEADMARKER")
+
+    def test_a_whitespace_only_diff_says_so(self) -> None:
+        """``not diff.strip()`` -> ``not diff`` survived, so a whitespace-only
+        diff rendered as a blank block instead of saying it is empty."""
+        assert "empty" in _bounded_diff("   \n\t  ")
+
+
+class TestTheReplyIsSlicedBeforeItIsParsed:
+    """``MAX_PARSE_CHARS``'s docstring argues at length that "a receipt path
+    must not read an unbounded string". Deleting the slice survived, and it is
+    the bound the recursion bomb above sits behind."""
+
+    # The slice itself is pinned end-to-end in
+    # ``test_review_worker_runner.test_a_reply_past_the_parse_window_is_refused_not_read_whole``
+    # — a reply whose JSON extends past the window must fail to parse. An
+    # earlier version of this class asserted `len(s[:N]) == N`, which is
+    # arithmetic about the stdlib and pins nothing: the mutation that deletes
+    # the slice survived it.
+
+    def test_a_reply_past_the_window_still_refuses_rather_than_raising(self) -> None:
+        """End to end through the parser: an enormous hostile reply is a
+        refusal, never an exception."""
+        assert parse_review_proposal("[" * (MAX_PARSE_CHARS // 2)) is None
+
+
+class TestTheTheftCounterIsNotDowngradedToAStaleFence:
+    """The sharpest of the ordered-table adjacencies.
+
+    ``admit_dispatch``'s comment states the rule and names the counter it
+    protects: "a lease lagging its driver's epoch is a stale fence rather than
+    ownership theft — so it reports LEASE_EXPIRED, not DRIVER_IDENTITY_MISMATCH,
+    which B5's bar counts as a theft event." The ordinary theft shape trips
+    BOTH predicates, and swapping those two rows survived — downgrading a theft
+    event to a stale fence in the evidence the canary is judged by.
+    """
+
+    def test_a_foreign_writer_lease_reports_theft_not_staleness(self) -> None:
+        now = datetime.now(UTC)
+        lease = DriverLease(
+            driver_id="drv-mine",
+            epoch=7,
+            repo_slug="acme/widget",
+            issue_number=1,
+            phase=DriverPhase.IMPLEMENT,
+            expected_stage_label="hydraflow-implementing",
+            phase_attempt=0,
+            expires_at=now + timedelta(hours=1),
+        )
+        request = WorkerDispatchRequest(
+            request_id="req-1",
+            driver_id="drv-mine",
+            epoch=7,
+            phase_attempt=0,
+            worker_role=WorkerRole.IMPLEMENTER,
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+            ),
+            task_contract="write it",
+            reason="needs code",
+            expected_route_policy_revision="rev-7",
+            idempotency_key="key-1",
+        )
+
+        reason = admit_dispatch(
+            request=request,
+            lease=lease,
+            now=now,
+            route_policy_revision="rev-7",
+            live_stage_label="hydraflow-implementing",
+            # Foreign driver AND a lagging epoch: both predicates true.
+            writer_lease=WriterLease(
+                driver_id="drv-thief",
+                epoch=9,
+                worktree_base_digest="b",
+                worktree_head_digest="h",
+            ),
+            sandbox_verified=True,
+            allowed_roles=frozenset({WorkerRole.IMPLEMENTER}),
+            remaining_usd_budget=10.0,
+        )
+
+        assert reason is RejectionReason.DRIVER_IDENTITY_MISMATCH

@@ -229,7 +229,12 @@ REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_IMPLEMENT: (
         RejectionReason.ROLE_PHASE_FORBIDDEN
     ),
-    PlanRouteReason.PHASE_NOT_REVIEW: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    # Not ROLE_PHASE_FORBIDDEN: this member says the PHASE is not the canary's,
+    # which is silent about the role (#11543). Its sibling
+    # ROLE_NOT_CATALOGUED_FOR_REVIEW carries the catalogue's answer. The PLAN
+    # and IMPLEMENT members above still conflate the two; they belong to
+    # #11541/#11542's vocabulary and are left for their owners.
+    PlanRouteReason.PHASE_NOT_REVIEW: RejectionReason.OUTSIDE_CANARY_BOUND,
     PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW: (
         RejectionReason.ROLE_PHASE_FORBIDDEN
     ),

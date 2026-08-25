@@ -21,9 +21,15 @@ is to give it no path, not to filter it on the way past.
 
 **It returns a proposal, never a verdict.** A child's reply is parsed into a
 :class:`review_authority.ReviewProposal` — which has no verdict field, no merge
-instruction, no label and no CI waiver — and :func:`review_authority.adjudicate`
-stays the only function in the codebase that produces a
-:class:`models.ReviewVerdict`. This module does not import it. A reviewer that
+instruction, no label and no CI waiver — and this module never turns that
+proposal into a :class:`models.ReviewVerdict`. It does not import
+:func:`review_authority.adjudicate`, and the guard below is an AST assertion
+that the name is absent from THIS module, which is the whole of what is
+enforced. Fifteen other modules name a ``ReviewVerdict`` member (the Classic
+reviewer's parser among them), so "the only function that produces one" — as
+an earlier wording here, and two tests quoting it, all had it — was false by
+fifteen and invited a reader to conclude that verdict authority is centralised
+when what is actually pinned is that *this* path cannot reach it. A reviewer that
 recommends approval while filing a blocking finding is resolved against by the
 adjudicator, and nothing here can pre-empt that.
 
@@ -51,7 +57,6 @@ did exist would find every boundary outside the canary's bound.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
@@ -168,6 +173,31 @@ _REFUSAL_CODES = REFUSAL_CODES
 #: ``review_evidence.CANONICAL_FIELDS`` and for the same reason: a deny-list of
 #: forbidden keys is fail-open the moment somebody invents a new one, and the
 #: key an untrusted reviewer would invent is precisely the one nobody listed.
+#:
+#: Every way an untrusted string can break a JSON parser, fail-closed to a
+#: refusal. Copied from ``hydraflow_gateway.observer``'s
+#: ``_JSON_OBSERVER_ERRORS`` rather than re-derived — this repo already worked
+#: out the tuple for exactly this hazard at two other untrusted-JSON
+#: boundaries, and a third hand-written version is how they drift.
+#:
+#: ``RecursionError`` is the one a ``JSONDecodeError``-only handler misses, and
+#: it is not exotic: ~2 KB of nested brackets — far inside
+#: :data:`MAX_PARSE_CHARS` — raises it out of ``json``. It is a ``RuntimeError``,
+#: so it is not in ``FATAL_EXCEPTIONS`` either; it simply escaped ``_run_child``
+#: to the allocator, breaking this module's promise that a child's failure
+#: becomes a receipt (#11543). The parser one layer down bounds its own
+#: recursion deliberately; the hostile one did not.
+_UNTRUSTED_JSON_ERRORS = (UnicodeDecodeError, ValueError, RecursionError)
+
+#: Scope, stated exactly (#11543). NEITHER constant is what closes the
+#: boundary: a proposal is assembled by naming its three fields explicitly and
+#: a finding by naming its four, so an unlisted key has no path to either
+#: regardless. ``_FINDING_KEYS`` additionally filters, which is a redundant
+#: belt; ``_PROPOSAL_KEYS`` filters nothing and deleting it changes no
+#: behaviour. Both are kept as the written record of what may arrive. Two
+#: earlier wordings here claimed the sets did the work — first that both
+#: filtered, then that one did "real work" — and each described a check the
+#: ``.get()`` calls were providing.
 #: Nothing outside this set is read, so nothing outside it can arrive.
 _PROPOSAL_KEYS: frozenset[str] = frozenset({"recommended", "summary", "findings"})
 _FINDING_KEYS: frozenset[str] = frozenset({"summary", "file", "line", "blocking"})
@@ -433,7 +463,7 @@ class ReviewWorkerRunner:
                 evidence.issue_number,
                 request.worker_role.value,
             )
-            return _refusal(request, RejectionReason.ROLE_PHASE_FORBIDDEN, blank)
+            return _refusal(request, RejectionReason.OUTSIDE_CANARY_BOUND, blank)
 
         # 2. Independence, asked of the module that owns the rule. Before the
         #    tier is resolved, because no route can make a self-review
@@ -446,12 +476,28 @@ class ReviewWorkerRunner:
         )
         if self_review is not None:
             self.last_decision_ids[request.request_id] = ""
-            logger.info(
-                "review_worker_runner: #%d %s would review its own work (spawn %s)",
-                evidence.issue_number,
-                request.worker_role.value,
-                request.requesting_spawn_id,
-            )
+            # The message follows the REASON, because the fence now returns two
+            # of them and they say different things to an operator (#11543).
+            # A single "would review its own work" line was accurate while
+            # SELF_REVIEW_FORBIDDEN was the only outcome; against
+            # LINEAGE_UNKNOWN it asserted a fact nothing established, and
+            # rendered "(spawn None)" as the evidence for it. That is the same
+            # dishonest-reason-code defect this phase already fixed once in
+            # `adjudicate`, arriving here through a new enum member.
+            if self_review is RejectionReason.LINEAGE_UNKNOWN:
+                logger.info(
+                    "review_worker_runner: #%d %s states no lineage, so its "
+                    "independence cannot be checked",
+                    evidence.issue_number,
+                    request.worker_role.value,
+                )
+            else:
+                logger.info(
+                    "review_worker_runner: #%d %s would review its own work (spawn %s)",
+                    evidence.issue_number,
+                    request.worker_role.value,
+                    request.requesting_spawn_id,
+                )
             return _refusal(request, self_review, blank)
 
         decision = resolve_review_model(
@@ -882,6 +928,12 @@ def _bounded_diff(diff: str) -> str:
         return "(the diff supplied with this evidence is empty)"
     if len(diff) <= MAX_DIFF_CHARS:
         return diff
+    # The HEAD, not the tail: file headers and the first hunks are what orient
+    # a reviewer, and the banner below says the change "continues past the end
+    # of this block" — which is a lie if the tail is what survived. Both the
+    # slice direction and the banner's position ahead of the excerpt are
+    # pinned; every earlier test used homogeneous fill, so head and tail were
+    # indistinguishable to all of them (#11543).
     return (
         f"(TRUNCATED at {MAX_DIFF_CHARS} characters; the change continues past "
         "the end of this block and you are not being shown the rest)\n"
@@ -898,11 +950,17 @@ def parse_review_proposal(text: str) -> ReviewProposal | None:
     judgement with no finding behind it. A caller that gets ``None`` has a
     receipt saying the output contract failed, which is the truth.
 
-    Only :data:`_PROPOSAL_KEYS` and :data:`_FINDING_KEYS` are read. A reply
-    carrying, say, a ``verdict`` key is not rejected for it and not warned
-    about — the key is simply never looked at, so it has no path to authority.
-    That is ``review_evidence``'s allow-list argument applied to the other
-    direction of the boundary.
+    Only the keys :data:`_PROPOSAL_KEYS` and :data:`_FINDING_KEYS` name are
+    read. A reply carrying, say, a ``verdict`` key is not rejected for it and
+    not warned about — the key is simply never looked at, so it has no path to
+    authority. That is ``review_evidence``'s allow-list argument applied to the
+    other direction of the boundary.
+
+    What closes it is the explicit ``.get("<literal>")`` reads, not either
+    constant — a key nobody names cannot reach a field. ``_FINDING_KEYS`` also
+    filters, as a redundant belt; ``_PROPOSAL_KEYS`` does not. Worth knowing
+    before editing either, because deleting the filter breaks nothing today
+    and would matter the moment a field is read some other way.
 
     Coercion is deliberately asymmetric, and the asymmetry is the safety
     property. Prose is trimmed to fit, and an unusable ``line`` becomes
@@ -915,7 +973,7 @@ def parse_review_proposal(text: str) -> ReviewProposal | None:
     """
     try:
         raw = extract_json(text)
-    except json.JSONDecodeError:
+    except _UNTRUSTED_JSON_ERRORS:
         return None
     if not isinstance(raw, dict):
         return None
@@ -956,6 +1014,19 @@ def _finding(entry: object) -> ReviewFinding:
         # is wrong. Kept, and kept blocking: silently dropping it would be this
         # parser hiding a finding on a formatting technicality.
         return ReviewFinding(summary=_summary_or_placeholder(entry))
+    # A redundant belt, NOT the defence — the same shape and the same honesty
+    # as ``review_evidence.PRIVATE_MARKERS``. What actually closes this
+    # boundary is the four explicit ``picked.get("<literal>")`` reads below: an
+    # unlisted key has no path to a field whatever this filter does, so
+    # replacing it with ``dict(entry)`` is unobservable through the return
+    # value and always will be while every member is read by name.
+    #
+    # An earlier attempt to "make it load-bearing" (#11543) added an
+    # ``AssertionError`` here, which was worse in two ways: unreachable by
+    # construction of the line above it, and — had it ever fired — an
+    # exception escaping ``parse_review_proposal``'s narrow ``try`` all the way
+    # to the allocator, breaching this module's contract that a child's failure
+    # becomes a receipt rather than something the allocator has to carry.
     picked: dict[str, Any] = {k: v for k, v in entry.items() if k in _FINDING_KEYS}
     line = picked.get("line")
     return ReviewFinding(

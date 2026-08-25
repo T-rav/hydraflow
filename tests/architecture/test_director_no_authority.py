@@ -61,12 +61,28 @@ DECISION_PATH_MODULES = (
     # ``review_worker_runner``, which is seam-declared and covered by the
     # actuator table at the bottom of this file.
     "src/review_broker.py",
+    # The other two P5 modules make the SAME claim in prose and were not on
+    # this list, so nothing enforced it: ``review_evidence`` says "Pure by
+    # construction: no I/O, no clock, no spawn" and ``review_authority`` says
+    # "Merge authority is not modelled here at all". ``adjudicate`` is the one
+    # P5 function that produces a ``ReviewVerdict``, so a
+    # ``merge_pr`` added beside it was exactly the edit this guard exists to
+    # redden — and would not have. Three modules claimed the property; one was
+    # pinned (#11543).
+    "src/review_evidence.py",
+    "src/review_authority.py",
     # #11542 cut the actuator half out of ``fable_director`` when the mass
     # sensor flagged the host class. It moved with its guarantees: the mixin
     # decides which canary covers a boundary and hands an admitted batch to a
     # dispatcher, and it must remain unable to spawn, mutate a label, or touch
     # convergence state. Splitting a god class must not split a guard.
     "src/director_dispatch.py",
+    # Surfaced by the DERIVED guard below rather than by anyone remembering:
+    # `worker_receipts` says "no spawn" in its own docstring and was on no
+    # list. It is where all three actuators build receipts, so a spawn or a
+    # label mutation added beside `unresolved_decision` reaches the record
+    # ADR-0137 B5's bar is read from.
+    "src/worker_receipts.py",
 )
 
 #: Mutation calls that would give the director real authority over an issue.
@@ -466,7 +482,7 @@ def test_the_review_actuator_cannot_reach_the_adjudicator() -> None:
     """The one thing this actuator must not be able to do that its siblings
     have no equivalent of: turn a proposal into a verdict.
 
-    ``review_authority.adjudicate`` is the only function that produces a
+    ``review_authority.adjudicate`` is the only P5 function that produces a
     ``ReviewVerdict``, and a reviewer that could call it would own the decision
     whatever the prose around it said. Read from the AST rather than the text,
     so the docstrings *explaining* the rule cannot satisfy the test for it.
@@ -482,3 +498,93 @@ def test_the_review_actuator_cannot_reach_the_adjudicator() -> None:
     assert "adjudicate" not in imported
     assert "ReviewVerdict" not in imported
     assert "adjudicate" not in _called_names(tree)
+
+
+def test_every_module_claiming_purity_is_on_the_list() -> None:
+    """The DROPS direction of ``DECISION_PATH_MODULES`` (#11543).
+
+    Every guard in this file checks that a LISTED module does nothing
+    forbidden. Nothing checked that a module which *should* be listed is —
+    so deleting an entry reddened nothing, and the guard silently stopped
+    covering whatever was removed. That is the same asymmetry as
+    ``as_payload`` testing only additions and the prompt test pinning "and
+    nothing else" but never "from evidence": three sites, one class.
+
+    The subject is DERIVED from the source, not enumerated here, per the rule
+    this chain kept breaking: a fix written against a finding's prose inherits
+    the prose's scope. A module that states the claim in its own docstring is
+    held to it, and one added tomorrow is held to it too.
+
+    Scope, stated exactly: the needle is the "no spawn" phrase, so it holds
+    modules to the claim they actually make. ``review_authority`` is on the
+    list for a different claim ("merge authority is not modelled here at all")
+    and is deliberately outside this guard's subject — widening the needle to
+    "pure" matches 88 modules and would turn the list into a directory.
+
+    It found ``worker_receipts`` on its first run — a module that claims "no
+    spawn", is where all three actuators build receipts, and had no test file
+    of any kind (#11718).
+    """
+    claimants = []
+    for path in sorted((REPO_ROOT / "src").rglob("*.py")):
+        try:
+            doc = ast.get_docstring(ast.parse(path.read_text(errors="replace"))) or ""
+        except SyntaxError:  # pragma: no cover - a broken module fails elsewhere
+            continue
+        if "no spawn" in doc.lower():
+            claimants.append(str(path.relative_to(REPO_ROOT)))
+
+    assert claimants, "no module claims purity — this guard has no subject"
+
+    missing = sorted(set(claimants) - set(DECISION_PATH_MODULES))
+    assert not missing, (
+        "these modules claim 'no spawn' in their own docstring but are absent "
+        f"from DECISION_PATH_MODULES, so nothing enforces the claim: {missing}. "
+        "Add them, or stop making the claim."
+    )
+
+
+#: Raw spawn machinery. ``SPAWN_PRIMITIVES`` names HydraFlow's *sanctioned*
+#: helpers, and the repo-wide raw-spawn ratchet knows
+#: ``create_subprocess_exec``/``Popen``/``spawnv`` — so a plain
+#: ``subprocess.run(...)`` in a decision-path module passed BOTH (#11543).
+#: Verified: injecting ``run_subprocess`` reddens, injecting ``subprocess.run``
+#: did not. For ten modules that each claim purity, importing the machinery at
+#: all is the rule with no false positives; a synchronous blocking spawn on an
+#: async decision path is worse than the async one, not better.
+_SPAWN_MACHINERY: frozenset[str] = frozenset({"subprocess", "multiprocessing"})
+
+
+@pytest.mark.parametrize("module", DECISION_PATH_MODULES)
+def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> None:
+    tree = _tree(module)
+    roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            roots.add(node.module.split(".")[0])
+
+    reached = roots & _SPAWN_MACHINERY
+    assert not reached, (
+        f"{module} imports {sorted(reached)}. Every module on this list says it "
+        "does not spawn; the call-site guards only know the sanctioned helper "
+        "names and three raw signatures, so a plain subprocess.run() reaches "
+        "neither. A module that needs to spawn belongs behind a declared seam."
+    )
+
+
+@pytest.mark.parametrize(
+    "raw", ["os.system", "os.popen", "subprocess.Popen", "subprocess.run"]
+)
+def test_the_import_rule_is_what_catches_a_raw_spawn(raw: str) -> None:
+    """Negative control, and the honest statement of why the rule is on
+    imports rather than call names: ``run``/``system``/``popen`` are far too
+    common as bare attribute names to sweep, so the call-site guard cannot see
+    them and the import guard is what does the work."""
+    attr = raw.rsplit(".", 1)[1]
+
+    assert attr not in SPAWN_PRIMITIVES, (
+        f"{attr} is now a sanctioned primitive; the import rule may be redundant"
+    )
+    assert raw.split(".", maxsplit=1)[0] in _SPAWN_MACHINERY | {"os"}
