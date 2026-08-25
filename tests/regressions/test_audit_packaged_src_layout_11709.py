@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 from scripts.hydraflow_audit import context, registry  # noqa: F401
 from scripts.hydraflow_audit.checks import (  # noqa: F401
+    p1_docs,
     p2_architecture,
     p3_testing,
     p6_agents,
@@ -46,6 +47,7 @@ from scripts.hydraflow_audit.checks import (  # noqa: F401
     p9_persistence,
     p10_tdd,
 )
+from scripts.hydraflow_audit.checks._helpers import finding
 from scripts.hydraflow_audit.models import CheckContext, Finding, Status
 
 from false_close import UI_TEST_RE
@@ -812,3 +814,92 @@ def test_scan_root_reaches_into_the_package(tmp_path: Path) -> None:
 
     assert finding.status is Status.PASS
     assert "settings.py" in finding.message
+
+
+# --- the backstop: EVERY registered check, not a hand-listed 16 -----------
+#
+# The static ratchet (tests/architecture/test_audit_src_layout_ratchet.py) gates
+# on the LITERAL `src`, on the premise that every spelling of the hazard must
+# contain it. That premise is false, and no literal rule can repair it: the
+# vocabulary itself builds flat paths on request.
+#
+#     probe = ctx.src_root() / f"{name}.py"          # no literal `src`
+#     probe = ctx.root / SOURCE_DIR_NAME / "x.py"    # no literal `src`
+#
+# Both resolve to `src/x.py` on a packaged repo — #11709 verbatim — and both
+# sail past a spelling gate. `src_root()` is documented as a RECURSIVE scan root
+# (rglob from it reaches `src/<pkg>/**`), but nothing stops someone appending a
+# filename, and that is the natural next keystroke.
+#
+# Enumerating spellings failed five times; enumerating misuses of the sanctioned
+# calls would fail the same way. The layer that closes it in one assertion,
+# independent of spelling, is behavioural: run the WHOLE registry against a
+# packaged fixture and assert nothing exits at a path probe. A check added
+# tomorrow is covered without anyone remembering to list it — which is the
+# difference between this and `_CONFORMANT_EXPECTATIONS` above.
+
+
+def _probe_exit_findings(root: Path) -> dict[str, str]:
+    """``{check_id: message}`` for every check that exits at a path probe."""
+    ctx = context.build(root)
+    offenders: dict[str, str] = {}
+    for check_id, fn in sorted(registry.all_registered().items()):
+        message = fn(ctx).message or ""
+        if _PROBE_EXIT_RE.search(message):
+            offenders[check_id] = message
+    return offenders
+
+
+def test_no_registered_check_exits_at_a_path_probe(packaged_repo: Path) -> None:
+    """The spelling-independent backstop for the whole #11709 class."""
+    offenders = _probe_exit_findings(packaged_repo)
+
+    assert offenders == {}, (
+        f"These checks never assessed a packaged repo, they missed at the path "
+        f"probe: {offenders}. Resolve modules with ctx.src_module(...) / "
+        "ctx.src_dir(...) — ctx.src_root() is a RECURSIVE scan root, and "
+        "appending a filename to it rebuilds the #11709 bug (#11709)."
+    )
+
+
+def test_the_sweep_catches_a_flat_probe_the_literal_gate_cannot_see(
+    packaged_repo: Path,
+) -> None:
+    """Guard the guard, with the exact evasion the static ratchet is blind to.
+
+    Plants a check that builds a flat probe out of the vocabulary itself, so
+    the source text contains no ``src`` literal at all. If this sweep ever
+    stops catching it, the class has no remaining gate.
+    """
+    snapshot = registry._snapshot_for_tests()
+    try:
+
+        @registry.register("ZZ.1")
+        def _planted(ctx: CheckContext) -> Finding:
+            probe = ctx.src_root() / "ports.py"  # the Rank-1 evasion
+            if not probe.exists():
+                return finding("ZZ.1", Status.FAIL, f"{ctx.rel(probe)} missing")
+            return finding("ZZ.1", Status.PASS)
+
+        offenders = _probe_exit_findings(packaged_repo)
+    finally:
+        registry._restore_for_tests(snapshot)
+
+    assert "ZZ.1" in offenders, (
+        "the registry sweep no longer catches a flat probe built from "
+        f"ctx.src_root() — got {offenders}"
+    )
+    assert (
+        offenders["ZZ.1"] == f"src/{PKG}/ports.py missing"
+        or offenders["ZZ.1"] == "src/ports.py missing"
+    )
+
+
+def test_the_sweep_covers_the_whole_registry(packaged_repo: Path) -> None:
+    """Guard the guard: an empty registry would pass the sweep vacuously."""
+    context.build(packaged_repo)
+
+    assert len(registry.all_registered()) >= 90, (
+        f"only {len(registry.all_registered())} checks registered — the sweep "
+        "above would pass with almost nothing to run"
+    )
