@@ -122,12 +122,18 @@ into a real module and asking whether the extractor saw it; that answers *yes*
 for any name at all, never consults the deny-list, and passed while `merge_pr`
 was deleted.
 
-So the protection is a **shrink-only floor**: an independently written
-high-water mark, asserted as `floor ⊆ live`. The deny-list may grow freely and
-a new member needs no ceremony; a member that has ever been denied cannot
-quietly stop being. It is not a second copy of a vocabulary — it records where
-the guard has been, not what the guard is, which is the same shape as the
-repo's `GRANDFATHERED_*` baselines inverted.
+So the protection is a **floor**: the same names written a second time, in a
+second file, and enforced as an equality in both directions. `floor ⊆ live`
+catches the drop; the per-member sweep catches the addition, because the
+detector answers False for a live member the floor does not carry. **Adding a
+member to a deny-list means adding it to `DENY_LIST_FLOORS` too** — the
+failure message says so.
+
+Yes, that is a second copy of the vocabulary, and no, there is no way around
+it: two objects that must agree is the only arrangement in which losing one is
+visible at all. It is the same bargain a ratchet baseline makes. What a copy
+must not become is one nobody re-reads, which is what the per-member witness
+below is for.
 
 The floor is kept honest by the witness it replaced, applied to *live* members
 rather than used as the detector: every member of every deny-list is injected
@@ -162,8 +168,11 @@ recorded because an unstated limit is how the next author over-reads a guard.
   reddens — via the row-order equality — so the row carries a named
   `undetected_members` exemption rather than a claim it cannot make.
 - **The scan sees module-level names and calls to module-level or imported
-  functions.** An imported *sequence*, or a comprehension over one, must be
-  registered by hand. Widening the scan from names to calls is what revealed
+  functions.** An imported *sequence*, a `sorted(...)`/`list(...)` wrapper, or
+  a comprehension over one must be registered by hand. Each shape the scan
+  *does* handle carries a tracer in `_TRACER_SEQUENCES`; without one per shape,
+  deleting a branch of the scan stays green, because the completeness check is
+  a containment and a shrinking scan satisfies it. Widening the scan from names to calls is what revealed
   `registered_claims()`, which had been parametrised over and unclassified all
   along — the reason the ratchet on undetected subjects moved 4 → 5. That mark
   moves for a subject the scan newly *reveals*, never for one newly *written*.
@@ -175,10 +184,13 @@ recorded because an unstated limit is how the next author over-reads a guard.
    assert. `test_the_sweep_has_a_subject`, `test_an_empty_registry_fails_the_sweep`
    and `test_a_subject_that_resolves_to_nothing_fails_the_sweep` are the
    answer, and the last must *resolve*, not check presence.
-2. **The gate asserts presence instead of resolution.** A sibling PR shipped
-   `test_the_owner_still_owns_it`, which asserted a literal was present in a
-   file and was vacuously satisfiable. Every property here calls the live
-   predicate and reads its answer.
+2. **The gate asserts presence instead of resolution.** A sibling PR shipped a
+   guard (test_the_owner_still_owns_it) whose first version asserted a literal
+   was present in a file and was vacuously satisfiable; it has since been
+   rewritten to run the real detector. Every property here calls the live
+   predicate and reads its answer. Named without backticks on purpose — a
+   backticked test name is pinned by the anchor check below, and a cautionary
+   example should not become a test nobody may rename.
 3. **The derivation degenerates.** A derivation that starts returning nothing
    makes `derived ⊆ literal` trivially true. `test_a_degenerate_detector_is_a_failure`
    feeds each subject a detector that has degenerated to matching nothing and

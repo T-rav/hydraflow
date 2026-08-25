@@ -103,6 +103,16 @@ def check_member(row: GuardedEnumeration, member: str) -> None:
             f"{row.name}::{member} is exempt from drop-detection with no "
             "reason, which is indistinguishable from an oversight"
         )
+        # The exemption must still be NEEDED. A ratchet that only tightens is
+        # a ratchet nobody can honestly lower: fix the masking at its source
+        # and this branch would keep the exemption alive forever, which is the
+        # "exempts nothing and reads as progress" shape one level up.
+        assert not row.detects_drop(member), (
+            f"{row.name}::{member} is exempt from drop-detection, but its "
+            "detector now catches the drop. Remove the exemption and lower "
+            "EXEMPT_MEMBERS_MAX — the mechanism it deferred to is no longer "
+            "the only one."
+        )
         return
     assert row.detects_drop(member), (
         f"{row.name} would not notice losing {member!r}: the live machinery "
@@ -299,12 +309,19 @@ def test_undetected_subjects_only_shrink() -> None:
 
 #: Sequences the scan is known to see. Not the whole expected set — that would
 #: be a second enumeration to maintain — but enough that a scan which has
-#: stopped working cannot pass. Two files, two shapes: a plain tuple and an
-#: annotated one.
+#: stopped working cannot pass.
+#:
+#: One tracer PER SHAPE the scan handles, which is the point: the first two
+#: are bare ``ast.Name`` argvalues, and without the third, deleting the
+#: call-expression branch of ``parametrised_module_sequences`` stayed green —
+#: the containment below only shrinks, and the vitals row resolves its members
+#: directly rather than through the scan. The capability that revealed a fifth
+#: undetected subject was itself unpinned.
 _TRACER_SEQUENCES = frozenset(
     {
         "test_director_no_authority.DECISION_PATH_MODULES",
         "test_director_no_authority.ACTUATORS",
+        "test_vitals_conformance_seam.registered_claims()",
     }
 )
 

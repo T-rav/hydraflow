@@ -205,7 +205,7 @@ def declared_deny_lists() -> frozenset[str]:
         f"test_director_no_authority.{name}"
         for name in assigned
         if name not in ALLOW_LIST_NAMES
-        and isinstance(value := getattr(director, name, None), frozenset)
+        and isinstance(value := getattr(director, name, None), (frozenset, set))
         and value
         and all(isinstance(member, str) for member in value)
     )
@@ -223,13 +223,17 @@ def declared_deny_lists() -> frozenset[str]:
 #: ``FORBIDDEN_MUTATIONS``. Any derivation would reproduce a strict subset —
 #: which is finding F2 again, inside the gate written to catch it.
 #:
-#: So the floor is an independently written high-water mark, and the property
-#: is CONTAINMENT rather than equality: the deny-lists may grow freely and a
-#: new member needs no ceremony, but a member that has ever been denied cannot
-#: quietly stop being. That is the same shape as the repo's ``GRANDFATHERED_*``
-#: baselines, inverted — a floor rather than a ceiling — and it is not a second
-#: copy of a vocabulary for the same reason a ratchet baseline is not: it
-#: records where the guard has been, not what the guard is.
+#: So the floor is a second copy of the vocabulary, in a second file, and the
+#: enforced property is EQUALITY in both directions. ``floor <= live`` catches
+#: the drop; the per-member sweep over ``live`` catches the addition, because
+#: ``floor_protects`` answers False for a live member the floor does not
+#: carry. Adding a member means adding it here too.
+#:
+#: A second copy is the cost, and it is the price of a drop reddening at all:
+#: two objects that must agree is the only arrangement where losing one is
+#: visible, which is the same reason a ratchet baseline is a copy. What it
+#: must NOT become is a copy nobody re-reads — hence the per-member witness
+#: below, which exercises every live member through the guard's own extractor.
 #:
 #: Every live member is separately witnessed against the guard's own extractor,
 #: so a floor entry cannot rot into a name nothing could ever match.
@@ -539,7 +543,8 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             why=(
                 "Dropping 'merge_pr' survives, silently un-guarding the 'no "
                 "merge action' half of #11537's second acceptance criterion "
-                "across every decision-path module and every actuator."
+                "across every decision-path module and every actuator. A new "
+                "member goes in DENY_LIST_FLOORS here as well as in the list."
             ),
         ),
         GuardedEnumeration(
@@ -554,7 +559,8 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             why=(
                 "ADR-0137's narrowing of ADR-0094: the ConvergenceLedger stays "
                 "the sole owner of convergence state. A dropped call name lets "
-                "an actuator keep a second copy of the lap."
+                "an actuator keep a second copy of the lap. A new member goes "
+                "in DENY_LIST_FLOORS here as well as in the list."
             ),
         ),
         GuardedEnumeration(
@@ -569,7 +575,8 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             why=(
                 "#11542's sixth acceptance criterion as a property of what the "
                 "module cannot reach. A dropped name is how 'let the reviewer "
-                "apply its own fix' becomes a one-line change nothing reddens."
+                "apply its own fix' becomes a one-line change nothing reddens. "
+                "A new member goes in DENY_LIST_FLOORS here as well."
             ),
         ),
         GuardedEnumeration(
@@ -585,7 +592,8 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "The constant introduced BY the fix for this class, with no "
                 "drops guard of its own. Dropping 'multiprocessing' leaves a "
                 "raw spawn on the decision path invisible to the call-site "
-                "guards, which know only sanctioned helper names."
+                "guards, which know only sanctioned helper names. A new member "
+                "goes in DENY_LIST_FLOORS here as well as in the list."
             ),
         ),
         GuardedEnumeration(
