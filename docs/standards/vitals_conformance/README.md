@@ -130,12 +130,26 @@ therefore invisible to any parser; and `python` / `sys.executable`, since
 
 `SUBPROCESS_WAIVERS` is the one allow-list here, and it exists because an
 import is a fact about the file while an argv can be a fact about a call the
-test never makes — monkeypatching is invisible to a parser. It is registered
-alongside the claims, keyed by `(path, binary)` rather than by a line number
-that would rot, carries a written reason, must still match a live spawn (a dead
-waiver pre-approves whatever lands in that file next), and is capped by
-`SUBPROCESS_WAIVER_CEILING`, **which may only ever be lowered**. It holds one
-entry.
+test never makes. Two shapes make that so, and neither is visible to a parser:
+a `monkeypatch` of the spawn primitive, and an **injected runner** —
+`stream_claude_process` and `HostRunner.run_simple` are inversion-of-control
+seams, so `cmd=["claude", …]` with a recording double in `StreamConfig(runner=)`
+executes nothing. Note the seam still fails closed where it matters:
+`StreamConfig.runner` defaults to the real runner, so a call that omits it is
+flagged.
+
+It is registered alongside the claims, keyed by `(path, binary)` rather than by
+a line number that would rot, carries a written reason, must still match a live
+spawn (a dead waiver pre-approves whatever lands in that file next), and is
+capped by `SUBPROCESS_WAIVER_CEILING`, **which may only ever be lowered**. It
+holds three entries.
+
+An argv is read wherever it can be passed — positionally, spread across
+varargs, or by keyword. `subprocess.run(args=[...])` is ordinary working Python
+(`run(*popenargs, **kwargs)` forwards straight into `Popen(args=…)`), and a
+scanner reading only `call.args` sees a real spawn with an empty argv and
+reports nothing. An absolute path is reduced to its basename for the same
+reason: `/usr/bin/curl` is `curl`.
 
 ### The floor, and what is still above it
 

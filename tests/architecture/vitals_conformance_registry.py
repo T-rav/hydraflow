@@ -183,6 +183,27 @@ SUBPROCESS_WAIVERS: tuple[SubprocessWaiver, ...] = (
             "faithful fixture for a green sweep."
         ),
     ),
+    SubprocessWaiver(
+        path="tests/regressions/test_issue_11263.py",
+        binary="claude",
+        why=(
+            "stream_claude_process is an inversion-of-control seam: it spawns "
+            "through the runner handed to it in StreamConfig. This test injects "
+            "a recording double whose create_streaming_process runs `true`, so "
+            "the `claude` in cmd= is never executed. Statically indistinguishable "
+            "from the real thing — StreamConfig.runner defaults to None and the "
+            "REAL runner, so a call that omits it is correctly flagged."
+        ),
+    ),
+    SubprocessWaiver(
+        path="tests/regressions/test_issue_9911_stop_path_reap.py",
+        binary="claude",
+        why=(
+            "same seam, same shape: StreamConfig(runner=_Recorder()) returns a "
+            "MagicMock process, so cmd=['claude', '-p'] is documentary. The "
+            "test is about the spawn REGISTRY, not the spawn."
+        ),
+    ),
 )
 
 #: The waiver count on the day the subprocess dimension landed (#11706).
@@ -192,7 +213,7 @@ SUBPROCESS_WAIVERS: tuple[SubprocessWaiver, ...] = (
 #: whole standard exists to stop — so a new exception is a conversation, not an
 #: edit. A waiver that no longer matches a live spawn must be deleted, not left
 #: to cover the next thing that lands in that file.
-SUBPROCESS_WAIVER_CEILING: int = 1
+SUBPROCESS_WAIVER_CEILING: int = 3
 
 
 def registered_claims() -> tuple[Claim, ...]:

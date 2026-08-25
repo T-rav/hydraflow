@@ -499,6 +499,65 @@ def test_an_import_cycle_does_not_hang_the_closure(tmp_path: Path) -> None:
     assert reach is not None and reach.names == ("requests",)
 
 
+def test_a_dynamic_import_is_caught(tmp_path: Path) -> None:
+    """``importlib.import_module("boto3")`` is an import no ``ast.Import`` records.
+
+    #11706's census put ``importlib`` next to ``subprocess`` in the escape
+    hatches carried by 73 of the 673 swept files. A statement-only sweep reads
+    it as ordinary code.
+    """
+    _write(
+        tmp_path,
+        {
+            "test_dyn.py": (
+                "import importlib\n\n\ndef test_x():\n"
+                '    assert importlib.import_module("boto3")\n'
+            ),
+            "test_builtin.py": 'def test_x():\n    assert __import__("requests")\n',
+            "test_hop.py": "import loader\n\n\ndef test_x():\n    assert loader\n",
+            "loader.py": 'import importlib\n\nmod = importlib.import_module("swamp")\n',
+        },
+    )
+    graph = ImportGraph((tmp_path,))
+    for rel, expected in (
+        ("test_dyn.py", "boto3"),
+        ("test_builtin.py", "requests"),
+        ("test_hop.py", "swamp"),
+    ):
+        reach = graph.find(tmp_path / rel, _REMOTE_CLIENTS)
+        assert reach is not None, f"{rel}: dynamic import not followed"
+        assert reach.names == (expected,)
+
+    # A dynamic import of something local is not a network reach.
+    _write(
+        tmp_path,
+        {
+            "test_local_dyn.py": 'import importlib\n\nm = importlib.import_module("helper")\n',
+            "helper.py": "VALUE = 1\n",
+        },
+    )
+    assert graph.find(tmp_path / "test_local_dyn.py", _REMOTE_CLIENTS) is None
+
+
+def test_a_dotted_import_keeps_the_edge_into_the_package(tmp_path: Path) -> None:
+    """``import pkg.thing`` where ``thing`` is a re-exported NAME, not a module.
+
+    Without the prefix fallback the resolver records ``pkg`` as a third-party
+    leaf and the walk never enters ``pkg/__init__.py`` — where the client
+    import actually lives.
+    """
+    _write(
+        tmp_path,
+        {
+            "test_dotted.py": "import pkg.Thing\n\n\ndef test_x():\n    assert pkg\n",
+            "pkg/__init__.py": "import requests\n\nThing = requests\n",
+        },
+    )
+    graph = ImportGraph((tmp_path,))
+    reach = graph.find(tmp_path / "test_dotted.py", _REMOTE_CLIENTS)
+    assert reach is not None and reach.names == ("requests",)
+
+
 def test_the_spawn_detector_actually_fires(tmp_path: Path) -> None:
     """Negative control for #11706's second hole.
 
@@ -516,6 +575,15 @@ def test_the_spawn_detector_actually_fires(tmp_path: Path) -> None:
         "test_python_m.py": 'import subprocess\nsubprocess.run(["python", "-m", "pip", "install", "x"])\n',
         "test_git_clone.py": 'import subprocess\nsubprocess.run(["git", "clone", "https://github.com/o/r"])\n',
         "test_git_scp.py": 'import subprocess\nsubprocess.run(["git", "fetch", "git@github.com:o/r.git"])\n',
+        # argv by KEYWORD. `run(*popenargs, **kwargs)` forwards into
+        # `Popen(args=...)`, so this is ordinary working Python — and a scanner
+        # reading only `call.args` saw a real spawn with an empty argv and
+        # reported nothing at all.
+        "test_kwargs.py": 'import subprocess\nsubprocess.run(args=["curl", "-fsS", "https://vitals.example.com/m"])\n',
+        "test_kw_exec.py": 'import subprocess\nsubprocess.Popen(["sh"], executable="/usr/bin/curl")\n',
+        "test_kw_cmd.py": 'async def f(): await stream_claude_process(cmd=["claude", "-p"], prompt="hi")\n',
+        # An absolute path is still the binary.
+        "test_abspath.py": 'import subprocess\nsubprocess.run(["/usr/local/bin/gh", "issue", "list"])\n',
     }
     _write(tmp_path, cases)
     for rel in cases:

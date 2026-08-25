@@ -69,6 +69,28 @@ def remote_hosts(text: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 
+def _dynamic_import_target(call: ast.Call) -> str | None:
+    """``importlib.import_module("boto3")`` / ``__import__("boto3")``.
+
+    #11706's census found ``importlib`` sitting alongside ``subprocess`` in the
+    conformance roots' escape hatches. A dynamic import is a real import that no
+    ``ast.Import`` node records, so a sweep that reads only import statements
+    treats ``import_module(name)`` as ordinary code. Only string LITERALS are
+    resolvable here; a name computed at runtime is a residual the standard
+    records, same as an argv built from non-literals.
+    """
+    func = call.func
+    name = func.attr if isinstance(func, ast.Attribute) else None
+    if isinstance(func, ast.Name):
+        name = func.id
+    if name not in {"import_module", "__import__"} or not call.args:
+        return None
+    first = call.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class Reach:
     """One file's shortest path to a name the caller asked about.
@@ -198,11 +220,22 @@ class ImportGraph:
         local: set[Path] = set()
 
         def consider(dotted: str) -> bool:
-            resolved = self.module_file(dotted)
-            if resolved is None:
-                return False
-            local.add(resolved)
-            return True
+            """Follow *dotted*, or the longest prefix of it that resolves.
+
+            ``import pkg.thing`` where ``pkg`` is first-party but ``pkg/thing.py``
+            is not a file (a re-exported name, a namespace package) would
+            otherwise record ``pkg`` as a third-party leaf and drop the edge into
+            ``pkg/__init__.py`` — which is exactly where a package puts the
+            import that carries the client.
+            """
+            parts = dotted.split(".")
+            while parts:
+                resolved = self.module_file(".".join(parts))
+                if resolved is not None:
+                    local.add(resolved)
+                    return True
+                parts.pop()
+            return False
 
         for node in ast.walk(self._parse(path)):
             if isinstance(node, ast.Import):
@@ -223,6 +256,10 @@ class ImportGraph:
                         consider(f"{base}.{alias.name}")
                 if not resolved and node.level == 0:
                     external.add(base.split(".")[0])
+            elif isinstance(node, ast.Call):
+                dynamic = _dynamic_import_target(node)
+                if dynamic and not consider(dynamic):
+                    external.add(dynamic.split(".")[0])
 
         result = (frozenset(external), frozenset(local))
         self._edges[path] = result
@@ -413,20 +450,39 @@ class _SpawnNames:
         return module is not None and last in _STDLIB_SPAWNS[module]
 
 
+#: Parameter names that carry argv. ``subprocess.run(args=[...])`` is ordinary,
+#: working Python — ``run(*popenargs, **kwargs)`` forwards straight into
+#: ``Popen(args=...)`` — and a scanner that reads only ``call.args`` sees a real
+#: spawn with an EMPTY argv and reports nothing. ``cmd=`` is how
+#: ``stream_claude_process`` takes it; ``program=`` is
+#: ``create_subprocess_exec``'s.
+_ARGV_KEYWORDS: Final[frozenset[str]] = frozenset(
+    {"args", "argv", "cmd", "command", "program", "executable"}
+)
+
+
 def _argv_nodes(call: ast.Call) -> list[ast.expr]:
-    """The positional arguments that are argv.
+    """Every argument node that can carry argv.
 
     ``subprocess.run(["git", ...])`` puts argv in one list; ``run_subprocess(
     "git", "status")`` and ``create_subprocess_exec("gh", "pr", ...)`` spread it
     across positionals. Reading only ``args[0]`` in the second shape sees the
     binary and misses the URL it is pointed at.
+
+    Keywords are read in every shape, not only when the positionals are empty:
+    ``Popen(["sh"], executable="/usr/bin/curl")`` puts the real binary in a
+    keyword while the positional list looks innocent.
     """
-    if not call.args:
-        return []
-    first = call.args[0]
-    if isinstance(first, ast.List | ast.Tuple):
-        return [first]
-    return list(call.args)
+    nodes: list[ast.expr] = []
+    if call.args:
+        first = call.args[0]
+        nodes.extend([first] if isinstance(first, ast.List | ast.Tuple) else call.args)
+    nodes.extend(
+        keyword.value
+        for keyword in call.keywords
+        if keyword.arg in _ARGV_KEYWORDS and keyword.value is not None
+    )
+    return nodes
 
 
 def _argv_tokens(call: ast.Call) -> tuple[str, ...]:
@@ -435,7 +491,14 @@ def _argv_tokens(call: ast.Call) -> tuple[str, ...]:
         for node in ast.walk(arg):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 for chunk in _SHELL_SPLIT.split(node.value):
-                    tokens.extend(chunk.split())
+                    for token in chunk.split():
+                        tokens.append(token)
+                        # ``/usr/bin/curl`` is ``curl``. Matching whole tokens
+                        # only would let an absolute path walk past the binary
+                        # list — the same miss as a keyword argv, one character
+                        # of punctuation further along.
+                        if "/" in token:
+                            tokens.append(token.rsplit("/", 1)[-1])
     return tuple(tokens)
 
 
