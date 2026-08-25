@@ -279,6 +279,91 @@ jobs:
       - name: Scan tracked files for runtime caches
         run: python3 scripts/check_runtime_cache_tracked.py --tracked
 
+  # Universal backstop (#11730): the whole-tree aggregate ratchets, UNGATED by
+  # `changes` on purpose — this job must have no `if:` at all.
+  #
+  # These gates measure a quantity summed over an entire tree (parametrize
+  # copies across every module under tests/, `# noqa` counts across every
+  # module under src/, the untraced fraction of recent merge history) against a
+  # committed mark. Every other lane that runs them is path-filtered, and a
+  # path filter can only ever be a SUBSET of a whole-tree subject. Two failure
+  # modes follow, and being ungated closes both:
+  #
+  #   1. Scoped by PATH. `core_python` carries predicate-quantifier: every with
+  #      !tests/regressions/**, !tests/scenarios/** and
+  #      !tests/sandbox_scenarios/**, and no other lane that collects
+  #      tests/architecture restores them. So a PR touching only
+  #      tests/regressions/** runs `Regression Tests` (pytest tests/regressions/)
+  #      and nothing that reads the whole-tests/ aggregates — it can move the
+  #      parametrize count with no gate watching.
+  #   2. Scoped by BASE. strict_required_status_checks_policy is false on both
+  #      rulesets, so a PR's checks are evaluated against whatever base it
+  #      branched from. Three individually-green PRs summed to
+  #      `parametrize copies 413 > baseline 412` on origin/staging and blocked
+  #      every open PR. Because this job also runs on `push` to main/staging
+  #      (see the workflow triggers), the merged tree is measured within minutes
+  #      of landing instead of never.
+  #
+  # Deliberately NOT solved by widening the `arch` paths-filter to tests/**:
+  # `Architecture Check` also regenerates every arch artifact (`make
+  # arch-check`) and runs the full tests/architecture suite, minutes of work
+  # that has nothing to do with these counts. A narrow, fast, ungated lane
+  # costs less than a wide trigger on a heavy job.
+  #
+  # Deliberately NOT auto-healing: the ratchets are shrink-only, and the honest
+  # repair is semantic (collapse a parametrize group, delete a duplicate). The
+  # only repair a bot could generate mechanically is raising the mark, which is
+  # the one move that must never be automatic. So this fails loudly and names
+  # the breach instead.
+  #
+  # Default (shallow) checkout ON PURPOSE, matching the `test` job that runs
+  # these same gates today. This job WIDENS a trigger; it must not also change
+  # what the gates measure. The traceability dimension recomputes from merge
+  # history when it has any, and degrades to marker-only mode on a shallow
+  # clone (see src/disturbance/detectors/traceability.py) — which is exactly
+  # how it already behaves in the `test` job. Deepening it here would turn on
+  # the marker-mismatch check for the first time, on an UNGATED required lane:
+  # the day the untraced fraction moves more than a point from the committed
+  # marker, every PR in the repo goes red for a reason no PR caused. That is
+  # the failure this whole job exists to prevent, so do not add fetch-depth.
+  aggregate-ratchets:
+    name: Aggregate Ratchets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # No explicit `uv sync` step: `make aggregate-ratchets` depends on
+      # `deps`, the same way the gateway-package-coverage job calls
+      # `make gateway-coverage`. One command, identical locally and in CI.
+      - name: Whole-tree aggregate ratchets
+        run: make aggregate-ratchets
+      - name: Explain a base-branch breach
+        if: failure() && github.event_name == 'push'
+        run: |
+          echo "::error::Aggregate ratchet breached on ${{ github.ref_name }} itself."
+          {
+            echo "## Aggregate ratchet breached on \`${{ github.ref_name }}\`"
+            echo
+            echo "The base branch is over one of its committed marks. This is a"
+            echo "**semantic merge conflict**: several PRs, each green against its own"
+            echo "merge base, summed past the mark. Git reports no conflict because"
+            echo "there isn't one."
+            echo
+            echo "Every open PR will now go red on \`Aggregate Ratchets\` for a reason"
+            echo "that has nothing to do with its own change. Heal the base branch"
+            echo "first — collapse the extra copies or delete the duplicate."
+            echo
+            echo "Do **not** raise the baseline. These ratchets are shrink-only."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     name: Lint & Format
     needs: changes
@@ -1126,7 +1211,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, security, arch, test, gateway-package-coverage, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
+    needs: [changes, lint, typecheck, security, arch, aggregate-ratchets, test, gateway-package-coverage, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
     if: always()
     steps:
       - name: Require all CI jobs to have passed or been skipped
