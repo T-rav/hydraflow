@@ -186,7 +186,17 @@ def test_a_forgetful_caller_fails_loudly_rather_than_adjudicating_fail_open() ->
     ("kwargs", "expected"),
     [
         pytest.param(
-            {"reviewer_independent": False, "hitl_required": True, "ci_green": False},
+            {
+                "reviewer_independent": False,
+                "hitl_required": True,
+                "ci_green": False,
+                # Without a MISMATCHED pair this case never trips the snapshot
+                # rule, so it pinned independence-outranks-HITL while its id
+                # claimed the snapshot adjacency — the docstring's own "trips
+                # its rule AND every rule below it" was false for this row.
+                "evidence_head_sha": "a" * 40,
+                "current_head_sha": "b" * 40,
+            },
             AdjudicationReason.NOT_INDEPENDENT,
             id="independence-outranks-snapshot",
         ),

@@ -175,12 +175,15 @@ _REFUSAL_CODES = REFUSAL_CODES
 #: forbidden keys is fail-open the moment somebody invents a new one, and the
 #: key an untrusted reviewer would invent is precisely the one nobody listed.
 #:
-#: Scope, stated exactly (#11543): ``_FINDING_KEYS`` filters, and every read of
-#: a finding goes through the filtered dict. ``_PROPOSAL_KEYS`` does NOT filter
-#: anything — the proposal is assembled by naming its four fields explicitly,
-#: which is a second, independent allow-list. It is kept as the written record
-#: of what a proposal may carry, and deleting it changes no behaviour. Saying
-#: otherwise would describe a check that is not there.
+#: Scope, stated exactly (#11543). NEITHER constant is what closes the
+#: boundary: a proposal is assembled by naming its three fields explicitly and
+#: a finding by naming its four, so an unlisted key has no path to either
+#: regardless. ``_FINDING_KEYS`` additionally filters, which is a redundant
+#: belt; ``_PROPOSAL_KEYS`` filters nothing and deleting it changes no
+#: behaviour. Both are kept as the written record of what may arrive. Two
+#: earlier wordings here claimed the sets did the work — first that both
+#: filtered, then that one did "real work" — and each described a check the
+#: ``.get()`` calls were providing.
 #: Nothing outside this set is read, so nothing outside it can arrive.
 _PROPOSAL_KEYS: frozenset[str] = frozenset({"recommended", "summary", "findings"})
 _FINDING_KEYS: frozenset[str] = frozenset({"summary", "file", "line", "blocking"})
@@ -933,11 +936,11 @@ def parse_review_proposal(text: str) -> ReviewProposal | None:
     authority. That is ``review_evidence``'s allow-list argument applied to the
     other direction of the boundary.
 
-    Which constant *enforces* that differs, and the difference is worth
-    knowing before editing either: findings are filtered through
-    ``_FINDING_KEYS`` and read only from the filtered dict, while a proposal is
-    assembled by naming its fields explicitly and ``_PROPOSAL_KEYS`` filters
-    nothing. Both close the boundary; only one does it with a set.
+    What closes it is the explicit ``.get("<literal>")`` reads, not either
+    constant — a key nobody names cannot reach a field. ``_FINDING_KEYS`` also
+    filters, as a redundant belt; ``_PROPOSAL_KEYS`` does not. Worth knowing
+    before editing either, because deleting the filter breaks nothing today
+    and would matter the moment a field is read some other way.
 
     Coercion is deliberately asymmetric, and the asymmetry is the safety
     property. Prose is trimmed to fit, and an unusable ``line`` becomes
@@ -991,16 +994,20 @@ def _finding(entry: object) -> ReviewFinding:
         # is wrong. Kept, and kept blocking: silently dropping it would be this
         # parser hiding a finding on a formatting technicality.
         return ReviewFinding(summary=_summary_or_placeholder(entry))
-    # `picked` is the allow-list doing real work: every read below goes
-    # through it, never through `entry`. An earlier shape read all four
-    # members back out by name, which made the filter unobservable —
-    # `dict(entry)` passed every test — so the constant documented a guard the
-    # `.get()` calls were actually providing. Same defect as `as_payload`
-    # comparing `model_fields` while claiming to guard the rendered payload
-    # (#11543): the guard's stated subject was not the thing doing the work.
+    # A redundant belt, NOT the defence — the same shape and the same honesty
+    # as ``review_evidence.PRIVATE_MARKERS``. What actually closes this
+    # boundary is the four explicit ``picked.get("<literal>")`` reads below: an
+    # unlisted key has no path to a field whatever this filter does, so
+    # replacing it with ``dict(entry)`` is unobservable through the return
+    # value and always will be while every member is read by name.
+    #
+    # An earlier attempt to "make it load-bearing" (#11543) added an
+    # ``AssertionError`` here, which was worse in two ways: unreachable by
+    # construction of the line above it, and — had it ever fired — an
+    # exception escaping ``parse_review_proposal``'s narrow ``try`` all the way
+    # to the allocator, breaching this module's contract that a child's failure
+    # becomes a receipt rather than something the allocator has to carry.
     picked: dict[str, Any] = {k: v for k, v in entry.items() if k in _FINDING_KEYS}
-    if set(picked) - _FINDING_KEYS:  # pragma: no cover - defensive, by construction
-        raise AssertionError("the finding allow-list let an unlisted key through")
     line = picked.get("line")
     return ReviewFinding(
         summary=_summary_or_placeholder(picked.get("summary")),

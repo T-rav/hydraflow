@@ -65,7 +65,7 @@ DECISION_PATH_MODULES = (
     # this list, so nothing enforced it: ``review_evidence`` says "Pure by
     # construction: no I/O, no clock, no spawn" and ``review_authority`` says
     # "Merge authority is not modelled here at all". ``adjudicate`` is the one
-    # function in the repository that produces a ``ReviewVerdict``, so a
+    # P5 function that produces a ``ReviewVerdict``, so a
     # ``merge_pr`` added beside it was exactly the edit this guard exists to
     # redden — and would not have. Three modules claimed the property; one was
     # pinned (#11543).
