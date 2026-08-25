@@ -47,6 +47,12 @@ already releases *capacity* for — CI, diagnostic, and a human — and applies 
 same rule to *authority*: a driver parked on one of them has no business
 holding a writer lease, and the correct number of workers running against its
 worktree is zero.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations

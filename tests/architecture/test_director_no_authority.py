@@ -108,6 +108,24 @@ FORBIDDEN_MUTATIONS = frozenset(
     }
 )
 
+#: Calls that would make an actuator an owner of convergence state. ADR-0137's
+#: narrowing of ADR-0094 survives dispatch being armed and survives a
+#: write-capable worker existing: a driver may sequence the outer lap but may
+#: not own its state, and the canaries' evidence is telemetry beside the ledger
+#: rather than a second copy of it.
+CONVERGENCE_WRITES = frozenset(
+    {
+        "increment_route_backs",
+        "record_lap",
+        "recompute_converged",
+        "set_converged",
+        "add_open_concern",
+        "resolve_open_concern",
+        "record_stage_transition",
+        "record_sub_state_transition",
+    }
+)
+
 #: The broker's ENTIRE public surface. An allow-list, not a deny-list of
 #: plausible verb names: a deny-list would pass ``admit_and_run``, ``submit``,
 #: ``send``, ``fan_out`` or ``__call__``, which is precisely the fail-open shape
@@ -117,12 +135,48 @@ FORBIDDEN_MUTATIONS = frozenset(
 ALLOWED_BROKER_METHODS = frozenset({"admit"})
 
 
-def _tree(relative: str) -> ast.Module:
+#: The exact sentence a decision-path module carries in its own module
+#: docstring, and the thing ``DECISION_PATH_MODULES`` is derived from.
+#:
+#: The needle it replaces was ``"no spawn" in doc.lower()``, which matched
+#: FOUR of the ten entries (#11723 F2). Deleting ``src/plan_broker.py`` or
+#: ``src/review_authority.py`` from the list above reddened nothing, because
+#: neither uses that phrase — a predicate merely *correlated* with the subject,
+#: standing in for the subject. This sentence is carried by exactly the ten,
+#: so the derivation is TOTAL for the literal and the two are asserted equal.
+#:
+#: Deliberately a sentence no module would write by accident. A looser needle
+#: is how the previous one degenerated; a needle a module must opt into is how
+#: ``literal == derived`` stays an equality rather than a containment.
+DECISION_PATH_CLAIM = "Decision path, no authority."
+
+
+def claiming_modules() -> frozenset[str]:
+    """Every ``src`` module that declares itself on the decision path.
+
+    The derivation, resolved from source on every run. Public because
+    ``guard_enumeration_registry`` witnesses drops from
+    ``DECISION_PATH_MODULES`` by calling THIS function rather than a copy of
+    it: a gate that re-implements the derivation it is checking is checking
+    its own copy.
+    """
+    found: set[str] = set()
+    for path in sorted((REPO_ROOT / "src").rglob("*.py")):
+        try:
+            doc = ast.get_docstring(ast.parse(path.read_text(errors="replace"))) or ""
+        except SyntaxError:  # pragma: no cover - a broken module fails elsewhere
+            continue
+        if DECISION_PATH_CLAIM in doc:
+            found.add(str(path.relative_to(REPO_ROOT)))
+    return frozenset(found)
+
+
+def module_tree(relative: str) -> ast.Module:
     path = REPO_ROOT / relative
     return ast.parse(path.read_text(encoding="utf-8"), filename=relative)
 
 
-def _called_names(tree: ast.Module) -> set[str]:
+def called_names(tree: ast.Module) -> set[str]:
     names: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -135,17 +189,35 @@ def _called_names(tree: ast.Module) -> set[str]:
     return names
 
 
+def import_roots(tree: ast.Module) -> set[str]:
+    """Top-level package of every absolute import in *tree*.
+
+    Public because ``guard_enumeration_registry`` witnesses ``_SPAWN_MACHINERY``
+    by feeding this extractor a subject module with an import injected. A
+    re-implementation there would be a second copy of the rule, and the two
+    would drift — which is the shape ``docs/standards/parametrised_guards``
+    exists to stop.
+    """
+    roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
 @pytest.mark.parametrize("module", DECISION_PATH_MODULES)
 def test_the_decision_path_never_spawns_a_process(module: str) -> None:
     # The director's own turn is spawned by ``director_turn_runner``, which is
     # seam-declared. Nothing in the decision path may spawn anything at all —
     # that is the "no direct process spawn" half of the criterion.
-    assert not (_called_names(_tree(module)) & SPAWN_PRIMITIVES)
+    assert not (called_names(module_tree(module)) & SPAWN_PRIMITIVES)
 
 
 @pytest.mark.parametrize("module", DECISION_PATH_MODULES)
 def test_the_decision_path_never_mutates_a_label_or_merges(module: str) -> None:
-    assert not (_called_names(_tree(module)) & FORBIDDEN_MUTATIONS)
+    assert not (called_names(module_tree(module)) & FORBIDDEN_MUTATIONS)
 
 
 def test_the_brokers_public_surface_is_exactly_admit() -> None:
@@ -167,7 +239,7 @@ def test_the_broker_imports_nothing_that_could_run_a_worker() -> None:
     # A method name is only half of it: the capability would have to be
     # *reachable*, and the broker importing a runner, a port or a subprocess
     # module is the earliest visible sign that someone is about to make it so.
-    tree = _tree("src/director_broker.py")
+    tree = module_tree("src/director_broker.py")
     imported = {
         node.module.split(".")[0]
         for node in ast.walk(tree)
@@ -199,28 +271,23 @@ def test_the_director_never_writes_convergence_state() -> None:
     # of convergence state, and a driver may sequence the outer lap but may not
     # own its state. A shadow director keeping its own parallel view of laps,
     # verdicts or open concerns would have broken the ADR that permits it.
-    forbidden = {
-        "increment_route_backs",
-        "record_lap",
-        "recompute_converged",
-        "set_converged",
-        "add_open_concern",
-        "resolve_open_concern",
-        "record_stage_transition",
-        "record_sub_state_transition",
-    }
+    # The set is ``CONVERGENCE_WRITES``, defined once below rather than
+    # restated here. The literal that used to sit inline was a second copy of
+    # one vocabulary: the two were byte-identical on the day they were written
+    # and nothing kept them so, which is how a name added to one and not the
+    # other stops being forbidden on half the boundary (#11723).
     called: set[str] = set()
     for module in DECISION_PATH_MODULES:
-        called |= _called_names(_tree(module))
+        called |= called_names(module_tree(module))
 
-    assert not (called & forbidden)
+    assert not (called & CONVERGENCE_WRITES)
 
 
 def test_the_broker_does_not_reimplement_the_admission_rule_table() -> None:
     # It must delegate to ``driver_contracts.admit_dispatch``. A second copy of
     # the rules would fork the vocabulary the canary's evidence bar counts
     # against, and the two copies would drift.
-    assert "admit_dispatch" in _called_names(_tree("src/director_broker.py"))
+    assert "admit_dispatch" in called_names(module_tree("src/director_broker.py"))
 
 
 def test_the_turn_runner_never_resumes_a_vendor_session() -> None:
@@ -233,7 +300,7 @@ def test_the_turn_runner_never_resumes_a_vendor_session() -> None:
     # deleted.
     flags = {
         node.value
-        for node in ast.walk(_tree("src/director_turn_runner.py"))
+        for node in ast.walk(module_tree("src/director_turn_runner.py"))
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
 
@@ -251,7 +318,9 @@ def test_the_turn_runner_owns_no_raw_spawn_primitive() -> None:
     # the same rule fleet-wide; this pins it for the director specifically,
     # because the director is the one component with a legitimate reason to
     # want a raw spawn — it needs a *replaced* environment, not a merged one.
-    assert not (_called_names(_tree("src/director_turn_runner.py")) & SPAWN_PRIMITIVES)
+    assert not (
+        called_names(module_tree("src/director_turn_runner.py")) & SPAWN_PRIMITIVES
+    )
 
 
 #: Every module that can start a brokered child, and the ``SANDBOX_SEAMS`` key
@@ -266,6 +335,48 @@ ACTUATORS: tuple[tuple[str, str], ...] = (
 )
 
 
+def brokered_actuator_modules() -> frozenset[str]:
+    """Every ``src`` module whose name declares it a brokered actuator.
+
+    The derivation ``ACTUATORS`` is pinned against. A canary's actuator is
+    ``src/<phase>_worker_runner.py`` by construction — the naming is the
+    convention #11541 set and #11542/#11543 followed — so the table has a free
+    derivation and does not need anyone to remember the row (#11723).
+
+    Public for the same reason :func:`claiming_modules` is: the enumeration
+    gate calls this, not a copy of it.
+    """
+    return frozenset(
+        str(path.relative_to(REPO_ROOT))
+        for path in sorted((REPO_ROOT / "src").glob("*_worker_runner.py"))
+    )
+
+
+def test_the_actuator_table_and_the_naming_convention_are_the_same_set() -> None:
+    """The DROPS direction of ``ACTUATORS`` (#11723).
+
+    Dropping the ``review_worker_runner`` row silently un-guarded THREE
+    parametrised checks against the module that spawns the reviewer, and
+    reddened nothing — the table was iterated by its own tests and by nothing
+    else. The derivation was free the whole time.
+
+    Equality, not containment, so both edits redden: removing a row while the
+    file exists, and adding a ``*_worker_runner.py`` without a row.
+    """
+    derived = brokered_actuator_modules()
+    listed = frozenset(module for module, _seam in ACTUATORS)
+
+    assert derived, (
+        "no src/*_worker_runner.py exists; the derivation has no subject and "
+        "every containment against it is vacuously true"
+    )
+    assert derived == listed, (
+        "the actuator table and the naming convention disagree. "
+        f"On disk but unlisted (spawns with no guard): {sorted(derived - listed)}. "
+        f"Listed but gone from disk: {sorted(listed - derived)}."
+    )
+
+
 @pytest.mark.parametrize(("module", "_seam"), ACTUATORS)
 def test_an_actuator_never_mutates_a_label_or_merges(module: str, _seam: str) -> None:
     # Each canary gives one module the ability to start a process. It must gain
@@ -273,7 +384,7 @@ def test_an_actuator_never_mutates_a_label_or_merges(module: str, _seam: str) ->
     # the deterministic driver still owns every label and every merge. #11542's
     # workers WRITE and #11543's has an opinion about whether a change should
     # land, so the rule matters more with each one, not less.
-    assert not (_called_names(_tree(module)) & FORBIDDEN_MUTATIONS)
+    assert not (called_names(module_tree(module)) & FORBIDDEN_MUTATIONS)
 
 
 @pytest.mark.parametrize(("module", "_seam"), ACTUATORS)
@@ -287,7 +398,7 @@ def test_an_actuator_owns_no_raw_spawn_primitive(module: str, _seam: str) -> Non
     # machinery and which the sandbox replaces wholesale.
     raw = SPAWN_PRIMITIVES - {"run_lightweight_agent"}
 
-    assert not (_called_names(_tree(module)) & raw)
+    assert not (called_names(module_tree(module)) & raw)
 
 
 @pytest.mark.parametrize(("module", "seam"), ACTUATORS)
@@ -346,24 +457,6 @@ def test_the_sandbox_clears_every_canary_dial(dial: str, tmp_path) -> None:
     assert getattr(armed, dial) == ""
 
 
-#: Calls that would make an actuator an owner of convergence state. ADR-0137's
-#: narrowing of ADR-0094 survives dispatch being armed and survives a
-#: write-capable worker existing: a driver may sequence the outer lap but may
-#: not own its state, and the canaries' evidence is telemetry beside the ledger
-#: rather than a second copy of it.
-CONVERGENCE_WRITES = frozenset(
-    {
-        "increment_route_backs",
-        "record_lap",
-        "recompute_converged",
-        "set_converged",
-        "add_open_concern",
-        "resolve_open_concern",
-        "record_stage_transition",
-        "record_sub_state_transition",
-    }
-)
-
 #: Calls that would let a worker's output become the commit. #11542's sixth
 #: acceptance criterion — "existing implementation output markers, quality
 #: gates, commit rules, and no-push rule remain unchanged" — as a property of
@@ -413,7 +506,7 @@ WRITE_PRIMITIVES = frozenset(
 def test_an_actuator_reaches_no_forbidden_call(
     module: str, forbidden: frozenset[str]
 ) -> None:
-    assert not (_called_names(_tree(module)) & forbidden)
+    assert not (called_names(module_tree(module)) & forbidden)
 
 
 async def test_the_implement_actuator_actually_uses_the_injected_git_runner() -> None:
@@ -487,7 +580,7 @@ def test_the_review_actuator_cannot_reach_the_adjudicator() -> None:
     whatever the prose around it said. Read from the AST rather than the text,
     so the docstrings *explaining* the rule cannot satisfy the test for it.
     """
-    tree = _tree("src/review_worker_runner.py")
+    tree = module_tree("src/review_worker_runner.py")
     imported = {
         alias.asname or alias.name
         for node in ast.walk(tree)
@@ -497,7 +590,7 @@ def test_the_review_actuator_cannot_reach_the_adjudicator() -> None:
 
     assert "adjudicate" not in imported
     assert "ReviewVerdict" not in imported
-    assert "adjudicate" not in _called_names(tree)
+    assert "adjudicate" not in called_names(tree)
 
 
 def test_every_module_claiming_purity_is_on_the_list() -> None:
@@ -544,6 +637,36 @@ def test_every_module_claiming_purity_is_on_the_list() -> None:
     )
 
 
+def test_the_declared_claim_and_the_list_are_the_same_set() -> None:
+    """The DROPS direction, closed (#11723 F2).
+
+    The guard above is a containment — ``claimants ⊆ list`` — over a needle
+    that matched four of the ten entries, so six of the ten could be deleted
+    and nothing reddened. This is the equality, over a needle every entry
+    carries: delete a row from ``DECISION_PATH_MODULES`` and the module still
+    declares itself, so ``derived - literal`` is non-empty; delete the
+    sentence from a module and ``literal - derived`` is. Neither edit is green
+    on its own any more, which is what "two individually-green edits removed a
+    module from every guard in this file" needed.
+
+    The subject is the literal tuple BY REFERENCE, not a re-typed copy and not
+    a predicate that selects from it — ``docs/standards/parametrised_guards``.
+    """
+    derived = claiming_modules()
+    listed = frozenset(DECISION_PATH_MODULES)
+
+    assert derived, (
+        f"no module carries {DECISION_PATH_CLAIM!r}; the derivation has no "
+        "subject and every containment below it is vacuously true"
+    )
+    assert derived == listed, (
+        "the decision path's declaration and its enumeration disagree. "
+        f"Declared but unlisted (nothing guards them): {sorted(derived - listed)}. "
+        f"Listed but no longer declaring (the list is guarding a claim the "
+        f"module withdrew): {sorted(listed - derived)}."
+    )
+
+
 #: Raw spawn machinery. ``SPAWN_PRIMITIVES`` names HydraFlow's *sanctioned*
 #: helpers, and the repo-wide raw-spawn ratchet knows
 #: ``create_subprocess_exec``/``Popen``/``spawnv`` — so a plain
@@ -557,15 +680,7 @@ _SPAWN_MACHINERY: frozenset[str] = frozenset({"subprocess", "multiprocessing"})
 
 @pytest.mark.parametrize("module", DECISION_PATH_MODULES)
 def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> None:
-    tree = _tree(module)
-    roots: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            roots.add(node.module.split(".")[0])
-
-    reached = roots & _SPAWN_MACHINERY
+    reached = import_roots(module_tree(module)) & _SPAWN_MACHINERY
     assert not reached, (
         f"{module} imports {sorted(reached)}. Every module on this list says it "
         "does not spawn; the call-site guards only know the sanctioned helper "

@@ -25,6 +25,12 @@ were green while guarding nothing:
 
 Pure: no I/O, no clock, no spawn. Every function is a decision about a
 configuration and a request.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations
