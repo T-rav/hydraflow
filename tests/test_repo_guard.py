@@ -219,7 +219,13 @@ class TestJSONFormatterRepoSession:
 
 
 class TestWorktreeOriginValidation:
-    def _make_wt_manager(self, repo: str = "owner/repo"):
+    def _make_wt_manager(
+        self,
+        repo: str = "owner/repo",
+        *,
+        github_host: str = "github.com",
+        fail_closed: bool = True,
+    ):
         from workspace import WorkspaceManager
 
         config = MagicMock()
@@ -230,6 +236,12 @@ class TestWorktreeOriginValidation:
         config.main_branch = "main"
         config.dry_run = False
         config.ui_dirs = []
+        # Set explicitly, never left to MagicMock: an auto-created attribute is
+        # truthy, so ``origin_guard_fail_closed`` would read as ON no matter
+        # what a test meant, and ``github_host`` would reach ``re.escape`` as a
+        # Mock. Both are the #11720 behaviour under test.
+        config.github_host = github_host
+        config.origin_guard_fail_closed = fail_closed
         # Prevent auto-detection from scanning filesystem
         with patch.object(WorkspaceManager, "_detect_ui_dirs", return_value=[]):
             return WorkspaceManager(config)
@@ -369,30 +381,127 @@ class TestWorktreeOriginValidation:
         assert result is None  # case-insensitive match succeeds
 
     @pytest.mark.asyncio
-    async def test_unrecognised_origin_url_warns_that_validation_was_skipped(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A non-GitHub origin is tolerated, and the log says the guard did not run.
-
-        Fail-open is the deliberate, unchanged behaviour here (#11703): flipping
-        it to a raise aborts factory runs on any origin form the pattern does
-        not handle, which is an operator decision. What the log must NOT do is
-        read like a cosmetic parse miss — it has to say the safety check was
-        SKIPPED.
-        """
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://gitlab.example/owner/repo.git",
+            "https://github.mycorp.com/owner/repo.git",
+            "/tmp/fixture-repo",
+            "file:///tmp/fixture-repo",
+            "../sibling-repo",
+        ],
+        ids=["other_host", "ghes_default_host", "fs_path", "file_url", "relative_path"],
+    )
+    async def test_unrecognised_origin_fails_closed(self, url: str) -> None:
+        """An origin it cannot parse it cannot verify — so it refuses (#11720)."""
         wm = self._make_wt_manager("owner/repo")
+        with patch(
+            "workspace._remote.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
+            mock_run.return_value = f"{url}\n"
+            with pytest.raises(RuntimeError) as excinfo:
+                await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+        message = str(excinfo.value)
+        # The message must be self-sufficient: this fires per issue, so someone
+        # reading a stalled factory's logs has to fix it from the text alone.
+        assert url in message
+        assert "owner/repo" in message
+        assert "HYDRAFLOW_GITHUB_HOST" in message
+        assert "HYDRAFLOW_ORIGIN_GUARD_FAIL_CLOSED" in message
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://gitlab.example/owner/repo.git",
+            "/tmp/fixture-repo",
+            "file:///tmp/fixture-repo",
+            "../sibling-repo",
+        ],
+        ids=["other_host", "fs_path", "file_url", "relative_path"],
+    )
+    async def test_kill_switch_restores_warn_and_continue(
+        self, url: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``origin_guard_fail_closed=False`` is the deliberate opt-out (#11720).
+
+        Filesystem origins are the realistic non-GHES casualty of fail-closed,
+        and this switch is what covers them. A kill-switch nobody has watched
+        work is not a kill-switch.
+        """
+        wm = self._make_wt_manager("owner/repo", fail_closed=False)
         with (
             caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
             patch(
                 "workspace._remote.run_subprocess", new_callable=AsyncMock
             ) as mock_run,
         ):
-            mock_run.return_value = "https://gitlab.example/owner/repo.git\n"
+            mock_run.return_value = f"{url}\n"
             result = await wm._assert_origin_matches_repo()
         mock_run.assert_awaited_once()
         assert "Origin validation SKIPPED" in caplog.text
         assert "did NOT run" in caplog.text
         assert result is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://evilgithub.com/owner/repo",
+            "https://evilgithub.com/owner/repo.git",
+            "git@notgithub.com:owner/repo.git",
+        ],
+        ids=["lookalike_https", "lookalike_https_suffix", "lookalike_scp"],
+    )
+    async def test_lookalike_host_is_not_accepted_as_the_real_host(
+        self, url: str
+    ) -> None:
+        """``evilgithub.com/owner/repo`` must not read as ``owner/repo`` (#11720).
+
+        Before the ``(?:^|[@/])`` host boundary these parsed to the expected slug
+        and were ACCEPTED — a guard that exists to reject the wrong repository
+        accepting a lookalike host. Now they do not parse, so fail-closed
+        refuses them.
+        """
+        wm = self._make_wt_manager("owner/repo")
+        with patch(
+            "workspace._remote.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
+            mock_run.return_value = f"{url}\n"
+            with pytest.raises(RuntimeError, match="not a recognised"):
+                await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_configured_ghes_host_is_accepted(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Setting ``github_host`` keeps a GHES deployment guarded, not exempt."""
+        wm = self._make_wt_manager("owner/repo", github_host="github.mycorp.com")
+        with (
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+            patch(
+                "workspace._remote.run_subprocess", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = "https://github.mycorp.com/owner/repo.git\n"
+            result = await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
+        assert "Origin validation SKIPPED" not in caplog.text
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_configured_ghes_host_still_raises_on_mismatch(self) -> None:
+        """A configured host relaxes parsing, never the identity check itself."""
+        wm = self._make_wt_manager("owner/repo", github_host="github.mycorp.com")
+        with patch(
+            "workspace._remote.run_subprocess", new_callable=AsyncMock
+        ) as mock_run:
+            mock_run.return_value = "https://github.mycorp.com/other/project.git\n"
+            with pytest.raises(RuntimeError, match="expected 'owner/repo'"):
+                await wm._assert_origin_matches_repo()
+        mock_run.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_empty_repo_skips_validation(self) -> None:
@@ -406,20 +515,21 @@ class TestWorktreeOriginValidation:
         assert result is None
 
 
-class TestOriginUrlPatternHasNoDeadArm:
-    """``_ORIGIN_SSH_RE`` was unreachable: the surviving pattern already wins.
+class TestOriginUrlPattern:
+    """Pattern-level properties, asserted directly on the compiled matcher.
 
-    Deleting dead code needs proof it was dead. This asserts the property that
-    made it so — ``[/:]`` matches scp-style's ``:`` and the search is unanchored
-    — over the same table the behavioural tests use, so a future narrowing of
-    the pattern that would resurrect the need for an SSH arm reddens here (#11703).
+    ``_ORIGIN_SSH_RE`` was unreachable: ``[/:]`` matches scp-style's ``:`` and
+    the search is unanchored, so a separate SSH arm could never win (#11703).
+    Deleting dead code needs proof it was dead, so the property that made it so
+    is pinned here over the same table the behavioural tests use.
     """
 
     def test_single_pattern_parses_every_origin_form(self) -> None:
-        from workspace import WorkspaceManager
+        from workspace._remote import origin_url_pattern
 
+        pattern = origin_url_pattern("github.com")
         for case_id, url, slug in TestWorktreeOriginValidation.ORIGIN_TABLE:
-            match = WorkspaceManager._ORIGIN_URL_RE.search(url)
+            match = pattern.search(url)
             assert match is not None, f"{case_id}: {url!r} did not parse"
             assert match.group(1) == slug, f"{case_id}: {url!r} -> {match.group(1)!r}"
 
@@ -429,12 +539,35 @@ class TestOriginUrlPatternHasNoDeadArm:
         assert not hasattr(WorkspaceManager, "_ORIGIN_SSH_RE")
 
     def test_non_github_origin_does_not_parse(self) -> None:
-        """The pattern stays a GitHub-origin check; it does not match anything."""
-        from workspace import WorkspaceManager
+        """The pattern stays a host-scoped check; it does not match anything."""
+        from workspace._remote import origin_url_pattern
 
         assert (
-            WorkspaceManager._ORIGIN_URL_RE.search(
+            origin_url_pattern("github.com").search(
                 "https://gitlab.example/owner/repo.git"
             )
             is None
         )
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://evilgithub.com/owner/repo",
+            "https://notgithub.com/owner/repo.git",
+            "git@myevilgithub.com:owner/repo.git",
+        ],
+    )
+    def test_host_boundary_rejects_lookalike_hosts(self, url: str) -> None:
+        """``(?:^|[@/])`` stops the host matching inside a longer one (#11720)."""
+        from workspace._remote import origin_url_pattern
+
+        assert origin_url_pattern("github.com").search(url) is None
+
+    def test_configured_host_is_escaped_not_interpolated_raw(self) -> None:
+        """A dotted host stays literal — its dots must not act as wildcards."""
+        from workspace._remote import origin_url_pattern
+
+        pattern = origin_url_pattern("github.mycorp.com")
+        assert pattern.search("https://github.mycorp.com/o/r.git").group(1) == "o/r"
+        # `.` as a wildcard would let this near-miss through.
+        assert pattern.search("https://githubXmycorpYcom/o/r.git") is None
