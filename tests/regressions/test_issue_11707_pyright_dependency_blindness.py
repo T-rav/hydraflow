@@ -18,15 +18,20 @@ fixture holding a deliberate pydantic attribute typo, and asserts pyright still
 reports it. It is a standing canary rather than a historical pin: it fails on
 environment and toolchain drift, not only on someone editing the config back.
 
-Cost: one pyright process over a single file, ~2s wall on a warm host. The
-pyright wheel bundles its own JS, so there is no network fetch and no npm
-download; it needs only the ``node`` that ``make typecheck`` already needs.
+Cost: one pyright process over a single file, ~2s wall on a warm host — but
+CI's Regression Tests lane runs ``tests/regressions/`` with ``--forked``, and
+pytest-forked rebuilds the module-scoped fixture inside each fork, so it is
+one process per test there (~3 today). Adding a test to
+``TestPyrightSeesItsDependencies`` costs another. The pyright wheel bundles
+its own JS, so there is no network fetch and no npm download; it needs only
+the ``node`` that ``make typecheck`` already needs.
 
-Portable across checkouts that keep their venv elsewhere (the agent image puts
-it at ``/opt/hydraflow-venv`` and exports it on ``PATH``): a ``venvPath`` that
-does not resolve makes pyright warn once and fall back to a PATH interpreter
-search, which still resolves pydantic there. The canary reddens only where
-pyright genuinely cannot see the dependency — which is the point.
+Portable across checkouts that keep their venv elsewhere — the agent image
+puts it at ``/opt/hydraflow-venv``, a fresh worktree has none until
+``make env``. That is handled by retargeting the derived config onto the
+interpreter actually running the tests (see ``_derive_canary_config``), NOT by
+pyright's PATH fallback, which ``_hermetic_bin_dir`` deliberately starves. The
+canary reddens only where pyright genuinely cannot see the dependency.
 
 Mutation-proven **under ``uv run --active``**, which is how CI and
 ``make quality`` launch this suite — not merely under a bare ``python -m
@@ -41,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +69,19 @@ PYRIGHT_TIMEOUT_SECONDS = 300
 # canary would measure its own scaffolding instead of the project's config.
 _PATH_KEYS = ("venvPath", "typeshedPath", "stubPath", "pythonPath")
 _PATH_LIST_KEYS = ("extraPaths",)
+# Keys the derivation overwrites outright rather than rebasing.
+_OVERWRITTEN_KEYS = ("include", "exclude", "ignore")
+# An allowlist rots silently: a path-valued key added to [tool.pyright] that
+# nobody rebases would resolve against the tmp dir, and nothing would redden.
+# Anything that LOOKS path-valued and is unhandled fails loudly instead.
+_PATH_LIKE_KEY_RE = re.compile(
+    r"(?i)(paths?|roots?|dirs?|executionEnvironments)$",
+)
+
+# The one venv declaration this canary knows how to retarget (see
+# `_derive_canary_config`). Pinned by
+# `TestPyrightConfigIsSelfSufficient::test_venv_is_declared_relative_to_the_config`.
+_CANONICAL_VENV = (".", ".venv")
 
 # Environment that makes an invocation "bare": no active virtualenv for pyright
 # to inherit, which is exactly how an agent running `.venv/bin/pyright` by hand
@@ -101,9 +120,13 @@ def _bare_pyright_executable() -> Path:
     if found is not None:
         return Path(found)
     raise AssertionError(
-        f"pyright is not installed: no {candidate} and none on PATH. The type "
-        "check cannot run at all in this environment, so nothing is verifying "
-        "types — run `make env` to sync the dev extras."
+        f"pyright is not installed: no {candidate} and none on PATH. This is not a "
+        "second gate on pyright's presence — `make typecheck` and CI's Type Check "
+        "job own that and fail outright without it. It means a lane running this "
+        "canary lost its dev extras: either restore them (`uv sync --all-extras`) "
+        "or deselect this file there, the way ci.yml's time-travel lane does. "
+        "Deliberately NOT a skip: a canary that can go quiet is the exact silence "
+        "it exists to catch."
     )
 
 
@@ -116,35 +139,41 @@ def _declared_venv_dir(config: dict[str, Any]) -> Path | None:
     return (REPO_ROOT / str(venv_path) / str(venv)).resolve()
 
 
-def _is_virtualenv_bin(entry: str) -> bool:
-    """True when *entry* is a virtualenv's script directory (``pyvenv.cfg`` sibling)."""
-    if not entry:
-        return False
-    try:
-        return (Path(entry).parent / "pyvenv.cfg").is_file()
-    except OSError:  # pragma: no cover - unreadable PATH entry
-        return False
+def _hermetic_bin_dir(config_dir: Path) -> Path:
+    """A PATH holding exactly one executable: ``node``.
 
+    Scrubbing ``VIRTUAL_ENV`` does not make an invocation bare, and neither
+    does dropping virtualenv entries from PATH. When pyright's config declares
+    no venv it searches PATH for an interpreter, and **any** python it finds
+    with pydantic installed answers the question for it. Two rounds of review
+    found this the hard way: first ``uv run``'s own venv ``bin`` kept the
+    canary green with the fix reverted, then — after that was filtered out —
+    this host's ``/usr/bin/python3``, which has pydantic 2.11.7, did the same.
+    Filtering PATH tests the wrong predicate ("is this a virtualenv?") for the
+    property that matters ("can this interpreter import pydantic?"), and one
+    ``pip install --user pydantic`` re-opens the hole with nothing red.
 
-def _bare_path() -> str:
-    """PATH with every virtualenv script directory removed.
-
-    Scrubbing ``VIRTUAL_ENV`` alone does NOT make an invocation bare. When
-    pyright's config declares no venv it falls back to searching PATH for an
-    interpreter, and ``uv run`` — the way CI and ``make quality`` launch this
-    suite — prepends the project venv's ``bin`` to PATH. Leaving it there let
-    that fallback resolve pydantic anyway, so the canary stayed green with
-    ``venvPath``/``venv`` deleted from pyproject.toml: a guard that could not
-    see its own subject, in the only contexts where it runs. ``node`` lives
-    outside any virtualenv, so pyright can still start.
+    So the search is starved instead of filtered: no python on PATH at all,
+    which leaves ``venvPath``/``venv`` as the only way pyright can resolve the
+    dependency. pyright itself needs exactly one executable — ``node`` — so
+    PATH holds a directory containing exactly that, symlinked in. Resolving it
+    here also means pyright never falls through to ``nodeenv``, which would
+    download a node over the network.
     """
-    entries = os.environ.get("PATH", "").split(os.pathsep)
-    own_bin = str(Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin"))
-    return os.pathsep.join(
-        entry
-        for entry in entries
-        if entry and entry != own_bin and not _is_virtualenv_bin(entry)
-    )
+    node = shutil.which("node")
+    if node is None:
+        raise AssertionError(
+            "`node` is not on PATH, so pyright cannot run at all — it is a "
+            "JavaScript program with a Python launcher. Install Node 20.19+/22.12+ "
+            "(nvm counts). Not skipping: a silent pass here would mean nothing "
+            "checked types, which is the failure this module exists to catch."
+        )
+    bin_dir = config_dir / "_bin"
+    bin_dir.mkdir(exist_ok=True)
+    link = bin_dir / "node"
+    if not link.exists():
+        link.symlink_to(node)
+    return bin_dir
 
 
 def _derive_canary_config(config_dir: Path) -> None:
@@ -157,6 +186,16 @@ def _derive_canary_config(config_dir: Path) -> None:
     are overridden.
     """
     config = _project_pyright_config()
+    handled = {*_PATH_KEYS, *_PATH_LIST_KEYS, *_OVERWRITTEN_KEYS}
+    unhandled = sorted(
+        key for key in config if key not in handled and _PATH_LIKE_KEY_RE.search(key)
+    )
+    assert not unhandled, (
+        f"[tool.pyright] gained path-valued key(s) this canary does not rebase: "
+        f"{unhandled}. Their values would resolve against the canary's tmp config "
+        "directory instead of the repo, so the canary would quietly measure its own "
+        "scaffolding. Add them to _PATH_KEYS or _PATH_LIST_KEYS."
+    )
     for key in _PATH_KEYS:
         if key in config:
             config[key] = str((REPO_ROOT / str(config[key])).resolve())
@@ -185,10 +224,22 @@ def _derive_canary_config(config_dir: Path) -> None:
     # it at /opt/hydraflow-venv, a fresh worktree has none until `make env` —
     # still has ONE: the interpreter running this test. Retarget onto it so the
     # canary asserts "the config points pyright at a real environment" rather
-    # than "the environment sits at this exact path". A config that declares no
-    # venv at all is NOT retargeted: that is the regression, and it must redden.
-    declared = _declared_venv_dir(_project_pyright_config())
-    if declared is not None and not declared.is_dir():
+    # than "the environment sits at this exact path".
+    #
+    # Gated on the CANONICAL declaration, not merely on "something was
+    # declared". Retargeting anything absent would swallow the regressions it
+    # exists to catch: `venv = ".vnev"` and `venvPath = "/nonexistent"` are
+    # both genuinely blind on every real invocation, and both went green while
+    # this branch fired on any missing directory. A config that declares no
+    # venv, a partial pair, or a wrong path is never retargeted.
+    project_config = _project_pyright_config()
+    declared = (project_config.get("venvPath"), project_config.get("venv"))
+    declared_dir = _declared_venv_dir(project_config)
+    if (
+        declared == _CANONICAL_VENV
+        and declared_dir is not None
+        and not declared_dir.is_dir()
+    ):
         in_use = Path(sys.prefix).resolve()
         config["venvPath"] = str(in_use.parent)
         config["venv"] = in_use.name
@@ -203,7 +254,7 @@ def _run_bare_pyright(config_dir: Path) -> dict[str, Any]:
     executable = _bare_pyright_executable()
 
     env = {k: v for k, v in os.environ.items() if k not in _VENV_ENV_KEYS}
-    env["PATH"] = _bare_path()
+    env["PATH"] = str(_hermetic_bin_dir(config_dir))
     # `--outputjson` already suppresses pyright-python's update check (and the
     # network call behind it); this keeps stderr clean if that ever changes.
     env["PYRIGHT_PYTHON_IGNORE_WARNINGS"] = "1"
@@ -240,18 +291,38 @@ def _diagnostics(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _venv_state_hint() -> str:
-    """Name the boring cause first: this checkout may simply have no venv yet."""
+    """Name the actual cause, because the two look identical from the outside.
+
+    A deleted config key and an unsynced checkout both end as "pyright cannot
+    see pydantic". They need opposite fixes, and an earlier version of this
+    hint told the reader to run `make env` in the first case — which cannot
+    fix a deleted key, and whose closing "before reading anything else into
+    this failure" sent them away from the real cause.
+    """
     config = _project_pyright_config()
-    venv_dir = (
-        REPO_ROOT / str(config.get("venvPath", ".")) / str(config.get("venv", ".venv"))
-    )
-    if venv_dir.is_dir():
+    declared = (config.get("venvPath"), config.get("venv"))
+    if declared[0] is None or declared[1] is None:
+        return (
+            "\nNOTE: [tool.pyright] declares "
+            f"venvPath={declared[0]!r} venv={declared[1]!r} — an incomplete pair, so "
+            "pyright has no environment to resolve against. THIS IS THE REGRESSION, "
+            'not a local environment problem: restore `venvPath = "."` and '
+            '`venv = ".venv"`. Running `make env` will not help.'
+        )
+    venv_dir = _declared_venv_dir(config)
+    if venv_dir is None or venv_dir.is_dir():
         return ""
+    if declared != _CANONICAL_VENV:
+        return (
+            f"\nNOTE: [tool.pyright] points at {venv_dir}, which does not exist. That "
+            "is a wrong declaration, not a local environment problem — pyright is "
+            "blind on every invocation with it. Fix the config."
+        )
     return (
-        f"\nNOTE: {venv_dir} does not exist, so pyright fell back to searching PATH for "
-        "an interpreter — and whatever it found there has no pydantic. A fresh git "
-        "worktree has no .venv until something syncs one: run `make env` in this "
-        "checkout before reading anything else into this failure."
+        f"\nNOTE: the declared venv {venv_dir} does not exist, so the canary retargeted "
+        f"onto the interpreter running these tests ({sys.prefix}) — and that one cannot "
+        "import pydantic either. A fresh git worktree has no .venv until something "
+        "syncs one: try `make env` in this checkout."
     )
 
 

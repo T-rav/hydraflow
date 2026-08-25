@@ -680,8 +680,18 @@ jobs:
       - name: Run bomb-prone subset at +90 days
         run: |
           uv sync --extra test --quiet
+          # This lane's subject is wall-clock time bombs, and it installs only
+          # the `test` extra to stay fast. The pyright canary (#11707) has no
+          # date surface at all and needs `pyright` from the `dev` extra, so
+          # sweeping tests/regressions/ pulled it in and errored on a tool this
+          # lane deliberately does not install. It is NOT skipped inside the
+          # test — a canary that can skip is the silence it exists to catch;
+          # it is deselected here, where the scope mismatch actually lives.
+          # It runs with pyright present in `regression`, `coverage`, and
+          # `make quality`.
           PYTHONPATH=src HYDRAFLOW_TIME_TRAVEL_DAYS=90 uv run pytest \
             tests/regressions/ \
+            --ignore=tests/regressions/test_issue_11707_pyright_dependency_blindness.py \
             tests/test_time_travel_guard.py \
             tests/test_diagnostics_judge_calibration_route.py \
             tests/test_escape_ledger_loop.py \
