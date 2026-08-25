@@ -6,18 +6,37 @@ the thing that goes vacuous: the seam erodes the easy way, when someone wires a
 conformance check to read a metric from the vitals plane *because it is already
 there*, and "do the articles hold" quietly becomes "the vendor's dashboard said
 so."
+
+#11706 found the first version of this enforcement green **by luck**. It swept
+673 files for a top-level import of a remote client and passed — but it parsed
+one file at a time (a check that imported a local module which imported the
+client was invisible) and it never looked at ``subprocess`` (a check that shells
+``curl`` imports nothing at all). Neither hole had a live subject, which is the
+only reason it was green. The mechanics that close them are in
+``conformance_offline_scan``; the policy — which names count as a reach — stays
+here and in ``vitals_conformance_registry``, next to its reasons.
 """
 
 from __future__ import annotations
 
-import ast
-import re
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
+from tests.architecture.conformance_offline_scan import (
+    LOCAL_HOST_RE,
+    URL_RE,
+    ImportGraph,
+    SpawnSite,
+    remote_hosts,
+    spawn_sites,
+)
 from tests.architecture.vitals_conformance_registry import (
     CONFORMANCE_ROOTS,
+    NETWORK_CAPABLE_BINARIES,
+    SUBPROCESS_WAIVER_CEILING,
+    SUBPROCESS_WAIVERS,
     ClaimKind,
     registered_claims,
     repo_root,
@@ -34,6 +53,13 @@ _REPO = repo_root()
 #: entirely offline. "Imports an HTTP library" is not "depends on a network";
 #: conflating them would have made the rule mean something it does not, and the
 #: allow-list needed to keep it green would have grown until it was the rule.
+#:
+#: That judgement got MORE load-bearing when the sweep went transitive (#11706),
+#: not less: 396 of the 673 swept files reach ``httpx`` through
+#: ``hydraflow_gateway``/``gateway_mint_client`` without importing it
+#: themselves. Transitivity widens what the sweep can SEE; it must not widen
+#: what counts as a reach. If closing the hole turns those 396 red, the closure
+#: is wrong — the carriers are not.
 _REMOTE_CLIENTS: frozenset[str] = frozenset(
     {
         "requests",
@@ -48,37 +74,53 @@ _REMOTE_CLIENTS: frozenset[str] = frozenset(
     }
 )
 
-#: Kept for the negative control below, NOT used as a sweep.
-#:
-#: A URL-literal sweep was the second thing tried and it is also wrong: fixture
-#: data legitimately contains ``https://github.com/...`` and sample payloads
-#: name hosts the test never contacts. Both proxies (imports-an-HTTP-library,
-#: names-a-URL) push toward an allow-list to stay green, and an allow-list that
-#: grows until it is the rule is the fail-open shape this standard exists to
-#: prevent. What remains is the check with zero false positives: importing a
-#: client that can ONLY mean a remote service.
-#:
-#: Hosts that are not a remote service: loopback, and the TLDs RFC 2606 reserves
-#: precisely so a test can name a host it will never contact.
-_LOCAL_HOST_RE = re.compile(
-    r"^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::\d+)?$|"
-    r"\.(?:test|invalid|example|localhost)$",
-    re.IGNORECASE,
-)
+# ``_LOCAL_HOST_RE``/``_URL_RE`` (now in ``conformance_offline_scan``) are kept
+# for the negative control below and for the spawn-argv rule, NOT as a
+# repo-wide sweep.
+#
+# A URL-literal sweep was the second thing tried and it is also wrong: fixture
+# data legitimately contains ``https://github.com/...`` and sample payloads
+# name hosts the test never contacts. Both proxies (imports-an-HTTP-library,
+# names-a-URL) push toward an allow-list to stay green, and an allow-list that
+# grows until it is the rule is the fail-open shape this standard exists to
+# prevent. What remains is the check with zero false positives: importing a
+# client that can ONLY mean a remote service.
+#
+# The URL proxy does come back in #11706, in the one place it has no false
+# positives: inside the argv of a spawn call. ``https://github.com/x`` in a
+# fixture is data; the same string in ``["git", "clone", ...]`` is a fetch.
+# Scope, not the pattern, was what made the repo-wide version wrong.
 
-_URL_RE = re.compile(r"https?://([^/\s\"']+)")
-
-# There is deliberately no allow-list here. One was written — a single entry
-# exempting THIS file, on the theory that verifying "nothing reaches the
-# network" requires naming what that means. It does not: the names live in
-# ``_REMOTE_CLIENTS`` as strings and in the negative control as source written
-# to ``tmp_path``, never as an import, so the exemption was a no-op that
+# There is deliberately no allow-list for the import rule. One was written — a
+# single entry exempting THIS file, on the theory that verifying "nothing
+# reaches the network" requires naming what that means. It does not: the names
+# live in ``_REMOTE_CLIENTS`` as strings and in the negative control as source
+# written to ``tmp_path``, never as an import, so the exemption was a no-op that
 # exempted the one file whose job is the rule. A no-op exemption is worse than
 # none, because the day this file did import a remote client the sweep would
 # have stayed green. It is swept like everything else.
+#
+# The subprocess rule DOES carry one (``SUBPROCESS_WAIVERS``), and the
+# difference is not hypocrisy. An import is a fact about the file; a spawn's
+# argv can be a fact about a call the test never makes, because monkeypatching
+# is invisible to a parser. So that rule needs an escape hatch — and it is
+# registered, carries its reason, is keyed by ``(path, binary)`` rather than by
+# a rotting line number, must still match a live spawn, and is capped by a
+# ceiling that may only ever be lowered.
 
 
-def _conformance_files() -> list[Path]:
+@lru_cache(maxsize=1)
+def _graph() -> ImportGraph:
+    """The first-party import graph, resolved the way the suite imports.
+
+    ``src`` then the repo root — the two entries ``tests/conftest.py`` puts on
+    ``sys.path``. Built once so every property below shares one parse cache.
+    """
+    return ImportGraph((_REPO / "src", _REPO))
+
+
+@lru_cache(maxsize=1)
+def _conformance_files() -> tuple[Path, ...]:
     """Every conformance root, PLUS any registered conformance claim outside one.
 
     A claim classified conformance is held to the offline rule wherever it
@@ -94,22 +136,15 @@ def _conformance_files() -> list[Path]:
             path = _REPO / claim.path
             if path.is_file() and path not in out:
                 out.append(path)
-    return out
+    return tuple(out)
 
 
-def _imported_roots(path: Path) -> set[str]:
-    """Top-level package of every import in *path*, at any nesting depth."""
-    try:
-        tree = ast.parse(path.read_text(errors="replace"), filename=str(path))
-    except SyntaxError:  # pragma: no cover - a broken test fails elsewhere
-        return set()
-    roots: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            roots.add(node.module.split(".")[0])
-    return roots
+@lru_cache(maxsize=1)
+def _all_spawn_sites() -> tuple[SpawnSite, ...]:
+    sites: list[SpawnSite] = []
+    for path in _conformance_files():
+        sites.extend(spawn_sites(path, str(path.relative_to(_REPO))))
+    return tuple(sites)
 
 
 def test_the_registry_is_not_empty() -> None:
@@ -137,6 +172,16 @@ def test_the_conformance_roots_are_real_and_populated() -> None:
         assert found, f"{root} has no Python files — the sweep below is vacuous"
 
 
+def test_the_sweep_has_a_subject() -> None:
+    """ "Swept 0 files" must fail loudly, not read as "found nothing wrong"."""
+    swept = _conformance_files()
+    assert len(swept) > 100, (
+        f"the offline sweep collected {len(swept)} files. Both properties below "
+        "iterate this list, so a resolver or glob that stopped matching turns "
+        "them green without observing anything."
+    )
+
+
 def test_no_conformance_check_imports_a_remote_client() -> None:
     """The load-bearing property, and the honest limit of a static check.
 
@@ -145,17 +190,23 @@ def test_no_conformance_check_imports_a_remote_client() -> None:
     enforce is one outage away from being unanswerable — and an assurance seat
     auditable only through somebody else's uptime is not an assurance seat.
 
+    Since #11706 the reach is TRANSITIVE. The one-file version had live carriers
+    and no live subject: no ``src`` module imports a remote client today, so a
+    conformance check that reached one through a local module would have been
+    invisible and green. ``_ANTHROPIC_MODEL_ID`` already accepts Bedrock ids —
+    one ``boto3``-backed client in ``src`` and the hole is live overnight.
+
     This catches *dependence on a service*, not *use of HTTP*: see the comment
     on ``_REMOTE_CLIENTS`` for the two proxies that were tried and rejected.
     Statically this is as far as it goes honestly; proving the suite actually
     runs with no network is a CI-lane concern, recorded in the standard.
     """
-    offenders: list[str] = []
-    for path in _conformance_files():
-        rel = str(path.relative_to(_REPO))
-        reached = _imported_roots(path) & _REMOTE_CLIENTS
-        if reached:
-            offenders.append(f"{rel} imports remote client(s) {sorted(reached)}")
+    graph = _graph()
+    offenders = [
+        reach.describe(_REPO)
+        for path in _conformance_files()
+        if (reach := graph.find(path, _REMOTE_CLIENTS)) is not None
+    ]
 
     assert not offenders, (
         "conformance checks must run offline (docs/standards/vitals_conformance/). "
@@ -163,43 +214,592 @@ def test_no_conformance_check_imports_a_remote_client() -> None:
     )
 
 
-def _remote_hosts(path: Path) -> list[str]:
-    """URL hosts in *path* that are neither loopback nor an RFC-2606 sentinel."""
-    text = path.read_text(errors="replace")
-    return sorted({h for h in _URL_RE.findall(text) if not _LOCAL_HOST_RE.search(h)})
+def test_the_closure_actually_leaves_the_file_it_starts_from() -> None:
+    """The transitive sweep's own vacuity guard.
+
+    ``ImportGraph`` resolves dotted names against ``src``/ the repo root. If that
+    resolution silently stops matching — a layout change, a package that becomes
+    a namespace package, a base path that moves — every import degrades to
+    "third-party leaf", the walk never leaves the starting file, and the sweep
+    above quietly becomes the one-file version #11706 was filed about. Nothing
+    would redden. This is the thing that reddens.
+    """
+    graph = _graph()
+    swept = _conformance_files()
+    transitive_only = 0
+    for path in swept:
+        direct, _ = graph.edges(path)
+        reached, _ = graph.reach(path)
+        if reached - direct:
+            transitive_only += 1
+
+    assert transitive_only >= len(swept) // 4, (
+        f"only {transitive_only} of {len(swept)} conformance files reach a "
+        "package they do not import directly. The first-party resolver has "
+        "stopped resolving, and the sweep is one-file again."
+    )
+
+
+def test_the_gateway_httpx_carriers_stay_green() -> None:
+    """Transitivity widens what is SEEN, never what COUNTS as a reach.
+
+    ``hydraflow_gateway``/``gateway_mint_client`` import ``httpx``, and hundreds
+    of conformance files import them. That is the correct state: an in-process
+    ``MockTransport`` is not a network, so ``httpx`` is out of
+    ``_REMOTE_CLIENTS`` on purpose. The tempting bug when closing #11706's first
+    hole is to "prove" the new closure works by watching those files go red —
+    which would mean the closure had smuggled the rejected imports-HTTP proxy
+    back in through the transitive door.
+    """
+    graph = _graph()
+    carriers = [
+        path
+        for path in _conformance_files()
+        if "httpx" in (graph.reach(path)[0] - graph.edges(path)[0])
+    ]
+    assert len(carriers) > 50, (
+        "the httpx-via-gateway carriers are gone. Either the gateway stopped "
+        "using httpx, or the resolver stopped resolving — check which before "
+        "trusting the sweep."
+    )
+    assert "httpx" not in _REMOTE_CLIENTS, (
+        "httpx was added to the remote-client set. That reddens the "
+        f"{len(carriers)} offline MockTransport carriers above and re-opens the "
+        "false-positive problem the set was written to avoid."
+    )
+    for path in carriers:
+        assert graph.find(path, _REMOTE_CLIENTS) is None
+
+
+def test_no_conformance_check_spawns_a_network_binary() -> None:
+    """The second dimension: an argv is a reach an import sweep cannot see.
+
+    ``subprocess.run(["curl", ...])`` imports nothing remote. Neither does
+    ``["gh", "api", ...]``, ``["aws", "s3", ...]`` or ``["bash", "-c", "wget …"]``.
+    #11706 filed this with 73 of 673 swept files carrying a spawn primitive and
+    the import sweep blind to every one.
+
+    Two rules, because one binary list cannot carry both jobs:
+
+    - the argv names a binary whose ordinary job is remote I/O
+      (``NETWORK_CAPABLE_BINARIES``, and see the registry for the exclusions);
+    - the argv names a remote host, whatever the binary. This is the URL proxy
+      rejected repo-wide, readmitted where it has no false positives — inside a
+      spawn's argv a hostname is a destination, not fixture data. It is what
+      keeps ``git`` honest without a 130-entry waiver list: ``git status`` and
+      ``git clone /tmp/x`` are local, ``git clone https://github.com/x`` is not.
+    """
+    waived = {(waiver.path, waiver.binary) for waiver in SUBPROCESS_WAIVERS}
+    offenders: list[str] = []
+    for site in _all_spawn_sites():
+        binaries = [
+            binary
+            for binary in site.binaries(NETWORK_CAPABLE_BINARIES)
+            if (site.path, binary) not in waived
+        ]
+        hosts = list(site.hosts())
+        if binaries or hosts:
+            reason = " and ".join(
+                part
+                for part in (
+                    f"binaries {binaries}" if binaries else "",
+                    f"hosts {hosts}" if hosts else "",
+                )
+                if part
+            )
+            offenders.append(f"{site.path}:{site.line} {site.call}(...) — {reason}")
+
+    assert not offenders, (
+        "conformance checks must run offline (docs/standards/vitals_conformance/). "
+        "These shell out to a network:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_spawn_scanner_still_sees_spawns() -> None:
+    """Vacuity guard for the second dimension.
+
+    The rule above passes when nothing reaches a network AND when the scanner
+    has stopped recognising spawns at all — a renamed wrapper, an aliased
+    import, a new spawn primitive. Those two states are indistinguishable from
+    the assertion, so pin the subject: the conformance roots really do shell
+    out, roughly 165 times.
+    """
+    sites = _all_spawn_sites()
+    assert len(sites) > 50, (
+        f"the spawn scanner found {len(sites)} call sites in the conformance "
+        "roots. It found ~165 when it was written; a count this low means it "
+        "stopped recognising the primitives, not that the repo stopped spawning."
+    )
+
+
+def test_the_subprocess_waiver_list_is_shrink_only() -> None:
+    """An allow-list that may grow is the failure this standard is about."""
+    assert len(SUBPROCESS_WAIVERS) <= SUBPROCESS_WAIVER_CEILING, (
+        f"{len(SUBPROCESS_WAIVERS)} subprocess waivers against a ceiling of "
+        f"{SUBPROCESS_WAIVER_CEILING}. The ceiling may only ever be lowered — "
+        "if a new conformance check needs to spawn a network binary, the "
+        "question is whether it is a conformance check."
+    )
+    keys = [(waiver.path, waiver.binary) for waiver in SUBPROCESS_WAIVERS]
+    assert len(keys) == len(set(keys)), f"duplicate waivers: {keys}"
+    for waiver in SUBPROCESS_WAIVERS:
+        assert len(waiver.why) > 40, (
+            f"{waiver.path}/{waiver.binary} has no real rationale. A waiver "
+            "without one is an allow-list entry with extra steps."
+        )
+
+
+def test_every_subprocess_waiver_is_still_live() -> None:
+    """A dead waiver covers whatever lands in that file next.
+
+    Same failure as a rotted line-window anchor (#11670): the exemption outlives
+    the thing it excused and silently pre-approves its successor.
+    """
+    live = {
+        (site.path, binary)
+        for site in _all_spawn_sites()
+        for binary in site.binaries(NETWORK_CAPABLE_BINARIES)
+    }
+    dead = [
+        f"{waiver.path} no longer spawns {waiver.binary!r}"
+        for waiver in SUBPROCESS_WAIVERS
+        if (waiver.path, waiver.binary) not in live
+    ]
+    assert not dead, (
+        "delete these waivers — they excuse nothing that still exists:\n  "
+        + "\n  ".join(dead)
+    )
+
+
+def test_the_network_binary_list_is_not_empty() -> None:
+    """The policy set the rule reads. Emptied, the rule passes on everything."""
+    for binary in ("curl", "wget", "gh", "aws"):
+        assert binary in NETWORK_CAPABLE_BINARIES, (
+            f"{binary!r} left the network-binary list. Removing an entry is the "
+            "loosening move; it needs the scrutiny a new waiver gets."
+        )
+
+
+# --------------------------------------------------------------------------
+# Negative controls. Every property above passes on today's tree, so each one
+# needs a mutation that proves it CAN fail — otherwise "it passes" is a claim
+# about nothing, which is the exact shape this standard exists to stop.
+# --------------------------------------------------------------------------
+
+
+def _write(root: Path, spec: dict[str, str]) -> ImportGraph:
+    """Materialise a synthetic tree and return a graph built OVER it.
+
+    Returning the graph is not a convenience. ``ImportGraph`` caches directory
+    listings, so one built before a file exists never sees that file — and a
+    control that writes a second tree, reuses the first graph and then asserts
+    ``find(...) is None`` passes for the wrong reason. Two of the controls below
+    were written that way and were vacuous until this helper made the order
+    impossible to get wrong. (The real sweep builds one graph over a tree that
+    does not change under it, which is what the cache is for.)
+    """
+    for rel, body in spec.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+    return ImportGraph((root,))
 
 
 def test_the_remote_client_detector_actually_fires(tmp_path: Path) -> None:
-    """Negative control. The sweep passes today, so prove it can fail.
+    """Negative control for the direct reach. The sweep passes today, so prove
+    it can fail.
 
     Without this, deleting the detector's body leaves a green test that has
     never observed a violation — the shape this whole standard exists to stop.
     """
-    victim = tmp_path / "test_victim.py"
-    victim.write_text("import boto3\n\n\ndef test_x():\n    assert boto3\n")
-    assert _imported_roots(victim) & _REMOTE_CLIENTS == {"boto3"}
+    graph = _write(
+        tmp_path,
+        {
+            "test_victim.py": "import boto3\n\n\ndef test_x():\n    assert boto3\n",
+            "test_nested.py": "def test_x():\n    import swamp\n\n    assert swamp\n",
+        },
+    )
 
-    nested = tmp_path / "test_nested.py"
-    nested.write_text("def test_x():\n    import swamp\n\n    assert swamp\n")
-    assert _imported_roots(nested) & _REMOTE_CLIENTS == {"swamp"}, (
+    direct = graph.find(tmp_path / "test_victim.py", _REMOTE_CLIENTS)
+    assert direct is not None and direct.names == ("boto3",)
+
+    nested = graph.find(tmp_path / "test_nested.py", _REMOTE_CLIENTS)
+    assert nested is not None and nested.names == ("swamp",), (
         "a deferred import inside a function still reaches the service"
     )
 
-    remote = tmp_path / "test_remote.py"
-    remote.write_text('URL = "https://vitals.example.com/api"\n')
-    assert _remote_hosts(remote) == ["vitals.example.com"]
-
-    # The three shapes that must NOT fire: an in-process mock transport, a
-    # loopback address, and an RFC-2606 sentinel host.
-    clean = tmp_path / "test_clean.py"
-    clean.write_text(
-        "import httpx\n"
-        'A = "https://zai.test/v1"\n'
-        'B = "http://127.0.0.1:8000/health"\n'
-        'C = "https://upstream.invalid/x"\n'
+    # Written through ``_write`` like everything else, so the graph that judges
+    # them is built after they exist. Reusing the earlier one would have been
+    # accidentally safe rather than structurally safe.
+    graph = _write(
+        tmp_path,
+        {
+            "test_remote.py": 'URL = "https://vitals.example.com/api"\n',
+            # The three shapes that must NOT fire: an in-process mock transport,
+            # a loopback address, and an RFC-2606 sentinel host.
+            "test_clean.py": (
+                "import httpx\n"
+                'A = "https://zai.test/v1"\n'
+                'B = "http://127.0.0.1:8000/health"\n'
+                'C = "https://upstream.invalid/x"\n'
+            ),
+        },
     )
-    assert not (_imported_roots(clean) & _REMOTE_CLIENTS)
-    assert _remote_hosts(clean) == []
+    remote = tmp_path / "test_remote.py"
+    assert remote_hosts(remote.read_text()) == ["vitals.example.com"]
+
+    clean = tmp_path / "test_clean.py"
+    assert graph.find(clean, _REMOTE_CLIENTS) is None
+    assert remote_hosts(clean.read_text()) == []
+    assert URL_RE.search("https://vitals.example.com/api") is not None
+    assert LOCAL_HOST_RE.search("zai.test") is not None
+
+
+def test_a_transitive_reach_is_caught(tmp_path: Path) -> None:
+    """Negative control for #11706's first hole.
+
+    ``check`` imports ``bedrock``; ``bedrock`` imports ``boto3``. The pre-#11706
+    sweep parsed ``check`` alone, saw ``{"bedrock"}``, intersected it with the
+    remote clients, found nothing, and passed. This is the mutation that has to
+    redden, and the depth is deliberate: two hops, an ``__init__`` re-export and
+    a relative import, because ``src`` packages are shaped exactly like that.
+    """
+    graph = _write(
+        tmp_path,
+        {
+            "test_check.py": "from vendor import Client\n\n\ndef test_x():\n    assert Client\n",
+            "vendor/__init__.py": "from .client import Client\n\n__all__ = ['Client']\n",
+            "vendor/client.py": "import boto3\n\n\nclass Client:\n    session = boto3\n",
+        },
+    )
+
+    reach = graph.find(tmp_path / "test_check.py", _REMOTE_CLIENTS)
+    assert reach is not None, (
+        "a conformance check that reaches boto3 through two local hops was not "
+        "caught — the closure is back to a one-file parse"
+    )
+    assert reach.names == ("boto3",)
+    assert [p.name for p in reach.chain] == [
+        "test_check.py",
+        "__init__.py",
+        "client.py",
+    ]
+    assert "vendor/client.py" in reach.describe(tmp_path)
+
+    # And the shape that must NOT fire: the same two hops ending at httpx.
+    graph = _write(
+        tmp_path,
+        {
+            "test_gateway.py": "from gw import mint\n\n\ndef test_x():\n    assert mint\n",
+            "gw/__init__.py": "from .mint import mint\n\n__all__ = ['mint']\n",
+            "gw/mint.py": "import httpx\n\n\ndef mint():\n    return httpx.MockTransport\n",
+        },
+    )
+    assert graph.find(tmp_path / "test_gateway.py", _REMOTE_CLIENTS) is None, (
+        "the gateway carriers must stay green: httpx through N hops is still "
+        "not a network"
+    )
+
+
+def test_an_import_cycle_does_not_hang_the_closure(tmp_path: Path) -> None:
+    """Cycles are real in ``src``; a naive walk would recurse forever."""
+    graph = _write(
+        tmp_path,
+        {
+            "test_cycle.py": "import a\n\n\ndef test_x():\n    assert a\n",
+            "a.py": "import b\n",
+            "b.py": "import a\nimport requests\n",
+        },
+    )
+    reach = graph.find(tmp_path / "test_cycle.py", _REMOTE_CLIENTS)
+    assert reach is not None and reach.names == ("requests",)
+
+
+def test_a_dynamic_import_is_caught_whatever_binds_it(tmp_path: Path) -> None:
+    """``import_module("boto3")`` is an import no ``ast.Import`` records.
+
+    #11706's census put ``importlib`` next to ``subprocess`` in the escape
+    hatches carried by 73 of the 673 swept files. A statement-only sweep reads
+    it as ordinary code.
+
+    Every case below is a DIFFERENT binding of the same call, and that is the
+    point of the parametrisation. Two earlier versions of the detector matched
+    the callee — first its literal spelling, then its resolved ``ImportFrom``
+    binding — and each was walked past by the next binding form somebody
+    thought of (``as`` alias, then ``import *`` and plain rebinding). The rule
+    now resolves the ARGUMENT, so the list below is a demonstration rather than
+    an enumeration: none of these cases is special-cased anywhere.
+    """
+    cases = {
+        "test_plain.py": 'import importlib\n\nm = importlib.import_module("boto3")\n',
+        "test_builtin.py": 'm = __import__("requests")\n',
+        "test_alias_fn.py": (
+            'from importlib import import_module as im\n\nm = im("aiohttp")\n'
+        ),
+        "test_alias_mod.py": (
+            'import importlib as il\n\nm = il.import_module("botocore")\n'
+        ),
+        # The two the callee-based version was blind to.
+        "test_star.py": 'from importlib import *\n\nm = import_module("swamp")\n',
+        "test_rebind.py": (
+            'import importlib\n\n_load = importlib.import_module\nm = _load("ftplib")\n'
+        ),
+        # And three nobody had enumerated, which the inverted rule gets free.
+        "test_getattr.py": (
+            "import importlib\n\n"
+            '_fn = getattr(importlib, "import_module")\nm = _fn("telnetlib")\n'
+        ),
+        "test_importorskip.py": 'import pytest\n\nm = pytest.importorskip("smtplib")\n',
+        "test_patch.py": (
+            'from unittest import mock\n\np = mock.patch("xmlrpc.client.ServerProxy")\n'
+        ),
+    }
+    graph = _write(tmp_path, cases)
+    for rel in cases:
+        reach = graph.find(tmp_path / rel, _REMOTE_CLIENTS)
+        assert reach is not None, f"{rel}: dynamic import not seen"
+        assert "names as a module argument" in reach.describe(tmp_path), (
+            f"{rel}: reported as a static import, which it is not"
+        )
+
+    # Through a local hop, like any other reach.
+    graph = _write(
+        tmp_path,
+        {
+            "test_hop.py": "import loader\n\n\ndef test_x():\n    assert loader\n",
+            "loader.py": 'import importlib\n\nm = importlib.import_module("boto3")\n',
+        },
+    )
+    hop = graph.find(tmp_path / "test_hop.py", _REMOTE_CLIENTS)
+    assert hop is not None and [x.name for x in hop.chain] == [
+        "test_hop.py",
+        "loader.py",
+    ]
+
+
+def test_naming_a_module_is_not_the_same_as_naming_anything(tmp_path: Path) -> None:
+    """The inverted rule's false-positive surface, pinned.
+
+    Resolving the argument means the callee is irrelevant — which is what makes
+    the case above exhaustive, and which also means an unrelated call passing a
+    client's name as its first argument would fire. Measured across the 1471
+    files the conformance roots reach: zero do. The shape that looks like a hit
+    and is not is the ``frozenset({...})`` that DEFINES ``_REMOTE_CLIENTS`` in
+    this very file — excluded because its first argument is a set, not a string.
+    """
+    graph = _write(
+        tmp_path,
+        {
+            "test_defines.py": 'CLIENTS = frozenset({"boto3", "requests"})\n',
+            "test_nested.py": 'run(["a"], ["boto3"])\n',
+            "test_second.py": 'parametrize("name", ["requests"])\n',
+            "test_other.py": 'log("hello")\nlog("state")\n',
+        },
+    )
+    for rel in ("test_defines.py", "test_nested.py", "test_second.py", "test_other.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
+            f"{rel} fired — the rule is reading more than the first positional "
+            "string argument"
+        )
+
+    # Naming a module is not importing it. Resolving the argument means the
+    # callee is irrelevant to DETECTION — but a call that only REFERENCES the
+    # name still has to be excluded, or the guard means something it does not.
+    #
+    # This is the cost of the inversion, and it is not hypothetical: the day a
+    # boto3-backed Bedrock client lands in src (`_ANTHROPIC_MODEL_ID` already
+    # accepts Bedrock ids), the obvious regression test mocks the lazy import
+    # and asserts it was called with "boto3". The import rule has no waiver
+    # mechanism, so without these exclusions that author is stuck.
+    graph = _write(
+        tmp_path,
+        {
+            "test_mocked_import.py": (
+                "def test_x(mock_import):\n"
+                '    mock_import.assert_called_once_with("boto3")\n'
+                '    mock_import.assert_any_call("requests")\n'
+            ),
+            "test_logger.py": (
+                'import logging\n\nlogging.getLogger("botocore").setLevel(0)\n'
+            ),
+            "test_unittest.py": (
+                "class T:\n"
+                "    def test_x(self):\n"
+                '        self.assertEqual("boto3", self.provider)\n'
+            ),
+        },
+    )
+    for rel in ("test_mocked_import.py", "test_logger.py", "test_unittest.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
+            f"{rel} fired — naming a client is not importing one, and the "
+            "reference callees must be excluded"
+        )
+
+    # The two that DO import, and must keep firing: excluding by callee is a
+    # safe-side list, and it must not quietly grow into the detection side.
+    graph = _write(
+        tmp_path,
+        {
+            "test_skip.py": 'import pytest\n\nm = pytest.importorskip("boto3")\n',
+            "test_patch.py": (
+                'from unittest import mock\n\np = mock.patch("requests.get")\n'
+            ),
+        },
+    )
+    for rel in ("test_skip.py", "test_patch.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is not None, (
+            f"{rel} stopped firing — importorskip and patch really do import "
+            "the module they name"
+        )
+
+    # The declared limit, asserted rather than assumed: a name that is not a
+    # first-positional literal is NOT seen. Closing this needs the
+    # egress-blocked lane, not a bigger parser.
+    graph = _write(
+        tmp_path,
+        {
+            "test_computed.py": (
+                "import importlib\n\n_N = 'boto' + '3'\n"
+                "m = importlib.import_module(_N)\n"
+            ),
+            "test_keyword.py": (
+                'import importlib\n\nm = importlib.import_module(name="boto3")\n'
+            ),
+        },
+    )
+    for rel in ("test_computed.py", "test_keyword.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
+            f"{rel} was caught — good, but the standard records it as a "
+            "residual; update the standard rather than this assertion"
+        )
+
+
+def test_a_dotted_import_keeps_the_edge_into_the_package(tmp_path: Path) -> None:
+    """``import pkg.sub`` where ``sub`` is a PEP 420 namespace package.
+
+    A directory with no ``__init__.py`` is a perfectly importable subpackage
+    that this resolver cannot see as a file. Without the prefix fallback it
+    records ``pkg`` as a third-party leaf and the walk never enters
+    ``pkg/__init__.py`` — where the client import actually lives.
+
+    The obvious guess — ``import pkg.Thing`` where ``Thing`` is a re-exported
+    NAME — is NOT the trigger: that raises at import time, so it never reaches
+    a sweep. A control written against an unreachable scenario proves nothing.
+    """
+    graph = _write(
+        tmp_path,
+        {
+            "test_dotted.py": "import pkg.sub\n\n\ndef test_x():\n    assert pkg\n",
+            "pkg/__init__.py": "import requests\n\nCLIENT = requests\n",
+            "pkg/sub/mod.py": "VALUE = 1\n",
+        },
+    )
+    assert not (tmp_path / "pkg/sub/__init__.py").exists(), (
+        "the control needs `sub` to be a namespace package, or it is not "
+        "exercising the fallback at all"
+    )
+    reach = graph.find(tmp_path / "test_dotted.py", _REMOTE_CLIENTS)
+    assert reach is not None and reach.names == ("requests",)
+
+
+def test_the_spawn_detector_actually_fires(tmp_path: Path) -> None:
+    """Negative control for #11706's second hole.
+
+    Every one of these imports nothing in ``_REMOTE_CLIENTS``, so the import
+    sweep — transitive or not — passes on all of them.
+    """
+    cases = {
+        "test_curl.py": 'import subprocess\nsubprocess.run(["curl", "-fsS", "https://vitals.example.com/m"])\n',
+        "test_gh.py": 'import subprocess\nsubprocess.check_output(["gh", "api", "rate_limit"])\n',
+        "test_shell.py": 'import os\nos.system("set -e; wget -q https://pkgs.example.com/x")\n',
+        "test_alias.py": 'import subprocess as sp\nsp.Popen(["aws", "s3", "ls"])\n',
+        "test_bare.py": 'from subprocess import check_call\ncheck_call(["pip", "install", "x"])\n',
+        "test_async.py": 'import asyncio\nasyncio.create_subprocess_exec("gh", "pr", "view")\n',
+        "test_wrapper.py": 'async def f(): await run_subprocess("gh", "pr", "view")\n',
+        "test_python_m.py": 'import subprocess\nsubprocess.run(["python", "-m", "pip", "install", "x"])\n',
+        "test_git_clone.py": 'import subprocess\nsubprocess.run(["git", "clone", "https://github.com/o/r"])\n',
+        "test_git_scp.py": 'import subprocess\nsubprocess.run(["git", "fetch", "git@github.com:o/r.git"])\n',
+        # argv by KEYWORD. `run(*popenargs, **kwargs)` forwards into
+        # `Popen(args=...)`, so this is ordinary working Python — and a scanner
+        # reading only `call.args` saw a real spawn with an empty argv and
+        # reported nothing at all.
+        "test_kwargs.py": 'import subprocess\nsubprocess.run(args=["curl", "-fsS", "https://vitals.example.com/m"])\n',
+        "test_kw_exec.py": 'import subprocess\nsubprocess.Popen(["sh"], executable="/usr/bin/curl")\n',
+        "test_kw_cmd.py": 'async def f(): await stream_claude_process(cmd=["claude", "-p"], prompt="hi")\n',
+        # An absolute path is still the binary.
+        "test_abspath.py": 'import subprocess\nsubprocess.run(["/usr/local/bin/gh", "issue", "list"])\n',
+    }
+    _write(tmp_path, cases)
+    for rel in cases:
+        sites = spawn_sites(tmp_path / rel, rel)
+        assert sites, f"{rel}: no spawn site recognised at all"
+        flagged = [
+            site
+            for site in sites
+            if site.binaries(NETWORK_CAPABLE_BINARIES) or site.hosts()
+        ]
+        assert flagged, f"{rel}: spawn seen but not flagged as a network reach"
+
+
+def test_the_spawn_detector_leaves_offline_spawns_alone(tmp_path: Path) -> None:
+    """The false positives that would force the waiver list to grow.
+
+    ``git`` against a ``tmp_path`` repo is 129 of the ~165 spawn sites in the
+    conformance roots. If any of these fire, the fix is the detector, not a
+    waiver.
+    """
+    cases = {
+        "test_git_local.py": (
+            "import subprocess\n"
+            'subprocess.run(["git", "-C", "/tmp/r", "status", "--porcelain"])\n'
+            'subprocess.run(["git", "clone", "/tmp/origin", "/tmp/clone"])\n'
+            'subprocess.run(["git", "push", "origin", "main"])\n'
+            'subprocess.run(["git", "commit", "-m", "feat: add a thing"])\n'
+        ),
+        "test_local_host.py": (
+            "import subprocess\n"
+            'subprocess.run(["true", "http://127.0.0.1:8000/health"])\n'
+            'subprocess.run(["true", "https://zai.test/v1"])\n'
+        ),
+        # Spawn source as DATA — several conformance checks feed exactly this
+        # to a scanner fixture. A text-level grep would flag every one.
+        "test_fixture_source.py": (
+            "SOURCE = '''\n"
+            'async def f():\n    await asyncio.create_subprocess_exec("gh", "pr", "view")\n'
+            "'''\n"
+        ),
+        "test_make.py": 'import subprocess\nsubprocess.run(["make", "quality"])\n',
+    }
+    _write(tmp_path, cases)
+    for rel in cases:
+        for site in spawn_sites(tmp_path / rel, rel):
+            assert not site.binaries(NETWORK_CAPABLE_BINARIES), (
+                f"{rel}:{site.line} false positive on {site.argv}"
+            )
+            assert not site.hosts(), f"{rel}:{site.line} false host on {site.argv}"
+
+
+def test_a_waiver_covers_only_its_own_file_and_binary(tmp_path: Path) -> None:
+    """The waiver key is ``(path, binary)``. Prove it does not over-cover.
+
+    A waiver written as "this file is fine" would excuse the next network
+    binary someone adds to it, which is how an exemption outlives its reason.
+    """
+    rel = "test_waived.py"
+    _write(
+        tmp_path,
+        {
+            rel: 'import subprocess\nsubprocess.run(["gh", "api", "x"])\nsubprocess.run(["curl", "x"])\n'
+        },
+    )
+    waived = {(rel, "gh")}
+    leftover = [
+        binary
+        for site in spawn_sites(tmp_path / rel, rel)
+        for binary in site.binaries(NETWORK_CAPABLE_BINARIES)
+        if (rel, binary) not in waived
+    ]
+    assert leftover == ["curl"]
 
 
 def test_a_vitals_claim_is_not_held_to_the_offline_rule() -> None:
@@ -248,3 +848,9 @@ def test_the_standard_exists_and_states_the_rule() -> None:
     text = standard.read_text()
     assert "offline" in text
     assert "vitals" in text.lower() and "conformance" in text.lower()
+    assert "transitive" in text.lower(), (
+        "the standard still describes the one-file sweep #11706 replaced"
+    )
+    assert "subprocess" in text.lower(), (
+        "the standard does not mention the spawn dimension it now enforces"
+    )
