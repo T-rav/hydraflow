@@ -135,8 +135,23 @@ async def test_raise_message_is_self_sufficient() -> None:
         "https://evilgithub.com/owner/repo",
         "https://evilgithub.com/owner/repo.git",
         "git@notgithub.com:owner/repo.git",
+        # The host as a PATH SEGMENT of a foreign origin — the same hole one
+        # level down, which a ``[@/]`` boundary would still have let through.
+        "https://evil.com/github.com/owner/repo",
+        "https://evil.com/github.com/owner/repo.git",
+        "/srv/mirror/github.com/owner/repo",
+        # Userinfo trick: the real host appears before an ``@``, not after it.
+        "https://github.com@evil.com/owner/repo",
     ],
-    ids=["lookalike_https", "lookalike_https_suffix", "lookalike_scp"],
+    ids=[
+        "lookalike_https",
+        "lookalike_https_suffix",
+        "lookalike_scp",
+        "host_as_path_segment",
+        "host_as_path_segment_suffix",
+        "host_in_local_mirror_path",
+        "host_in_userinfo",
+    ],
 )
 async def test_lookalike_host_is_refused_not_accepted(url: str) -> None:
     """These parsed to ``owner/repo`` and were ACCEPTED before the boundary."""

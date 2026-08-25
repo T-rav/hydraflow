@@ -552,13 +552,21 @@ class TestOriginUrlPattern:
     @pytest.mark.parametrize(
         "url",
         [
+            # Host inside a longer host.
             "https://evilgithub.com/owner/repo",
             "https://notgithub.com/owner/repo.git",
             "git@myevilgithub.com:owner/repo.git",
+            # Host as a path segment of a foreign origin — the same hole one
+            # level down, which a ``[@/]`` boundary would still have admitted.
+            "https://evil.com/github.com/owner/repo",
+            "https://evil.com/github.com/owner/repo.git",
+            "/srv/mirror/github.com/owner/repo",
+            # Host in the userinfo, before the ``@`` rather than after it.
+            "https://github.com@evil.com/owner/repo",
         ],
     )
     def test_host_boundary_rejects_lookalike_hosts(self, url: str) -> None:
-        """``(?:^|[@/])`` stops the host matching inside a longer one (#11720)."""
+        """``(?:^|@|//)`` matches the host only where a host can appear (#11720)."""
         from workspace._remote import origin_url_pattern
 
         assert origin_url_pattern("github.com").search(url) is None
