@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ci_scaffold import (
+    QUALITY_GATE_CONTEXT,
+    QUALITY_GATE_JOB,
     CIScaffoldResult,
     generate_workflow,
     has_quality_workflow,
@@ -87,6 +90,26 @@ class TestGenerateWorkflow:
     def test_workflow_discovery_ignores_hydra_folders(self) -> None:
         wf = generate_workflow("python")
         assert '"hydra", "hydraflow"' in wf
+
+    @pytest.mark.parametrize(
+        "lang",
+        ["python", "node", "java", "ruby", "csharp", "go", "rust", "unknown"],
+    )
+    def test_every_template_carries_the_quality_gate_aggregator(
+        self, lang: str
+    ) -> None:
+        """Every language template ships the one stable required context.
+
+        `quality` is matrix-expanded from a matrix discovered at runtime, so a
+        template without the aggregator leaves the stamped repo with no context
+        branch protection can require (#11715).
+        """
+        jobs = yaml.safe_load(generate_workflow(lang))["jobs"]
+        assert QUALITY_GATE_JOB in jobs, f"{lang} template has no aggregator job"
+        gate = jobs[QUALITY_GATE_JOB]
+        assert gate["name"] == QUALITY_GATE_CONTEXT
+        assert "quality" in gate["needs"]
+        assert gate["if"] == "always()"
 
 
 class TestScaffoldCI:

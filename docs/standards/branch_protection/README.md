@@ -85,6 +85,52 @@ python scripts/setup_branch_protection.py --repo owner/name --audit
 `--audit` exits non-zero if any field on the live ruleset diverges from the canonical JSON.
 Wire this into a periodic CI job (or a HydraFlow caretaker loop) to catch silent drift.
 
+## Stamped children — require the aggregator, never the matrix
+
+A repo stamped by the greenfield kernel writer gets a `quality.yml` whose
+`quality` job is matrix-expanded over a matrix **discovered at runtime**
+(`${{ fromJSON(needs.discover-projects.outputs.matrix) }}`). Two consequences,
+both of which have bitten:
+
+1. **Never require the bare `quality` context.** GitHub names a matrix leg's
+   check run `quality (<project_dir>)`, so `quality` alone is never reported —
+   it sits at *Expected — waiting for status* and hard-blocks every PR on the
+   child forever. This is exactly what `REQUIRED_CHECKS = ["quality"]` did
+   before #11715.
+2. **Never enumerate the legs either.** That is how this repo's own
+   `main protect` binds `quality (.)` / `quality (src/ui)`, and it does not
+   generalise: a child's leg set is not known until `discover-projects` runs, so
+   there is nothing to enumerate at stamp time.
+
+The stamped workflow therefore ships a **`Quality Gate` aggregator** —
+`needs: [discover-projects, quality]`, `if: always()`, failing on any upstream
+result that is not `success` — and `REQUIRED_CHECKS` names that one stable
+context. Same shape as this repo's `CI Gate` (`ci.yml`). The `if: always()` is
+load-bearing: without it a failed or cancelled `quality` **skips** the gate, so
+the one required context never reports a verdict of its own — and GitHub
+resolves that inconsistently (a job-level skip reads as Success, i.e. green over
+a red matrix; a never-expanded matrix stays *expected*, i.e. blocked forever).
+`always()` removes the question. Both directions are pinned by
+`tests/regressions/test_stamped_required_check_aggregator_11715.py`, which
+executes the gate's own shell body against synthetic upstream results.
+
+3. **The workflow must trigger on every protected branch.**
+   `on.pull_request.branches` filters by BASE branch, so a required context
+   from a workflow that does not trigger for that base is never reported — the
+   identical hard block by a different mechanism. The stamped kernel protects
+   `main` *and* `staging` and tells agents to target `staging`, so
+   `generate_workflow()` is passed both, and the same regression module asserts
+   `PROTECTED_BRANCHES ⊆ on.pull_request.branches`.
+
+Where legs *are* enumerated (this repo), the enumeration must be checked in
+**both** directions —
+`tests/architecture/test_required_matrix_contexts.py` asserts required ⊆
+producible (a dropped marker orphans a required context and jams the merge
+queue) **and** produced ⊆ required (a new project marker spawns a leg nobody
+requires, which can go red while the merge stays green, because
+`strict_required_status_checks_policy` is `false` and contexts are enumerated).
+The second direction is the dangerous one: it fails silently.
+
 ## Adding a gate
 
 See [`ADDING-A-GATE.md`](ADDING-A-GATE.md). A new required check must exist and

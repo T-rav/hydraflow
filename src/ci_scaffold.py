@@ -7,6 +7,7 @@ lint/test/build-style checks for common ecosystems.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from pathlib import Path
 
 from polyglot_prep import (
@@ -55,15 +56,27 @@ def has_quality_workflow(repo_root: Path) -> tuple[bool, str]:
 
 _IGNORED_DIRS_LITERAL = ", ".join(f'"{name}"' for name in sorted(PREP_IGNORED_DIRS))
 
+#: Job key of the aggregator that fans in every dynamic `quality` matrix leg.
+QUALITY_GATE_JOB = "quality-gate"
+
+#: The ONE check context a stamped repo's branch protection may require for
+#: quality (#11715). Never require the bare `quality` job (matrix-expanded, so
+#: that context is never reported) nor its legs (discovered at runtime, so they
+#: are unknowable at stamp time). Consumers -- notably the kernel writer's
+#: generated `scripts/setup_branch_protection.py` -- import this name rather
+#: than restating the string, so the workflow and the protection payload cannot
+#: drift apart.
+QUALITY_GATE_CONTEXT = "Quality Gate"
+
 _UNIVERSAL_WORKFLOW_TEMPLATE = """\
 name: Quality
 # prep-managed: quality-workflow
 
 on:
   pull_request:
-    branches: [main]
+    branches: __TRIGGER_BRANCHES__
   push:
-    branches: [main]
+    branches: __TRIGGER_BRANCHES__
 
 jobs:
   discover-projects:
@@ -202,10 +215,58 @@ jobs:
           fi
           echo "Missing Makefile in ${{ matrix.project_dir }}. Run 'make prep' to scaffold make targets." >&2
           exit 1
+
+  # The single stable check context for branch protection (#11715).
+  #
+  # `quality` is matrix-expanded from a matrix DISCOVERED AT RUNTIME, so GitHub
+  # reports its check runs as `quality (<project_dir>)` and never a bare
+  # `quality`. A stamped repo therefore cannot enumerate its own required
+  # contexts at stamp time: requiring `quality` blocks every PR forever
+  # ("expected -- waiting for status"), and requiring the legs is impossible
+  # because the leg set is not known until discover-projects runs.
+  #
+  # This job is the aggregator (the shape HydraFlow's own `ci.yml` uses for
+  # `CI Gate`): ONE fixed context that summarises however many legs ran.
+  __QUALITY_GATE_JOB__:
+    name: __QUALITY_GATE_CONTEXT__
+    runs-on: ubuntu-latest
+    needs: [discover-projects, quality]
+    # `if: always()` is LOAD-BEARING. Without it, a failed or cancelled `quality`
+    # SKIPS this job, so the one required context never reports a verdict of its
+    # own -- and what GitHub then does with it is exactly the ambiguity that
+    # produced this bug: a job-level skip is reported as Success (green over a
+    # red matrix), while a never-expanded matrix stays "expected" (blocked
+    # forever). Both are failures of the gate as a gate. `always()` removes the
+    # question: the job runs on every outcome and reports a real pass/fail.
+    if: always()
+    steps:
+      - name: Require every quality matrix leg to have succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "Upstream job results: $RESULTS"
+          if [ -z "${RESULTS// /}" ]; then
+            echo "::error::No upstream results -- the quality matrix never ran."
+            exit 1
+          fi
+          for r in $RESULTS; do
+            # Anything other than success fails the gate, `skipped` included:
+            # `quality` is skipped when discover-projects fails or emits an
+            # empty matrix, and passing that through would be a silent green.
+            if [ "$r" != "success" ]; then
+              echo "::error::A required quality job did not succeed (result=$r)."
+              exit 1
+            fi
+          done
+          echo "All quality matrix legs succeeded."
 """
 
-_UNIVERSAL_WORKFLOW = _UNIVERSAL_WORKFLOW_TEMPLATE.replace(
-    "__PREP_IGNORED_DIRS__", _IGNORED_DIRS_LITERAL
+_UNIVERSAL_WORKFLOW = (
+    _UNIVERSAL_WORKFLOW_TEMPLATE.replace("__PREP_IGNORED_DIRS__", _IGNORED_DIRS_LITERAL)
+    .replace("__QUALITY_GATE_JOB__", QUALITY_GATE_JOB)
+    .replace("__QUALITY_GATE_CONTEXT__", QUALITY_GATE_CONTEXT)
 )
 
 _WORKFLOW_TEMPLATES: dict[str, str] = {
@@ -224,9 +285,31 @@ _WORKFLOW_TEMPLATES: dict[str, str] = {
 }
 
 
-def generate_workflow(language: str) -> str:
-    """Return the GitHub Actions workflow YAML for the given language."""
-    return _WORKFLOW_TEMPLATES.get(language, _UNIVERSAL_WORKFLOW)
+#: Default protected branch the workflow triggers on. Callers that protect more
+#: than one branch (the two-tier main/staging model, ADR-0042) must pass them
+#: all — see ``generate_workflow``.
+DEFAULT_TRIGGER_BRANCHES: tuple[str, ...] = ("main",)
+
+
+def generate_workflow(
+    language: str, *, branches: Sequence[str] = DEFAULT_TRIGGER_BRANCHES
+) -> str:
+    """Return the GitHub Actions workflow YAML for the given language.
+
+    ``branches`` are the base branches the workflow triggers on. It MUST cover
+    every branch whose protection requires a context this workflow produces:
+    ``on.pull_request.branches`` filters by BASE branch, so a PR into a branch
+    the workflow does not trigger on never reports that context, and the PR sits
+    at "expected -- waiting for status" forever. That is the same never-reported
+    hard block as requiring the bare matrix-expanded `quality` job (#11715), and
+    it bites the stamped kernel specifically: its own CLAUDE.md tells agents to
+    target `staging`, and its protection script protects `staging` too.
+    """
+    assert branches, "generate_workflow needs at least one trigger branch"
+    template = _WORKFLOW_TEMPLATES.get(language, _UNIVERSAL_WORKFLOW)
+    return template.replace(
+        "__TRIGGER_BRANCHES__", "[" + ", ".join(dict.fromkeys(branches)) + "]"
+    )
 
 
 _WORKFLOW_REL_PATH = ".github/workflows/quality.yml"

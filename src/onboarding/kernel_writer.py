@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from ci_scaffold import generate_workflow
+from ci_scaffold import QUALITY_GATE_CONTEXT, generate_workflow
 from makefile_scaffold import generate_makefile
 from onboarding.kernel_lock import (
     KERNEL_LOCK_FILENAME,
@@ -346,8 +346,15 @@ def _gitignore() -> str:
     return ".venv/\n__pycache__/\n.coverage\ncoverage.xml\n.pytest_cache/\ndist/\n.hydraflow/\n"
 
 
-def _quality_workflow() -> str:
-    return generate_workflow("python")
+def _quality_workflow(spec: KernelSpec) -> str:
+    """The stamped quality workflow, triggering on every protected branch.
+
+    Both branches matter: ``scripts/setup_branch_protection.py`` protects
+    `main` AND `staging` with the same required context, and the stamped
+    CLAUDE.md tells agents to target `staging`. A workflow that only triggered
+    on `main` would leave that context unreported on every feature PR (#11715).
+    """
+    return generate_workflow("python", branches=(spec.main_branch, spec.staging_branch))
 
 
 def _issue_template(spec: KernelSpec, name: str) -> str:
@@ -455,8 +462,16 @@ def _branch_protection_script(spec: KernelSpec) -> str:
 
 Free-tier private repos cannot use the modern Rulesets API, so this kernel ships
 the classic ``PUT /repos/{{owner}}/{{repo}}/branches/{{branch}}/protection`` variant
-(onboarding doc friction F2). The canonical required-check list is the ``quality``
-workflow job. Requires an authenticated ``gh`` CLI with admin on the repo.
+(onboarding doc friction F2). Requires an authenticated ``gh`` CLI with admin on
+the repo.
+
+The canonical required check is the ``{QUALITY_GATE_CONTEXT}`` aggregator job in
+``.github/workflows/quality.yml`` -- NOT the ``quality`` job itself. ``quality``
+is matrix-expanded over a matrix discovered at runtime, so GitHub only ever
+reports ``quality (<project_dir>)`` check runs; a bare ``quality`` context would
+sit at "expected -- waiting for status" and block every PR forever, and the leg
+names cannot be enumerated at stamp time because the leg set is not known until
+``discover-projects`` runs (#11715).
 
 Usage::
 
@@ -472,7 +487,7 @@ import json
 import subprocess
 import sys
 
-REQUIRED_CHECKS = ["quality"]
+REQUIRED_CHECKS = ["{QUALITY_GATE_CONTEXT}"]
 PROTECTED_BRANCHES = ["{spec.main_branch}", "{spec.staging_branch}"]
 
 
@@ -547,7 +562,7 @@ def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Owners
         (".gitignore", _gitignore(), Ownership.TEMPLATE),
         (".env.example", _env_example(spec), Ownership.PRODUCT),
         ("Makefile", _makefile(spec), Ownership.TEMPLATE),
-        (".github/workflows/quality.yml", _quality_workflow(), Ownership.TEMPLATE),
+        (".github/workflows/quality.yml", _quality_workflow(spec), Ownership.TEMPLATE),
         # --- Docs ---
         ("CLAUDE.md", _claude_md(spec), Ownership.PRODUCT),
         ("README.md", _readme(spec), Ownership.PRODUCT),
