@@ -174,8 +174,8 @@ def materialize(root: Path, spec: dict[str, str]) -> Path:
     return root
 
 
-#: A frozen identity and clock, so two runs of the same fixture differ in
-#: nothing a git-reading check could see.
+#: A fixed identity, so the fixture never depends on the host's git config —
+#: CI containers have none, and ``git commit`` refuses without one.
 _GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",
     "GIT_AUTHOR_EMAIL": "t@t",
@@ -194,7 +194,7 @@ def git(root: Path, *args: str) -> None:
     )
 
 
-def ui_fix_branch(root: Path, ui_prefix: str, *, with_test: bool = True) -> Path:
+def ui_fix_branch(root: Path, ui_prefix: str) -> Path:
     """Commit the tree, then branch a UI-only ``fix(ui): …`` on top of it.
 
     The git-dependent checks — P10.6 above all, the only one whose layout
@@ -210,10 +210,13 @@ def ui_fix_branch(root: Path, ui_prefix: str, *, with_test: bool = True) -> Path
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "chore: base")
     git(root, "checkout", "-q", "-b", "fix/ui")
-    delta = {f"{ui_prefix}/src/StreamView.jsx": "cap\n"}
-    if with_test:
-        delta[f"{ui_prefix}/src/__tests__/StreamView.test.jsx"] = "t\n"
-    materialize(root, delta)
+    materialize(
+        root,
+        {
+            f"{ui_prefix}/src/StreamView.jsx": "cap\n",
+            f"{ui_prefix}/src/__tests__/StreamView.test.jsx": "t\n",
+        },
+    )
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "fix(ui): cap the dots")
     return root
