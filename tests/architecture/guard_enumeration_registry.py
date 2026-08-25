@@ -346,11 +346,14 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     actuators = director.brokered_actuator_modules()
     canaries = {row.name for row in canary_registry.discovered_canaries()}
     proposal_keys = proposal_keys_read_by_parser()
-    phase_rows = {
-        reason.name
-        for reason in plan_broker.PlanRouteReason
-        if reason.name.startswith("PHASE_NOT_")
-    }
+    # NOT re-derived from ``PlanRouteReason``: ``_PHASE_ROWS`` is derived from
+    # that enum, so a detector reading the same enum would answer True for
+    # every member by construction and detect nothing. ``REFUSAL_CODES`` is the
+    # independently maintained object — a hand-written table keyed by those
+    # members — so "this member still has a refusal row" is a real question
+    # with a real answer. Two objects that must agree is the only arrangement
+    # in which a drop reddens (``docs/standards/parametrised_guards``).
+    refusal_rows = {reason.name for reason in plan_broker.REFUSAL_CODES}
 
     return (
         # --- SUBJECTS, derived ------------------------------------------
@@ -406,12 +409,14 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             name="test_canary_family_conformance._PHASE_ROWS",
             members=tuple(reason.name for reason in canary_sweep._PHASE_ROWS),  # noqa: SLF001
             kind=EnumerationKind.SUBJECT,
-            detects_drop=lambda member: member in phase_rows,
+            detects_drop=lambda member: member in refusal_rows,
             why=(
                 "#11716 residue 1. ROLE_PHASE_FORBIDDEN claims the CATALOGUE "
                 "forbids the role; a phase outside the canary's bound says "
                 "nothing about the role. A dropped row stops the distinction "
-                "being checked for that phase, and flipping it survives."
+                "being checked for that phase, and flipping it survives. The "
+                "drop that matters is the REFUSAL_CODES row: a member with no "
+                "row has no code to be wrong about."
             ),
         ),
         # --- SUBJECTS, floored ------------------------------------------

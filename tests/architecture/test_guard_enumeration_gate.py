@@ -179,6 +179,30 @@ def test_a_degenerate_detector_is_a_failure(row: GuardedEnumeration) -> None:
         check_member(degenerate, row.members[0])
 
 
+#: A member no subject has ever carried. Any detector that answers True for it
+#: is answering without looking.
+_FABRICATED_MEMBER = "__a_member_that_was_never_in_any_subject__"
+
+
+@pytest.mark.parametrize("row", DETECTED, ids=[row.name for row in DETECTED])
+def test_a_detector_rejects_a_member_that_was_never_there(
+    row: GuardedEnumeration,
+) -> None:
+    """The other half of "the detector is consulted".
+
+    ``test_a_degenerate_detector_is_a_failure`` proves the gate reads the
+    callable. This proves the callable reads something: a detector that has
+    regressed to ``return True`` — the cheapest way to make this whole file
+    green — passes every assertion above and fails here.
+    """
+    assert row.detects_drop is not None
+    assert not row.detects_drop(_FABRICATED_MEMBER), (
+        f"{row.name}'s detector reports that a member which has never existed "
+        "would be caught. It is not consulting its subject, so every drop it "
+        "claims to detect is unproven."
+    )
+
+
 def test_every_registered_name_is_unique() -> None:
     names = [row.name for row in ENUMERATIONS]
 
