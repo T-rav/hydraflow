@@ -18,6 +18,7 @@ from false_close import closing_issue_refs as _closing_issue_refs
 from false_close import has_regression_delta as _has_regression_delta
 from false_close import product_paths as _product_paths
 
+from ..layout import src_candidates
 from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import finding
@@ -51,10 +52,10 @@ def _claude_md_documents_tdd(ctx: CheckContext) -> Finding:
 
 @register("P10.2")
 def _every_module_has_a_test(ctx: CheckContext) -> Finding:
-    src = ctx.root / "src"
+    src = ctx.src_root()
     tests = ctx.root / "tests"
     if not src.is_dir():
-        return finding("P10.2", Status.NA, "no src/")
+        return finding("P10.2", Status.NA, f"no {ctx.rel(src)}/")
     if not tests.is_dir():
         return finding("P10.2", Status.FAIL, "tests/ missing")
 
@@ -100,7 +101,8 @@ def _every_module_has_a_test(ctx: CheckContext) -> Finding:
     return finding(
         "P10.2",
         Status.WARN,
-        f"{len(orphans)}/{total} src/ modules have no test_<module>.py counterpart ({sample})",
+        f"{len(orphans)}/{total} {ctx.rel(src)}/ modules have no "
+        f"test_<module>.py counterpart ({sample})",
     )
 
 
@@ -355,13 +357,28 @@ def _skip_regression_reason(root: Path, merge_base: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
+def _ui_prefixes(ctx: CheckContext) -> tuple[str, ...]:
+    """Repo-relative prefixes a UI product file can sit under, both layouts.
+
+    Diff paths are repo-relative strings, so this is the string-prefix twin of
+    ``ctx.src_dir("ui")``. A literal ``"src/ui/"`` matched nothing on a repo the
+    kernel writer stamped, so its UI-only fixes fell through to P10.6's WARN —
+    which is NOT in ``runner._NON_BLOCKING_WARN_CHECKS`` and therefore failed
+    the audit gate outright (#11709).
+    """
+    return tuple(
+        f"{ctx.rel(candidate)}/"
+        for candidate in src_candidates(ctx.root, ("ui",), ctx.src_packages)
+    )
+
+
+def _evaluate_pr_regression_delta(ctx: CheckContext, merge_base: str) -> Finding:
     """Judge the PR's own diff for regression coverage (P10.6 core)."""
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", f"{merge_base}..HEAD"],
             check=False,
-            cwd=root,
+            cwd=ctx.root,
             capture_output=True,
             text=True,
             timeout=20,
@@ -385,7 +402,8 @@ def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
             "no product-code delta (CI/workflow/docs/test-only changes) — a "
             "regression test is not applicable",
         )
-    ui_only = bool(product) and all(path.startswith("src/ui/") for path in product)
+    ui_prefixes = _ui_prefixes(ctx)
+    ui_only = bool(product) and all(path.startswith(ui_prefixes) for path in product)
     if ui_only and any(_UI_TEST_RE.match(path) for path in paths):
         return finding(
             "P10.6",
@@ -397,9 +415,10 @@ def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
         "P10.6",
         Status.WARN,
         "fix(...) commits in THIS PR have no regression-test delta — add a "
-        "test under tests/regressions/ (or a src/ui test delta for UI-only "
-        "fixes), or opt out with a `Skip-Regression: <justification>` "
-        "commit trailer when coverage legitimately lives elsewhere",
+        "test under tests/regressions/ (or a UI test delta under "
+        f"{' / '.join(ui_prefixes)} for UI-only fixes), or opt out with a "
+        "`Skip-Regression: <justification>` commit trailer when coverage "
+        "legitimately lives elsewhere",
     )
 
 
@@ -446,7 +465,7 @@ def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
             f"Skip-Regression trailer present: {reason} (justification "
             "survives into the squash body)",
         )
-    return _evaluate_pr_regression_delta(ctx.root, merge_base)
+    return _evaluate_pr_regression_delta(ctx, merge_base)
 
 
 _CLOSE_SCAN_COUNT = 100
