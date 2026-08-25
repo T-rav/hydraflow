@@ -124,8 +124,30 @@ def _docstring_constants(tree: ast.AST) -> set[int]:
     return ids
 
 
+def _string_skeleton(node: ast.Constant | ast.JoinedStr) -> str:
+    """The literal skeleton of a string, with each f-string hole as one char.
+
+    ``f"src/{name}.py"`` becomes ``"src/X.py"`` — still recognisably a flat
+    source path, and the interpolation is exactly what would otherwise hide it
+    from a Constant-only scan. ``f"{ctx.rel(p)} missing"`` becomes
+    ``"X missing"`` and stays clean.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else ""
+    return "".join(
+        part.value
+        if isinstance(part, ast.Constant) and isinstance(part.value, str)
+        else "X"
+        for part in node.values
+    )
+
+
 def _string_offenders(tree: ast.AST) -> list[int]:
     """Lines where a *string* hardcodes ``src/<child>`` outside a docstring.
+
+    Covers f-strings as well as plain constants — ``f"src/{name}.py"`` is the
+    same hardcoded root with the child moved into an interpolation, and a
+    Constant-only scan would never see it.
 
     The scan above only sees path ARITHMETIC. The same blindness ships as a
     plain string just as easily — ``path.startswith("src/ui/")``, a
@@ -139,10 +161,10 @@ def _string_offenders(tree: ast.AST) -> list[int]:
     return [
         node.lineno
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
+        if isinstance(node, ast.Constant | ast.JoinedStr)
+        and not (isinstance(node, ast.Constant) and not isinstance(node.value, str))
         and id(node) not in exempt
-        and _SRC_CHILD_RE.search(node.value)
+        and _SRC_CHILD_RE.search(_string_skeleton(node))
     ]
 
 
@@ -234,6 +256,7 @@ _FORBIDDEN_SHAPES = [
     pytest.param('ui_only = path.startswith("src/ui/")\n', id="string-prefix"),
     pytest.param('UI_TEST_RE = re.compile(r"^src/ui/.*")\n', id="regex-source"),
     pytest.param('_PORTS_REL = "src/ports.py"\n', id="named-constant"),
+    pytest.param('p = ctx.root / f"src/{name}.py"\n', id="fstring-whole-path"),
 ]
 
 _ALLOWED_SHAPES = [
@@ -244,6 +267,7 @@ _ALLOWED_SHAPES = [
         'msg = "no *_DATA_ROOT override found in src/"\n', id="bare-src-prose"
     ),
     pytest.param('def f():\n    """Probes src/ports.py."""\n', id="docstring-prose"),
+    pytest.param('m = f"{ctx.rel(p)} missing"\n', id="fstring-resolved-path"),
     pytest.param('p = ctx.root / "tests" / "scenarios"\n', id="not-src"),
     pytest.param('p = ctx.src_module("ports")\n', id="the-resolver"),
 ]
