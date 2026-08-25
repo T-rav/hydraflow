@@ -98,6 +98,14 @@ class GuardedEnumeration:
     detects_drop: Callable[[str], bool] | None = None
     """Given one member, does the LIVE machinery catch its removal?
 
+    **It must resolve a different object from :attr:`members`.** Two sets
+    derived from one source agree by construction, so their equality is not a
+    question — the tautology that got past self-review twice while this gate
+    was being written, once in ``registered_canaries()`` and once here. A
+    detector that has regressed further, to ``return True``, is caught
+    mechanically by ``test_a_detector_rejects_a_member_that_was_never_there``;
+    one reading its own subject is caught only by reading it.
+
     ``None`` means undetected. Legal only with :attr:`undetected_reason`, and
     the count of them is ratcheted shrink-only.
     """

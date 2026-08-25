@@ -141,7 +141,7 @@ Known limit, stated rather than hidden: a floor catches a plain drop, not a
 swap that removes one member and adds another in the same edit. A derivation
 would; there isn't one.
 
-### Three ways a gate like this goes vacuous, and the property that stops each
+### Four ways a gate like this goes vacuous, and the property that stops each
 
 1. **The sweep has no subject.** An empty registry, or one whose rows resolve
    to nothing, passes every parametrised assertion because there is nothing to
@@ -153,8 +153,22 @@ would; there isn't one.
    file and was vacuously satisfiable. Every property here calls the live
    predicate and reads its answer.
 3. **The derivation degenerates.** A derivation that starts returning nothing
-   makes `derived ⊆ literal` trivially true. `test_a_degenerate_derivation_is_a_failure`
-   feeds each subject an empty derivation and asserts the comparison **fails**.
+   makes `derived ⊆ literal` trivially true. `test_a_degenerate_detector_is_a_failure`
+   feeds each subject a detector that has degenerated to matching nothing and
+   asserts the comparison **fails**. It doubles as the proof that
+   `detects_drop` is *consulted* rather than assumed: swapping the callable
+   changes the outcome, so the callable is what the gate reads.
+4. **The detector reads its own subject.** Two sets derived from one source
+   agree by construction, so their equality is not a question. This one is not
+   hypothetical: `registered_canaries()` first returned `discovered_canaries()`,
+   and `_PHASE_ROWS`'s detector first re-derived the same enum `_PHASE_ROWS` is
+   derived from — both caught in self-review, both inside the gate written to
+   catch them. The registry rule that follows is: **`members` and
+   `detects_drop` must resolve different objects.** A detector that has gone
+   further and regressed to `return True` is caught mechanically by
+   `test_a_detector_rejects_a_member_that_was_never_there`; a detector reading
+   the same source as its members is caught only by looking, which is why it is
+   written down here.
 
 ### Registering a new enumeration
 
