@@ -34,6 +34,7 @@ from dataclasses import fields
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 import worker_receipts
 from driver_contracts import (
@@ -159,6 +160,30 @@ class RecordingPricingTable:
             cache_read_tokens,
             input_includes_cache=input_includes_cache,
         )
+
+
+def refusal_receipt(*, route_policy_revision: str, **overrides: Any) -> WorkerReceipt:
+    """The refusal receipt shape all three actuators build from a blank decision.
+
+    The requirement is a **literal family** rather than a capability class on
+    purpose: ``ModelRequirement.satisfied_by`` returns ``True`` for every
+    capability class, so a capability-shaped receipt would exercise the
+    model-honesty validator vacuously — it cannot fail. A literal family is the
+    case the validator exists for.
+    """
+    return WorkerReceipt(
+        request_id="req-1",
+        idempotency_key="idem-1",
+        status=ReceiptStatus.REJECTED,
+        reason_code=RejectionReason.ROUTE_UNAVAILABLE,
+        worker_role=WorkerRole.PLANNER,
+        requested_model=ModelRequirement(
+            kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+        ),
+        route_policy_revision=route_policy_revision,
+        output_contract_ok=False,
+        **overrides,
+    )
 
 
 @pytest.fixture
@@ -306,21 +331,22 @@ def test_a_blank_decision_carries_a_refusal_receipt_that_validates() -> None:
     """
     decision = unresolved_decision(ROUTE_REVISION)
 
-    receipt = WorkerReceipt(
-        request_id="req-1",
-        idempotency_key="idem-1",
-        status=ReceiptStatus.REJECTED,
-        reason_code=RejectionReason.ROUTE_UNAVAILABLE,
-        worker_role=WorkerRole.PLANNER,
-        requested_model=ModelRequirement(
-            kind=ModelRequirementKind.CAPABILITY, value="high-reasoning"
-        ),
-        route_policy_revision=decision.route_policy_revision,
-        output_contract_ok=False,
-    )
+    receipt = refusal_receipt(route_policy_revision=decision.route_policy_revision)
 
+    assert receipt.route_policy_revision == ROUTE_REVISION
+    assert decision.served_model == ""
     assert receipt.served_model is None
-    assert receipt.usd_cost == 0.0
+
+
+def test_the_receipt_validator_rejects_a_refusal_that_names_a_served_model() -> None:
+    """The other direction: "a refusal names no served model" is enforced.
+
+    Without this, the test above only observes that nothing was passed — it
+    would pass just as happily against a model with no validator at all. This
+    is what makes the omission load-bearing rather than conventional.
+    """
+    with pytest.raises(ValidationError):
+        refusal_receipt(route_policy_revision=ROUTE_REVISION, served_model="glm-4.6")
 
 
 # -- estimate_worker_cost --------------------------------------------------
@@ -637,18 +663,9 @@ def test_the_address_fits_the_receipt_field_that_carries_it() -> None:
     receipt from an address for a large output rather than asserting a length
     the model might later disagree with.
     """
-    receipt = WorkerReceipt(
-        request_id="req-1",
-        idempotency_key="idem-1",
-        status=ReceiptStatus.REJECTED,
-        reason_code=RejectionReason.ROUTE_UNAVAILABLE,
-        worker_role=WorkerRole.PLANNER,
-        requested_model=ModelRequirement(
-            kind=ModelRequirementKind.CAPABILITY, value="high-reasoning"
-        ),
+    receipt = refusal_receipt(
         route_policy_revision=ROUTE_REVISION,
         artifact_digest=artifact_digest("a" * 500_000),
-        output_contract_ok=False,
     )
 
     assert receipt.artifact_digest == artifact_digest("a" * 500_000)
