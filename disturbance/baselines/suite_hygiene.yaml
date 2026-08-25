@@ -1,9 +1,12 @@
-comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene):
-  parametrize copies (identical bodies in one file) and cross-file duplicate tests.
-  The gate fails only when a count rises above its mark; falling is the point. Last
-  moved: Re-mark after #11717 (fix(audit): resolve source modules across both src
-  layouts) raised parametrize copies 409 -> 413 on staging without re-marking, leaving
-  the ratchet red for every downstream PR. Measured: pristine origin/staging is already
-  at 413; #11720 adds 0.'
+comment: "High-water marks for structural test redundancy (erosion.suite_hygiene):\
+  \ parametrize copies (identical bodies in one file) and cross-file duplicate tests.\
+  \ The gate fails only when a count rises above its mark; falling is the point. Last\
+  \ moved: #11548 batch 7 — eleven 4-member groups collapsed into parametrize tables\
+  \ across nine files, three of them in test_planner.py (plan-malformation errors,\
+  \ task-graph rejections, Feature file:line rejections); 11 groups x 3 copies each,\
+  \ 445 -> 412. Collected cases unchanged across all nine files (466 -> 466). 45\
+  \ functions were removed — the 44 group members, plus test_traceability's\
+  \ overlong_id_rejected, a non-member folded into the same rejection table so the\
+  \ table would not omit one of the five rejections. All 45 survive as case ids."
 cross_file_duplicates: 21
-parametrize_copies: 413
+parametrize_copies: 412
