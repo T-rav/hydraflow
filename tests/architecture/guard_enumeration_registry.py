@@ -751,4 +751,27 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             why="Synthetic sources the same detector must NOT flag.",
             undetected_reason="Evidence, not subject — the false-positive half.",
         ),
+        GuardedEnumeration(
+            name="test_director_no_authority._RAW_SPAWNS",
+            members=tuple(raw for raw, _caught in director._RAW_SPAWNS),  # noqa: SLF001
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "The four raw spawn forms a victim module is written with, and "
+                "whether the live import rule catches each. Evidence for the "
+                "negative control that proves the rule fires at all (#11724)."
+            ),
+            undetected_reason=(
+                "Evidence, not subject: the subject the import rule guards is "
+                "_SPAWN_MACHINERY, which is floored above. Each member here is a "
+                "source shape fed to that rule, and two of them are shapes it "
+                "deliberately does NOT catch — so a drop-detector asking 'would "
+                "removing this member be caught?' has no answer for half the "
+                "corpus by construction. Dropping a row narrows the proof that "
+                "the rule sees (or admits to missing) that spelling, which is a "
+                "coverage question. The rows carry their own ratchet instead: "
+                "each asserts caught/not-caught against the live detector, so "
+                "closing the os.* hole reddens the False rows rather than "
+                "passing silently."
+            ),
+        ),
     )
