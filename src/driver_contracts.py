@@ -155,6 +155,25 @@ class RejectionReason(StrEnum):
     LIVE_LABEL_CHANGED = "live_label_changed"
     ROLE_NOT_IN_CATALOG = "role_not_in_catalog"
     ROLE_PHASE_FORBIDDEN = "role_phase_forbidden"
+    """The CATALOGUE forbids this role at this phase. Nothing about the dial.
+
+    Produced legitimately by exactly one place: ``admit_dispatch``'s
+    ``legality`` table, where ``lease.phase not in entry.allowed_phases`` is a
+    statement about :data:`WORKER_CATALOG` and nothing else.
+
+    ``plan_broker.REFUSAL_CODES`` also maps four route-refusal reasons here.
+    Two of them — ``ROLE_NOT_CATALOGUED_FOR_*`` — are the same claim in the
+    resolver's vocabulary and belong. The other two, ``PHASE_NOT_PLAN`` and
+    ``PHASE_NOT_IMPLEMENT``, say the PHASE is not the canary's, which is silent
+    about the role: they are the conflation :attr:`OUTSIDE_CANARY_BOUND` was
+    minted to end, left in place deliberately because they belong to
+    #11541/#11542's vocabulary rather than P5's. That exception is named in
+    code as ``plan_broker.PHASE_ROWS_STILL_CONFLATED`` and pinned by
+    ``tests/architecture/test_canary_family_conformance.py`` — recorded where
+    the invariant is asserted rather than only in a comment beside the rows,
+    because nothing else distinguished "left on purpose" from "not finished"
+    and flipping either row survived the suite in both directions (#11716).
+    """
     ROLE_NOT_IN_CAPSULE = "role_not_in_capsule"
     MODEL_REQUIREMENT_UNSATISFIABLE = "model_requirement_unsatisfiable"
     ROUTE_POLICY_REVISION_STALE = "route_policy_revision_stale"
@@ -275,6 +294,14 @@ class RejectionReason(StrEnum):
     three, and it was false for two of them: an unarmed dial says nothing about
     the role, and B5's bar is read from these counters, where "one code cannot
     say two things" is the rule every neighbouring docstring states.
+
+    **The invariant is not yet total, and the exception is named in code.**
+    ``plan_broker.PHASE_ROWS_STILL_CONFLATED`` holds the ``PHASE_NOT_*`` rows
+    that still report :attr:`ROLE_PHASE_FORBIDDEN`; it is shrink-only and
+    empty is the goal. Before #11716 the exception existed only as a comment
+    beside the rows and nowhere near the claim it contradicts, so nothing told
+    a reader whether the two remaining rows were a decision or an unfinished
+    migration — and flipping either survived the suite in both directions.
     """
 
     LINEAGE_UNKNOWN = "lineage_unknown"

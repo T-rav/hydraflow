@@ -30,6 +30,12 @@ And it writes no convergence state: ``ConvergenceLedger`` remains the sole owner
 under ADR-0094's narrowing, and this module is on
 ``tests/architecture/test_director_no_authority.py``'s decision-path list beside
 the observer it was cut from.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations
