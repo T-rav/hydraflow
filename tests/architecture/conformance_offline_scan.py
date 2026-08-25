@@ -69,6 +69,47 @@ def remote_hosts(text: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 
+#: Callees whose first string argument REFERENCES a module rather than importing
+#: one. ``logging.getLogger("botocore")`` quiets a noisy logger;
+#: ``mock_import.assert_called_once_with("boto3")`` asserts about an import that
+#: was MOCKED and therefore never happened.
+#:
+#: Yes, this is an enumeration, and the rule below exists because enumerating
+#: was the wrong move. The difference is which side of the error it sits on. The
+#: enumeration this rule escaped was on the DETECTION side, where a spelling
+#: nobody thought of is a SILENT false negative: nothing reddens, the hole stays
+#: open, and it is found only by going looking. An enumeration on the SAFE side
+#: fails the other way — a callee nobody excluded is a LOUD false positive that
+#: whoever wrote it hits immediately and fixes in one line. Unbounded silent
+#: misses and bounded loud misses are not the same risk.
+#:
+#: The trigger is not hypothetical, which is why this is closed rather than
+#: declared: ``_ANTHROPIC_MODEL_ID`` already accepts Bedrock ids, and the day a
+#: ``boto3``-backed client lands in ``src`` the obvious regression test mocks
+#: the lazy import and asserts it was called with ``"boto3"``. The import rule
+#: has no waiver mechanism by design, so without this that author's only exits
+#: are degrading the test or reopening a settled design decision mid-feature.
+#:
+#: ``assert*`` is a prefix rather than a list because every mock and unittest
+#: assertion shares it. ``importorskip`` and ``patch`` are deliberately NOT
+#: here: both really do import the module they name.
+_REFERENCE_CALLEES: Final[frozenset[str]] = frozenset({"getLogger", "get_logger"})
+
+
+def _callee_name(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _references_without_importing(call: ast.Call) -> bool:
+    name = _callee_name(call)
+    return name.startswith("assert") or name in _REFERENCE_CALLEES
+
+
 def _named_module_argument(call: ast.Call) -> str | None:
     """The module name a call's FIRST POSITIONAL argument names, if it is a literal.
 
@@ -99,6 +140,10 @@ def _named_module_argument(call: ast.Call) -> str | None:
     the client set — is excluded because its first argument is a set, not a
     string.
 
+    Inverting a rule is not free: it moves the error to the other side.
+    ``_REFERENCE_CALLEES`` above is what keeps this inversion's false-positive
+    surface bounded and, crucially, LOUD rather than silent.
+
     THE DECLARED LIMIT, which is not enumerable away and is recorded in the
     standard rather than patched around:
 
@@ -115,7 +160,7 @@ def _named_module_argument(call: ast.Call) -> str | None:
     The same limit already applies to ``_SpawnNames`` below, which resolves
     ``import subprocess as sp`` but not ``spawn = subprocess.run``.
     """
-    if not call.args:
+    if not call.args or _references_without_importing(call):
         return None
     first = call.args[0]
     if isinstance(first, ast.Constant) and isinstance(first.value, str):

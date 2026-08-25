@@ -83,6 +83,18 @@ mechanics in `tests/architecture/conformance_offline_scan.py`:
    had enumerated. Measured across the 1471 files the conformance roots reach:
    zero calls take a remote-client name as their first positional argument.
 
+   Inverting a rule is not free — it moves the error to the other side. Here
+   the other side is "names a client without importing it":
+   `logging.getLogger("botocore")`, `mock_import.assert_called_once_with(
+   "boto3")`. Those are excluded by callee (`assert*` as a prefix, plus a
+   two-name list), and *that* enumeration is fine where the first one was not:
+   a spelling missed on the detection side is a **silent false negative**, while
+   a callee missed on the safe side is a **loud false positive** its author
+   fixes in one line. The exclusion is pinned in both directions — removing it
+   reddens the false-positive control, widening it to swallow
+   `pytest.importorskip` / `mock.patch` (which really do import) reddens the
+   detection control.
+
 2. **No conformance file spawns its way out of the checkout.** An argv is a
    reach an import sweep cannot see: `subprocess.run(["curl", …])` imports
    nothing. Every spawn call is read — the stdlib primitives, `os.exec*`/

@@ -428,19 +428,27 @@ def test_the_remote_client_detector_actually_fires(tmp_path: Path) -> None:
         "a deferred import inside a function still reaches the service"
     )
 
+    # Written through ``_write`` like everything else, so the graph that judges
+    # them is built after they exist. Reusing the earlier one would have been
+    # accidentally safe rather than structurally safe.
+    graph = _write(
+        tmp_path,
+        {
+            "test_remote.py": 'URL = "https://vitals.example.com/api"\n',
+            # The three shapes that must NOT fire: an in-process mock transport,
+            # a loopback address, and an RFC-2606 sentinel host.
+            "test_clean.py": (
+                "import httpx\n"
+                'A = "https://zai.test/v1"\n'
+                'B = "http://127.0.0.1:8000/health"\n'
+                'C = "https://upstream.invalid/x"\n'
+            ),
+        },
+    )
     remote = tmp_path / "test_remote.py"
-    remote.write_text('URL = "https://vitals.example.com/api"\n')
     assert remote_hosts(remote.read_text()) == ["vitals.example.com"]
 
-    # The three shapes that must NOT fire: an in-process mock transport, a
-    # loopback address, and an RFC-2606 sentinel host.
     clean = tmp_path / "test_clean.py"
-    clean.write_text(
-        "import httpx\n"
-        'A = "https://zai.test/v1"\n'
-        'B = "http://127.0.0.1:8000/health"\n'
-        'C = "https://upstream.invalid/x"\n'
-    )
     assert graph.find(clean, _REMOTE_CLIENTS) is None
     assert remote_hosts(clean.read_text()) == []
     assert URL_RE.search("https://vitals.example.com/api") is not None
@@ -592,6 +600,56 @@ def test_naming_a_module_is_not_the_same_as_naming_anything(tmp_path: Path) -> N
         assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
             f"{rel} fired — the rule is reading more than the first positional "
             "string argument"
+        )
+
+    # Naming a module is not importing it. Resolving the argument means the
+    # callee is irrelevant to DETECTION — but a call that only REFERENCES the
+    # name still has to be excluded, or the guard means something it does not.
+    #
+    # This is the cost of the inversion, and it is not hypothetical: the day a
+    # boto3-backed Bedrock client lands in src (`_ANTHROPIC_MODEL_ID` already
+    # accepts Bedrock ids), the obvious regression test mocks the lazy import
+    # and asserts it was called with "boto3". The import rule has no waiver
+    # mechanism, so without these exclusions that author is stuck.
+    graph = _write(
+        tmp_path,
+        {
+            "test_mocked_import.py": (
+                "def test_x(mock_import):\n"
+                '    mock_import.assert_called_once_with("boto3")\n'
+                '    mock_import.assert_any_call("requests")\n'
+            ),
+            "test_logger.py": (
+                'import logging\n\nlogging.getLogger("botocore").setLevel(0)\n'
+            ),
+            "test_unittest.py": (
+                "class T:\n"
+                "    def test_x(self):\n"
+                '        self.assertEqual("boto3", self.provider)\n'
+            ),
+        },
+    )
+    for rel in ("test_mocked_import.py", "test_logger.py", "test_unittest.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is None, (
+            f"{rel} fired — naming a client is not importing one, and the "
+            "reference callees must be excluded"
+        )
+
+    # The two that DO import, and must keep firing: excluding by callee is a
+    # safe-side list, and it must not quietly grow into the detection side.
+    graph = _write(
+        tmp_path,
+        {
+            "test_skip.py": 'import pytest\n\nm = pytest.importorskip("boto3")\n',
+            "test_patch.py": (
+                'from unittest import mock\n\np = mock.patch("requests.get")\n'
+            ),
+        },
+    )
+    for rel in ("test_skip.py", "test_patch.py"):
+        assert graph.find(tmp_path / rel, _REMOTE_CLIENTS) is not None, (
+            f"{rel} stopped firing — importorskip and patch really do import "
+            "the module they name"
         )
 
     # The declared limit, asserted rather than assumed: a name that is not a
