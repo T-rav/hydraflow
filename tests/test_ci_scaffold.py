@@ -18,6 +18,19 @@ from ci_scaffold import (
 from tests.conftest import CIScaffoldResultFactory
 
 
+def _on_block(workflow: str) -> dict:
+    """The workflow's `on:` triggers.
+
+    PyYAML resolves the bare key ``on`` to the boolean ``True`` (YAML 1.1
+    truthy), so a plain ``["on"]`` lookup raises KeyError on a perfectly valid
+    workflow — hence the two-key fallback.
+    """
+    data = yaml.safe_load(workflow)
+    triggers = data.get("on", data.get(True))
+    assert isinstance(triggers, dict), "workflow has no `on:` block"
+    return triggers
+
+
 class TestCIScaffoldResultFactory:
     def test_creates_default_instance(self) -> None:
         result = CIScaffoldResultFactory.create()
@@ -110,6 +123,28 @@ class TestGenerateWorkflow:
         assert gate["name"] == QUALITY_GATE_CONTEXT
         assert "quality" in gate["needs"]
         assert gate["if"] == "always()"
+
+    def test_default_trigger_branches_unchanged_for_prep(self) -> None:
+        """The `branches` parameter must not change what `make prep` emits.
+
+        `generate_workflow` grew a keyword-only `branches` argument so the
+        kernel can stamp both protected branches (#11715). `scaffold_ci` — the
+        `make prep` path for arbitrary repos — deliberately keeps the default,
+        because it does not stamp branch protection and so has no required
+        context to keep reachable. Pinned so the default cannot drift silently
+        along with the callers that do pass branches.
+        """
+        triggers = _on_block(generate_workflow("python"))
+        assert triggers["pull_request"]["branches"] == ["main"]
+        assert triggers["push"]["branches"] == ["main"]
+
+    def test_trigger_branches_are_threaded_and_deduped(self) -> None:
+        """Explicit branches reach both triggers, with repeats collapsed."""
+        triggers = _on_block(
+            generate_workflow("python", branches=("main", "staging", "main"))
+        )
+        assert triggers["pull_request"]["branches"] == ["main", "staging"]
+        assert triggers["push"]["branches"] == ["main", "staging"]
 
 
 class TestScaffoldCI:

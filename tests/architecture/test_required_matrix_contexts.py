@@ -334,6 +334,9 @@ def test_tracked_files_ignores_untracked_working_tree_files() -> None:
     assert tracked, "git ls-files returned nothing"
     assert "pyproject.toml" in tracked
 
+    # Deliberately NOT tmp_path: the function under test reads _REPO_ROOT, so a
+    # probe outside it could not tell a git read from a disk walk. pid-scoped so
+    # concurrent xdist workers cannot collide, and removed in `finally`.
     probe = _REPO_ROOT / f"untracked-probe-{os.getpid()}.txt"
     probe.write_text("untracked\n", encoding="utf-8")
     try:
