@@ -34,7 +34,6 @@ existence is asserted here instead.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -50,6 +49,7 @@ from tests.architecture.aggregate_gate_registry import (
     TRIGGER_COVERS_SUBJECT,
     AggregateGate,
     lane_test_paths,
+    makefile_lane_paths,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -72,20 +72,6 @@ def _lane_job() -> dict:
         "Deleting it reopens the hole silently, so it fails here loudly."
     )
     return jobs[LANE_JOB]
-
-
-def _make_variable(name: str) -> list[str]:
-    """Whitespace-split value of a single-line ``NAME := ...`` Makefile assignment."""
-    match = re.search(
-        rf"^{re.escape(name)}\s*[:?]?=\s*(.*)$",
-        _MAKEFILE.read_text(encoding="utf-8"),
-        re.M,
-    )
-    assert match, (
-        f"could not find `{name}` in the Makefile — this guard parses it, so a "
-        "rename must update the parser rather than silently matching nothing"
-    )
-    return match.group(1).split()
 
 
 def _sweep_ratchet_files() -> set[str]:
@@ -255,7 +241,7 @@ def test_the_lane_job_is_required_via_ci_gate() -> None:
 
 def test_the_makefile_lane_matches_the_registry() -> None:
     """One list, two readers — the Makefile variable and the registry."""
-    assert _make_variable(LANE_MAKE_VARIABLE) == list(lane_test_paths()), (
+    assert makefile_lane_paths() == lane_test_paths(), (
         f"{LANE_MAKE_VARIABLE} in the Makefile has drifted from "
         "AGGREGATE_GATES. The Makefile is what actually runs; the registry is "
         "what explains and guards it. A gate present in one and not the other "

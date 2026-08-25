@@ -53,7 +53,9 @@ one forces a decision instead of defaulting into the hole:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 #: Name of the ungated CI job that runs :data:`AGGREGATE_GATES`.
 LANE_JOB = "aggregate-ratchets"
@@ -207,3 +209,33 @@ DEFERRED_MISMATCHES_MAX = 5
 def lane_test_paths() -> tuple[str, ...]:
     """Repo-relative pytest paths for the ungated lane, in registry order."""
     return tuple(gate.test_path for gate in AGGREGATE_GATES)
+
+
+def repo_root() -> Path:
+    """Repository root — two levels up from ``tests/architecture/``."""
+    return Path(__file__).resolve().parents[2]
+
+
+def makefile_lane_paths() -> tuple[str, ...]:
+    """The lane as the MAKEFILE spells it — the second of the two copies.
+
+    Deliberately a separate object from :func:`lane_test_paths`. The Makefile
+    is what actually runs, in CI and locally; this module is what explains and
+    guards it. Two objects that must agree is the only arrangement in which
+    losing one is visible at all (``docs/standards/parametrised_guards``), and
+    it is what lets a drop from ``AGGREGATE_GATES`` be *detected* rather than
+    merely regretted: the equality is asserted in
+    ``test_aggregate_gate_trigger_scope.py``, and the drop-detector registered
+    in ``guard_enumeration_registry.py`` reads this side of it.
+    """
+    match = re.search(
+        rf"^{re.escape(LANE_MAKE_VARIABLE)}\s*[:?]?=\s*(.*)$",
+        (repo_root() / "Makefile").read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert match, (
+        f"could not find `{LANE_MAKE_VARIABLE}` in the Makefile — the lane is "
+        "parsed from there, so a rename must update this reader rather than "
+        "silently resolving to nothing"
+    )
+    return tuple(match.group(1).split())

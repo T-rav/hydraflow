@@ -449,6 +449,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     """Every classified enumeration under the drop-detection gate."""
     import plan_broker
     import review_worker_runner as rwr
+    from tests.architecture import aggregate_gate_registry as aggregate_lane
     from tests.architecture import canary_registry
     from tests.architecture import test_admission_rule_tables as admission
     from tests.architecture import test_audit_src_layout_ratchet as src_layout
@@ -473,6 +474,12 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     # with a real answer. Two objects that must agree is the only arrangement
     # in which a drop reddens (``docs/standards/parametrised_guards``).
     refusal_rows = {reason.name for reason in plan_broker.REFUSAL_CODES}
+    # The Makefile's copy of the ungated aggregate-ratchet lane — a
+    # different object from AGGREGATE_GATES, read out of a different file,
+    # and the one that actually runs in CI and locally. A member dropped
+    # from the Python registry stops appearing here, which is a real
+    # question with a real answer rather than two views of one list.
+    makefile_lane = set(aggregate_lane.makefile_lane_paths())
 
     return (
         # --- SUBJECTS, derived ------------------------------------------
@@ -536,6 +543,21 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "being checked for that phase, and flipping it survives. The "
                 "drop that matters is the REFUSAL_CODES row: a member with no "
                 "row has no code to be wrong about."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_aggregate_gate_trigger_scope.lane_test_paths()",
+            members=aggregate_lane.lane_test_paths(),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=lambda member: member in makefile_lane,
+            why=(
+                "#11730. These are the gates whose subject is a whole tree and "
+                "whose only correct trigger is therefore no trigger — they run "
+                "in the UNGATED `aggregate-ratchets` CI job. A member dropped "
+                "from AGGREGATE_GATES leaves the Makefile lane, so the job "
+                "stops running it and that gate silently falls back to being "
+                "path-triggered: exactly the defect the lane exists to close, "
+                "reproduced inside the fix for it."
             ),
         ),
         # --- SUBJECTS, floored ------------------------------------------

@@ -42,11 +42,10 @@ import yaml
 
 from erosion.suite_hygiene import collect_tests, compute
 from erosion.suite_hygiene_baseline import SuiteHygieneBaseline, exceeded
-from tests.architecture.aggregate_gate_registry import LANE_JOB, LANE_MAKE_VARIABLE
+from tests.architecture.aggregate_gate_registry import LANE_JOB, makefile_lane_paths
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CI_PATH = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
-_MAKEFILE = _REPO_ROOT / "Makefile"
 
 #: The gate whose breach started this: subject is all of ``tests/``.
 _SUBJECT_GATE = "tests/architecture/test_suite_hygiene_ratchet.py"
@@ -178,16 +177,6 @@ def _job_fires(job: dict, changed: str) -> bool:
     return any(outputs[name] for name in referenced)
 
 
-def _make_variable(name: str) -> list[str]:
-    match = re.search(
-        rf"^{re.escape(name)}\s*[:?]?=\s*(.*)$",
-        _MAKEFILE.read_text(encoding="utf-8"),
-        re.M,
-    )
-    assert match, f"could not find `{name}` in the Makefile"
-    return match.group(1).split()
-
-
 def _pytest_targets(job: dict) -> tuple[list[str], list[str]]:
     """``(positional paths, --ignore paths)`` across every ``run:`` step of a job."""
     positionals: list[str] = []
@@ -195,7 +184,7 @@ def _pytest_targets(job: dict) -> tuple[list[str], list[str]]:
     for step in job.get("steps") or []:
         command = str(step.get("run", ""))
         if "make aggregate-ratchets" in command:
-            positionals.extend(_make_variable(LANE_MAKE_VARIABLE))
+            positionals.extend(makefile_lane_paths())
         for chunk in command.split("pytest ")[1:]:
             for token in chunk.split():
                 if token.startswith("--ignore="):
