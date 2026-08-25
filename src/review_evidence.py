@@ -137,7 +137,7 @@ class ReviewEvidence(BaseModel):
 
         Which is exactly why the rendered key set is checked here. A *subclass*
         is the one way an implementer-private field could ride the allow-list
-        into a reviewer's prompt while every existing test stayed green —
+        into the rendered PAYLOAD while every existing test stayed green —
         ``extra="forbid"`` does not stop a subclass, it stops an extra key on
         this class.
 
@@ -152,6 +152,13 @@ class ReviewEvidence(BaseModel):
         proxy for its subject, over a docstring claiming it asserts the
         subject, is the exact shape this module was repaired for; here it is
         one layer in.
+
+        Note the scope precisely: this guards the PAYLOAD, not the prompt.
+        ``build_review_worker_prompt`` indexes the payload by canonical key
+        name, so it is a second, independent allow-list and an extra key would
+        not reach a reviewer through it. An earlier wording here said "prompt",
+        which named a subject this guard does not protect and left the one that
+        does protect it stated nowhere.
         """
         payload = self.model_dump()
         rendered = set(payload)

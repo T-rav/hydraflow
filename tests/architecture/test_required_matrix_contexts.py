@@ -15,13 +15,25 @@ that was caught only by a human reading a diff on 2026-07-21; issue #10142).
 
 This guard ties the required matrix contexts back to the scan that must produce
 them, so such an edit fails a required check (`Tests`) instead of merging.
+
+It runs in BOTH directions (#11715). The original check is *required ⊆
+producible*, which fails loudly (the merge queue jams). The inverse — *produced
+⊆ required* — is the dangerous one, because it fails SILENTLY: commit a
+`package.json` / `Makefile` / `go.mod` / `pyproject.toml` into a new directory
+and `discover-projects` starts emitting a `quality (<newdir>)` leg that is in
+nobody's required list. `strict_required_status_checks_policy` is false and the
+contexts are enumerated, so that leg can go RED without blocking the merge, and
+nothing reddens to say so. `test_every_discovered_leg_is_required` closes it.
 """
 
 from __future__ import annotations
 
 import ast
+import os
 import re
-from pathlib import Path
+import subprocess
+from collections.abc import Iterable
+from pathlib import Path, PurePosixPath
 
 import yaml
 from scripts.gates.contract import Gate, load_gates
@@ -182,3 +194,156 @@ def test_guard_flags_an_unproducible_dir() -> None:
     # A dir excluded by the scan's ignore-list is caught even if it exists.
     some_ignored = next(iter(ignored))
     assert _unproducible_dirs({some_ignored}, markers, ignored) == [some_ignored]
+
+
+def _tracked_files() -> list[str]:
+    """Repo-relative POSIX paths of every file in the COMMITTED tree.
+
+    Deliberately `git ls-files`, NOT a walk of the working tree. CI checks the
+    committed tree out into a clean runner; the local working tree carries
+    `.claude/worktrees/` and `.uv-cache/` that CI never sees, and walking it
+    reports ~90 phantom legs instead of the real 2. A submodule appears here as
+    a single gitlink entry rather than its contents, which matches the scan's
+    own `.gitmodules`-based exclusion.
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [path for path in out.split("\0") if path]
+
+
+def _discovered_dirs(
+    files: Iterable[str], markers: set[str], ignored: set[str]
+) -> set[str]:
+    """Matrix legs discover-projects would emit for ``files``.
+
+    Pure, so it can be exercised with synthetic inputs. Mirrors the scan: a
+    marker file contributes its PARENT directory (root becomes "."), any path
+    with an ignored component is dropped, and `.sln`/`.csproj` count as markers
+    by suffix.
+    """
+    dirs: set[str] = set()
+    for name in files:
+        path = PurePosixPath(name)
+        if set(path.parts) & ignored:
+            continue
+        if path.name not in markers and path.suffix not in _MARKER_SUFFIXES:
+            continue
+        parent = str(path.parent)
+        dirs.add("." if parent == "." else parent)
+    return dirs
+
+
+def _required_quality_dirs() -> set[str]:
+    return {
+        _matrix_value(g.name)
+        for g in _required_matrix_gates()
+        if g.job == _KNOWN_MATRIX_JOB
+    }
+
+
+def _unguarded_legs(
+    files: Iterable[str], markers: set[str], ignored: set[str], required: set[str]
+) -> list[str]:
+    """Legs ``files`` would produce that ``required`` does not cover.
+
+    Pure, and deliberately the ONLY place the comparison lives: against the real
+    tree the two sets agree today, so the live assertion cannot falsify itself.
+    `test_inverse_guard_reports_a_leg_nobody_requires` is its negative control —
+    without it, this subtraction could be hollowed out and stay green.
+    """
+    return sorted(_discovered_dirs(files, markers, ignored) - set(required))
+
+
+def test_every_discovered_leg_is_required() -> None:
+    """Inverse direction: no `quality (<dir>)` leg runs ungated (#11715).
+
+    The forward guard above stops a required context from being orphaned. This
+    one stops a produced context from being un-required — the silent failure
+    mode, where a new project marker spawns a matrix leg that may go red while
+    the merge stays green.
+    """
+    markers, ignored = _discover_projects_sets()
+    tracked = _tracked_files()
+    assert _discovered_dirs(tracked, markers, ignored), (
+        "discover-projects would emit no matrix legs against the committed tree "
+        "— either `git ls-files` returned nothing or the markers set went "
+        "vacuous; this guard cannot be trusted in that state"
+    )
+    unguarded = _unguarded_legs(tracked, markers, ignored, _required_quality_dirs())
+    assert not unguarded, (
+        "quality.yml discover-projects would emit matrix leg(s) "
+        f"{[f'quality ({d})' for d in unguarded]} that branch protection does "
+        "not require. Because strict_required_status_checks_policy is false and "
+        "contexts are enumerated, those legs can go RED without blocking the "
+        "merge. Add a [[gate]] for each in docs/standards/branch_protection/"
+        "gates.toml and run `make gen-gates`, or add the directory to the scan's "
+        "`ignored` set if it is not meant to be built."
+    )
+
+
+def test_inverse_guard_reports_a_leg_nobody_requires() -> None:
+    """Negative control for the comparison itself, not just the leg scan."""
+    markers, ignored = _discover_projects_sets()
+    required = _required_quality_dirs()
+    assert required, "no required quality legs — the comparison would be vacuous"
+    marker = sorted(markers)[0]
+
+    # A marker under a directory nobody requires is reported...
+    assert _unguarded_legs(
+        [marker, f"services/new-svc/{marker}"], markers, ignored, required
+    ) == ["services/new-svc"]
+    # ...while a leg that IS required is not.
+    assert _unguarded_legs([marker], markers, ignored, required) == []
+
+
+def test_inverse_guard_flags_a_new_marker_dir() -> None:
+    """The inverse check is live: a synthetic marker dir produces a new leg."""
+    markers, ignored = _discover_projects_sets()
+    marker = sorted(markers)[0]
+    # A marker committed under a brand-new directory yields that directory.
+    assert _discovered_dirs([f"services/new-svc/{marker}"], markers, ignored) == {
+        "services/new-svc"
+    }
+    # A marker at the repo root yields ".", exactly as the scan spells it.
+    assert _discovered_dirs([marker], markers, ignored) == {"."}
+    # The suffix markers count too.
+    assert _discovered_dirs(["apps/App.csproj"], markers, ignored) == {"apps"}
+    # Ignored path components are excluded, matching the scan.
+    some_ignored = next(iter(ignored))
+    assert _discovered_dirs([f"{some_ignored}/{marker}"], markers, ignored) == set()
+    # Non-marker files contribute nothing.
+    assert _discovered_dirs(["src/hydraflow_loop.py"], markers, ignored) == set()
+
+
+def test_tracked_files_ignores_untracked_working_tree_files() -> None:
+    """`_tracked_files` must be git-backed, not a working-tree walk.
+
+    The difference is invisible until it is wrong: a walk of the working tree
+    sweeps `.claude/worktrees/` (a whole second copy of the repo, markers and
+    all) and `.uv-cache/`, neither of which CI ever checks out — ~90 phantom
+    legs instead of the real 2. Probing with a real untracked file makes the
+    distinction fail deterministically on any machine, including a clean CI
+    checkout where the two happen to agree.
+    """
+    tracked = _tracked_files()
+    assert tracked, "git ls-files returned nothing"
+    assert "pyproject.toml" in tracked
+
+    # Deliberately NOT tmp_path: the function under test reads _REPO_ROOT, so a
+    # probe outside it could not tell a git read from a disk walk. pid-scoped so
+    # concurrent xdist workers cannot collide, and removed in `finally`.
+    probe = _REPO_ROOT / f"untracked-probe-{os.getpid()}.txt"
+    probe.write_text("untracked\n", encoding="utf-8")
+    try:
+        assert probe.name not in set(_tracked_files()), (
+            "_tracked_files() returned an UNTRACKED working-tree file — it is "
+            "walking the disk instead of reading the committed tree, so local "
+            "worktrees and caches will drown the real matrix legs"
+        )
+    finally:
+        probe.unlink(missing_ok=True)

@@ -395,7 +395,8 @@ def test_no_independence_fenced_role_can_write() -> None:
             assert entry.write_scope is not WriteScope.ISSUE_WORKTREE, role
 
 
-def test_a_request_for_a_fenced_role_must_carry_its_lineage() -> None:
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_request_for_a_fenced_role_must_carry_its_lineage(blank: str) -> None:
     """Refused at CONSTRUCTION, so a director's reply is discarded as malformed
     before it can reach a route (#11543).
 
@@ -404,8 +405,17 @@ def test_a_request_for_a_fenced_role_must_carry_its_lineage() -> None:
     only ever refuse a request where the party being fenced volunteered the
     value that refused it.
     """
+    # The None cell is the helper's own default; the blank-string cells are
+    # parametrised. THREE tables describe this rule — this constructor, the
+    # admission backstop, and review_broker — and this one is the PRIMARY
+    # defence the other two's docstrings lean on ("refuses to construct the
+    # shape"). It carried only the None cell, so dropping `.strip()` here, or
+    # narrowing to `is None`, left the whole suite green while a director
+    # emitting "   " built a valid request.
     with pytest.raises(ValidationError, match="requesting_spawn_id"):
         _request(worker_role=WorkerRole.REVIEWER)
+    with pytest.raises(ValidationError, match="requesting_spawn_id"):
+        _request(worker_role=WorkerRole.REVIEWER, requesting_spawn_id=blank)
 
 
 def test_an_unfenced_role_still_needs_no_lineage() -> None:
@@ -414,7 +424,10 @@ def test_an_unfenced_role_still_needs_no_lineage() -> None:
     assert _request(worker_role=WorkerRole.EXPLORER).requesting_spawn_id is None
 
 
-def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too() -> None:
+@pytest.mark.parametrize("blank", [None, "", "   "])
+def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too(
+    blank: str | None,
+) -> None:
     """The belt under the validator, reached the way validation is skipped.
 
     ``model_copy`` (like ``model_construct``) does not revalidate, so a fenced
@@ -423,11 +436,19 @@ def test_an_absent_lineage_on_a_fenced_role_is_refused_at_admission_too() -> Non
     admitting, and it is why this reports its own code rather than
     ``SELF_REVIEW_FORBIDDEN``: nothing here establishes that the requester
     implemented anything.
+
+    Parametrised over all three blank shapes to mirror
+    ``test_review_broker``'s ``test_a_fenced_role_with_no_lineage_is_refused``
+    EXACTLY rather than approximately. Only ``None`` was covered here, so the
+    two descriptions of one rule had different subjects: reverting just this
+    table's presence test to the raw value left every test green while
+    ``"   "`` was admitted. Two tables over one vocabulary need the same cells,
+    not merely a cell each.
     """
     valid = _request(
         worker_role=WorkerRole.REVIEWER, requesting_spawn_id="spawn-director"
     )
-    stripped = valid.model_copy(update={"requesting_spawn_id": None})
+    stripped = valid.model_copy(update={"requesting_spawn_id": blank})
 
     reason = _admit(
         request=stripped,
