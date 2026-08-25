@@ -154,7 +154,10 @@ def test_a_subject_that_resolves_to_nothing_fails_the_sweep() -> None:
     ``members`` is read off the live object, and a row that reads back empty
     is a failure rather than a silent zero-case parametrisation.
     """
-    hollow = dataclasses.replace(ENUMERATIONS[0], members=())
+    # DETECTED[0], not ENUMERATIONS[0]: a corpus row would be filtered out by
+    # the sweep and raise "asserting nothing" instead, so the assertion would
+    # be measuring the wrong failure and would flip on a registry reorder.
+    hollow = dataclasses.replace(DETECTED[0], members=())
 
     with pytest.raises(AssertionError, match="empty sequence"):
         assert_sweep_has_a_subject((hollow,))
