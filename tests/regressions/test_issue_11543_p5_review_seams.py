@@ -931,7 +931,17 @@ class TestTheBadgesOffSwitchAndCanonicalisation:
 
 
 class TestTheBoundCanonicalisesTheRepoSide:
-    """The broker half of the same clause — three more unpinned statements."""
+    """The broker half of the same clause — three more unpinned statements.
+
+    The single-canary copies that used to sit here (a different repository, a
+    display-cased dial, a different dial) moved to
+    ``tests/architecture/test_canary_family_conformance.py``, which asserts the
+    same three statements for EVERY registered canary rather than for review
+    and — in the parametrised case below — two of three. That is #11716's
+    point: the sweep covers what six hand-written copies did, and covers the
+    fourth canary too. The parametrised case stays as the local witness that
+    this file's ``_Dials`` stand-in still exercises the clause.
+    """
 
     @pytest.mark.parametrize(
         ("covers", "phase"),
@@ -942,14 +952,6 @@ class TestTheBoundCanonicalisesTheRepoSide:
     )
     def test_a_case_only_difference_still_matches(self, covers, phase) -> None:
         assert covers(_Dials("Acme/Widget", "acme/widget"), phase=phase) is True
-
-    def test_a_different_repository_still_does_not(self) -> None:
-        assert (
-            review_canary_covers(
-                _Dials("acme/other", "acme/widget"), phase=CANARY_PHASE
-            )
-            is False
-        )
 
 
 class TestTheTwoLineageArmsAreMutuallyExclusive:
@@ -1263,22 +1265,10 @@ class TestTheDialOperandIsCanonicalisedToo:
     def test_the_broker_dial_is_canonicalised(self) -> None:
         assert review_canary_repo(_Dials("acme/widget", "Acme/Widget")) == "acme/widget"
 
-    def test_a_display_cased_dial_covers_the_bound(self) -> None:
-        assert (
-            review_canary_covers(
-                _Dials("acme/widget", "Acme/Widget"), phase=CANARY_PHASE
-            )
-            is True
-        )
-
-    def test_a_different_dial_is_still_refused(self) -> None:
-        """Non-vacuity: canonicalising must not make every dial match."""
-        assert (
-            review_canary_covers(
-                _Dials("acme/widget", "Acme/Other"), phase=CANARY_PHASE
-            )
-            is False
-        )
+    # "a display-cased dial covers the bound" and "a different dial is still
+    # refused" were review-only copies of a rule all three canaries state.
+    # ``tests/architecture/test_canary_family_conformance.py`` now asserts both
+    # over the registry, so the fourth canary inherits them (#11716).
 
 
 class TestTheBrokerArmedPredicateRejectsALossyDial:
