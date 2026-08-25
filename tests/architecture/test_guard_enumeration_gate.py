@@ -222,6 +222,18 @@ def test_undetected_subjects_only_shrink() -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Sequences the scan is known to see. Not the whole expected set — that would
+#: be a second enumeration to maintain — but enough that a scan which has
+#: stopped working cannot pass. Two files, two shapes: a plain tuple and an
+#: annotated one.
+_TRACER_SEQUENCES = frozenset(
+    {
+        "test_director_no_authority.DECISION_PATH_MODULES",
+        "test_director_no_authority.ACTUATORS",
+    }
+)
+
+
 def test_the_scan_sees_real_sequences() -> None:
     """Non-vacuity of the scan itself.
 
@@ -233,18 +245,6 @@ def test_the_scan_sees_real_sequences() -> None:
 
     assert len(found) >= len(_TRACER_SEQUENCES)
     assert {sequence.name for sequence in found} >= _TRACER_SEQUENCES
-
-
-#: Sequences the scan is known to see. Not the whole expected set — that would
-#: be a second enumeration to maintain — but enough that a scan which has
-#: stopped working cannot pass. Two files, two shapes: a plain tuple and an
-#: annotated one.
-_TRACER_SEQUENCES = frozenset(
-    {
-        "test_director_no_authority.DECISION_PATH_MODULES",
-        "test_director_no_authority.ACTUATORS",
-    }
-)
 
 
 def test_every_parametrised_arch_sequence_is_classified() -> None:
