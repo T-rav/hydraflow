@@ -124,30 +124,70 @@ def _docstring_constants(tree: ast.AST) -> set[int]:
     return ids
 
 
-def _string_skeleton(node: ast.Constant | ast.JoinedStr) -> str:
-    """The literal skeleton of a string, with each f-string hole as one char.
+#: Stand-in for a runtime slot inside a composed string. One identifier char,
+#: so ``f"src/{name}.py"`` renders as a path with a child rather than a bare
+#: ``"src/"`` the needle would skip.
+_HOLE = "X"
 
-    ``f"src/{name}.py"`` becomes ``"src/X.py"`` — still recognisably a flat
-    source path, and the interpolation is exactly what would otherwise hide it
-    from a Constant-only scan. ``f"{ctx.rel(p)} missing"`` becomes
-    ``"X missing"`` and stays clean.
+
+def _string_skeleton(node: ast.expr) -> str:
+    """The literal skeleton of a composed string, runtime slots as ``X``.
+
+    A ``"src"`` that is the PREFIX OF THE SAME STRING as its child hides from
+    both other arms of this gate: ``_path_segments`` sees one opaque non-literal
+    operand, and a per-``Constant`` scan sees ``"src/"`` and ``".py"`` as two
+    separate literals, neither of which carries a child. Reassembling the whole
+    expression is what makes it visible:
+
+    * ``f"src/{name}.py"``            -> ``src/X.py``   (caught)
+    * ``"src/" + name + ".py"``       -> ``src/X.py``   (caught)
+    * ``f"{ctx.rel(p)} missing"``     -> ``X missing``  (clean)
+
+    Implicit adjacent-literal concatenation needs no arm — CPython folds
+    ``"src/" "ports.py"`` into one ``Constant`` at parse time.
     """
     if isinstance(node, ast.Constant):
-        return node.value if isinstance(node.value, str) else ""
-    return "".join(
-        part.value
-        if isinstance(part, ast.Constant) and isinstance(part.value, str)
-        else "X"
-        for part in node.values
-    )
+        return node.value if isinstance(node.value, str) else _HOLE
+    if isinstance(node, ast.JoinedStr):
+        return "".join(_string_skeleton(part) for part in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _HOLE
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _string_skeleton(node.left) + _string_skeleton(node.right)
+    return _HOLE
+
+
+def _composed_strings(tree: ast.AST) -> list[ast.expr]:
+    """Every string expression to skeletonize, outermost composition first.
+
+    Only the OUTERMOST node of a ``+`` chain or f-string is returned: its
+    skeleton already contains every part, and reporting the children too would
+    just duplicate the line.
+    """
+    inner: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            inner.update(id(part) for part in node.values)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            inner.update({id(node.left), id(node.right)})
+    return [
+        node
+        for node in ast.walk(tree)
+        if id(node) not in inner
+        and (
+            (isinstance(node, ast.Constant) and isinstance(node.value, str))
+            or isinstance(node, ast.JoinedStr)
+            or (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add))
+        )
+    ]
 
 
 def _string_offenders(tree: ast.AST) -> list[int]:
     """Lines where a *string* hardcodes ``src/<child>`` outside a docstring.
 
-    Covers f-strings as well as plain constants — ``f"src/{name}.py"`` is the
-    same hardcoded root with the child moved into an interpolation, and a
-    Constant-only scan would never see it.
+    Covers composed strings as well as plain constants — ``f"src/{name}.py"``
+    and ``"src/" + name`` are the same hardcoded root with the child moved into
+    a runtime slot, and a per-``Constant`` scan would never see either.
 
     The scan above only sees path ARITHMETIC. The same blindness ships as a
     plain string just as easily — ``path.startswith("src/ui/")``, a
@@ -160,11 +200,8 @@ def _string_offenders(tree: ast.AST) -> list[int]:
     exempt = _docstring_constants(tree)
     return [
         node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant | ast.JoinedStr)
-        and not (isinstance(node, ast.Constant) and not isinstance(node.value, str))
-        and id(node) not in exempt
-        and _SRC_CHILD_RE.search(_string_skeleton(node))
+        for node in _composed_strings(tree)
+        if id(node) not in exempt and _SRC_CHILD_RE.search(_string_skeleton(node))
     ]
 
 
@@ -257,6 +294,7 @@ _FORBIDDEN_SHAPES = [
     pytest.param('UI_TEST_RE = re.compile(r"^src/ui/.*")\n', id="regex-source"),
     pytest.param('_PORTS_REL = "src/ports.py"\n', id="named-constant"),
     pytest.param('p = ctx.root / f"src/{name}.py"\n', id="fstring-whole-path"),
+    pytest.param('p = ctx.root / ("src/" + name + ".py")\n', id="concatenated-path"),
 ]
 
 _ALLOWED_SHAPES = [
@@ -268,6 +306,7 @@ _ALLOWED_SHAPES = [
     ),
     pytest.param('def f():\n    """Probes src/ports.py."""\n', id="docstring-prose"),
     pytest.param('m = f"{ctx.rel(p)} missing"\n', id="fstring-resolved-path"),
+    pytest.param('m = "looked under " + probed + "/ and tests/"\n', id="concat-clean"),
     pytest.param('p = ctx.root / "tests" / "scenarios"\n', id="not-src"),
     pytest.param('p = ctx.src_module("ports")\n', id="the-resolver"),
 ]
