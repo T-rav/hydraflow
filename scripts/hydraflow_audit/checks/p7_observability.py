@@ -139,10 +139,12 @@ def _runner_injects_wiki(ctx: CheckContext) -> Finding:
         text = path.read_text(encoding="utf-8", errors="replace")
         if _INJECT_WIKI_RE.search(text):
             return finding("P7.3c", Status.PASS)
+    probed = ", ".join(ctx.rel(path) for path in candidates)
     return finding(
         "P7.3c",
         Status.FAIL,
-        "no _inject_repo_wiki call in runner modules — wiki not read during agent runs",
+        f"no _inject_repo_wiki call in runner modules (tried {probed}) — "
+        "wiki not read during agent runs",
     )
 
 
@@ -153,7 +155,7 @@ def _runner_injects_wiki(ctx: CheckContext) -> Finding:
 
 @register("P7.4")
 def _no_bare_except(ctx: CheckContext) -> Finding:
-    src = ctx.root / "src"
+    src = ctx.src_root()
     if not src.is_dir():
         return finding("P7.4", Status.NA, "no src/ directory")
     offenders: list[str] = []
@@ -191,7 +193,7 @@ def _is_bare_except_pass(handler: ast.ExceptHandler) -> bool:
 @register("P7.5")
 def _logger_error_has_format(ctx: CheckContext) -> Finding:
     """Use AST so matches inside string literals and comments don't count."""
-    src = ctx.root / "src"
+    src = ctx.src_root()
     if not src.is_dir():
         return finding("P7.5", Status.NA, "no src/ directory")
     offenders: list[str] = []

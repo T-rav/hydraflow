@@ -10,12 +10,15 @@ from pathlib import Path
 
 from ..models import CheckContext, Finding, Status
 from ..registry import register
-from ._helpers import exists, finding
+from ._helpers import finding
 
 
 @register("P2.1")
 def _src_dir_exists(ctx: CheckContext) -> Finding:
-    return exists(ctx.root, "src", "P2.1")
+    src = ctx.src_root()
+    if src.is_dir():
+        return finding("P2.1", Status.PASS)
+    return finding("P2.1", Status.FAIL, f"missing: {ctx.rel(src)}")
 
 
 @register("P2.2")
@@ -96,12 +99,9 @@ def _composition_root_exists(ctx: CheckContext) -> Finding:
     ]
     for path in candidates:
         if path.exists():
-            return finding("P2.5", Status.PASS, f"composition root: {path.name}")
-    return finding(
-        "P2.5",
-        Status.FAIL,
-        "no composition root found (tried service_registry.py, composition_root.py, container.py)",
-    )
+            return finding("P2.5", Status.PASS, f"composition root: {ctx.rel(path)}")
+    probed = ", ".join(ctx.rel(path) for path in candidates)
+    return finding("P2.5", Status.FAIL, f"no composition root found (tried {probed})")
 
 
 _ALLOWLIST_RE = re.compile(r"\bALLOWLIST\b")

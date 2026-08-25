@@ -80,16 +80,41 @@ from collections.abc import Callable
 from pathlib import Path
 
 __all__ = [
+    "SOURCE_DIR_NAME",
     "root_packages",
     "src_candidates",
     "src_dir",
     "src_module",
+    "src_root",
 ]
+
+#: The one spelling of the source directory in the whole audit package.
+#:
+#: Every other module reaches the source tree through ``ctx.src_root`` /
+#: ``ctx.src_module`` / ``ctx.src_dir``, or through this constant. That is not
+#: style: it is what makes the #11709 ratchet unevadable. A gate that matches
+#: AST SHAPES has to enumerate them, and every shape it has not thought of
+#: (``PurePath("src")``, ``_SRC = "src"``, ``f"src/{name}.py"``) walks straight
+#: through — the same enumeration drift this package was fixed for. A gate that
+#: matches the LITERAL only has to know one thing, and every spelling of the
+#: hazard must contain it.
+SOURCE_DIR_NAME = "src"
 
 #: Directories under ``src/`` that are never a package.
 _NOT_A_PACKAGE = frozenset({"__pycache__", "node_modules"})
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def src_root(root: Path) -> Path:
+    """The source directory itself — the root of a recursive scan.
+
+    Correct for both layouts without any package knowledge: walking ``src/``
+    with ``rglob`` reaches ``src/<pkg>/**`` too. That is why P9.2 kept working
+    while its sibling P9.1 went blind, and it is the reason this is a distinct
+    call rather than a special case of :func:`src_dir`.
+    """
+    return root / SOURCE_DIR_NAME
 
 
 def root_packages(root: Path) -> tuple[str, ...]:
@@ -98,7 +123,7 @@ def root_packages(root: Path) -> tuple[str, ...]:
     Empty for a flat repo (including a flat repo that happens to contain
     sub-packages, which is HydraFlow).
     """
-    src = root / "src"
+    src = src_root(root)
     if not src.is_dir():
         return ()
     declared = tuple(name for name in _declared_packages(root) if (src / name).is_dir())
@@ -142,7 +167,7 @@ def src_dir(root: Path, *parts: str, packages: tuple[str, ...] | None = None) ->
 def _split_candidates(
     root: Path, parts: tuple[str, ...], packages: tuple[str, ...] | None
 ) -> tuple[Path, list[Path]]:
-    src = root / "src"
+    src = src_root(root)
     pkgs = root_packages(root) if packages is None else packages
     return src.joinpath(*parts), [src.joinpath(pkg, *parts) for pkg in pkgs]
 

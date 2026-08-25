@@ -128,11 +128,13 @@ def _trace_collector(ctx: CheckContext) -> Finding:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if _TRACE_WRITE_RE.search(text):
-            return finding("P8.6", Status.PASS, f"trace writer: {path.name}")
+            return finding("P8.6", Status.PASS, f"trace writer: {ctx.rel(path)}")
+    probed = ", ".join(ctx.rel(path) for path in candidates)
     return finding(
         "P8.6",
         Status.FAIL,
-        "no trace collector module found — session retros have no subprocess traces to mine",
+        f"no trace collector module found (tried {probed}) — session retros "
+        "have no subprocess traces to mine",
     )
 
 

@@ -36,7 +36,7 @@ _ENV_OVERRIDE_RE = re.compile(r"\b[A-Z]+_DATA_ROOT\b|os\.environ\[.*DATA_ROOT")
 
 @register("P9.2")
 def _data_root_env_override(ctx: CheckContext) -> Finding:
-    src = ctx.root / "src"
+    src = ctx.src_root()
     if not src.is_dir():
         return finding("P9.2", Status.FAIL, "src/ missing")
     for py in src.rglob("*.py"):
@@ -57,7 +57,7 @@ _REPO_SLUG_SCOPE_RE = re.compile(
 
 @register("P9.3")
 def _repo_slug_scoping(ctx: CheckContext) -> Finding:
-    src = ctx.root / "src"
+    src = ctx.src_root()
     if not src.is_dir():
         return finding("P9.3", Status.FAIL, "src/ missing")
     for py in src.rglob("*.py"):
@@ -77,8 +77,8 @@ _CLASS_NAMES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _find_class(root: Path, names: tuple[str, ...]) -> Path | None:
-    src = root / "src"
+def _find_class(ctx: CheckContext, names: tuple[str, ...]) -> Path | None:
+    src = ctx.src_root()
     if not src.is_dir():
         return None
     pattern = re.compile(r"^class\s+(" + "|".join(names) + r")\b", re.MULTILINE)
@@ -91,7 +91,7 @@ def _find_class(root: Path, names: tuple[str, ...]) -> Path | None:
 
 @register("P9.4")
 def _state_tracker(ctx: CheckContext) -> Finding:
-    hit = _find_class(ctx.root, _CLASS_NAMES["P9.4"])
+    hit = _find_class(ctx, _CLASS_NAMES["P9.4"])
     if hit:
         return finding("P9.4", Status.PASS, f"state abstraction in {hit.name}")
     return finding(
@@ -103,7 +103,7 @@ def _state_tracker(ctx: CheckContext) -> Finding:
 
 @register("P9.5")
 def _dedup_store(ctx: CheckContext) -> Finding:
-    hit = _find_class(ctx.root, _CLASS_NAMES["P9.5"])
+    hit = _find_class(ctx, _CLASS_NAMES["P9.5"])
     if hit:
         return finding("P9.5", Status.PASS, f"dedup abstraction in {hit.name}")
     return finding(
@@ -120,7 +120,7 @@ _ATOMIC_WRITE_RE = re.compile(
 
 @register("P9.6")
 def _atomic_writes(ctx: CheckContext) -> Finding:
-    src = ctx.root / "src"
+    src = ctx.src_root()
     if not src.is_dir():
         return finding("P9.6", Status.FAIL, "src/ missing")
     for py in src.rglob("*.py"):
@@ -161,7 +161,7 @@ def _no_writes_in_src(ctx: CheckContext) -> Finding:
     `data_root` or config. A string literal `open("foo.txt", "w")` is the
     unambiguous signal of a write outside the store abstractions.
     """
-    src = ctx.root / "src"
+    src = ctx.src_root()
     if not src.is_dir():
         return finding("P9.8", Status.NA, "no src/")
     offenders: list[str] = []

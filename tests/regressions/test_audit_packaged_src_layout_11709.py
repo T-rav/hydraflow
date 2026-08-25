@@ -718,3 +718,97 @@ _NOT_UI_TEST_PATHS = [
 def test_ui_test_regex_stays_anchored(path: str) -> None:
     """Widened by exactly one optional package segment — not turned into `.*`."""
     assert not UI_TEST_RE.match(path)
+
+
+# --- multi-candidate FAIL messages name the paths they probed -------------
+#
+# The flat-wins precedence is argued on "a wrong answer is never a SILENT one —
+# every check reports the path it actually probed." The multi-candidate probes
+# used to list bare filenames ("tried service_registry.py, composition_root.py,
+# container.py"), which is exactly the information a stamped repo cannot act on
+# and makes that argument untrue where it matters most.
+
+_MULTI_CANDIDATE_PROBES = [
+    pytest.param(
+        "P2.5",
+        ("service_registry.py", "composition_root.py", "container.py"),
+        id="P2.5-composition-root",
+    ),
+    pytest.param(
+        "P6.5",
+        ("pr_manager.py", "pr_manager_labels.py", "label_manager.py", "labels.py"),
+        id="P6.5-label-swap",
+    ),
+    pytest.param("P7.3c", ("base_runner.py", "runner.py"), id="P7.3c-runner"),
+    pytest.param("P8.6", ("trace_collector.py", "tracing.py"), id="P8.6-trace"),
+]
+
+
+@pytest.mark.parametrize(("check_id", "modules"), _MULTI_CANDIDATE_PROBES)
+def test_multi_candidate_failure_names_every_packaged_path(
+    tmp_path: Path, check_id: str, modules: tuple[str, ...]
+) -> None:
+    root = _materialize(
+        tmp_path,
+        {
+            **_EMPTY_PACKAGED_REPO,
+            # P6 self-marks NA off shape detection unless a marker is present.
+            f"src/{PKG}/orchestrator.py": "import asyncio\n",
+        },
+    )
+
+    message = _run(check_id, root).message
+
+    for module in modules:
+        assert f"src/{PKG}/{module}" in message, (
+            f"{check_id} listed a bare filename instead of the path it probed: "
+            f"{message!r}. A stamped repo cannot act on {module!r} alone."
+        )
+
+
+@pytest.mark.parametrize(("check_id", "modules"), _MULTI_CANDIDATE_PROBES)
+def test_multi_candidate_success_names_the_packaged_path(
+    tmp_path: Path, check_id: str, modules: tuple[str, ...]
+) -> None:
+    """The PASS message identifies which candidate matched, by full path."""
+    bodies = {
+        "P2.5": "REGISTRY = {}\n",
+        "P6.5": "def swap_pipeline_labels() -> None: ...\n",
+        "P7.3c": "def build():\n    _inject_repo_wiki()\n",
+        "P8.6": "import subprocess  # writes the trace\n",
+    }
+    root = _materialize(
+        tmp_path,
+        {
+            **_EMPTY_PACKAGED_REPO,
+            f"src/{PKG}/orchestrator.py": "import asyncio\n",
+            f"src/{PKG}/{modules[0]}": bodies[check_id],
+        },
+    )
+
+    finding = _run(check_id, root)
+
+    assert finding.status is Status.PASS
+    if check_id != "P7.3c":  # P7.3c's PASS message carries no path
+        assert f"src/{PKG}/{modules[0]}" in finding.message
+
+
+def test_scan_root_reaches_into_the_package(tmp_path: Path) -> None:
+    """``ctx.src_root()`` is layout-agnostic — rglob from src/ sees src/<pkg>/**.
+
+    P9.2 passing while its sibling P9.1 failed is how #11709 announced itself;
+    this pins the property that made P9.2 immune, so a future "fix" cannot
+    narrow the scan roots to the package and reintroduce the asymmetry.
+    """
+    root = _materialize(
+        tmp_path,
+        {
+            **_EMPTY_PACKAGED_REPO,
+            f"src/{PKG}/settings.py": 'import os\nX = os.environ["APP_DATA_ROOT"]\n',
+        },
+    )
+
+    finding = _run("P9.2", root)
+
+    assert finding.status is Status.PASS
+    assert "settings.py" in finding.message

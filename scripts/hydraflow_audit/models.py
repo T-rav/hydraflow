@@ -95,6 +95,16 @@ class CheckContext:
             self._src_packages = layout.root_packages(self.root)
         return self._src_packages
 
+    def src_root(self) -> Path:
+        """The source directory — the root of a RECURSIVE scan.
+
+        Layout-agnostic already: ``rglob`` from here reaches ``src/<pkg>/**``
+        too. Spelled as a method rather than ``ctx.root / "src"`` so the
+        literal lives in exactly one module and the #11709 ratchet can gate on
+        the literal instead of on AST shapes it would have to enumerate.
+        """
+        return layout.src_root(self.root)
+
     def src_module(self, name: str) -> Path:
         """Resolve source module ``name`` across flat and packaged layouts.
 

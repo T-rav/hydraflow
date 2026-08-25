@@ -1,39 +1,51 @@
-"""Structural gate: the audit never spells a source path as a flat literal.
+"""Structural gate: only ``layout.py`` may spell the source directory (#11709).
 
-#11709. ``scripts/hydraflow_audit/`` resolved 24 source probes as
-``ctx.root / "src" / "<name>.py"`` while ``src/onboarding/kernel_writer.py``
-stamps ``src/{pkg}/``. Every affected check missed at the probe on a stamped
-repo and reported ``FAIL: <path> missing`` — a verdict about the audit's own
-assumptions, not about the repo. HydraFlow is flat-src, so all 24 passed here
-and were blind everywhere else.
+The audit resolved 24 source probes as flat literals — ``ctx.root / "src" /
+"<name>.py"`` — while ``src/onboarding/kernel_writer.py`` stamps ``src/{pkg}/``.
+Every affected check missed at the probe on a stamped repo and reported
+``FAIL: <path> missing``: a verdict about the audit's own assumptions, not about
+the repo. HydraFlow is flat-src, so all 24 passed here and were blind everywhere
+else. The conversions need a gate or they rot back — #6855's lesson, where the
+guard that issue asked for was never added at all.
 
-The 24 conversions need a gate or they rot back. This is #6855's lesson: a fix
-without a gate covering it is a fix with a countdown on it, and the guard that
-issue asked for was never added at all.
+Why this gate matches a LITERAL, not a shape
+---------------------------------------------
+The first version of this file matched AST shapes: a ``/``-chain, then also
+``joinpath``, then also ``os.path.join``, then also ``Path("src")``, then also
+f-strings, then also ``+`` concatenation. Five review passes found five more
+spellings it could not see, including:
 
-What is forbidden
------------------
-A path expression that names ``src`` **and then something under it** as string
-literals:
+    pathlib.Path("src") / name        # Attribute callee, not a bare Name
+    PurePath("src") / name            # bare Name, but not spelled "Path"
+    _SRC = "src"; root / _SRC / name  # the "src" segment hoisted to a constant
 
-* ``ctx.root / "src" / "ports.py"``  — the module probe
-* ``ctx.root / "src" / "domain"``    — the directory probe
-* ``root.joinpath("src", "mockworld", "fakes")`` — the same, spelled out
+That list was never going to close. **A gate that enumerates shapes is the same
+enumeration-drift disease this PR exists to fix** (cf. #11715 for the
+branch-protection instance). Hoisting a repeated ``"src"`` to a module constant
+is an ordinary DRY refactor, and under a shape-matching gate it silently
+disarmed the whole thing.
 
-What stays allowed
-------------------
-``src = ctx.root / "src"`` on its own, which is what the recursive scans
-(P7.4/P7.5, P9.2/P9.3/P9.6/P9.8, P10.2) walk with ``rglob``. Those are already
-layout-agnostic — P9.2 passing while its sibling P9.1 failed is how the class
-announced itself.
+So the rule is inverted, and it is one sentence:
 
-The replacement is ``CheckContext.src_module`` / ``src_dir``
-(:mod:`scripts.hydraflow_audit.layout`), which probes the flat spelling and
-then ``src/<pkg>/``.
+    The string ``src`` appears in exactly ONE module — ``layout.py``.
+
+Every spelling of the hazard, known or not, must contain that literal in order
+to name the directory at all. ``PurePosixPath("src")`` contains it. ``_SRC =
+"src"`` contains it. ``f"src/{name}.py"`` contains it. A shape nobody has
+thought of yet contains it. There is nothing left to enumerate, and the
+detector below is ~15 lines instead of ~90.
+
+What replaced the literals
+--------------------------
+``CheckContext.src_root()`` for a recursive scan root (P7.4/P7.5,
+P9.2/P9.3/P9.6/P9.8, P10.2 — already layout-agnostic, since ``rglob`` from
+``src/`` reaches ``src/<pkg>/**``), and ``src_module`` / ``src_dir`` for the
+probes that name a module. ``layout.SOURCE_DIR_NAME`` for the one remaining
+consumer outside a ``CheckContext`` (the ``__init__`` sys.path bootstrap).
 
 ``_GRANDFATHERED`` is **empty** and must stay that way: every site was
-converted, so a new entry means a new flat literal, and the fix for that is the
-resolver, not the allowlist.
+converted, so a new entry means a new literal, and the fix for that is the
+vocabulary, not the allowlist.
 """
 
 from __future__ import annotations
@@ -46,63 +58,40 @@ import pytest
 
 _AUDIT_PKG = Path("scripts") / "hydraflow_audit"
 
-#: Relative paths (posix, under the audit package) still holding a flat source
-#: literal. Empty after #11709 — shrink-only; growing it is the wrong fix.
+#: The one module allowed to spell the source directory.
+_OWNER = "layout.py"
+
+#: Relative paths (posix, under the audit package) that still spell it anyway.
+#: Empty after #11709 — shrink-only; growing it is the wrong fix.
 _GRANDFATHERED: frozenset[str] = frozenset()
 
-#: The floor on resolver adoption. A ratchet whose subject vanished passes
-#: vacuously, so pin that the conversions are still there (#6855).
-_MIN_RESOLVER_CALL_SITES = 24
+#: ``src`` as a path token: the bare directory name, or the head of a path.
+#: Deliberately NOT a bare substring test — ``"source"``, ``"src_root"`` and
+#: prose like ``"no *_DATA_ROOT override found in src/"`` (a trailing slash with
+#: no child) are not hazards, and a gate that flagged them would be relaxed into
+#: uselessness the first time it did.
+_SRC_TOKEN_RE = re.compile(r"(?<![\w/.-])src(?:/[A-Za-z_][\w.-]*|$)")
+
+#: Stand-in for a runtime slot inside a composed string, so ``f"src/{name}.py"``
+#: renders as a path with a child rather than a bare ``"src/"``.
+_HOLE = "X"
 
 
-def _literal(node: ast.expr) -> list[str | None]:
-    """One path operand as segments — a ``"a/b"`` literal counts as two."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return [part for part in node.value.split("/") if part]
-    return [None]
+def _string_skeleton(node: ast.expr) -> str:
+    """The literal skeleton of a composed string, runtime slots as ``X``.
 
-
-def _path_segments(node: ast.expr) -> list[str | None]:
-    """String segments of a ``a / "b" / "c"`` chain, ``None`` for non-literals.
-
-    The base of the chain is dropped: ``ctx.root``, ``root`` and ``self.root``
-    all lead to the same hazard, and the gate is about what follows. A
-    ``Path("src")`` base, an ``os.path.join`` spelling and an embedded
-    ``"src/ports.py"`` separator are all expanded, so none of them evades the
-    scan.
+    Reassembles f-strings and ``+`` chains, because a ``src`` split across two
+    literals (``"src/" + name``) is one path to a reader and two ``Constant``
+    nodes to a scanner. Implicit adjacent-literal concatenation needs no arm:
+    CPython folds ``"src/" "ports.py"`` into one ``Constant`` at parse time.
     """
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return [*_path_segments(node.left), *_literal(node.right)]
-    if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr in {"joinpath", "join"}:
-            base = _path_segments(func.value)
-            args = [seg for arg in node.args for seg in _literal(arg)]
-            return [*base, *args]
-        if isinstance(func, ast.Name) and func.id == "Path":
-            return [seg for arg in node.args for seg in _literal(arg)]
-    return []
-
-
-def _is_flat_source_literal(node: ast.expr) -> bool:
-    """True when the expression names a literal ``src`` with ANYTHING under it.
-
-    The child need not itself be a literal. ``ctx.root / "src" / name`` and
-    ``ctx.root / "src" / f"{name}.py"`` hardcode the source root just as firmly
-    as ``ctx.root / "src" / "ports.py"``, and are exactly as blind to
-    ``src/<pkg>/``. Only a bare ``ctx.root / "src"`` — the root of an rglob
-    walk — is layout-agnostic, and that is what this permits.
-    """
-    segments = _path_segments(node)
-    return any(
-        segment == "src" and index + 1 < len(segments)
-        for index, segment in enumerate(segments)
-    )
-
-
-#: ``src/`` immediately followed by a path segment, with no path before it.
-#: ``"src/"`` alone (an rglob root, or the word in prose) does not match.
-_SRC_CHILD_RE = re.compile(r"(?<![\w/.-])src/[A-Za-z_][\w.-]*")
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else _HOLE
+    if isinstance(node, ast.JoinedStr):
+        return "".join(_string_skeleton(part) for part in node.values)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _string_skeleton(node.left) + _string_skeleton(node.right)
+    return _HOLE
 
 
 def _docstring_constants(tree: ast.AST) -> set[int]:
@@ -124,45 +113,11 @@ def _docstring_constants(tree: ast.AST) -> set[int]:
     return ids
 
 
-#: Stand-in for a runtime slot inside a composed string. One identifier char,
-#: so ``f"src/{name}.py"`` renders as a path with a child rather than a bare
-#: ``"src/"`` the needle would skip.
-_HOLE = "X"
-
-
-def _string_skeleton(node: ast.expr) -> str:
-    """The literal skeleton of a composed string, runtime slots as ``X``.
-
-    A ``"src"`` that is the PREFIX OF THE SAME STRING as its child hides from
-    both other arms of this gate: ``_path_segments`` sees one opaque non-literal
-    operand, and a per-``Constant`` scan sees ``"src/"`` and ``".py"`` as two
-    separate literals, neither of which carries a child. Reassembling the whole
-    expression is what makes it visible:
-
-    * ``f"src/{name}.py"``            -> ``src/X.py``   (caught)
-    * ``"src/" + name + ".py"``       -> ``src/X.py``   (caught)
-    * ``f"{ctx.rel(p)} missing"``     -> ``X missing``  (clean)
-
-    Implicit adjacent-literal concatenation needs no arm — CPython folds
-    ``"src/" "ports.py"`` into one ``Constant`` at parse time.
-    """
-    if isinstance(node, ast.Constant):
-        return node.value if isinstance(node.value, str) else _HOLE
-    if isinstance(node, ast.JoinedStr):
-        return "".join(_string_skeleton(part) for part in node.values)
-    if isinstance(node, ast.FormattedValue):
-        return _HOLE
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _string_skeleton(node.left) + _string_skeleton(node.right)
-    return _HOLE
-
-
 def _composed_strings(tree: ast.AST) -> list[ast.expr]:
-    """Every string expression to skeletonize, outermost composition first.
+    """Every string expression to skeletonize, outermost composition only.
 
-    Only the OUTERMOST node of a ``+`` chain or f-string is returned: its
-    skeleton already contains every part, and reporting the children too would
-    just duplicate the line.
+    The children of a ``+`` chain or f-string are skipped: the outermost node's
+    skeleton already contains them, and reporting both duplicates the line.
     """
     inner: set[int] = set()
     for node in ast.walk(tree):
@@ -182,62 +137,44 @@ def _composed_strings(tree: ast.AST) -> list[ast.expr]:
     ]
 
 
-def _string_offenders(tree: ast.AST) -> list[int]:
-    """Lines where a *string* hardcodes ``src/<child>`` outside a docstring.
-
-    Covers composed strings as well as plain constants — ``f"src/{name}.py"``
-    and ``"src/" + name`` are the same hardcoded root with the child moved into
-    a runtime slot, and a per-``Constant`` scan would never see either.
-
-    The scan above only sees path ARITHMETIC. The same blindness ships as a
-    plain string just as easily — ``path.startswith("src/ui/")``, a
-    ``re.compile(r"^src/ui/...")`` source, or a ``_PORTS_REL = "src/ports.py"``
-    constant fed to a ``/`` one line later. P10.6 held the first two of those
-    and they failed a stamped repo's audit gate outright, so this arm is not
-    hypothetical. Docstrings are exempt: prose explaining the layout is what a
-    docstring is for.
-    """
+def _offending_lines(tree: ast.AST) -> list[int]:
+    """Lines naming the source directory as a literal, outside docstrings."""
     exempt = _docstring_constants(tree)
-    return [
-        node.lineno
-        for node in _composed_strings(tree)
-        if id(node) not in exempt and _SRC_CHILD_RE.search(_string_skeleton(node))
-    ]
+    return sorted(
+        {
+            node.lineno
+            for node in _composed_strings(tree)
+            if id(node) not in exempt and _SRC_TOKEN_RE.search(_string_skeleton(node))
+        }
+    )
 
 
 def _offenders(root: Path) -> dict[str, list[int]]:
     found: dict[str, list[int]] = {}
     audit_root = root / _AUDIT_PKG
     for py in sorted(audit_root.rglob("*.py")):
-        if "__pycache__" in py.parts:
+        rel = py.relative_to(audit_root).as_posix()
+        if "__pycache__" in py.parts or rel == _OWNER:
             continue
-        tree = ast.parse(py.read_text(encoding="utf-8"))
-        lines = sorted(
-            {
-                node.lineno
-                for node in ast.walk(tree)
-                if isinstance(node, ast.BinOp | ast.Call)
-                and _is_flat_source_literal(node)
-            }
-            | set(_string_offenders(tree))
-        )
+        lines = _offending_lines(ast.parse(py.read_text(encoding="utf-8")))
         if lines:
-            found[py.relative_to(audit_root).as_posix()] = lines
+            found[rel] = lines
     return found
 
 
-def test_no_flat_source_path_literal_in_the_audit(real_repo_root: Path) -> None:
-    """Source modules resolve through ``ctx.src_module`` / ``src_dir`` (#11709)."""
+def test_only_the_owner_spells_the_source_directory(real_repo_root: Path) -> None:
+    """``layout.py`` owns the literal; everything else uses the vocabulary."""
     offenders = {
         rel: lines
         for rel, lines in _offenders(real_repo_root).items()
         if rel not in _GRANDFATHERED
     }
     assert offenders == {}, (
-        f"Flat `src/<name>` path literal in the audit: {offenders}. "
-        "Use ctx.src_module('<name>') / ctx.src_dir('<parts>') — a flat "
-        "literal is blind to every repo the greenfield kernel writer stamps "
-        "(#11709). A bare `ctx.root / 'src'` walked with rglob is fine."
+        f"Source-directory literal outside {_OWNER}: {offenders}. Use "
+        "ctx.src_root() for a recursive scan root, ctx.src_module('<name>') / "
+        "ctx.src_dir('<parts>') for a module or directory probe, or "
+        "layout.SOURCE_DIR_NAME outside a CheckContext. A hand-spelled literal "
+        "is blind to every repo the greenfield kernel writer stamps (#11709)."
     )
 
 
@@ -246,21 +183,42 @@ def test_grandfather_list_is_empty(real_repo_root: Path) -> None:
     stale = sorted(_GRANDFATHERED - set(_offenders(real_repo_root)))
     assert stale == [], f"No longer offenders: {stale}. Drop them from the list."
     assert not _GRANDFATHERED, (
-        "The #11709 conversion left no flat literals. A new entry here means a "
-        "new one was written; convert it instead of grandfathering it."
+        "The #11709 conversion left no literals outside the owner. A new entry "
+        "here means a new one was written; convert it instead."
     )
+
+
+def test_the_owner_still_owns_it(real_repo_root: Path) -> None:
+    """Guard the exemption: an emptied owner must not silently pass the scan."""
+    owner = real_repo_root / _AUDIT_PKG / _OWNER
+    assert owner.is_file(), f"{_OWNER} is gone — the resolver was removed"
+    assert _offending_lines(ast.parse(owner.read_text(encoding="utf-8"))), (
+        f"{_OWNER} no longer spells the source directory. Either the constant "
+        "moved (point _OWNER at its new home) or the resolver was gutted — "
+        "which would let the scan above pass with nothing left to find."
+    )
+
+
+#: Floor on resolver adoption. A ratchet whose subject vanished passes
+#: vacuously, so pin that the conversions are still there (#6855).
+_MIN_RESOLVER_CALL_SITES = 24
 
 
 def test_the_resolver_is_still_the_thing_being_used(real_repo_root: Path) -> None:
-    """Guard the guard: an empty scan must not be able to pass vacuously."""
+    """Guard the guard: count real CALLS, not mentions in prose."""
     audit_root = real_repo_root / _AUDIT_PKG
-    assert (audit_root / "layout.py").is_file(), "the resolver module is gone"
-    call_sites = sum(
-        text.count("ctx.src_module(") + text.count("ctx.src_dir(")
-        for py in audit_root.rglob("*.py")
-        if "__pycache__" not in py.parts
-        for text in [py.read_text(encoding="utf-8")]
-    )
+    wanted = {"src_root", "src_module", "src_dir"}
+    call_sites = 0
+    for py in audit_root.rglob("*.py"):
+        if "__pycache__" in py.parts:
+            continue
+        for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in wanted
+            ):
+                call_sites += 1
     assert call_sites >= _MIN_RESOLVER_CALL_SITES, (
         f"only {call_sites} layout-aware call sites, floor is "
         f"{_MIN_RESOLVER_CALL_SITES}. The #11709 conversions were removed or "
@@ -268,7 +226,11 @@ def test_the_resolver_is_still_the_thing_being_used(real_repo_root: Path) -> Non
     )
 
 
-# --- detector self-tests --------------------------------------------------
+# --- detector self-tests ---------------------------------------------------
+#
+# Every spelling any review pass found, plus the ones that were only ever
+# hypothetical. They are all caught by the SAME one-line rule — that is the
+# point of the list: it is evidence the rule generalises, not a set of arms.
 
 _FORBIDDEN_SHAPES = [
     pytest.param('p = ctx.root / "src" / "ports.py"\n', id="module-literal"),
@@ -280,52 +242,60 @@ _FORBIDDEN_SHAPES = [
         'CANDIDATES = [ctx.root / "src" / "a.py", ctx.root / "src" / "b.py"]\n',
         id="inside-a-list",
     ),
-    pytest.param('p = Path("src") / "ports.py"\n', id="path-constructor-base"),
+    pytest.param('p = Path("src") / "ports.py"\n', id="path-constructor"),
+    # --- pass-4 evasions: constructor spellings a Name=="Path" test missed ---
+    pytest.param('p = pathlib.Path("src") / name\n', id="qualified-path-ctor"),
+    pytest.param('p = PurePath("src") / name\n', id="purepath-ctor"),
+    pytest.param('p = PurePosixPath("src") / name\n', id="pureposixpath-ctor"),
+    pytest.param('p = PosixPath("src") / name\n', id="posixpath-ctor"),
+    pytest.param('p = WindowsPath("src") / name\n', id="windowspath-ctor"),
+    pytest.param('p = PureWindowsPath("src") / name\n', id="purewindowspath-ctor"),
+    # --- pass-4 evasion: the "src" segment itself hoisted to a variable ---
+    pytest.param('_SRC = "src"\np = ctx.root / _SRC / "ports.py"\n', id="src-hoisted"),
+    pytest.param(
+        '_SRC = "src"\np = ctx.root.joinpath(_SRC, name)\n', id="src-hoisted-joinpath"
+    ),
+    # --- earlier passes ---
     pytest.param('p = ctx.root / "src/ports.py"\n', id="embedded-separator"),
     pytest.param(
         'p = ctx.root.joinpath("src/mockworld", "fakes")\n', id="joinpath-embedded"
     ),
-    pytest.param('p = ctx.root / "src" / name\n', id="variable-segment"),
-    pytest.param('p = ctx.root / "src" / f"{name}.py"\n', id="fstring-segment"),
+    pytest.param('p = ctx.root / "src" / name\n', id="variable-child"),
+    pytest.param('p = ctx.root / f"src/{name}.py"\n', id="fstring-whole-path"),
+    pytest.param('p = ctx.root / ("src/" + name + ".py")\n', id="concatenated-path"),
     pytest.param(
         'p = os.path.join(str(ctx.root), "src", "ports.py")\n', id="os-path-join"
     ),
     pytest.param('ui_only = path.startswith("src/ui/")\n', id="string-prefix"),
     pytest.param('UI_TEST_RE = re.compile(r"^src/ui/.*")\n', id="regex-source"),
     pytest.param('_PORTS_REL = "src/ports.py"\n', id="named-constant"),
-    pytest.param('p = ctx.root / f"src/{name}.py"\n', id="fstring-whole-path"),
-    pytest.param('p = ctx.root / ("src/" + name + ".py")\n', id="concatenated-path"),
 ]
 
 _ALLOWED_SHAPES = [
-    pytest.param('src = ctx.root / "src"\n', id="bare-src-root"),
-    pytest.param('src = ctx.root.joinpath("src")\n', id="bare-src-joinpath"),
+    pytest.param("src = ctx.src_root()\n", id="the-scan-root-vocabulary"),
+    pytest.param('p = ctx.src_module("ports")\n', id="the-module-vocabulary"),
+    pytest.param('p = ctx.src_dir("mockworld", "fakes")\n', id="the-dir-vocabulary"),
     pytest.param("p = src.joinpath(pkg, *parts)\n", id="starred-segments"),
+    pytest.param('p = ctx.root / "tests" / "scenarios"\n', id="not-src"),
+    pytest.param('p = ctx.root / "source" / "x.py"\n', id="src-is-not-a-substring"),
     pytest.param(
-        'msg = "no *_DATA_ROOT override found in src/"\n', id="bare-src-prose"
+        'm = "no *_DATA_ROOT override found in src/"\n', id="prose-trailing-slash"
     ),
-    pytest.param('def f():\n    """Probes src/ports.py."""\n', id="docstring-prose"),
     pytest.param('m = f"{ctx.rel(p)} missing"\n', id="fstring-resolved-path"),
     pytest.param('m = "looked under " + probed + "/ and tests/"\n', id="concat-clean"),
-    pytest.param('p = ctx.root / "tests" / "scenarios"\n', id="not-src"),
-    pytest.param('p = ctx.src_module("ports")\n', id="the-resolver"),
+    pytest.param('def f():\n    """Probes src/ports.py."""\n', id="docstring-prose"),
 ]
 
 
 def _detect(body: str) -> bool:
-    tree = ast.parse(body)
-    return bool(_string_offenders(tree)) or any(
-        _is_flat_source_literal(node)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.BinOp | ast.Call)
-    )
+    return bool(_offending_lines(ast.parse(body)))
 
 
 @pytest.mark.parametrize("body", _FORBIDDEN_SHAPES)
-def test_detector_catches_every_flat_literal_shape(body: str) -> None:
+def test_detector_catches_every_spelling(body: str) -> None:
     assert _detect(body)
 
 
 @pytest.mark.parametrize("body", _ALLOWED_SHAPES)
-def test_detector_ignores_layout_agnostic_shapes(body: str) -> None:
+def test_detector_ignores_the_vocabulary_and_prose(body: str) -> None:
     assert not _detect(body)

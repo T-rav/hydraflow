@@ -164,10 +164,12 @@ def _atomic_label_swap(ctx: CheckContext) -> Finding:
             return finding(
                 "P6.5",
                 Status.PASS,
-                f"atomic swap helper in {path.name}",
+                f"atomic swap helper in {ctx.rel(path)}",
             )
+    probed = ", ".join(ctx.rel(path) for path in candidates)
     return finding(
         "P6.5",
         Status.FAIL,
-        "no swap_pipeline_labels / swap_labels / atomic_label_swap function found",
+        "no swap_pipeline_labels / swap_labels / atomic_label_swap function "
+        f"found (tried {probed})",
     )

@@ -52,7 +52,7 @@ def _claude_md_documents_tdd(ctx: CheckContext) -> Finding:
 
 @register("P10.2")
 def _every_module_has_a_test(ctx: CheckContext) -> Finding:
-    src = ctx.root / "src"
+    src = ctx.src_root()
     tests = ctx.root / "tests"
     if not src.is_dir():
         return finding("P10.2", Status.NA, "no src/")
