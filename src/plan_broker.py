@@ -41,6 +41,12 @@ table is code-owned and pinned by a test, and a lane that cannot serve Anthropic
 at all rejects rather than substituting. That is the proposal's named hazard —
 *"a GLM model is never reported as Sonnet"* — closed before a spawn rather than
 at the receipt, where it would already have cost a worker.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations
@@ -215,6 +221,23 @@ class PlanRouteReason(StrEnum):
     """
 
 
+#: The ``PHASE_NOT_*`` rows that still report ``ROLE_PHASE_FORBIDDEN``.
+#:
+#: ``driver_contracts.OUTSIDE_CANARY_BOUND`` asserts that the three
+#: canary-bound situations must NOT share ``ROLE_PHASE_FORBIDDEN`` — a code
+#: that says the CATALOGUE forbids the role, which is false of a phase that is
+#: simply not the canary's. #11543 migrated the REVIEW row and deliberately
+#: left the other two, because they belong to #11541/#11542's vocabulary.
+#:
+#: Named here, and referenced from the invariant's own docstring, because a
+#: deliberate exception recorded only as a comment beside the rows is
+#: indistinguishable from an unfinished migration: flipping either row
+#: survived the suite in both directions (#11716). Shrink-only; empty is the
+#: goal, and the row to migrate next is whichever phase's owner is in the file.
+PHASE_ROWS_STILL_CONFLATED: frozenset[str] = frozenset(
+    {"PHASE_NOT_PLAN", "PHASE_NOT_IMPLEMENT"}
+)
+
 #: Which deterministic receipt code each refusal reason reports.
 #:
 #: Lives beside the enum rather than in an actuator because there are now two
@@ -233,7 +256,8 @@ REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
     # which is silent about the role (#11543). Its sibling
     # ROLE_NOT_CATALOGUED_FOR_REVIEW carries the catalogue's answer. The PLAN
     # and IMPLEMENT members above still conflate the two; they belong to
-    # #11541/#11542's vocabulary and are left for their owners.
+    # #11541/#11542's vocabulary and are left for their owners, recorded in
+    # PHASE_ROWS_STILL_CONFLATED above rather than only here.
     PlanRouteReason.PHASE_NOT_REVIEW: RejectionReason.OUTSIDE_CANARY_BOUND,
     PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_REVIEW: (
         RejectionReason.ROLE_PHASE_FORBIDDEN
