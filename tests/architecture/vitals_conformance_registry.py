@@ -20,6 +20,9 @@ from pathlib import Path
 
 __all__ = [
     "CONFORMANCE_ROOTS",
+    "EGRESS_LANE_EXCLUSIONS",
+    "EGRESS_LANE_EXCLUSION_CEILING",
+    "EgressLaneExclusion",
     "NETWORK_CAPABLE_BINARIES",
     "SUBPROCESS_WAIVER_CEILING",
     "SUBPROCESS_WAIVERS",
@@ -167,53 +170,114 @@ class SubprocessWaiver:
     """Why the argv names it without the check leaving the checkout."""
 
 
-#: The registered exceptions. An unregistered allow-list would be #11706 one
-#: level up — a rule kept green by a set nobody classified.
-SUBPROCESS_WAIVERS: tuple[SubprocessWaiver, ...] = (
-    SubprocessWaiver(
-        path="tests/regressions/test_reap_processlookuperror.py",
-        binary="gh",
+#: EMPTY since #11706's egress lane landed, and the reason is the whole point
+#: of building the lane rather than more parser.
+#:
+#: It held three entries, and all three said the same thing: *this call is
+#: faked*. One monkeypatched ``asyncio.create_subprocess_exec``; two passed
+#: ``cmd=["claude", ...]`` into an inversion-of-control seam with a recording
+#: double in ``StreamConfig(runner=)``. A parser reads the call, never what the
+#: call resolves to at runtime, so a hand-written waiver was the only honest
+#: way to say it.
+#:
+#: ``test_no_conformance_check_spawns_a_network_binary`` no longer asks for one.
+#: A statically flagged site is now ESCALATED: the file is run in a child
+#: process with :mod:`tests.architecture.egress_guard` armed, and the question
+#: "does this argv ever become a process?" is answered by watching the
+#: interpreter's own ``subprocess.Popen``/``os.exec`` audit events. Measured on
+#: those three files: 14 tests, 5 real spawns, all of them ``bash`` and
+#: ``true`` — no ``gh``, no ``claude``, nothing to waive.
+#:
+#: The escalation is bounded BY the exception count, which is the property that
+#: makes it affordable: only flagged sites are run, so a rule nobody trips
+#: costs nothing and a rule tripped fifty times costs fifty test files. That is
+#: the right pressure gradient for an exception mechanism to have.
+SUBPROCESS_WAIVERS: tuple[SubprocessWaiver, ...] = ()
+
+#: The waiver count. #11706 lowered it 3 -> 0 when the lane retired all three.
+#:
+#: This number may only ever be LOWERED. Raising it is precisely how an
+#: allow-list grows until it *is* the rule, which is the fail-open shape the
+#: whole standard exists to stop. At zero the statement is stronger than it
+#: was: there is no hand-written exception to the spawn rule at all, and the
+#: answer for a flagged site is to let the lane observe it.
+SUBPROCESS_WAIVER_CEILING: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class EgressLaneExclusion:
+    """One conformance file the egress-blocked lane does NOT run.
+
+    Not a waiver. A waiver says "the static reading is wrong here"; this says
+    "the lane's reading is RIGHT here, and the file reaches the network today".
+    Each entry is a measured defect kept visible rather than a judgement kept
+    quiet, and ``scripts/check_egress_exclusions.py`` reddens when one stops
+    reaching — because an exclusion that outlives its reason pre-approves
+    whatever lands in that file next (#11670's lesson, one mechanism over).
+    """
+
+    path: str
+    """Repo-relative."""
+
+    reaches: tuple[str, ...]
+    """What was OBSERVED, not what was assumed. These come from a guarded run,
+    not from reading the source — the source of every one of them is a helper
+    the test calls, which is why the static scanner sees nothing."""
+
+    why: str
+
+
+#: The conformance files the lane skips, because they really do leave the
+#: checkout. Found BY the lane on the day it was built (#11706): three files out
+#: of the 691 the conformance roots contain, none of them visible to the static
+#: scanner, because in every case a first-party helper does the spawning — the
+#: residual the standard names and no amount of further AST work reaches.
+#:
+#: These are defects, and the list is shrink-only for that reason. The fix in
+#: each case is to fake the seam the test already depends on; when someone does,
+#: ``check_egress_exclusions.py`` reddens and says to delete the entry.
+EGRESS_LANE_EXCLUSIONS: tuple[EgressLaneExclusion, ...] = (
+    EgressLaneExclusion(
+        path="tests/regressions/test_issue_10015_streak_escalation_autoclose.py",
+        reaches=("gh api repos//compare/main...staging",),
         why=(
-            "argv is ['gh', 'issue', 'list'] but the test monkeypatches "
-            "asyncio.create_subprocess_exec to return a dead-process double "
-            "before calling run_simple, so nothing is ever spawned. The argv is "
-            "documentary — it models the shape of the real call whose reap "
-            "semantics (#9794/#9814) are under test. A static reader cannot see "
-            "a monkeypatch; rewriting the argv to appease it would trade a "
-            "faithful fixture for a green sweep."
+            "StagingPromotionLoop's ahead-by probe runs unfaked: the loop reaches "
+            "PRManager, which shells `gh api` against the real forge. Note the "
+            "empty repo slug in the argv — the test is not even asking a "
+            "meaningful question of the network, it just fails to stop the call."
         ),
     ),
-    SubprocessWaiver(
-        path="tests/regressions/test_issue_11263.py",
-        binary="claude",
+    EgressLaneExclusion(
+        path="tests/regressions/test_issue_8650.py",
+        reaches=("gh issue list --repo hydra/hydraflow",),
         why=(
-            "stream_claude_process is an inversion-of-control seam: it spawns "
-            "through the runner handed to it in StreamConfig. This test injects "
-            "a recording double whose create_streaming_process runs `true`, so "
-            "the `claude` in cmd= is never executed. Statically indistinguishable "
-            "from the real thing — StreamConfig.runner defaults to None and the "
-            "REAL runner, so a call that omits it is correctly flagged."
+            "the trust loop's staleness search runs against the real forge. The "
+            "test asserts on escalation behaviour, so the live query's result is "
+            "never read — it is latency and a rate-limit token, spent for nothing."
         ),
     ),
-    SubprocessWaiver(
-        path="tests/regressions/test_issue_9911_stop_path_reap.py",
-        binary="claude",
+    EgressLaneExclusion(
+        path="tests/regressions/test_issue_10253_airgap_start_orchestrator.py",
+        reaches=(
+            "gh run list --branch main --workflow ci.yml",
+            "gh issue list --repo test-org/test-repo",
+            "https://raw.githubusercontent.com (PricingRefreshLoop)",
+        ),
         why=(
-            "same seam, same shape: StreamConfig(runner=_Recorder()) returns a "
-            "MagicMock process, so cmd=['claude', '-p'] is documentary. The "
-            "test is about the spawn REGISTRY, not the spawn."
+            "the sharpest one, and the reason a lane beats a parser: the test is "
+            "named test_wired_start_orchestrator_is_airgapped_and_stays_responsive "
+            "and it is not air-gapped. Its own assertions pass — it exits 0 with "
+            "all three reaches recorded — because the reaches happen in loops it "
+            "starts and does not assert about. A gate reading the source finds "
+            "nothing here; a gate watching the process finds three."
         ),
     ),
 )
 
-#: The waiver count on the day the subprocess dimension landed (#11706).
-#:
-#: This number may only ever be LOWERED. Raising it is precisely how an
-#: allow-list grows until it *is* the rule, which is the fail-open shape the
-#: whole standard exists to stop — so a new exception is a conversation, not an
-#: edit. A waiver that no longer matches a live spawn must be deleted, not left
-#: to cover the next thing that lands in that file.
-SUBPROCESS_WAIVER_CEILING: int = 3
+#: The exclusion count on the day the lane landed (#11706). SHRINK-ONLY, for
+#: the same reason the waiver ceiling is: a list of "files allowed to reach the
+#: network" that may grow is the rule inverted.
+EGRESS_LANE_EXCLUSION_CEILING: int = 3
 
 
 def registered_claims() -> tuple[Claim, ...]:

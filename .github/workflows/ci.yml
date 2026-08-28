@@ -454,8 +454,29 @@ jobs:
           uv run python -c "from arch._functional_areas_schema import load_functional_areas; from pathlib import Path; load_functional_areas(Path('docs/arch/functional_areas.yml')); print('functional_areas.yml: schema OK')"
       - name: Drift check
         run: make arch-check
-      - name: Architecture tests
-        run: uv run pytest tests/architecture -x --tb=short
+      # EGRESS-BLOCKED (#11706). `unshare --net` gives this step a network
+      # namespace with no route off the host, so the offline-conformance rule
+      # is OBSERVED rather than inferred from source: an orchestrator whose
+      # config reaches out (`mkdocs build --strict` is offline only while
+      # mkdocs.yml stays on search/mermaid2/git-revision-date), a `git fetch`
+      # whose remote is set elsewhere, an argv built from non-literals, a spawn
+      # done by a helper — none of which any parser reaches.
+      #
+      # The wrapper VERIFIES the isolation before running anything and exits 3
+      # if this tree can still reach the network, so a lane that silently
+      # stopped isolating fails instead of passing. `--user` drops back to the
+      # runner after the namespace is set up and `lo` is brought up; the
+      # conformance roots really do use loopback. `.venv/bin/python` rather than
+      # `uv run` because `uv run` may want the network to re-check the lock.
+      #
+      # tests/architecture has NO registered exclusions: measured, every one of
+      # its ~1500 spawns is local and every connect it makes is to 127.0.0.1.
+      - name: Architecture tests (egress-blocked)
+        run: |
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python -m pytest tests/architecture -x --tb=short
 
   test:
     name: Tests
@@ -671,6 +692,22 @@ jobs:
         # (patches subprocess_util.run_subprocess + auto_pr's runner prefix), so
         # a bled mock leaves the patch unapplied and it asserts on the wrong
         # preflight stage. Passes single-threaded.
+        #
+        # EGRESS-BLOCKED (#11706): both invocations run inside a network
+        # namespace with no route off the host, via a wrapper that exits 3 if
+        # the isolation is not real. Same total compute as before — the lane is
+        # not a second copy of this job, it is this job with the network taken
+        # away, which is the only version of it nobody switches off to save
+        # runner minutes.
+        #
+        # EXCLUDED is the honest part. Three files reach a real forge today,
+        # every one of them through a helper the test calls rather than through
+        # an argv any parser could read. They are registered in
+        # vitals_conformance_registry.EGRESS_LANE_EXCLUSIONS (shrink-only),
+        # they run OUTSIDE the namespace in the step below so their verdict is
+        # unchanged, and check_egress_exclusions.py reddens if one of them
+        # stops reaching — an exclusion that outlives its reason pre-approves
+        # whatever lands in that file next.
         run: |
           set -euo pipefail
           REAP="tests/regressions/test_reap_processlookuperror.py \
@@ -681,15 +718,43 @@ jobs:
             tests/regressions/test_issue_9641_unified_group_kill.py \
             tests/regressions/test_hostrunner_reap_grandchildren.py \
             tests/regressions/test_auto_pr_preflight_gate.py"
-          IGNORES=""; for f in $REAP; do IGNORES="$IGNORES --ignore=$f"; done
+          EXCLUDED="tests/regressions/test_issue_10015_streak_escalation_autoclose.py \
+            tests/regressions/test_issue_8650.py \
+            tests/regressions/test_issue_10253_airgap_start_orchestrator.py"
+          IGNORES=""; for f in $REAP $EXCLUDED; do IGNORES="$IGNORES --ignore=$f"; done
           # --forked isolates every test in its own subprocess so a test that
           # leaks worker state (a global holding another test's tmp path) cannot
           # poison a later test on the same xdist worker (#11004). --reruns can't
           # fix this class — a rerun stays on the poisoned worker; only a fresh
           # process does. The REAP lane below stays un-forked (its subprocess-
           # group reap assertions are their own isolation regime).
-          PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --forked --reruns 2 --reruns-delay 1 -q
-          PYTHONPATH=src uv run pytest $REAP -q
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python -m pytest tests/regressions/ $IGNORES -n auto --dist loadscope --forked --reruns 2 --reruns-delay 1 -q
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python -m pytest $REAP -q
+      # The excluded three, run normally: their pass/fail verdict is unchanged
+      # by #11706, only their egress claim is.
+      - name: Run egress-lane exclusions (NOT isolated)
+        run: |
+          PYTHONPATH=src uv run pytest \
+            tests/regressions/test_issue_10015_streak_escalation_autoclose.py \
+            tests/regressions/test_issue_8650.py \
+            tests/regressions/test_issue_10253_airgap_start_orchestrator.py -q
+      # ...and the check that keeps that list from becoming a permanent hole
+      # with a reassuring name. Inside the namespace the reach is OBSERVED (the
+      # audit event fires) and never completes (the syscall fails), so this
+      # proves each entry is still needed without performing the traffic it is
+      # about.
+      - name: Every egress-lane exclusion is still necessary
+        run: |
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python scripts/check_egress_exclusions.py
 
   # Linux signal-context smoke lane (#10049, deferred from #10010). Reruns the
   # reap/signal-focused test subset INSIDE a plain Linux container as root —

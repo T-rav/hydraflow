@@ -62,7 +62,12 @@ counter? Register it as vitals, and it may go to the data plane.
 
 Two static properties, both in
 `tests/architecture/test_vitals_conformance_seam.py`, both reading the
-mechanics in `tests/architecture/conformance_offline_scan.py`:
+mechanics in `tests/architecture/conformance_offline_scan.py` — and, since
+#11706, an **empirical** third that runs the suite with egress blocked and
+watches instead of reading. The static pair is the floor and the fast local
+answer; the lane is the one that can settle a question about what a call
+resolves to at runtime. Both are described below, the lane under
+"[The lane](#the-lane-what-the-static-checks-cannot-reach)".
 
 1. **No conformance file reaches a remote client — transitively.** The remote
    clients are the ones that can *only* mean a remote service (`boto3`,
@@ -103,8 +108,8 @@ mechanics in `tests/architecture/conformance_offline_scan.py`:
    production code to use — and its argv literals are checked against
    `NETWORK_CAPABLE_BINARIES` and against the hosts they name.
 
-Each property carries a vacuity guard, because both passed on the day they
-landed and a check that has never observed a violation is a claim about
+Each static property carries a vacuity guard, because both passed on the day
+they landed and a check that has never observed a violation is a claim about
 nothing: the sweep must have a subject, the closure must actually leave the
 file it starts from, and the spawn scanner must still recognise the ~165 spawn
 sites the conformance roots really contain.
@@ -150,61 +155,136 @@ invoke — a property of `Makefile` / `mkdocs.yml`, not of the argv, and
 therefore invisible to any parser; and `python` / `sys.executable`, since
 `python -m pip` is caught by `pip` appearing as an argv token.
 
-### Waivers
+### Waivers, and why there are none left
 
-`SUBPROCESS_WAIVERS` is the one allow-list here, and it exists because an
-import is a fact about the file while an argv can be a fact about a call the
-test never makes. Two shapes make that so, and neither is visible to a parser:
-a `monkeypatch` of the spawn primitive, and an **injected runner** —
-`stream_claude_process` and `HostRunner.run_simple` are inversion-of-control
-seams, so `cmd=["claude", …]` with a recording double in `StreamConfig(runner=)`
-executes nothing. Note the seam still fails closed where it matters:
-`StreamConfig.runner` defaults to the real runner, so a call that omits it is
-flagged.
+`SUBPROCESS_WAIVERS` held three entries, and all three said the same thing:
+*this call is faked*. One monkeypatched `asyncio.create_subprocess_exec`; two
+passed `cmd=["claude", …]` into an inversion-of-control seam with a recording
+double in `StreamConfig(runner=)`. A parser reads the call, never what the call
+resolves to at runtime, so a hand-written waiver was the only honest way to say
+it — and "the only honest way to say it" is exactly the state that should make
+you go build a different instrument.
 
-It is registered alongside the claims, keyed by `(path, binary)` rather than by
-a line number that would rot, carries a written reason, must still match a live
-spawn (a dead waiver pre-approves whatever lands in that file next), and is
-capped by `SUBPROCESS_WAIVER_CEILING`, **which may only ever be lowered**. It
-holds three entries.
+The list is **empty**, and `SUBPROCESS_WAIVER_CEILING` is **0**. A flagged
+spawn site is no longer waived, it is **escalated**: the file is run in a child
+process with `tests/architecture/egress_guard.py` armed, and the question "does
+this argv ever become a process?" is answered by the interpreter's own
+`subprocess.Popen`/`os.exec` audit events. A monkeypatched primitive and an
+injected runner both spawn nothing, so both are simply not observed. Measured
+on those three files: 14 tests, 5 real spawns, every one of them `bash` or
+`true`.
+
+The cost is proportional to the exception count, which is the property that
+makes it affordable and the pressure gradient the right way round: a rule
+nobody trips costs nothing, and a rule tripped fifty times costs fifty test
+files. `git status` in a hundred conformance tests is still free, because
+nothing flags it.
+
+The waiver *liveness* property — an exemption must still match a live spawn, or
+it pre-approves whatever lands in that file next — is not gone, it moved. It
+now applies to the one list that is not empty, `EGRESS_LANE_EXCLUSIONS`, and is
+enforced by `scripts/check_egress_exclusions.py`.
 
 An argv is read wherever it can be passed — positionally, spread across
 varargs, or by keyword. `subprocess.run(args=[...])` is ordinary working Python
 (`run(*popenargs, **kwargs)` forwards straight into `Popen(args=…)`), and a
 scanner reading only `call.args` sees a real spawn with an empty argv and
 reports nothing. An absolute path is reduced to its basename for the same
-reason: `/usr/bin/curl` is `curl`.
+reason: `/usr/bin/curl` is `curl`. Both sides — the AST scanner and the runtime
+guard — call one `argv_tokens`, so the same argv cannot be read two different
+ways.
 
-### The floor, and what is still above it
+### The lane: what the static checks cannot reach
 
-**These are static proxies, not proofs.** They are a floor. The proof that
-conformance runs offline is a CI-lane property: run the conformance suite with
-egress blocked and require it to pass, with a negative control proving the lane
-fires. That remains unbuilt (#11706), and it is what covers the residuals the
-static checks name but cannot reach:
+**The static checks are proxies, not proofs.** They are a floor. The proof is a
+CI-lane property — run the conformance suite with egress blocked — and it is
+built (#11706). Two mechanisms, because they see different things:
+
+- **`tests/architecture/egress_guard.py`** arms a `sys.addaudithook` hook in a
+  child process and watches `socket.connect`, `socket.sendto` and every spawn
+  primitive. It can NAME the test that reached and read the argv a process was
+  actually handed, which is what settles a faked call and what sees an argv
+  assembled from non-literals. It cannot see inside a child process.
+- **`scripts/offline_egress_lane.sh`** verifies the surrounding process tree
+  has no route off the host, and runs the suite inside it. That is the half
+  that catches what the hook cannot: a `gh` that opens its own socket, a
+  `mkdocs` plugin fetching Google Fonts, a `git fetch` whose remote is
+  configured elsewhere.
+
+Both `arch` and `regression` in `ci.yml` run through the lane. It is not a
+second copy of those jobs — it is those jobs with the network taken away, which
+is the only version of it nobody switches off to save runner minutes.
+
+#### Why not `pytest-socket --disable-socket`
+
+It was the obvious candidate and it is the wrong altitude twice over. It blocks
+at the socket **constructor**, and the asyncio event loop's self-pipe is a
+`socket.socketpair()` — so a naive `--disable-socket` breaks the harness rather
+than the egress. And it is in-process only: `subprocess.run(["curl", …])`
+satisfies it completely, which is the entire second dimension.
+
+Blocking at `connect` instead costs none of that. Measured: `socket.socketpair()`
+raises no `connect` audit event at all, and the ~1500 `git` spawns the
+conformance roots make against `tmp_path` repos name no host, so neither rule
+touches them. `test_the_guard_leaves_local_machinery_alone` is the pin —
+socketpair, a loopback round trip, a synchronous `git` and an asyncio
+subprocess, all in one guarded run, all clean.
+
+#### Guarding the guard
+
+A lane that stopped isolating would go on passing, which is the failure this
+whole standard is about. So `offline_egress_lane.sh` **verifies before it
+runs**, every time, with three canaries: an outbound TCP connect to a public
+address by IP (must fail), a DNS lookup (must fail), and a loopback round trip
+(must **work** — `unshare --net` hands over a namespace whose `lo` is down, and
+running the suite there would redden it for a reason unrelated to egress). Any
+of the three answering wrong is exit 3, not a warning.
+
+#### What the lane does not cover
+
+- **Three conformance files reach the network today**, and the lane does not run
+  them. They are registered in `EGRESS_LANE_EXCLUSIONS` with the reach that was
+  *observed*, the count is shrink-only, and they run outside the namespace so
+  their own verdict is unchanged. Every one was found BY the lane and is
+  invisible to the scanner, because in each case a first-party helper does the
+  spawning — the residual named below. The sharpest is
+  `test_wired_start_orchestrator_is_airgapped_and_stays_responsive`, which is
+  not air-gapped: it spawns `gh run list`, `gh issue list` and opens a TLS
+  connection to `raw.githubusercontent.com`, and it **exits 0**, because the
+  reaches happen in loops it starts and does not assert about. A gate reading
+  the source finds nothing there; a gate watching the process finds three.
+- `scripts/check_egress_exclusions.py` reddens when one of those files stops
+  reaching, because an exclusion that outlives its reason pre-approves whatever
+  lands in that file next. It runs **inside** the namespace, where the reach is
+  observed (the audit event fires) and never completes (the syscall fails), and
+  it refuses to run outside one.
+- The hook observes Python-level audit events, so a C extension calling
+  `connect(2)` directly is invisible to it. Only the namespace catches that, and
+  the namespace half is Linux-only: a macOS developer box gets the hook and not
+  the kernel.
+- A callee rebound in a way no argument reveals — the same limit `_SpawnNames`
+  has for `spawn = subprocess.run`. Static only; the lane does not care how the
+  call was spelled.
+
+#### Residuals the static checks name, and where they now land
 
 - an orchestrator whose *configuration* reaches out (`mkdocs build --strict` is
   offline today only because `mkdocs.yml` enables `search`, `mermaid2` and
   `git-revision-date-localized`; adding the social-card plugin fetches Google
-  Fonts at build time and nothing static would redden);
-- `git fetch`/`push` against a remote configured elsewhere, where the argv
-  names no host;
-- an argv assembled entirely from non-literal values (`subprocess.run(cmd)`),
-  where there is no string for a parser to read — and the same for a module
-  name that is not a first-positional string literal (computed at runtime, read
-  from a variable, or passed as `import_module(name="boto3")`);
-- a dynamically imported FIRST-PARTY module, which is deliberately not followed
-  as a graph edge: 195 first-positional literals in the corpus resolve to a
-  local module and essentially all are `monkeypatch.setattr("state.x", …)`
-  targets rather than imports, so turning them into edges would put whole
-  subtrees behind a coincidence — and the import rule has no waiver mechanism
-  to undo a false positive. Static imports of those modules are followed as
-  normal;
-- a callee rebound in a way no argument reveals — the same limit `_SpawnNames`
-  has for `spawn = subprocess.run`. This is a *declared* boundary, not an
-  oversight: per-file resolution that does not chase arbitrary rebinding is the
-  line, and the argument rule above is what makes the line affordable;
+  Fonts at build time and nothing static would redden) — **caught by the
+  namespace**;
+- `git fetch`/`push` against a remote configured elsewhere, where the argv names
+  no host — **caught by the namespace**;
+- an argv assembled entirely from non-literal values (`subprocess.run(cmd)`) —
+  **caught by the hook**, which reads the argv the process received;
 - a conformance check that calls a first-party helper which does the spawning —
-  the subprocess rule reads the conformance file's own call sites, because
-  following spawns transitively would flag every test that imports a module
-  capable of shelling `gh`, which is most of them.
+  **caught by the hook**, and this is the residual that produced all three live
+  findings above;
+- a dynamically imported FIRST-PARTY module, deliberately not followed as a
+  graph edge: 195 first-positional literals in the corpus resolve to a local
+  module and essentially all are `monkeypatch.setattr("state.x", …)` targets
+  rather than imports, so turning them into edges would put whole subtrees
+  behind a coincidence — and the import rule has no waiver mechanism to undo a
+  false positive. Static imports of those modules are followed as normal. **Not
+  covered by either half**: it is an import-graph question, not a runtime one,
+  and it stays a declared boundary.
