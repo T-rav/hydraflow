@@ -1,0 +1,84 @@
+# Dockerfile.factory — the HydraFlow orchestrator (the "factory") as an image.
+#
+# Distinct from Dockerfile.agent, which is the container an *agent* runs inside.
+# This one runs the orchestrator itself: the FastAPI server, the dashboard, and
+# the background loops.
+#
+# Layered on the same pre-built base as the agent image, so a rebuild is seconds
+# rather than a full toolchain install:
+#
+#   docker build -f Dockerfile.factory \
+#     --build-arg BASE_IMAGE=ghcr.io/t-rav/hydraflow-agent-base:latest \
+#     -t ghcr.io/t-rav/hydraflow-factory:latest .
+#
+# Run it:
+#
+#   docker run --rm -p 5555:5555 \
+#     -e HYDRAFLOW_GITHUB_REPO=owner/repo \
+#     -e GITHUB_TOKEN=... \
+#     -v hydraflow-data:/data \
+#     ghcr.io/t-rav/hydraflow-factory:latest
+#
+# Smoke:  docker run --rm ghcr.io/t-rav/hydraflow-factory:latest --version
+#         (`--version` and `--help` are the ONLY flags; server.py answers
+#          both without touching config, logging or the event loop, which
+#          is exactly what makes them a usable smoke surface.)
+#
+# NOTE the image does NOT bake a target repo. `HYDRAFLOW_GITHUB_REPO` is
+# explicit-only: the factory no longer adopts whatever checkout it finds, so an
+# image started without it boots and idles rather than working someone's repo by
+# accident.
+
+ARG BASE_IMAGE=ghcr.io/t-rav/hydraflow-agent-base:latest
+
+# ---------------------------------------------------------------------------
+# Stage 1: build the dashboard. `src/ui/dist` is a build artefact, not tracked,
+# so it cannot simply be COPYed from the context — it has to be produced here or
+# the server serves no UI.
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS ui
+
+WORKDIR /ui
+# Lockfile first so dependency install caches independently of UI source edits.
+COPY src/ui/package.json src/ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY src/ui ./
+RUN npm run build \
+    && test -f dist/index.html \
+    || (echo "vite build produced no dist/index.html" >&2; exit 1)
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime. The base already carries /opt/hydraflow-venv with every
+# runtime dependency, so nothing is installed here — deps change only when
+# pyproject.toml / uv.lock change, which rebuilds the BASE image.
+# ---------------------------------------------------------------------------
+FROM ${BASE_IMAGE} AS runtime
+
+USER root
+WORKDIR /opt/hydraflow
+
+# src/ carries non-.py package data (templates, prompts, hydraflow_resources),
+# so copy the tree wholesale rather than cherry-picking modules.
+COPY --chown=hydraflow:hydraflow src ./src
+COPY --chown=hydraflow:hydraflow --from=ui /ui/dist ./src/ui/dist
+COPY --chown=hydraflow:hydraflow scripts/docker-factory-smoke-test.sh ./scripts/
+
+# Data lives on a volume: a factory that writes its state into the image layer
+# loses everything on the next `docker run`.
+RUN mkdir -p /data && chown hydraflow:hydraflow /data
+
+ENV PYTHONPATH=/opt/hydraflow/src
+ENV HYDRAFLOW_DATA_DIR=/data
+ENV HYDRAFLOW_DASHBOARD_PORT=5555
+# Unbuffered so `docker logs` shows output as it happens rather than at exit.
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5555
+USER hydraflow
+
+# The venv interpreter by ABSOLUTE PATH, never a bare `python`. `python` on
+# PATH can resolve to /usr/local/bin/python — the system interpreter, which has
+# none of the dependencies — and `import server` then dies on pydantic. The
+# same interpreter-resolution trap as #11707, one layer down.
+ENTRYPOINT ["/opt/hydraflow-venv/bin/python", "-m", "server"]
