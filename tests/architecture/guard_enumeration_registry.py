@@ -545,6 +545,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_path_membership_registry as membership
     from tests.architecture import test_ratchet_baseline_keys_resolve as baselines
     from tests.architecture import test_runtime_caches_not_tracked as caches
+    from tests.architecture import test_shell_spawn_lint_rules as shell_lint
     from tests.architecture import test_wiki_runtime_caches_untracked as wiki_caches
     from tests.architecture import vitals_conformance_registry as vitals
 
@@ -566,9 +567,28 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     # from the Python registry stops appearing here, which is a real
     # question with a real answer rather than two views of one list.
     makefile_lane = set(aggregate_lane.makefile_lane_paths())
+    # Read out of pyproject.toml, NOT out of the test's own tuple: the rules
+    # ruff is actually configured to run. A rule dropped from `_RULES` while
+    # still selected is a rule nobody has watched fire; one selected without
+    # a test is a rule with no falsifying example. Two objects that must
+    # agree, which is the only arrangement in which a drop reddens.
+    selected_shell_rules = shell_lint.selected_shell_spawn_rules()
 
     return (
         # --- SUBJECTS, derived ------------------------------------------
+        GuardedEnumeration(
+            name="test_shell_spawn_lint_rules._RULES",
+            members=tuple(rule for rule, _spawn in shell_lint._RULES),  # noqa: SLF001
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=lambda member: member in selected_shell_rules,
+            why=(
+                "#11724 closed `os.system` on the decision path; S605/S606 close "
+                "it repo-wide. Each row pairs a rule with a source line that must "
+                "flag, so a dropped row stops anyone ever watching that rule fire "
+                "— and the rule stays in `select` looking enforced. Pinned "
+                "against the S-rules pyproject actually selects, both directions."
+            ),
+        ),
         GuardedEnumeration(
             name="test_director_no_authority.DECISION_PATH_MODULES",
             members=tuple(director.DECISION_PATH_MODULES),

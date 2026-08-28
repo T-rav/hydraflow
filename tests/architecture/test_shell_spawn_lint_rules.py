@@ -88,6 +88,37 @@ def test_a_clean_file_is_not_flagged(tmp_path: Path) -> None:
         assert rule not in out, f"{rule} fired on a file that spawns nothing:\n{out}"
 
 
+def selected_shell_spawn_rules() -> frozenset[str]:
+    """The S-rules ``pyproject.toml`` actually selects — the derivation.
+
+    ``_RULES`` is pinned against this rather than hand-kept beside it, so a
+    rule that is selected but untested, or tested but unselected, is a hard
+    error instead of a silent half-measure.
+    """
+    # `S` followed by digits — NOT a bare prefix. "SIM" also starts with "S",
+    # and treating it as a bandit rule made this derivation wrong on its first
+    # run: it reported {"SIM", "S605", "S606"} against a tested set of two.
+    return frozenset(r for r in _selected() if r.startswith("S") and r[1:].isdigit())
+
+
+def test_every_selected_shell_spawn_rule_is_exercised() -> None:
+    """``_RULES`` and the selected S-rules are the SAME set, both directions.
+
+    Containment either way rots: selected-but-untested means a rule nobody has
+    watched fire, and tested-but-unselected means a test asserting a rule that
+    is not on. Equality is the only property that stays true as either side
+    changes.
+    """
+    tested = frozenset(rule for rule, _spawn in _RULES)
+
+    assert tested == selected_shell_spawn_rules(), (
+        "the shell-spawn rules under test and those selected in pyproject.toml "
+        f"disagree. Tested: {sorted(tested)}. Selected: "
+        f"{sorted(selected_shell_spawn_rules())}. Add the rule to _RULES with a "
+        "source line that must flag, or take it out of `select`."
+    )
+
+
 def test_s607_stays_unselected() -> None:
     """S607 is a different rule about a different thing, at 722 findings here.
 
