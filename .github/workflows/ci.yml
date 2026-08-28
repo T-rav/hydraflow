@@ -457,10 +457,11 @@ jobs:
       # EGRESS-BLOCKED (#11706). `unshare --net` gives this step a network
       # namespace with no route off the host, so the offline-conformance rule
       # is OBSERVED rather than inferred from source: an orchestrator whose
-      # config reaches out (`mkdocs build --strict` is offline only while
-      # mkdocs.yml stays on search/mermaid2/git-revision-date), a `git fetch`
-      # whose remote is set elsewhere, an argv built from non-literals, a spawn
-      # done by a helper — none of which any parser reaches.
+      # config reaches out (mermaid2 `requests.get`s the CDN bundle on every
+      # `mkdocs build` — the standard said it did not, and this lane is what
+      # found out), a `git fetch` whose remote is set elsewhere, an argv built
+      # from non-literals, a spawn done by a helper — none of which any parser
+      # reaches.
       #
       # The wrapper VERIFIES the isolation before running anything and exits 3
       # if this tree can still reach the network, so a lane that silently
@@ -469,14 +470,25 @@ jobs:
       # conformance roots really do use loopback. `.venv/bin/python` rather than
       # `uv run` because `uv run` may want the network to re-check the lock.
       #
-      # tests/architecture has NO registered exclusions: measured, every one of
-      # its ~1500 spawns is local and every connect it makes is to 127.0.0.1.
+      # One registered exclusion, and it is the standard's own worked example.
+      # `mkdocs build --strict` was documented as offline; it is not. mermaid2
+      # `requests.get`s the CDN bundle on every build to check it exists, so
+      # with no route out it warns and --strict aborts. That reach is `requests`
+      # inside a plugin inside a child process — no hook of ours runs there and
+      # no parser could ever have seen it. It runs un-isolated below, and
+      # check_egress_exclusions.py proves it still needs to.
+      #
+      # No `-x` here, deliberately: with it, a lane that finds three problems
+      # reports one and each fix costs a full CI round trip.
       - name: Architecture tests (egress-blocked)
         run: |
           sudo unshare --net -- bash scripts/offline_egress_lane.sh \
             --user "$(id -u):$(id -g)" -- \
             env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
-            ./.venv/bin/python -m pytest tests/architecture -x --tb=short
+            ./.venv/bin/python -m pytest tests/architecture \
+            --ignore=tests/architecture/test_mkdocs_strict.py --tb=short
+      - name: Architecture egress-lane exclusion (NOT isolated)
+        run: uv run pytest tests/architecture/test_mkdocs_strict.py --tb=short
 
   test:
     name: Tests

@@ -23,6 +23,7 @@ __all__ = [
     "EGRESS_LANE_EXCLUSIONS",
     "EGRESS_LANE_EXCLUSION_CEILING",
     "EgressLaneExclusion",
+    "ReachDetector",
     "NETWORK_CAPABLE_BINARIES",
     "SUBPROCESS_WAIVER_CEILING",
     "SUBPROCESS_WAIVERS",
@@ -204,6 +205,28 @@ SUBPROCESS_WAIVERS: tuple[SubprocessWaiver, ...] = ()
 SUBPROCESS_WAIVER_CEILING: int = 0
 
 
+class ReachDetector(StrEnum):
+    """How ``check_egress_exclusions.py`` proves an exclusion is still needed.
+
+    Two, because the lane has two instruments and they see different things.
+    Registering which one found a reach is not bookkeeping: pointing the wrong
+    instrument at an entry answers "no reach observed" and reports a live
+    exclusion as stale, which is the liveness check lying in the direction that
+    reopens a hole.
+    """
+
+    HOOK = "hook"
+    """The audit hook observes the reach in-process: a ``socket.connect`` or a
+    spawn whose argv names a network binary or a host. Verified by running the
+    file under the guard in observe mode and requiring at least one violation."""
+
+    NAMESPACE = "namespace"
+    """The reach happens inside a CHILD process, where no audit hook of ours
+    runs — the kernel is the only witness. Verified the only way it can be:
+    the file must FAIL when egress is blocked. A pass means the reach is gone
+    and the exclusion with it."""
+
+
 @dataclass(frozen=True, slots=True)
 class EgressLaneExclusion:
     """One conformance file the egress-blocked lane does NOT run.
@@ -224,6 +247,9 @@ class EgressLaneExclusion:
     not from reading the source — the source of every one of them is a helper
     the test calls, which is why the static scanner sees nothing."""
 
+    detected_by: ReachDetector
+    """Which instrument saw it, and therefore which one can re-check it."""
+
     why: str
 
 
@@ -240,6 +266,7 @@ EGRESS_LANE_EXCLUSIONS: tuple[EgressLaneExclusion, ...] = (
     EgressLaneExclusion(
         path="tests/regressions/test_issue_10015_streak_escalation_autoclose.py",
         reaches=("gh api repos//compare/main...staging",),
+        detected_by=ReachDetector.HOOK,
         why=(
             "StagingPromotionLoop's ahead-by probe runs unfaked: the loop reaches "
             "PRManager, which shells `gh api` against the real forge. Note the "
@@ -250,6 +277,7 @@ EGRESS_LANE_EXCLUSIONS: tuple[EgressLaneExclusion, ...] = (
     EgressLaneExclusion(
         path="tests/regressions/test_issue_8650.py",
         reaches=("gh issue list --repo hydra/hydraflow",),
+        detected_by=ReachDetector.HOOK,
         why=(
             "the trust loop's staleness search runs against the real forge. The "
             "test asserts on escalation behaviour, so the live query's result is "
@@ -263,6 +291,7 @@ EGRESS_LANE_EXCLUSIONS: tuple[EgressLaneExclusion, ...] = (
             "gh issue list --repo test-org/test-repo",
             "https://raw.githubusercontent.com (PricingRefreshLoop)",
         ),
+        detected_by=ReachDetector.HOOK,
         why=(
             "the sharpest one, and the reason a lane beats a parser: the test is "
             "named test_wired_start_orchestrator_is_airgapped_and_stays_responsive "
@@ -272,12 +301,42 @@ EGRESS_LANE_EXCLUSIONS: tuple[EgressLaneExclusion, ...] = (
             "nothing here; a gate watching the process finds three."
         ),
     ),
+    EgressLaneExclusion(
+        path="tests/architecture/test_mkdocs_strict.py",
+        reaches=(
+            "GET https://unpkg.com/mermaid@10.6.1/dist/mermaid.esm.min.mjs "
+            "(mkdocs-mermaid2 url_exists check, every build)",
+        ),
+        detected_by=ReachDetector.NAMESPACE,
+        why=(
+            "the standard's own worked example of an orchestrator whose CONFIG "
+            "reaches out — and its text said this build 'fetches nothing at "
+            "build', which the lane disproved on its first run. mermaid2's "
+            "`javascript` property calls `url_exists()`, which is a live "
+            "`requests.get` of the CDN bundle on every `mkdocs build`; with no "
+            "route out it warns and `--strict` aborts. Nothing in this repo "
+            "could have found that statically: the reach is `requests` inside a "
+            "plugin inside a child process, selected by two lines of "
+            "`mkdocs.yml`. Fixing it means vendoring the mermaid bundle and "
+            "changing what the published site loads, which is a docs decision "
+            "and not this issue's."
+        ),
+    ),
 )
 
 #: The exclusion count on the day the lane landed (#11706). SHRINK-ONLY, for
 #: the same reason the waiver ceiling is: a list of "files allowed to reach the
 #: network" that may grow is the rule inverted.
-EGRESS_LANE_EXCLUSION_CEILING: int = 3
+#:
+#: It is 4 and not 3 because the first measurement used the weaker of the lane's
+#: two instruments. The audit hook found three reaches; the fourth happens
+#: inside the ``mkdocs`` child process, where no hook of ours runs, and only
+#: the network namespace saw it. Setting the number from the complete
+#: measurement is not raising a ratchet — the constant had not landed yet — but
+#: it is worth recording WHY it moved before it froze, because "our instrument
+#: could not see it" is exactly the sentence this whole standard exists to make
+#: someone say out loud.
+EGRESS_LANE_EXCLUSION_CEILING: int = 4
 
 
 def registered_claims() -> tuple[Claim, ...]:

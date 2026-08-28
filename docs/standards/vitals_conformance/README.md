@@ -268,11 +268,18 @@ of the three answering wrong is exit 3, not a warning.
 
 #### Residuals the static checks name, and where they now land
 
-- an orchestrator whose *configuration* reaches out (`mkdocs build --strict` is
-  offline today only because `mkdocs.yml` enables `search`, `mermaid2` and
-  `git-revision-date-localized`; adding the social-card plugin fetches Google
-  Fonts at build time and nothing static would redden) — **caught by the
-  namespace**;
+- an orchestrator whose *configuration* reaches out — **caught by the
+  namespace, and it fired on the first run**. This document used to say
+  `mkdocs build --strict` was offline "today", on the theory that `search`,
+  `mermaid2` and `git-revision-date-localized` all stay local, and that the
+  risk was some *future* plugin. That was wrong about the present:
+  `mermaid2` resolves its `javascript` property through `url_exists()`, which
+  is a live `requests.get` of the CDN bundle on **every** build. With no route
+  out it warns and `--strict` aborts. The prose asserting the opposite had been
+  read by several people and reviewed five times; the namespace disagreed with
+  it in four minutes. Registered as an exclusion, because vendoring the mermaid
+  bundle changes what the published site loads and that is a docs decision, not
+  this one;
 - `git fetch`/`push` against a remote configured elsewhere, where the argv names
   no host — **caught by the namespace**;
 - an argv assembled entirely from non-literal values (`subprocess.run(cmd)`) —
