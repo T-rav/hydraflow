@@ -113,43 +113,29 @@ def _discover_projects_sets() -> tuple[set[str], set[str]]:
     return _parse_set_literal(text, "markers"), _parse_set_literal(text, "ignored")
 
 
-def _dir_has_marker(proj: Path, markers: set[str]) -> bool:
-    """True when a marker file sits DIRECTLY in ``proj``.
-
-    discover-projects adds ``path.parent`` for each marker file it finds, so the
-    context ``<dir>`` is produced only if a marker lives in ``<dir>`` itself, not
-    in a descendant.
-    """
-    if not proj.is_dir():
-        return False
-    for child in proj.iterdir():
-        if child.is_file() and (
-            child.name in markers or child.suffix in _MARKER_SUFFIXES
-        ):
-            return True
-    return False
-
-
 def _unproducible_dirs(
-    dirs: set[str], markers: set[str], ignored: set[str]
+    dirs: set[str], files: Iterable[str], markers: set[str], ignored: set[str]
 ) -> list[str]:
-    """Subset of ``dirs`` that discover-projects would NOT emit against the tree.
+    """Subset of ``dirs`` that discover-projects would NOT emit for ``files``.
 
-    Pure so it can be exercised with synthetic inputs — a directory is
-    unproducible if it does not exist, any path part is in ``ignored``, or it
-    carries no marker file (the three edit vectors that orphan the context).
+    Derived from :func:`_discovered_dirs`, the same pure function the inverse
+    direction uses — so this module answers "what is in the tree?" exactly
+    once, from the COMMITTED tree, in both directions (#11728).
+
+    It previously walked the WORKING tree via ``proj.iterdir()`` while its
+    inverse twin read ``git ls-files``. Two answers to one question, and the
+    disagreement had a dangerous polarity: an **untracked** marker file left on
+    a developer's disk made a dir look producible after its marker had been
+    deleted from the committed tree. Locally green, red in CI on a clean
+    checkout — a required context that is never reported, which jams the merge
+    queue with no failing check to point at. That is the #10142 foot-gun this
+    guard exists to prevent, reintroduced by the guard's own helper.
+
+    Membership in ``_discovered_dirs`` subsumes all three original conditions:
+    a dir that does not exist contributes no tracked marker, an ignored part is
+    dropped by the scan mirror, and a dir with no marker never appears.
     """
-    bad: list[str] = []
-    for d in sorted(dirs):
-        proj = _REPO_ROOT if d == "." else _REPO_ROOT / d
-        parts: tuple[str, ...] = () if d == "." else Path(d).parts
-        if (
-            not proj.is_dir()
-            or (set(parts) & ignored)
-            or not _dir_has_marker(proj, markers)
-        ):
-            bad.append(d)
-    return bad
+    return sorted(set(dirs) - _discovered_dirs(files, markers, ignored))
 
 
 def test_required_quality_matrix_contexts_are_producible() -> None:
@@ -164,7 +150,7 @@ def test_required_quality_matrix_contexts_are_producible() -> None:
         "vanished from gates.toml; this guard is now vacuous"
     )
     markers, ignored = _discover_projects_sets()
-    orphaned = _unproducible_dirs(quality_dirs, markers, ignored)
+    orphaned = _unproducible_dirs(quality_dirs, _tracked_files(), markers, ignored)
     assert not orphaned, (
         "required branch-protection contexts would no longer be produced by "
         f"quality.yml discover-projects: {[f'quality ({d})' for d in orphaned]}. "
@@ -188,12 +174,57 @@ def test_no_unknown_matrix_producer() -> None:
 def test_guard_flags_an_unproducible_dir() -> None:
     """The producibility check is live: bogus / ignored dirs are reported."""
     markers, ignored = _discover_projects_sets()
-    assert _unproducible_dirs({"does-not-exist-xyz"}, markers, ignored) == [
+    marker = next(iter(markers))
+    tracked = [f"services/real/{marker}"]
+
+    # A dir with no marker anywhere in the committed tree.
+    assert _unproducible_dirs({"does-not-exist-xyz"}, tracked, markers, ignored) == [
         "does-not-exist-xyz"
     ]
-    # A dir excluded by the scan's ignore-list is caught even if it exists.
+    # A dir excluded by the scan's ignore-list is caught even when its marker
+    # IS committed — the scan drops it, so the context is never produced.
     some_ignored = next(iter(ignored))
-    assert _unproducible_dirs({some_ignored}, markers, ignored) == [some_ignored]
+    assert _unproducible_dirs(
+        {some_ignored}, [f"{some_ignored}/{marker}"], markers, ignored
+    ) == [some_ignored]
+    # Control: a dir whose marker is committed is producible, so the guard must
+    # NOT flag it. Without this the function could return every input and the
+    # two assertions above would still pass.
+    assert _unproducible_dirs({"services/real"}, tracked, markers, ignored) == []
+
+
+def test_an_untracked_marker_cannot_mask_a_committed_deletion() -> None:
+    """#11728, the regression: the answer comes from the COMMITTED tree.
+
+    The forward guard used to walk the working tree. A marker file deleted from
+    the committed tree but still present untracked on a developer's disk read
+    as producible locally and orphaned in CI — the silent direction, because
+    the required context simply never reports and no check goes red.
+
+    Here the marker is absent from ``tracked`` while a stray file sits in the
+    same directory. Only a committed-tree answer flags it.
+    """
+    markers, ignored = _discover_projects_sets()
+    marker = next(iter(markers))
+    committed_without_the_marker = ["services/svc/README.md", f"other/{marker}"]
+
+    assert _unproducible_dirs(
+        {"services/svc"}, committed_without_the_marker, markers, ignored
+    ) == ["services/svc"], (
+        "a dir whose marker is NOT in the committed tree was reported producible "
+        "— the guard is reading something other than `git ls-files`"
+    )
+    # And it is producible the moment the marker is committed, so the assertion
+    # above is about the marker and not about the directory name.
+    assert (
+        _unproducible_dirs(
+            {"services/svc"},
+            [*committed_without_the_marker, f"services/svc/{marker}"],
+            markers,
+            ignored,
+        )
+        == []
+    )
 
 
 def _tracked_files() -> list[str]:
