@@ -9,13 +9,17 @@ name: Build Factory Image
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - 'Dockerfile.factory'
       - 'scripts/docker-factory-smoke-test.sh'
       - 'src/**'
+  # BOTH protected branches. The agent workflows watch `main` only, which means
+  # an image change is not built until it has already been merged to staging and
+  # promoted — the PR that introduces it never exercises its own smoke test. A
+  # gate whose trigger is narrower than its subject cannot see it (#11730).
   pull_request:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - 'Dockerfile.factory'
       - 'scripts/docker-factory-smoke-test.sh'
