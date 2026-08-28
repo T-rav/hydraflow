@@ -119,7 +119,15 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP", "PL", "SIM"]
+# S605/S606 only — the two bandit-equivalent rules for shell and process
+# spawning. NOT the whole "S" set, and deliberately not S607
+# (start-process-with-partial-path): S607 flags 722 sites here — every
+# `git`/`gh`/`make` called by name — and is unrelated to the hole these
+# close. S605 and S606 are both at ZERO findings, measured, so they cost
+# nothing today and fail loudly the moment an `os.system`/`os.exec*`
+# reaches the tree. See #11724: bandit rates B605 as Low and the Makefile
+# gates at medium, so bandit never fired on these.
+select = ["E", "W", "F", "I", "B", "C4", "UP", "PL", "SIM", "S605", "S606"]
 ignore = ["E501", "B008", "C901", "PLR0913", "PLR0912", "PLR0915", "PLR2004", "PLC0415"]
 
 [tool.ruff.lint.per-file-ignores]
