@@ -59,6 +59,13 @@ class OrchestratorLoopsMixin:
     _stop_event: asyncio.Event
     _svc: ServiceRegistry
 
+    #: One-shot latch for the "no pipeline target" warning. A real class-level
+    #: DEFAULT, not a TYPE_CHECKING seam stub — the mixin has no ``__init__`` to
+    #: hook, and first assignment shadows this with an instance attribute. A
+    #: stub spelled ``...`` here would win the MRO at runtime and be truthy,
+    #: which would suppress the warning entirely.
+    _warned_no_pipeline_target: bool = False
+
     if TYPE_CHECKING:
 
         async def _apply_human_steering(
@@ -98,6 +105,20 @@ class OrchestratorLoopsMixin:
         ``int``, ``list[PlanResult]``) but ``_polling_loop`` only inspects
         truthiness via ``bool(await work_fn())``.
         """
+        if not slug:
+            # No pipeline target. Every pipeline loop funnels through here, so
+            # one guard idles all five rather than each polling GitHub with an
+            # empty slug. Warn ONCE — this is a steady state an operator chose,
+            # not an error, and repeating it every poll_interval would bury the
+            # log it is meant to be visible in.
+            if not self._warned_no_pipeline_target:
+                self._warned_no_pipeline_target = True
+                logger.warning(
+                    "Pipeline loops idle: no target repo. The factory does NOT "
+                    "adopt the checkout it runs from — set HYDRAFLOW_GITHUB_REPO"
+                    "=<owner>/<repo> (or config.repo) to give it work."
+                )
+            return False
         if self._is_slug_blocked(slug):
             logger.debug("Skipping %s — onboarding blocked", slug)
             return False

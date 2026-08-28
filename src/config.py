@@ -7589,12 +7589,29 @@ def _validate_repo_format(repo: str) -> None:
 
 
 def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
-    """Resolve repo slug and git identity from env vars."""
-    # Repo slug: env var → git remote → empty
+    """Resolve repo slug and git identity from env vars.
+
+    The pipeline target is **explicit only**. It used to fall back to the git
+    remote of the checkout the factory boots from, which meant starting the
+    factory anywhere inside HydraFlow silently targeted HydraFlow itself — the
+    one repo an operator is most likely to be standing in while testing
+    something else. No other repo ever auto-started, because no other repo is
+    ever the checkout. Detection is still performed, but only to explain the
+    idle state; it no longer selects a target.
+    """
     if not config.repo:
-        config.repo = os.environ.get("HYDRAFLOW_GITHUB_REPO", "") or _detect_repo_slug(
-            config.repo_root
-        )
+        config.repo = os.environ.get("HYDRAFLOW_GITHUB_REPO", "")
+        if not config.repo:
+            detected = _detect_repo_slug(config.repo_root)
+            logger.warning(
+                "No pipeline target: HYDRAFLOW_GITHUB_REPO is unset, so the "
+                "triage/plan/implement/review/HITL loops will idle.%s Set "
+                "HYDRAFLOW_GITHUB_REPO=<owner>/<repo> to give the factory work.",
+                f" (The checkout's own remote is {detected!r}, which is NOT"
+                " targeted automatically.)"
+                if detected
+                else "",
+            )
 
     if config.repo:
         _validate_repo_format(config.repo)
