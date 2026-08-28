@@ -682,3 +682,63 @@ than refreshed: absent data cannot be mistaken for fact.
 ```json:entry
 {"id":"EROSION-BASELINE-RECORDED-NUMBERS-001","source_type":"manual","topic":"patterns","tags":["erosion","mass","god-class","baseline","ratchet","suite-hygiene","setpoint-erosion","regen","adr-0104","measure-the-machinery"],"rule":"disturbance/baselines/*.yaml hold two different shapes. A MEMBERSHIP baseline (mass.yaml) grandfathers a set — the gate fails on a key crossing threshold that is ABSENT from the set — and its loc/methods are the high-water mark erosion.mass_baseline.grown() compares the live reading against for the ErosionMetricsLoop's burn-down roster, on BOTH god-making axes (AgentRunner shrank 1408->1388 LOC while gaining six methods, invisible to a LOC-only reading). A SCALAR ratchet (suite_hygiene.yaml, suppressions.yaml) records counts the gate compares directly and cannot rot upward, because rising is the failure. Move ONE membership entry with `scripts/regen_mass_baseline.py --only <key> --reason` — it updates an entry still over threshold, drops one a decomposition took below it, adopts a new one, and leaves every other line byte-identical; the blanket mode is only for a PR whose entire diff IS the baseline advance.","anti_pattern":"Gating growth of a grandfathered entry per-PR: measured over 60 days of staging it blocks 70/948 merged commits (7.4%) at the 10% tolerance and 2.0% even at a lax 50%, and the only remedy in scope for the PR that tipped a class over is re-recording the number — the bypass printed in the failure message — so the gate teaches goalpost-moving and launders each move as reviewed. Also: running a blanket regen inside a structural-refactor PR (it sweeps every other class's unrelated growth into that diff as reviewed), and keeping a baseline field no consumer compares — suite_hygiene.yaml's total_tests was written, loaded and read by nobody and drifted +1010 (20627->21637, +4.9%) while the trend reader read the live number the whole time; it was removed, not refreshed, because absent data cannot be mistaken for fact.","code_refs":["src/erosion/mass_baseline.py:grown","src/erosion/mass_baseline.py:refresh_entries","src/erosion/suite_hygiene_baseline.py","src/erosion_metrics_loop.py:_growth_line","scripts/regen_mass_baseline.py","tests/architecture/test_mass_ratchet.py","tests/regressions/test_mass_baseline_numbers_are_read_11646.py","disturbance/baselines/mass.yaml"],"source_issue":11646,"added":"2026-08-22"}
 ```
+
+## A gate's trigger scope must be at least as wide as its subject scope (#11730)
+
+An **aggregate gate** measures a quantity summed over a whole tree — parametrize
+copies across every module under `tests/`, `# noqa` counts across every module
+under `src/`, the untraced fraction of recent merge history — and compares it to
+a committed mark. CI decides whether to *run* such a gate from a
+`dorny/paths-filter` allowlist. A path filter is a subset of the repo by
+construction, so it can never be as wide as a whole-tree subject. **A whole-repo
+aggregate cannot be path-triggered.**
+
+Two independent scopings can breach the same gate, and they compose:
+
+**Scoped by PATH.** A change inside the subject but outside the trigger moves
+the number with nothing watching. The live hole was precise: `core_python`
+carries `predicate-quantifier: every` with `!tests/regressions/**`,
+`!tests/scenarios/**` and `!tests/sandbox_scenarios/**`, and the `arch` filter
+restores only `tests/architecture/**`. A change confined to `tests/regressions/`
+therefore ran `Regression Tests` (`pytest tests/regressions/`) and no lane that
+collects the whole-`tests/` aggregate.
+
+**Scoped by BASE.** `strict_required_status_checks_policy` is `false` on both
+rulesets, so a PR's checks are evaluated against whatever base it branched from.
+Three PRs, each green on its own merge base, summed to `parametrize copies 413 >
+baseline 412` on `origin/staging` and blocked every open PR for hours. Git
+reports no conflict because there is none — the files do not overlap. This is a
+*semantic* conflict, and the only gate that can see it is one that runs on the
+merged tree.
+
+**The fix is one ungated job that does both.** `.github/workflows/ci.yml`'s
+`aggregate-ratchets` job has no `if:` at all — the only trigger wide enough for a
+whole-tree subject is no trigger — and because `ci.yml` runs `on: push:
+[main, staging]`, the same job re-measures the real tree minutes after every
+merge. Membership is declared in
+`tests/architecture/aggregate_gate_registry.py`, which must classify every
+ratchet-shaped gate in the repo into exactly one of three buckets (in the lane /
+an existing filter provably covers it / a deferred mismatch with a reason), so a
+new ratchet forces a decision instead of defaulting into the hole.
+
+**Do not fix it by widening the filter.** Widening `arch` to `tests/**` would put
+`Architecture Check` — full arch-artifact regeneration plus the whole
+`tests/architecture` suite — on essentially every PR, minutes of work with
+nothing to do with these counts. A narrow, fast, ungated lane costs less than a
+wide trigger on a heavy job.
+
+**Aggregate gates fail open when their subject is empty.** Every half of a
+ratchet is `count > mark`, and zero is under every mark, so a scan that collected
+nothing reports a serene green while measuring its subject not at all — the same
+shape as the trigger bug: silence read as safety. Assert the subject exists
+before believing the verdict about it, and assert the mark is present too: a
+missing mark is a disabled ratchet, not a permissive one.
+
+**Do not auto-heal a breach.** These ratchets are shrink-only and the honest
+repair is semantic — collapse a parametrize group, delete the duplicate. The only
+repair a bot can generate mechanically is raising the mark, which is the one move
+that must never be automatic. Fail loudly and name the breach instead.
+
+```json:entry
+{"id":"GATE-TRIGGER-SCOPE-COVERS-SUBJECT-001","source_type":"manual","topic":"patterns","tags":["ci","paths-filter","ratchet","aggregate-gate","suite-hygiene","dorny","strict-status-checks","semantic-conflict","measure-the-machinery","vacuity"],"rule":"A gate's TRIGGER scope must be at least as wide as its SUBJECT scope. An aggregate gate sums a quantity over a whole tree and compares it to a committed mark; a dorny/paths-filter is a subset of the repo by construction, so a whole-repo aggregate cannot be path-triggered. Run such gates in an UNGATED CI job (no `if:` of any shape — .github/workflows/ci.yml's `aggregate-ratchets`), and because ci.yml runs on push to main/staging that same job re-measures the merged tree post-merge, closing the base-scope hole too. Declare membership in tests/architecture/aggregate_gate_registry.py, which must classify every ratchet-shaped gate into exactly one of three buckets so a new ratchet forces a decision. Also assert the scan HAS a subject and the baseline HAS a mark: count>mark is vacuously green over an empty tree, and a missing mark is a disabled ratchet.","anti_pattern":"Path-triggering a whole-tree aggregate. core_python's `predicate-quantifier: every` negations (!tests/regressions/**, !tests/scenarios/**, !tests/sandbox_scenarios/**) plus an `arch` filter that restores only tests/architecture/** left a change confined to tests/regressions/ running no lane that reads the whole-tests/ aggregate — it could move the parametrize count unmeasured. Compounded by strict_required_status_checks_policy=false: three individually-green PRs summed to `parametrize copies 413 > baseline 412` on origin/staging, a semantic conflict git cannot see, and blocked every open PR while the red was misattributed to whoever pushed next. Do NOT fix by widening the `arch` filter to tests/** (that puts full arch-artifact regen + the whole tests/architecture suite on every PR), and do NOT auto-heal a breach (the only mechanical repair is raising a shrink-only mark).","code_refs":["tests/architecture/aggregate_gate_registry.py","tests/architecture/test_aggregate_gate_trigger_scope.py","tests/regressions/test_issue_11730_aggregate_gate_trigger_scope.py","tests/architecture/test_suite_hygiene_ratchet.py",".github/workflows/ci.yml","Makefile"],"source_issue":11730,"added":"2026-08-24"}
+```
