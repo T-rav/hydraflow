@@ -48,12 +48,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "ALLOW_LIST_NAMES",
+    "DERIVED_SUBJECT_NAMES",
     "DENY_LIST_FLOORS",
     "EnumerationKind",
     "call_witness",
     "declared_deny_lists",
     "floor_protects",
     "import_witness",
+    "os_witness",
     "GuardedEnumeration",
     "SCAN_ROOT",
     "GateSequence",
@@ -168,21 +170,94 @@ def import_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool
     return member in (import_roots(ast.parse(injected)) & deny_list)
 
 
+def os_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
+    """The ``os``-qualified guard's half of :func:`call_witness`.
+
+    ``reachable_os_spawns`` is the third extractor in this file's guard, added
+    by #11724: it matches an attribute of a Name bound to ``os``, so its
+    witness injects ``os.<member>()`` rather than a bare call or an import.
+
+    The member is compared against the ATTRIBUTE half of the dotted result,
+    because the extractor reports ``os.system`` where the deny-list carries
+    ``system`` — precisely the shape mismatch
+    ``test_the_guard_can_actually_see_every_denied_name`` exists to catch, and
+    the reason that comparison is spelled out here rather than assumed.
+
+    Works for ``_OS_SPAWN_PREFIXES`` as well as ``_OS_SPAWN_EXACT``: every
+    prefix is a prefix of itself, so injecting ``os.exec()`` is the minimal
+    witness that the ``exec`` rule fires at all.
+
+    **NOT the same contract as its two siblings, and the difference decides
+    how the negative control has to be written.** ``called_names`` and
+    ``import_roots`` are maximally permissive — they record ANY call name and
+    ANY import root — so for those the extractor always answers yes and the
+    ``& deny_list`` step is what answers no. ``reachable_os_spawns`` is gated
+    internally by ``_is_os_spawn``, which reads the very sets this function is
+    handed as ``deny_list``. A name the list does not carry is therefore
+    rejected by the EXTRACTOR, before the intersection is consulted.
+
+    So ``& deny_list`` is not load-bearing against an arbitrary name here, and
+    an earlier version of this file proved it: deleting the intersection left
+    every test green. It is kept because it is the correct expression of the
+    contract, and it is made falsifiable by ``_UNDENIED_OVERRIDES`` in the
+    gate, which feeds each ``os`` row a name the extractor DOES flag and the
+    row's own list does not carry.
+    """
+    from tests.architecture.test_director_no_authority import reachable_os_spawns
+
+    injected = (
+        f"{_source_of(subject)}\n\nimport os\n\n"
+        f"def _witness():\n    return os.{member}()\n"
+    )
+    seen = {
+        dotted.split(".", 1)[1] for dotted in reachable_os_spawns(ast.parse(injected))
+    }
+    return member in (seen & deny_list)
+
+
 #: Module-level frozensets in ``test_director_no_authority`` that are allow-lists
 #: rather than deny-lists. An allow-list states a COMPLETE surface and is pinned
 #: by equality against the live class, which is a stronger guard than a floor
 #: and a different shape.
 ALLOW_LIST_NAMES: frozenset[str] = frozenset({"ALLOWED_BROKER_METHODS"})
 
+#: Module-level name-sequences in ``test_director_no_authority`` that are
+#: SUBJECTS with their own derivation, not deny-lists. ``DECISION_PATH_MODULES``
+#: is pinned by ``claiming_modules() == literal``, which is strictly stronger
+#: than a floor: a floor catches a drop, an equality catches a drop AND an
+#: unlisted addition.
+#:
+#: A second named exemption rather than a broader type test, because the
+#: distinction is not one the container type can carry — see
+#: :func:`declared_deny_lists`.
+DERIVED_SUBJECT_NAMES: frozenset[str] = frozenset({"DECISION_PATH_MODULES"})
+
 
 def declared_deny_lists() -> frozenset[str]:
-    """Every module-level name-set in ``test_director_no_authority``.
+    """Every module-level name-sequence in ``test_director_no_authority`` that
+    no other mechanism accounts for.
 
     The derivation :data:`DENY_LIST_FLOORS` is pinned against, so a FIFTH
     deny-list cannot arrive unfloored. Without it the floors, the live-list map
     and the witness-subject map are three hand-written tables agreeing with
     each other — "did the author remember" one level up, which is the defect
     this module exists to remove.
+
+    **Container type is not the discriminator, and assuming it was is how this
+    derivation went blind (#11724).** The first version matched ``frozenset``
+    and ``set`` only. ``_OS_SPAWN_PREFIXES`` is spelled as a tuple — it feeds
+    ``str.startswith``, which requires one — so it was a deny-list of exactly
+    the same kind sitting outside the mechanism that floors the other five,
+    and nothing reddened to say so. That is the enumeration-by-spelling defect
+    this gate exists to catch, reproduced inside the gate: the next author to
+    reach for a tuple would have concluded their list was covered.
+
+    So the sweep is over every non-empty sequence of strings, and what
+    separates a deny-list from a subject is stated as a named exemption
+    (:data:`ALLOW_LIST_NAMES`, :data:`DERIVED_SUBJECT_NAMES`) rather than
+    inferred from how it is written. An unexempt, unfloored name-set is a hard
+    red, which is the only arrangement where the author of the NEXT one finds
+    out.
     """
     from tests.architecture import test_director_no_authority as director
 
@@ -201,11 +276,14 @@ def declared_deny_lists() -> frozenset[str]:
             targets = [node.target]
         assigned.update(t.id for t in targets if isinstance(t, ast.Name))
 
+    exempt = ALLOW_LIST_NAMES | DERIVED_SUBJECT_NAMES
     return frozenset(
         f"test_director_no_authority.{name}"
         for name in assigned
-        if name not in ALLOW_LIST_NAMES
-        and isinstance(value := getattr(director, name, None), (frozenset, set))
+        if name not in exempt
+        and isinstance(
+            value := getattr(director, name, None), (frozenset, set, tuple, list)
+        )
         and value
         and all(isinstance(member, str) for member in value)
     )
@@ -291,6 +369,14 @@ DENY_LIST_FLOORS: dict[str, frozenset[str]] = {
     ),
     "test_director_no_authority._SPAWN_MACHINERY": frozenset(
         {"multiprocessing", "subprocess"}
+    ),
+    # #11724's two. `_OS_SPAWN_PREFIXES` carries prefixes rather than whole
+    # attribute names: `exec` floors the entire `os.exec*` family, so dropping
+    # it silently un-denies eight spellings at once (execl, execle, execlp,
+    # execlpe, execv, execve, execvp, execvpe).
+    "test_director_no_authority._OS_SPAWN_EXACT": frozenset({"startfile", "system"}),
+    "test_director_no_authority._OS_SPAWN_PREFIXES": frozenset(
+        {"exec", "fork", "popen", "posix_spawn", "spawn"}
     ),
 }
 
@@ -775,25 +861,24 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         ),
         GuardedEnumeration(
             name="test_director_no_authority._RAW_SPAWNS",
-            members=tuple(raw for raw, _caught in director._RAW_SPAWNS),  # noqa: SLF001
+            members=tuple(row[0] for row in director._RAW_SPAWNS),  # noqa: SLF001
             kind=EnumerationKind.CORPUS,
             why=(
-                "The four raw spawn forms a victim module is written with, and "
-                "whether the live import rule catches each. Evidence for the "
-                "negative control that proves the rule fires at all (#11724)."
+                "Synthetic spawn sources, each paired with the NAME of the rule "
+                "that must fire on it — the negative control for the three "
+                "detectors in that file (#11724)."
             ),
             undetected_reason=(
-                "Evidence, not subject: the subject the import rule guards is "
-                "_SPAWN_MACHINERY, which is floored above. Each member here is a "
-                "source shape fed to that rule, and two of them are shapes it "
-                "deliberately does NOT catch — so a drop-detector asking 'would "
-                "removing this member be caught?' has no answer for half the "
-                "corpus by construction. Dropping a row narrows the proof that "
-                "the rule sees (or admits to missing) that spelling, which is a "
-                "coverage question. The rows carry their own ratchet instead: "
-                "each asserts caught/not-caught against the live detector, so "
-                "closing the os.* hole reddens the False rows rather than "
-                "passing silently."
+                "Evidence, not subject. Each member is a source shape written "
+                "to a victim file; dropping one drops the proof that a "
+                "detector sees that spelling, which is a coverage question. "
+                "The SUBJECTS these rows exercise — _SPAWN_MACHINERY, "
+                "_OS_SPAWN_EXACT, _OS_SPAWN_PREFIXES — are floored separately "
+                "in DENY_LIST_FLOORS, so a rule losing a member reddens there "
+                "rather than here. Both halves of the corpus are carried in "
+                "one table rather than two, because a row's expected rule is "
+                "part of the row: the `os-getattr` row expects NO rule to "
+                "fire, and is this corpus's false-positive half."
             ),
         ),
     )

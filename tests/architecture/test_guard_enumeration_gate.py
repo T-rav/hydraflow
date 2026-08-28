@@ -43,11 +43,13 @@ import pytest
 
 from tests.architecture.guard_enumeration_registry import (
     DENY_LIST_FLOORS,
+    DERIVED_SUBJECT_NAMES,
     EnumerationKind,
     GuardedEnumeration,
     call_witness,
     declared_deny_lists,
     import_witness,
+    os_witness,
     parametrised_module_sequences,
     proposal_keys_read_by_parser,
     registered_enumerations,
@@ -427,6 +429,15 @@ def _live_deny_lists() -> dict[str, frozenset[str]]:
         "test_director_no_authority.CONVERGENCE_WRITES": director.CONVERGENCE_WRITES,
         "test_director_no_authority.WRITE_PRIMITIVES": director.WRITE_PRIMITIVES,
         "test_director_no_authority._SPAWN_MACHINERY": director._SPAWN_MACHINERY,  # noqa: SLF001
+        "test_director_no_authority._OS_SPAWN_EXACT": director._OS_SPAWN_EXACT,  # noqa: SLF001
+        # A tuple in the source — `str.startswith` takes one — coerced here
+        # purely so the set algebra below has a set. The coercion is NOT what
+        # makes the gate see it: `declared_deny_lists` sweeps string sequences
+        # of any container type, which is what stops the NEXT tuple-spelled
+        # deny-list arriving unfloored and unnoticed (#11724).
+        "test_director_no_authority._OS_SPAWN_PREFIXES": frozenset(
+            director._OS_SPAWN_PREFIXES  # noqa: SLF001
+        ),
     }
 
 
@@ -444,6 +455,17 @@ _WITNESS_SUBJECTS: dict[str, tuple[str, str]] = {
         "call",
     ),
     "test_director_no_authority._SPAWN_MACHINERY": ("src/plan_broker.py", "import"),
+    "test_director_no_authority._OS_SPAWN_EXACT": ("src/plan_broker.py", "os"),
+    "test_director_no_authority._OS_SPAWN_PREFIXES": ("src/plan_broker.py", "os"),
+}
+
+#: Extractor name -> the witness that runs it. A dict rather than a chain of
+#: conditionals: #11724 made this a three-way choice, and the two-way `if/else`
+#: it replaced would have silently routed a new extractor to `import_witness`.
+_WITNESSES = {
+    "call": call_witness,
+    "import": import_witness,
+    "os": os_witness,
 }
 
 
@@ -465,6 +487,37 @@ def test_a_deny_list_only_grows(name: str) -> None:
         "it look identical either way. Widen the list, or move the floor "
         "deliberately and say why in the PR."
     )
+
+
+def test_a_derived_subject_exemption_has_a_real_derivation() -> None:
+    """``DERIVED_SUBJECT_NAMES`` must not become a way to dodge a floor.
+
+    Exempting a name from ``declared_deny_lists`` exempts it from
+    ``DENY_LIST_FLOORS``. That is correct for a subject pinned by an equality
+    derivation — strictly stronger than a floor — and a free pass for anything
+    else. "Correct by review" is the shape this file exists to replace, so the
+    exemption is checked rather than trusted: every member must resolve to a
+    registered enumeration that actually HAS a drop-detector.
+
+    Adding a name here with no derivation behind it now reddens, which is the
+    only arrangement in which the next author cannot quietly widen the hatch.
+    """
+    registered = {row.name: row for row in ENUMERATIONS}
+
+    for bare in sorted(DERIVED_SUBJECT_NAMES):
+        name = f"test_director_no_authority.{bare}"
+        row = registered.get(name)
+        assert row is not None, (
+            f"{bare} is exempt from the deny-list floor as a 'derived subject', "
+            "but it is registered in no enumeration at all — so nothing derives "
+            "it and nothing floors it. Register it with a drop-detector, or "
+            "remove the exemption and floor it."
+        )
+        assert row.detects_drop is not None, (
+            f"{bare} is exempt from the deny-list floor as a 'derived subject', "
+            "but its registry row has no drop-detector. The exemption claims a "
+            "derivation catches its drops; nothing does."
+        )
 
 
 def test_every_registered_deny_list_has_a_floor() -> None:
@@ -492,6 +545,35 @@ def test_every_registered_deny_list_has_a_floor() -> None:
 #: A call name no deny-list carries. The negative half of the witness.
 _UNDENIED_NAME = "a_call_no_deny_list_has_ever_carried"
 
+#: Rows where :data:`_UNDENIED_NAME` cannot falsify anything, and the name that
+#: can (#11724).
+#:
+#: The shared constant works for the four rows whose extractor is maximally
+#: permissive: ``called_names`` records ANY call name and ``import_roots`` ANY
+#: import root, so the fabricated name reaches the ``& deny_list`` step and the
+#: intersection is what answers False. Delete the intersection and those rows
+#: redden.
+#:
+#: ``os_witness`` is different, and assuming parity made this control vacuous
+#: for its two rows. ``reachable_os_spawns`` is gated internally by
+#: ``_is_os_spawn``, which reads the very sets ``_live_deny_lists`` hands the
+#: witness — so ``_UNDENIED_NAME`` is rejected by the EXTRACTOR before the
+#: intersection is consulted, and ``seen`` is empty either way. Measured:
+#: deleting ``& deny_list`` from ``os_witness`` left this entire file green.
+#:
+#: A falsifying input has to be a name the extractor DOES flag and the row's
+#: own list does NOT carry, which for these two means borrowing from the other:
+#: ``exec`` is a live ``_OS_SPAWN_PREFIXES`` member absent from
+#: ``_OS_SPAWN_EXACT``; ``system`` is a live ``_OS_SPAWN_EXACT`` member that
+#: matches no prefix. Each makes ``seen`` non-empty, so only the intersection
+#: can answer False. That the extractor really does flag them is not assumed
+#: here — it is what ``test_the_guard_can_actually_see_every_denied_name``
+#: asserts for each, under the OTHER row.
+_UNDENIED_OVERRIDES: dict[str, str] = {
+    "test_director_no_authority._OS_SPAWN_EXACT": "exec",
+    "test_director_no_authority._OS_SPAWN_PREFIXES": "system",
+}
+
 
 @pytest.mark.parametrize("name", sorted(DENY_LIST_FLOORS))
 def test_the_deny_list_operand_is_load_bearing(name: str) -> None:
@@ -505,14 +587,19 @@ def test_the_deny_list_operand_is_load_bearing(name: str) -> None:
 
     This is the control that makes that half falsifiable. A name the list does
     not carry must not trip the guard.
+
+    The name has to be chosen per row, not shared: see
+    :data:`_UNDENIED_OVERRIDES` for why one constant cannot falsify a witness
+    whose extractor already reads the list.
     """
     subject, extractor = _WITNESS_SUBJECTS[name]
     live = _live_deny_lists()[name]
-    witness = call_witness if extractor == "call" else import_witness
+    witness = _WITNESSES[extractor]
+    undenied = _UNDENIED_OVERRIDES.get(name, _UNDENIED_NAME)
 
-    assert _UNDENIED_NAME not in live
-    assert not witness(subject, _UNDENIED_NAME, live), (
-        f"{name}'s witness flags {_UNDENIED_NAME!r}, which the list does not "
+    assert undenied not in live
+    assert not witness(subject, undenied, live), (
+        f"{name}'s witness flags {undenied!r}, which the list does not "
         "carry. It is reading the extractor and ignoring the set, so every "
         "member it 'sees' is unproven."
     )
@@ -543,7 +630,7 @@ def test_the_guard_can_actually_see_every_denied_name(name: str, member: str) ->
     """
     subject, extractor = _WITNESS_SUBJECTS[name]
     live = _live_deny_lists()[name]
-    witness = call_witness if extractor == "call" else import_witness
+    witness = _WITNESSES[extractor]
 
     assert witness(subject, member, live), (
         f"{name} lists {member!r}, but injecting it into {subject} does not "
