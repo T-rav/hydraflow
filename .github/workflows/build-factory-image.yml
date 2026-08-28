@@ -1,28 +1,33 @@
 # Build (and on main, publish) the FACTORY image — the orchestrator itself,
 # as opposed to Dockerfile.agent, which is the container an agent runs inside.
 #
-# Mirrors build-agent-image.yml: build on every PR that could change the image,
-# push only from main. Layered on hydraflow-agent-base, so it rebuilds in
-# seconds and inherits dependency changes through the base rather than
-# re-resolving them here.
+# Multi-arch, built NATIVELY per arch. This is the image an operator actually
+# runs on their own machine, so an amd64-only build would mean every Apple
+# Silicon developer runs the factory under emulation — the one image where
+# native matters most.
+#
+# Layered on hydraflow-agent-base, which is itself a manifest list, so `FROM`
+# resolves the matching arch automatically on each runner.
 name: Build Factory Image
 
 on:
+  # BOTH protected branches. Watching `main` only means an image change is not
+  # built until it has already merged to staging and been promoted — the PR
+  # that introduces it never exercises its own smoke test. A gate whose trigger
+  # is narrower than its subject cannot see it (#11730).
   push:
     branches: [main, staging]
     paths:
       - 'Dockerfile.factory'
       - 'scripts/docker-factory-smoke-test.sh'
+      - '.github/workflows/build-factory-image.yml'
       - 'src/**'
-  # BOTH protected branches. The agent workflows watch `main` only, which means
-  # an image change is not built until it has already been merged to staging and
-  # promoted — the PR that introduces it never exercises its own smoke test. A
-  # gate whose trigger is narrower than its subject cannot see it (#11730).
   pull_request:
     branches: [main, staging]
     paths:
       - 'Dockerfile.factory'
       - 'scripts/docker-factory-smoke-test.sh'
+      - '.github/workflows/build-factory-image.yml'
       - 'src/ui/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -36,13 +41,28 @@ env:
   IMAGE_NAME: ghcr.io/t-rav/hydraflow-factory
   BASE_IMAGE: ghcr.io/t-rav/hydraflow-agent-base:latest
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build & Smoke (${{ matrix.arch }})
     # A base-image run that FAILED must not trigger a build against a stale base.
     if: >-
       ${{ github.event_name != 'workflow_run'
           || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -55,24 +75,37 @@ jobs:
           context: .
           file: Dockerfile.factory
           build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
-          platforms: linux/amd64
-          tags: ${{ env.IMAGE_NAME }}:test
+          platforms: ${{ matrix.platform }}
+          tags: ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }}
           load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=factory-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=factory-${{ matrix.arch }}
 
       # The build succeeding proves only that the layers assembled. This proves
-      # the thing actually runs: right interpreter, deps importable, app
-      # imports, dashboard present, no baked-in target repo.
+      # the thing runs — right interpreter, deps importable, app imports,
+      # dashboard present, no baked-in target repo — and it proves it NATIVELY,
+      # so an arch whose venv is subtly wrong cannot pass on the other's back.
       - name: Smoke test
         run: |
-          docker run --rm --entrypoint bash ${{ env.IMAGE_NAME }}:test \
+          docker run --rm --entrypoint bash ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }} \
             /opt/hydraflow/scripts/docker-factory-smoke-test.sh
 
   push:
+    name: Push Factory (${{ matrix.arch }})
     if: github.ref == 'refs/heads/main'
     needs: build
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -89,16 +122,81 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # By digest, no tag — see the base workflow: tagging per-arch has the two
+      # runners race to own `:latest` and the loser silently publishes a
+      # single-arch image under a multi-arch name.
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.factory
           build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=factory-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=factory-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          test -n "$digest" || { echo "::error::build produced no digest"; exit 1; }
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish Factory Manifest
+    needs: push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: factory-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list
+        working-directory: /tmp/digests
+        run: |
+          count=$(ls -1 | wc -l)
+          echo "digests found: $count"; ls -1
+          if [ "$count" -ne 2 ]; then
+            echo "::error::expected 2 digests (amd64, arm64), found $count — refusing to publish a partial manifest"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:latest" \
+            -t "${IMAGE_NAME}:${{ github.sha }}" \
+            $(printf "${IMAGE_NAME}@sha256:%s " *)
+
+      - name: Verify both architectures are published
+        run: |
+          manifest=$(docker buildx imagetools inspect "${IMAGE_NAME}:latest" --raw)
+          echo "$manifest" | grep -q '"architecture":"amd64"' \
+            || { echo "::error::published manifest has no amd64"; exit 1; }
+          echo "$manifest" | grep -q '"architecture":"arm64"' \
+            || { echo "::error::published manifest has no arm64"; exit 1; }
+          echo "manifest carries both amd64 and arm64"

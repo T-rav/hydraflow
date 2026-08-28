@@ -24,10 +24,20 @@ permissions:
 
 jobs:
   build:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.arch }})
     timeout-minutes: 30
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,12 +93,12 @@ jobs:
         with:
           context: .
           file: Dockerfile.agent
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           load: true
-          tags: ${{ env.IMAGE_NAME }}:test
+          tags: ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }}
           build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=agent-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=agent-${{ matrix.arch }}
 
       - name: Build image (full, no base)
         if: steps.base-check.outputs.available == 'false'
@@ -96,30 +106,40 @@ jobs:
         with:
           context: .
           file: Dockerfile.agent
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           load: true
-          tags: ${{ env.IMAGE_NAME }}:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }}
+          cache-from: type=gha,scope=agent-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=agent-${{ matrix.arch }}
 
       - name: Run smoke tests
-        run: docker run --rm ${{ env.IMAGE_NAME }}:test bash /opt/hydraflow/docker-smoke-test.sh
+        run: docker run --rm ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }} bash /opt/hydraflow/docker-smoke-test.sh
 
       - name: Check image size
         run: |
-          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:test --format='{{.Size}}')
+          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }} --format='{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "Image size: ${SIZE_MB}MB"
+          echo "Image size (${{ matrix.arch }}): ${SIZE_MB}MB"
           if [ "$SIZE_MB" -gt 2048 ]; then
-            echo "::error::Image size ${SIZE_MB}MB exceeds 2GB limit"
+            echo "::error::Image size ${SIZE_MB}MB exceeds 2GB limit on ${{ matrix.arch }}"
             exit 1
           fi
 
   push:
-    name: Push to GHCR
+    name: Push Agent (${{ matrix.arch }})
     needs: build
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       packages: write
@@ -142,16 +162,83 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # By digest, no tag: two runners tagging `:latest` race, and the loser
+      # silently republishes a single-arch image under a multi-arch name.
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=agent-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=agent-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          test -n "$digest" || { echo "::error::build produced no digest"; exit 1; }
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish Agent Manifest
+    needs: push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/hydraflow-agent" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: agent-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list
+        working-directory: /tmp/digests
+        run: |
+          count=$(ls -1 | wc -l)
+          echo "digests found: $count"; ls -1
+          if [ "$count" -ne 2 ]; then
+            echo "::error::expected 2 digests (amd64, arm64), found $count — refusing to publish a partial manifest"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:latest" \
+            -t "${IMAGE_NAME}:${{ github.sha }}" \
+            $(printf "${IMAGE_NAME}@sha256:%s " *)
+
+      - name: Verify both architectures are published
+        run: |
+          manifest=$(docker buildx imagetools inspect "${IMAGE_NAME}:latest" --raw)
+          echo "$manifest" | grep -q '"architecture":"amd64"' \
+            || { echo "::error::published manifest has no amd64"; exit 1; }
+          echo "$manifest" | grep -q '"architecture":"arm64"' \
+            || { echo "::error::published manifest has no arm64"; exit 1; }
+          echo "manifest carries both amd64 and arm64"
