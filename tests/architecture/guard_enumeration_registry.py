@@ -171,7 +171,7 @@ def import_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool
 
 
 def os_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
-    """The ``os``-qualified guard's half of :func:`call_witness`, same contract.
+    """The ``os``-qualified guard's half of :func:`call_witness`.
 
     ``reachable_os_spawns`` is the third extractor in this file's guard, added
     by #11724: it matches an attribute of a Name bound to ``os``, so its
@@ -186,6 +186,22 @@ def os_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
     Works for ``_OS_SPAWN_PREFIXES`` as well as ``_OS_SPAWN_EXACT``: every
     prefix is a prefix of itself, so injecting ``os.exec()`` is the minimal
     witness that the ``exec`` rule fires at all.
+
+    **NOT the same contract as its two siblings, and the difference decides
+    how the negative control has to be written.** ``called_names`` and
+    ``import_roots`` are maximally permissive — they record ANY call name and
+    ANY import root — so for those the extractor always answers yes and the
+    ``& deny_list`` step is what answers no. ``reachable_os_spawns`` is gated
+    internally by ``_is_os_spawn``, which reads the very sets this function is
+    handed as ``deny_list``. A name the list does not carry is therefore
+    rejected by the EXTRACTOR, before the intersection is consulted.
+
+    So ``& deny_list`` is not load-bearing against an arbitrary name here, and
+    an earlier version of this file proved it: deleting the intersection left
+    every test green. It is kept because it is the correct expression of the
+    contract, and it is made falsifiable by ``_UNDENIED_OVERRIDES`` in the
+    gate, which feeds each ``os`` row a name the extractor DOES flag and the
+    row's own list does not carry.
     """
     from tests.architecture.test_director_no_authority import reachable_os_spawns
 
@@ -356,7 +372,8 @@ DENY_LIST_FLOORS: dict[str, frozenset[str]] = {
     ),
     # #11724's two. `_OS_SPAWN_PREFIXES` carries prefixes rather than whole
     # attribute names: `exec` floors the entire `os.exec*` family, so dropping
-    # it silently un-denies seven spellings at once.
+    # it silently un-denies eight spellings at once (execl, execle, execlp,
+    # execlpe, execv, execve, execvp, execvpe).
     "test_director_no_authority._OS_SPAWN_EXACT": frozenset({"startfile", "system"}),
     "test_director_no_authority._OS_SPAWN_PREFIXES": frozenset(
         {"exec", "fork", "popen", "posix_spawn", "spawn"}
