@@ -99,6 +99,12 @@ services:
       HYDRAFLOW_GATEWAY_LEDGER_PATH: "/gateway-metadata/requests.jsonl"
       HYDRAFLOW_GATEWAY_CONTROL_TOKEN: "hfgwctl_sandbox-control-token-0123456789abcdef"
       HYDRAFLOW_GATEWAY_REPO_CLASS: "hydraflow"
+      # The sandbox image carries no git repository, so config.repo was always
+      # empty here — the pipeline ran against a blank slug and FakeGitHub
+      # intercepted regardless. Now that an empty target idles the loops
+      # deliberately (#11744), the sandbox names one explicitly like any
+      # other deployment. Never resolved against real GitHub.
+      HYDRAFLOW_GITHUB_REPO: "owner/repo"
       HYDRAFLOW_GATEWAY_KEY_TTL_SECONDS: "3660"
       # Canary P4: the bounded ADR reviewer is the first real agentic role
       # dialed to the gateway. MockWorld still injects the LLM fake for other
