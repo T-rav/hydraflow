@@ -36,6 +36,7 @@ __all__ = [
     "ImportGraph",
     "Reach",
     "SpawnSite",
+    "argv_tokens",
     "remote_hosts",
     "spawn_sites",
 ]
@@ -601,21 +602,37 @@ def _argv_nodes(call: ast.Call) -> list[ast.expr]:
     return nodes
 
 
-def _argv_tokens(call: ast.Call) -> tuple[str, ...]:
+def argv_tokens(values: Iterable[str]) -> tuple[str, ...]:
+    """Every shell-significant token in a command line, plus bare basenames.
+
+    ONE tokeniser, two readers. The AST scanner feeds it the string literals it
+    found in a spawn call's argv; :mod:`tests.architecture.egress_guard` feeds
+    it the argv a process was *actually* handed at runtime. A second copy of
+    this vocabulary is how the same binary comes to be read two different ways
+    — the static side says ``curl`` and the runtime side says
+    ``/usr/bin/curl`` — so there is only one, and both sides import it.
+
+    ``/usr/bin/curl`` also yields ``curl``: matching whole tokens only would
+    let an absolute path walk past the binary list, the same miss as a keyword
+    argv, one character of punctuation further along.
+    """
     tokens: list[str] = []
-    for arg in _argv_nodes(call):
-        for node in ast.walk(arg):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                for chunk in _SHELL_SPLIT.split(node.value):
-                    for token in chunk.split():
-                        tokens.append(token)
-                        # ``/usr/bin/curl`` is ``curl``. Matching whole tokens
-                        # only would let an absolute path walk past the binary
-                        # list — the same miss as a keyword argv, one character
-                        # of punctuation further along.
-                        if "/" in token:
-                            tokens.append(token.rsplit("/", 1)[-1])
+    for value in values:
+        for chunk in _SHELL_SPLIT.split(value):
+            for token in chunk.split():
+                tokens.append(token)
+                if "/" in token:
+                    tokens.append(token.rsplit("/", 1)[-1])
     return tuple(tokens)
+
+
+def _argv_tokens(call: ast.Call) -> tuple[str, ...]:
+    return argv_tokens(
+        node.value
+        for arg in _argv_nodes(call)
+        for node in ast.walk(arg)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
 
 
 def spawn_sites(path: Path, rel: str) -> list[SpawnSite]:

@@ -32,8 +32,11 @@ from tests.architecture.conformance_offline_scan import (
     remote_hosts,
     spawn_sites,
 )
+from tests.architecture.egress_guard import run_under_guard
 from tests.architecture.vitals_conformance_registry import (
     CONFORMANCE_ROOTS,
+    EGRESS_LANE_EXCLUSION_CEILING,
+    EGRESS_LANE_EXCLUSIONS,
     NETWORK_CAPABLE_BINARIES,
     SUBPROCESS_WAIVER_CEILING,
     SUBPROCESS_WAIVERS,
@@ -271,7 +274,25 @@ def test_the_gateway_httpx_carriers_stay_green() -> None:
         assert graph.find(path, _REMOTE_CLIENTS) is None
 
 
-def test_no_conformance_check_spawns_a_network_binary() -> None:
+def flagged_spawn_files() -> tuple[str, ...]:
+    """Conformance files whose argv LITERALS name a network binary or a host.
+
+    The static reading, and nothing more. It used to be the verdict; since the
+    egress lane exists it is only the question, and the answer is one process
+    away.
+    """
+    return tuple(
+        sorted(
+            {
+                site.path
+                for site in _all_spawn_sites()
+                if site.binaries(NETWORK_CAPABLE_BINARIES) or site.hosts()
+            }
+        )
+    )
+
+
+def test_no_conformance_check_spawns_a_network_binary(tmp_path: Path) -> None:
     """The second dimension: an argv is a reach an import sweep cannot see.
 
     ``subprocess.run(["curl", ...])`` imports nothing remote. Neither does
@@ -279,7 +300,8 @@ def test_no_conformance_check_spawns_a_network_binary() -> None:
     #11706 filed this with 73 of 673 swept files carrying a spawn primitive and
     the import sweep blind to every one.
 
-    Two rules, because one binary list cannot carry both jobs:
+    Two rules decide what is FLAGGED, because one binary list cannot carry both
+    jobs:
 
     - the argv names a binary whose ordinary job is remote I/O
       (``NETWORK_CAPABLE_BINARIES``, and see the registry for the exclusions);
@@ -288,30 +310,52 @@ def test_no_conformance_check_spawns_a_network_binary() -> None:
       spawn's argv a hostname is a destination, not fixture data. It is what
       keeps ``git`` honest without a 130-entry waiver list: ``git status`` and
       ``git clone /tmp/x`` are local, ``git clone https://github.com/x`` is not.
-    """
-    waived = {(waiver.path, waiver.binary) for waiver in SUBPROCESS_WAIVERS}
-    offenders: list[str] = []
-    for site in _all_spawn_sites():
-        binaries = [
-            binary
-            for binary in site.binaries(NETWORK_CAPABLE_BINARIES)
-            if (site.path, binary) not in waived
-        ]
-        hosts = list(site.hosts())
-        if binaries or hosts:
-            reason = " and ".join(
-                part
-                for part in (
-                    f"binaries {binaries}" if binaries else "",
-                    f"hosts {hosts}" if hosts else "",
-                )
-                if part
-            )
-            offenders.append(f"{site.path}:{site.line} {site.call}(...) — {reason}")
 
-    assert not offenders, (
+    What decides the VERDICT is no longer this file. Flagging is where a parser
+    stops being able to help: three sites were flagged and none of them spawns
+    anything, because one monkeypatches the primitive and two hand ``cmd=
+    ["claude", …]`` to an injected runner. Reading the call cannot see what the
+    call resolves to, so for three releases the answer was three hand-written
+    waivers saying "trust me, this is faked".
+
+    So a flagged site is now ESCALATED rather than waived: its file is run in a
+    child process with :mod:`tests.architecture.egress_guard` armed, and the
+    question "does this argv ever become a process?" is answered by the
+    interpreter's own audit events. A fake spawns nothing and is simply not
+    observed; a real one is observed however its argv was assembled.
+
+    The cost is deliberately proportional to the exception count — only flagged
+    files are run — so an unexceptional repo pays nothing and an exception-happy
+    one pays per exception. That is the right direction for the gradient to run.
+    """
+    flagged = flagged_spawn_files()
+    if not flagged:
+        # Not a silent pass: `test_the_spawn_scanner_still_sees_spawns` pins
+        # that the scanner still has a subject, and the lane's own negative
+        # controls pin that the observer still fires. Nothing flagged means
+        # nothing needs escalating, which is the state this rule wants.
+        return
+
+    result = run_under_guard(flagged, repo_root=_REPO, report_dir=tmp_path)
+
+    assert not result.violations, (
         "conformance checks must run offline (docs/standards/vitals_conformance/). "
-        "These shell out to a network:\n  " + "\n  ".join(offenders)
+        f"These {len(flagged)} statically flagged files were run under the "
+        "egress guard and REALLY DID reach out:\n  "
+        + "\n  ".join(v.describe() for v in result.violations)
+    )
+    assert result.tests_run > 0, (
+        f"the escalation ran {flagged} and collected no tests, so 'nothing "
+        "reached the network' is a statement about nothing. Child output:\n"
+        + result.output[-2000:]
+    )
+    observed = "\n  ".join(f"{where}: {argv}" for where, argv in result.observed)
+    assert result.returncode == 0, (
+        f"the escalation exited {result.returncode} with no egress violation "
+        "recorded. That is INCONCLUSIVE, not clean: a file that failed early "
+        "may never have reached the spawn this rule flagged. Fix the file, or "
+        f"the flagged argv, before reading this as green.\nSpawns it did "
+        f"reach:\n  {observed}\nChild output:\n" + result.output[-2000:]
     )
 
 
@@ -332,43 +376,69 @@ def test_the_spawn_scanner_still_sees_spawns() -> None:
     )
 
 
-def test_the_subprocess_waiver_list_is_shrink_only() -> None:
-    """An allow-list that may grow is the failure this standard is about."""
+def test_the_subprocess_waiver_list_is_empty_and_may_not_grow() -> None:
+    """An allow-list that may grow is the failure this standard is about.
+
+    It reached zero in #11706, and the ceiling went with it. Reading this as
+    "the mechanism is unused, delete it" would be backwards: the ceiling is the
+    statement, and the statement is that there is currently no hand-written
+    exception to the spawn rule at all. The way to add one is to make the case
+    for raising a number the standard says may only be lowered — which is a
+    conversation, and is meant to be.
+
+    The liveness property that used to live beside this one — *a waiver must
+    still match a live spawn, or it pre-approves whatever lands in that file
+    next* — is deliberately gone rather than kept as a loop over an empty tuple.
+    Its job moved to ``check_egress_exclusions.py``, which asks the same
+    question of the one list that is not empty.
+    """
     assert len(SUBPROCESS_WAIVERS) <= SUBPROCESS_WAIVER_CEILING, (
         f"{len(SUBPROCESS_WAIVERS)} subprocess waivers against a ceiling of "
         f"{SUBPROCESS_WAIVER_CEILING}. The ceiling may only ever be lowered — "
-        "if a new conformance check needs to spawn a network binary, the "
-        "question is whether it is a conformance check."
+        "and the answer for a flagged site is now the lane, which observes "
+        "whether the argv ever becomes a process instead of taking your word "
+        "for it. If it observes a real spawn, that is not a waiver case."
     )
-    keys = [(waiver.path, waiver.binary) for waiver in SUBPROCESS_WAIVERS]
-    assert len(keys) == len(set(keys)), f"duplicate waivers: {keys}"
-    for waiver in SUBPROCESS_WAIVERS:
-        assert len(waiver.why) > 40, (
-            f"{waiver.path}/{waiver.binary} has no real rationale. A waiver "
-            "without one is an allow-list entry with extra steps."
-        )
+    assert SUBPROCESS_WAIVER_CEILING == 0, (
+        f"the waiver ceiling is {SUBPROCESS_WAIVER_CEILING}. It was lowered to "
+        "0 in #11706 when the egress lane retired all three entries; raising it "
+        "again re-opens the allow-list this standard exists to prevent."
+    )
 
 
-def test_every_subprocess_waiver_is_still_live() -> None:
-    """A dead waiver covers whatever lands in that file next.
+def test_every_egress_lane_exclusion_resolves_and_the_list_may_not_grow() -> None:
+    """The lane's own honesty check: what it does NOT cover, named on disk.
 
-    Same failure as a rotted line-window anchor (#11670): the exemption outlives
-    the thing it excused and silently pre-approves its successor.
+    A partial lane that says what it excludes beats a total one that quietly
+    does not work — but only while the exclusions are real files with real
+    reasons. An entry naming a path that is gone classifies nothing (#11673),
+    and a list of "files allowed to reach the network" that may grow is the
+    rule inverted.
+
+    Whether each entry STILL reaches is a runtime question and is answered by
+    ``scripts/check_egress_exclusions.py`` inside the lane, where the reach can
+    be observed without being completed.
     """
-    live = {
-        (site.path, binary)
-        for site in _all_spawn_sites()
-        for binary in site.binaries(NETWORK_CAPABLE_BINARIES)
-    }
-    dead = [
-        f"{waiver.path} no longer spawns {waiver.binary!r}"
-        for waiver in SUBPROCESS_WAIVERS
-        if (waiver.path, waiver.binary) not in live
-    ]
-    assert not dead, (
-        "delete these waivers — they excuse nothing that still exists:\n  "
-        + "\n  ".join(dead)
+    assert len(EGRESS_LANE_EXCLUSIONS) <= EGRESS_LANE_EXCLUSION_CEILING, (
+        f"{len(EGRESS_LANE_EXCLUSIONS)} egress-lane exclusions against a "
+        f"ceiling of {EGRESS_LANE_EXCLUSION_CEILING}. Shrink-only: a new file "
+        "that reaches the network is a defect to fix, not a row to add."
     )
+    paths = [exclusion.path for exclusion in EGRESS_LANE_EXCLUSIONS]
+    assert len(paths) == len(set(paths)), f"duplicate exclusions: {paths}"
+    for exclusion in EGRESS_LANE_EXCLUSIONS:
+        assert (_REPO / exclusion.path).is_file(), (
+            f"{exclusion.path} is excluded from the egress lane and does not "
+            "exist. Delete the entry — the lane is covering that path already."
+        )
+        assert exclusion.reaches, (
+            f"{exclusion.path} is excluded without naming what it reaches. The "
+            "observation is the entry; without it this is an allow-list."
+        )
+        assert len(exclusion.why) > 40, (
+            f"{exclusion.path} has no real rationale. An exclusion without one "
+            "is an allow-list entry with extra steps."
+        )
 
 
 def test_the_network_binary_list_is_not_empty() -> None:
@@ -779,27 +849,29 @@ def test_the_spawn_detector_leaves_offline_spawns_alone(tmp_path: Path) -> None:
             assert not site.hosts(), f"{rel}:{site.line} false host on {site.argv}"
 
 
-def test_a_waiver_covers_only_its_own_file_and_binary(tmp_path: Path) -> None:
-    """The waiver key is ``(path, binary)``. Prove it does not over-cover.
+def test_flagging_names_every_network_binary_in_an_argv(tmp_path: Path) -> None:
+    """Flagging is not first-match, and that is why escalation can be per-FILE.
 
-    A waiver written as "this file is fine" would excuse the next network
-    binary someone adds to it, which is how an exemption outlives its reason.
+    The waivers this replaced were keyed ``(path, binary)`` precisely so that
+    "this file is fine" could not excuse the next network binary someone added
+    to it. Escalation needs no such key — it runs the file and observes every
+    spawn — but only while flagging still sees every binary. A ``binaries()``
+    that stopped at the first hit would hand the escalation a shorter list to
+    explain and nothing would redden.
     """
-    rel = "test_waived.py"
+    rel = "test_flagged.py"
     _write(
         tmp_path,
         {
             rel: 'import subprocess\nsubprocess.run(["gh", "api", "x"])\nsubprocess.run(["curl", "x"])\n'
         },
     )
-    waived = {(rel, "gh")}
-    leftover = [
+    named = sorted(
         binary
         for site in spawn_sites(tmp_path / rel, rel)
         for binary in site.binaries(NETWORK_CAPABLE_BINARIES)
-        if (rel, binary) not in waived
-    ]
-    assert leftover == ["curl"]
+    )
+    assert named == ["curl", "gh"]
 
 
 def test_a_vitals_claim_is_not_held_to_the_offline_rule() -> None:
@@ -853,4 +925,15 @@ def test_the_standard_exists_and_states_the_rule() -> None:
     )
     assert "subprocess" in text.lower(), (
         "the standard does not mention the spawn dimension it now enforces"
+    )
+    assert "scripts/offline_egress_lane.sh" in text, (
+        "the standard does not name the egress lane. It described the lane as "
+        "'unbuilt (#11706)' for three releases while the static checks carried "
+        "the whole claim; prose that goes back to describing the intended state "
+        "is how that happens again."
+    )
+    assert "EGRESS_LANE_EXCLUSIONS" in text, (
+        "the standard does not name what the lane fails to cover. A partial "
+        "lane that says what it excludes beats a total one that quietly does "
+        "not work, but only while it still says so."
     )
