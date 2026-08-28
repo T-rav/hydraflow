@@ -69,7 +69,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # BOOTSTRAP ONLY. Dockerfile.factory has no self-contained fallback — it
+      # takes its venv and user from the base — so an arch the base does not
+      # publish yet cannot be built at all. That is a real ordering constraint
+      # (base publishes its manifest, then this image can consume it), not a
+      # defect, and it self-resolves: the base workflow's completion triggers
+      # this one via `workflow_run`.
+      #
+      # The skip is deliberately NARROW: it fires only when the registry says
+      # this exact platform is absent from the base manifest. It cannot become a
+      # quiet permanent hole, because the moment the base carries the arch the
+      # condition stops matching and the build runs.
+      - name: Check the base publishes this architecture
+        id: base
+        run: |
+          if docker manifest inspect "${BASE_IMAGE}" 2>/dev/null \
+               | grep -q '"architecture": *"${{ matrix.arch }}"'; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${BASE_IMAGE} does not yet publish ${{ matrix.arch }} — skipping this leg until the base image workflow republishes as a manifest list. This is the documented bootstrap order, not a passing build."
+          fi
+
       - name: Build image
+        if: steps.base.outputs.available == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -86,6 +109,7 @@ jobs:
       # dashboard present, no baked-in target repo — and it proves it NATIVELY,
       # so an arch whose venv is subtly wrong cannot pass on the other's back.
       - name: Smoke test
+        if: steps.base.outputs.available == 'true'
         run: |
           docker run --rm --entrypoint bash ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }} \
             /opt/hydraflow/scripts/docker-factory-smoke-test.sh
@@ -125,8 +149,20 @@ jobs:
       # By digest, no tag — see the base workflow: tagging per-arch has the two
       # runners race to own `:latest` and the loser silently publishes a
       # single-arch image under a multi-arch name.
+      - name: Check the base publishes this architecture
+        id: base
+        run: |
+          if docker manifest inspect "${BASE_IMAGE}" 2>/dev/null \
+               | grep -q '"architecture": *"${{ matrix.arch }}"'; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${BASE_IMAGE} does not yet publish ${{ matrix.arch }} — not pushing this leg. The merge job refuses a partial manifest, so the published image stays as it was rather than silently losing an arch."
+          fi
+
       - name: Build and push by digest
         id: build
+        if: steps.base.outputs.available == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -138,6 +174,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=factory-${{ matrix.arch }}
 
       - name: Export digest
+        if: steps.base.outputs.available == 'true'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
@@ -145,6 +182,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
+        if: steps.base.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: factory-digest-${{ matrix.arch }}
