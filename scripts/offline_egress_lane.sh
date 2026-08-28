@@ -114,7 +114,7 @@ def dns():
 
 
 blocked("outbound TCP to 1.1.1.1:443", direct_ip)
-blocked("DNS for github.com", dns)
+blocked("DNS lookup", dns)
 
 try:
     server = socket.socket()

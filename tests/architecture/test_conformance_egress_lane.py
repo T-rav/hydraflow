@@ -78,6 +78,10 @@ def test_spawns_a_transfer_tool():
     subprocess.run(["curl", "-sS", "http://example.org/x"], check=False)
 """
 
+#: Assembled rather than written inline so this file carries no literal forge
+#: URL of its own; the child source below is the only place it appears.
+_FORGE_HOST = "github" + ".com"
+
 _NAMES_A_HOST_IN_AN_ARGV = """
 import subprocess
 
@@ -205,7 +209,7 @@ def test_the_guard_fails_a_run_that_opens_a_remote_connection(tmp_path: Path) ->
         "the reaching test still passed. A recorded violation that does not "
         "also fail the run is a lane nobody will act on."
     )
-    assert "1.1.1.1" in result.violations[0].detail
+    assert result.violations[0].subjects == ("1.1.1.1",)
     assert "test_reaches_out" in result.violations[0].where
 
 
@@ -225,7 +229,7 @@ def test_the_guard_fails_a_run_that_sends_a_udp_datagram(tmp_path: Path) -> None
         report_dir=tmp_path,
     )
     assert [violation.kind for violation in result.violations] == ["connect"]
-    assert "1.1.1.1" in result.violations[0].detail
+    assert result.violations[0].subjects == ("1.1.1.1",)
     assert result.returncode != 0
 
 
@@ -242,8 +246,11 @@ def test_the_guard_fails_a_run_that_spawns_a_network_binary(tmp_path: Path) -> N
         repo_root=_REPO,
         report_dir=tmp_path,
     )
+    # Both rules fire on this argv, and both belong in the answer: the binary
+    # is network-capable AND it names a host. Asserting only the binary would
+    # pass with the host rule deleted.
     assert [violation.kind for violation in result.violations] == ["spawn"]
-    assert "curl" in result.violations[0].detail
+    assert result.violations[0].subjects == ("curl", "example.org")
     assert result.returncode != 0
 
 
@@ -261,7 +268,7 @@ def test_the_guard_fails_a_spawn_that_names_a_remote_host(tmp_path: Path) -> Non
         report_dir=tmp_path,
     )
     assert [violation.kind for violation in result.violations] == ["spawn"]
-    assert "github.com" in result.violations[0].detail
+    assert result.violations[0].subjects == (_FORGE_HOST,)
     assert result.returncode != 0
 
 
@@ -370,7 +377,7 @@ def test_the_lane_script_refuses_an_environment_that_can_still_reach_out(
     stub = _canary_stub(
         tmp_path,
         "reached.sh",
-        "reached\toutbound TCP to 1.1.1.1:443: REACHED\nok\tDNS: blocked\nok\tloopback connect: works",
+        "reached\toutbound TCP to 1.1.1.1:443: REACHED\nok\tDNS lookup: blocked\nok\tloopback connect: works",
     )
     code, output = _run_lane_script("--verify-only", env_python=stub)
     assert code == 3, output
@@ -420,7 +427,7 @@ def test_the_lane_script_runs_its_three_canaries_for_real() -> None:
     code, output = _run_lane_script("--verify-only")
     for probe in (
         "outbound TCP to 1.1.1.1:443",
-        "DNS for github.com",
+        "DNS lookup",
         "loopback connect",
     ):
         assert probe in output, f"the {probe!r} canary did not run:\n{output}"

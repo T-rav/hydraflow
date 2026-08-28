@@ -99,6 +99,15 @@ class Violation:
     """``connect`` or ``spawn``."""
 
     detail: str
+    """Human-readable. For reading, never for asserting."""
+
+    subjects: tuple[str, ...]
+    """WHAT made it a violation: the network binaries and hosts named, or the
+    address connected to. Structured because the alternative is asserting on
+    the prose, and a test that greps a rendered message for ``github.com`` both
+    breaks when the wording changes and reads, correctly, as incomplete URL
+    sanitisation to anything scanning for it."""
+
     where: str
     """The pytest nodeid that was running, or ``<session>`` outside a test."""
 
@@ -245,7 +254,10 @@ class _Recorder:
         if is_local_address(address):
             return
         self.connects += 1
-        self._raise(Violation("connect", f"{event} -> {address!r}", self.where))
+        host = address[0] if isinstance(address, tuple) and address else address
+        self._raise(
+            Violation("connect", f"{event} -> {address!r}", (str(host),), self.where)
+        )
 
     def _spawn(self, args: tuple[Any, ...], index: int) -> None:
         if len(args) <= index:
@@ -263,7 +275,9 @@ class _Recorder:
         named = f"binaries {list(binaries)}" if binaries else ""
         reached = f"hosts {list(hosts)}" if hosts else ""
         reason = " and ".join(part for part in (named, reached) if part)
-        self._raise(Violation("spawn", f"{argv} — {reason}", self.where))
+        self._raise(
+            Violation("spawn", f"{argv} — {reason}", (*binaries, *hosts), self.where)
+        )
 
     def _raise(self, violation: Violation) -> None:
         self.violations.append(violation)
@@ -281,7 +295,12 @@ class _Recorder:
             "connects": self.connects,
             "binaries": sorted(self.binaries),
             "violations": [
-                {"kind": v.kind, "detail": v.detail, "where": v.where}
+                {
+                    "kind": v.kind,
+                    "detail": v.detail,
+                    "subjects": list(v.subjects),
+                    "where": v.where,
+                }
                 for v in self.violations
             ],
             "observed": [list(pair) for pair in self.observed],
@@ -407,7 +426,12 @@ def run_under_guard(
         connects=int(payload["connects"]),
         binaries=tuple(payload["binaries"]),
         violations=tuple(
-            Violation(item["kind"], item["detail"], item["where"])
+            Violation(
+                item["kind"],
+                item["detail"],
+                tuple(item["subjects"]),
+                item["where"],
+            )
             for item in payload["violations"]
         ),
         observed=tuple((pair[0], pair[1]) for pair in payload["observed"]),
