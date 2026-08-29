@@ -31,6 +31,9 @@ from pathlib import Path
 from erosion.models import CrossFileDuplicate, ParametrizeGroup, SuiteHygieneFinding
 from pytest_collection import collected_test_globs
 
+#: This repo's root — ``src/erosion/suite_hygiene.py`` -> up three.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 #: Minimum identical tests in one file before they are reported as a parametrize group.
 DEFAULT_MIN_GROUP = 3
 
@@ -149,7 +152,9 @@ def compute(
     )
 
 
-def collect_tests(tests_dir: Path) -> dict[str, str]:
+def collect_tests(
+    tests_dir: Path, globs: tuple[str, ...] | None = None
+) -> dict[str, str]:
     """Read every pytest-collected module under *tests_dir* (impure), keyed by ``<tests_dir.name>/<relative>`` posix path.
 
     Matches the repo's ``python_files`` globs recursively; skips bytecode
@@ -157,9 +162,19 @@ def collect_tests(tests_dir: Path) -> dict[str, str]:
     :func:`pytest_collection.collected_test_globs` rather than a constant here,
     so this sensor and the anti-skip guard cannot disagree about what a test
     file is — they read the same key of the same file.
+
+    *globs* defaults to what THIS repo declares, resolved from its own
+    ``pyproject.toml``. Deliberately not resolved from ``tests_dir.parent``: a
+    directory with no pyproject beside it — a tmp fixture, an export — would
+    fall back to pytest's bare defaults and drop every ``regression_*.py`` from
+    the count without saying so. Silently measuring less than you claim to is
+    the failure this module exists to detect, not to commit. Callers auditing a
+    different repo pass that repo's globs explicitly.
     """
+    if globs is None:
+        globs = collected_test_globs(_REPO_ROOT)
     out: dict[str, str] = {}
-    for glob in collected_test_globs(tests_dir.parent):
+    for glob in globs:
         for path in tests_dir.rglob(glob):
             rel = path.relative_to(tests_dir)
             if _SKIP_DIRS.intersection(rel.parts[:-1]):
