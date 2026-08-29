@@ -1572,11 +1572,11 @@ class HydraFlowConfig(BaseModel):
             "rollback. Independent of fable_plan_canary_repo and "
             "fable_implement_canary_repo: arming one arms nothing about the "
             "others. Deliberately NOT an env override, for ADR-0141 D5's reason. "
-            "NOT WIRED YET (#11543): nothing constructs a ReviewWorkerRunner, "
-            "because nothing yet produces the canonical ReviewEvidence its "
-            "prompt is built from, so arming this today is a no-op. The dial "
-            "and its bound ship with the actuator so the rollback exists before "
-            "the capability does."
+            "WIRED (#11543): service_registry builds a ReviewWorkerRunner under "
+            "every fable_director process, and naming this repository dispatches "
+            "real read-only reviewers at the NEXT covered REVIEW boundary, with "
+            "no restart. Clearing it stops the next one, also with no restart — "
+            "including between two children of one batch."
         ),
     )
     fable_review_worker_timeout_seconds: int = Field(
@@ -1598,14 +1598,14 @@ class HydraFlowConfig(BaseModel):
     )
 
     def fable_review_canary_armed(self) -> bool:
-        """True when this process *would* dispatch a real brokered reviewer.
+        """True when this process may dispatch real brokered read-only reviewers.
 
-        Would, not will: no dispatcher is wired yet (#11543 — see
-        ``review_worker_runner.ReviewWorkerRunner``), so this predicate answers
-        the operator's question about the dial rather than reporting a live
-        capability. It is stated in the conditional because the sibling
-        predicates are not, and a reader comparing the three would otherwise
-        take the parallel wording as a parallel guarantee.
+        Will, not would: #11543 wired the dispatcher, so this predicate now
+        reports a live capability exactly as its siblings do. The conditional
+        wording it used to carry was load-bearing while nothing constructed a
+        ``ReviewWorkerRunner``, and leaving it here after the wiring landed
+        would understate the dial in the one direction an operator cannot
+        afford — reading "would" as "nothing happens" and arming it to find out.
 
         The same two-decision shape as its siblings, over a third dial:
         selecting the director is restart-required, naming the review canary

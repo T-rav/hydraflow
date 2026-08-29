@@ -40,10 +40,21 @@ from secret_scrub import scrub_secrets
 
 __all__ = [
     "CANONICAL_FIELDS",
+    "MAX_CHANGED_FILES",
+    "MAX_CRITERIA",
+    "MAX_CRITERION_CHARS",
+    "MAX_GOAL_CHARS",
+    "MAX_PLAN_CHARS",
     "PRIVATE_MARKERS",
     "ReviewEvidence",
+    "acceptance_criteria_in",
     "build_review_evidence",
+    "canonical_review_source",
+    "issue_goal_in",
+    "plan_summary_in",
     "private_markers_in",
+    "review_probes",
+    "snapshot_is_unreadable",
 ]
 
 
@@ -282,3 +293,236 @@ def private_markers_in(payload: Mapping[str, Any]) -> tuple[str, ...]:
     itself a disclosure.
     """
     return tuple(sorted(PRIVATE_MARKERS & set(payload)))
+
+
+# ---------------------------------------------------------------------------
+# Where each canonical field comes from (#11543).
+#
+# The allow-list above says what a reviewer MAY see. Everything below says how
+# each of those fields is derived from a source the pipeline already holds, and
+# it is the half that turns the dial from a bound into a capability: a runner
+# wired in without it would have to assemble the diff and the plan itself,
+# which is how implementer-private context arrives by convenience.
+#
+# All of it is pure. The git reads are performed by the actuator through its
+# injected ``SubprocessRunner`` (``review_worker_runner.ReviewWorkerRunner.gather``)
+# and handed here as text, for ``implement_worker_runner.measure``'s reason: a
+# module on the decision path may not reach a process, and an assembler that is
+# a function of strings can be tested against a value.
+# ---------------------------------------------------------------------------
+
+MAX_GOAL_CHARS = 4000
+"""How much of an issue body is carried as the goal."""
+
+MAX_PLAN_CHARS = 8000
+"""How much of the agreed plan is carried."""
+
+MAX_CRITERIA = 40
+"""How many acceptance criteria are carried."""
+
+MAX_CRITERION_CHARS = 500
+"""How long one carried acceptance criterion may be."""
+
+MAX_CHANGED_FILES = 400
+"""How many changed paths are named.
+
+Bounded like the diff and for the same reason — a reviewer's prompt is a
+bounded slice, not a repository dump. Unlike the diff this is not marked
+TRUNCATED in the prompt, because the diff itself is the evidence a reviewer
+judges and the file list is an index to it.
+"""
+
+_HEADING_PREFIX = "## "
+_GOAL_HEADINGS = ("goal", "goals", "intent", "summary")
+_CRITERIA_HEADINGS = ("acceptance criteria", "acceptance criterion")
+_BULLET_PREFIXES = ("- ", "* ", "+ ")
+
+
+def _sections(body: str) -> dict[str, str]:
+    """*body* split into ``lowercased level-2 heading -> text``.
+
+    Level 2 only, and deliberately: HydraFlow issue templates and the planner's
+    own ``PLAN_SECTION_DESCRIPTIONS`` both write ``## `` headings, and treating
+    ``###`` as a section too would let a sub-heading inside the goal end the
+    goal. That falls out of the prefix rather than needing a second clause —
+    ``"### x".startswith("## ")`` is ``False``, because the third character is
+    ``#`` and not a space. An explicit ``not startswith("### ")`` beside it
+    would be a guard no test could ever kill.
+    """
+    found: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in body.splitlines():
+        if line.startswith(_HEADING_PREFIX):
+            current = line[len(_HEADING_PREFIX) :].strip().rstrip(":").lower()
+            found.setdefault(current, [])
+            continue
+        if current is not None:
+            found[current].append(line)
+    return {name: "\n".join(lines).strip() for name, lines in found.items()}
+
+
+def issue_goal_in(body: str) -> str:
+    """What was asked for, from the issue body.
+
+    The ``## Goal`` section when the issue has one — every HydraFlow epic child
+    does, including the one this function was written for — and otherwise the
+    body's opening prose, up to the first level-2 heading.
+
+    Falling back to the *opening* rather than to the whole body is the point. A
+    reviewer given a whole issue body is given the comment thread's worth of
+    argument that follows the ask, and an issue whose body carries a triage
+    agent's reasoning would hand a reviewer exactly the kind of second-hand
+    conclusion this boundary exists to withhold. What is canonical is the ask.
+    """
+    sections = _sections(body)
+    for heading in _GOAL_HEADINGS:
+        text = sections.get(heading, "")
+        if text:
+            return text[:MAX_GOAL_CHARS]
+    opening = body.split(f"\n{_HEADING_PREFIX}", 1)[0].strip()
+    return opening[:MAX_GOAL_CHARS]
+
+
+def acceptance_criteria_in(body: str) -> tuple[str, ...]:
+    """The issue's acceptance criteria, as separate items.
+
+    Bullets under ``## Acceptance criteria``, matched case-insensitively
+    because issue bodies are written by humans and by agents and the two
+    capitalise differently.
+
+    Empty when the issue states none, and that is a real answer rather than a
+    failure: ``build_review_worker_prompt`` tells a reviewer to *name a missing
+    fact in a finding rather than guess*, so an issue with no criteria produces
+    a review that says so. Inventing criteria from the goal text would be this
+    module deciding what the change was for.
+    """
+    sections = _sections(body)
+    for heading in _CRITERIA_HEADINGS:
+        text = sections.get(heading, "")
+        if not text:
+            continue
+        items = tuple(
+            stripped[2:].strip()[:MAX_CRITERION_CHARS]
+            for line in text.splitlines()
+            if (stripped := line.strip()).startswith(_BULLET_PREFIXES)
+            and stripped[2:].strip()
+        )
+        if items:
+            return items[:MAX_CRITERIA]
+    return ()
+
+
+def plan_summary_in(comments: Iterable[str]) -> str:
+    """The agreed plan's OUTCOME, found by the rule the Classic reviewer uses.
+
+    The first comment carrying :data:`plan_constants.PLAN_COMMENT_HEADING`,
+    which is the same constant ``reviewer._context.ReviewContextMixin.
+    _load_plan_for_review`` reads — one owned literal rather than two spellings,
+    so "a Fable reviewer judges the same artefact a Classic reviewer would"
+    cannot quietly stop being true.
+
+    A published issue comment, note, and not the planner's transcript. The plan
+    comment is what the pipeline agreed to in public; the reasoning that
+    produced it is private context and has no field here to arrive in.
+    """
+    from plan_constants import PLAN_COMMENT_HEADING
+
+    for comment in comments:
+        text = str(comment)
+        if PLAN_COMMENT_HEADING in text:
+            return text.strip()[:MAX_PLAN_CHARS]
+    return ""
+
+
+def review_probes(base_ref: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """The git reads one review's evidence takes, as ``(token, argv)`` pairs.
+
+    The first three are ``implement_broker.worktree_probes``' own, reused
+    rather than respelled: ``worktree_state_from_reads`` already parses
+    ``--porcelain=v2 --branch`` into a branch and a HEAD object, and a second
+    copy of those two line prefixes here would be a second rule free to drift
+    from the first. The fourth is this boundary's own — a reviewer is shown
+    WHICH files changed, as an index into the diff, which a fence has no use
+    for.
+
+    ``diff HEAD`` rather than ``diff base..HEAD`` for the same reason the fence
+    uses it: it covers the working tree as well as the index, so a change an
+    implementer left uncommitted is reviewed rather than invisible.
+    """
+    from implement_broker import worktree_probes
+
+    return (*worktree_probes(base_ref), ("names", ("diff", "--name-only", "HEAD")))
+
+
+def snapshot_is_unreadable(evidence: ReviewEvidence) -> bool:
+    """Whether this bundle names no real snapshot.
+
+    ADR-0137 S4's rule at a third boundary: *a boundary that cannot be proven is
+    refused, never assumed*. A reviewer whose branch, base or HEAD reads
+    ``unmeasured`` is being asked to judge "one exact snapshot and nothing
+    else" while the prompt names no snapshot at all, and every proposal it
+    returns would then be adjudicated against a head sha that never existed.
+
+    Compared against ``implement_broker.UNMEASURED_TOKENS`` rather than against
+    a literal, so #11537's second spelling of the same idea is covered here too
+    and a third one cannot appear without moving that set.
+    """
+    from implement_broker import UNMEASURED_TOKENS
+
+    return bool(
+        {evidence.branch, evidence.base_sha, evidence.head_sha} & UNMEASURED_TOKENS
+    ) or not all((evidence.branch, evidence.base_sha, evidence.head_sha))
+
+
+def canonical_review_source(
+    *,
+    issue_number: int,
+    issue_title: str,
+    issue_body: str,
+    issue_comments: Iterable[str],
+    reads: Mapping[str, str],
+    test_command: str = "",
+    test_summary: str = "",
+    test_failures: Iterable[str] = (),
+) -> dict[str, Any]:
+    """The canonical bundle, from sources that are all public pipeline artefacts.
+
+    Every parameter is something a Classic reviewer also reads: the issue, its
+    published comments, the worktree the change is in, and the declared test
+    command. There is no parameter for a receipt, a transcript, a director
+    rationale or a prior verdict — the same construction
+    :func:`build_review_worker_prompt` uses one layer up, and the reason this
+    returns a bundle for :func:`build_review_evidence` to filter rather than
+    building a :class:`ReviewEvidence` directly: the allow-list stays the one
+    place that decides what may travel, even for a caller written to obey it.
+
+    *reads* is the raw output of :func:`review_probes`. Its branch, base and
+    HEAD are parsed by ``implement_broker.worktree_state_from_reads``, which is
+    total: a probe that did not answer yields ``unmeasured`` rather than
+    raising, and :func:`snapshot_is_unreadable` is what turns that into a
+    refusal at the actuator.
+    """
+    from implement_broker import worktree_state_from_reads
+
+    state = worktree_state_from_reads(reads)
+    names = tuple(
+        line.strip() for line in (reads.get("names") or "").splitlines() if line.strip()
+    )[:MAX_CHANGED_FILES]
+    return {
+        "issue_number": issue_number,
+        "issue_title": issue_title,
+        "issue_goal": issue_goal_in(issue_body),
+        "acceptance_criteria": acceptance_criteria_in(issue_body),
+        "plan_summary": plan_summary_in(issue_comments),
+        "branch": state.branch,
+        "base_sha": state.base_sha,
+        "head_sha": state.head_sha,
+        # The raw diff, NOT the fence's digest. A fence compares two readings
+        # and a reviewer reads the change, so the one field the two boundaries
+        # must not share a representation of is this one.
+        "diff": reads.get("diff") or "",
+        "changed_files": names,
+        "test_command": test_command,
+        "test_summary": test_summary,
+        "test_failures": tuple(test_failures),
+    }
