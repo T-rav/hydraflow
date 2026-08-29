@@ -312,7 +312,3 @@ docs/arch/generated/changelog.md
 docs/arch/.meta.local.json
 .playwright-mcp/
 audit-*.png
-
-# OPA pilot (#11750): the pinned binary `make opa-install` writes. 45 MB,
-# platform-specific, checksummed in scripts/opa_install.sh — never committed.
-.opa/

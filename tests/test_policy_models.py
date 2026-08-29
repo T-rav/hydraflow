@@ -260,38 +260,3 @@ def test_charter_for_standards_governs_only_what_it_names() -> None:
 def test_empty_charter_governs_every_standard() -> None:
     """ "No charter written yet" must not read as "nothing is enforced"."""
     assert Charter().governs("adr_enforcement")
-
-
-# ---------------------------------------------------------------------------
-# Charter.articles.assurance — the seam's slice of charter.yaml (#11750)
-# ---------------------------------------------------------------------------
-
-
-def test_the_seam_charters_default_assurance_matches_the_full_charters() -> None:
-    """``policy.models`` cannot import ``charter`` (it reads the filesystem and
-    the seam's import set is pinned), so the default is a literal copy. Pin the
-    copy to its source, in the one place that is allowed to see both."""
-    from charter import DEFAULT_ASSURANCE
-
-    assert Charter().articles.assurance == DEFAULT_ASSURANCE
-
-
-def test_an_internal_charter_is_not_regulated() -> None:
-    assert Charter().is_regulated() is False
-
-
-def test_any_regulated_class_is_regulated_not_only_an_enumerated_one() -> None:
-    """The vocabulary is ``regulated-<name>`` with an open right-hand side; a
-    rule that listed the known classes would silently stop covering the next."""
-    charter = Charter.model_validate(
-        {"articles": {"assurance": "regulated-newly-invented"}}
-    )
-
-    assert charter.is_regulated() is True
-
-
-def test_a_class_merely_containing_regulated_is_not_regulated() -> None:
-    """Prefix, not substring: ``deregulated`` must not read as regulated."""
-    charter = Charter.model_validate({"articles": {"assurance": "deregulated-phi"}})
-
-    assert charter.is_regulated() is False
