@@ -73,7 +73,12 @@ RESOURCE_PACKAGE = "hydraflow_resources"
 #: packaging and code cannot disagree about what must be in the wheel —
 #: ``tests/architecture/test_wheel_console_script.py`` binds this tuple to the
 #: on-disk trees and to ``[tool.setuptools.package-data]``.
-RESOURCE_TREES: tuple[str, ...] = ("prompts", "static", "templates")
+RESOURCE_TREES: tuple[str, ...] = (
+    "kernel_templates",
+    "prompts",
+    "static",
+    "templates",
+)
 
 #: A directory is a HydraFlow checkout when it holds ``src/<this module>``.
 #: Deliberately not ``pyproject.toml``: the agent image copies ``src/`` and

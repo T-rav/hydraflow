@@ -1,0 +1,7 @@
+from {{pkg}}.cli import main
+
+
+def test_main_smoke(capsys):
+    main()
+
+    assert "{{name}} ready" in capsys.readouterr().out

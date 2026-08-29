@@ -578,6 +578,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_director_no_authority as director
     from tests.architecture import test_fatal_exception_set_centralized as fatal
     from tests.architecture import test_import_boundary_gate as boundaries
+    from tests.architecture import test_kernel_documents_live_in_files as kernel_docs
     from tests.architecture import test_mockworld_loop_scenario_ratchet as mockworld
     from tests.architecture import test_path_membership_registry as membership
     from tests.architecture import test_policy_engine_is_pure as policy_purity
@@ -803,6 +804,25 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "stops running it and that gate silently falls back to being "
                 "path-triggered: exactly the defect the lane exists to close, "
                 "reproduced inside the fix for it."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_kernel_documents_live_in_files.GUARDED",
+            members=kernel_docs.GUARDED,
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=lambda member: (kernel_docs.REPO_ROOT / member).is_file(),
+            why=(
+                "Every module in src/onboarding/ is asked whether it holds a "
+                "stamped document as a string literal. The set is DERIVED by "
+                "glob from the package rather than spelled, precisely because "
+                "a literal tuple naming the two known writers is a predicate "
+                "that silently narrows: add a third materializer and the "
+                "guard stops covering it while staying green. That is the "
+                "defect the guard itself exists to close, and widening the "
+                "subject already caught a third offender (design_ai.py) the "
+                "spelled version would have missed. A member can therefore "
+                "only 'drop' by the file leaving disk, which the filesystem "
+                "corroborates independently."
             ),
         ),
         # --- SUBJECTS, floored ------------------------------------------

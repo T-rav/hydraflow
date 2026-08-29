@@ -1,0 +1,11 @@
+"""Smoke test proving the CLI is importable and runs."""
+
+from __future__ import annotations
+
+from {{pkg}}.cli import main
+
+
+def test_main_smoke(capsys) -> None:
+    main()
+
+    assert "{{name}} ready" in capsys.readouterr().out

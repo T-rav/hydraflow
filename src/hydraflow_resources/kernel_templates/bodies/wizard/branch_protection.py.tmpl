@@ -1,0 +1,14 @@
+"""Apply branch protection for the generated repository.
+
+The onboarding provisioning service calls this script after repository creation.
+"""
+
+from __future__ import annotations
+
+
+def main() -> None:
+    raise SystemExit("branch protection is applied by HydraFlow provisioning")
+
+
+if __name__ == "__main__":
+    main()
