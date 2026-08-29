@@ -105,13 +105,19 @@ class TestNoReviewerIsDispatchedUnlessArmed:
         """Where default-off is actually true: no director, therefore no
         review actuator at all. Everywhere else it is the predicate that holds.
 
-        Asserted on the ACTUATOR rather than on the director. That the director
-        itself is absent under Classic and under the deterministic controller
-        is a repo-wide property owned by
-        ``tests/test_implement_canary_default_off.py``; re-asserting it here
-        would be a second copy of someone else's guard, and it says nothing
-        about this dial. What belongs to this file is that no *reviewer* can be
-        dispatched, which is one derivation further on.
+        Asserted through ``_review_actuator`` rather than on the director, so
+        the statement is about what this file's subject is. Be precise about
+        how much that buys, though: for both inputs below ``_built_director``
+        is ``None`` — neither selects ``FABLE_DIRECTOR`` — so the helper
+        short-circuits and ``_review_dispatcher`` is never actually read. For
+        these two cases this is therefore equivalent to "no director", which
+        ``tests/test_implement_canary_default_off.py`` also owns.
+
+        Saying so rather than claiming a derivation this does not perform: the
+        case where the actuator EXISTS and is inert is a different fact, and it
+        is pinned separately by
+        ``test_a_director_is_built_with_its_review_actuator_ready_but_inert``,
+        which is the test that genuinely reads ``_review_dispatcher``.
         """
         assert _review_actuator(_config(tmp_path, **dials)) is None
 
