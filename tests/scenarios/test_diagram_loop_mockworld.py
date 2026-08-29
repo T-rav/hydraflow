@@ -86,8 +86,12 @@ class TestL24DiagramLoop:
         )
         # The synced traceability ratchet baseline rides in regen PRs so a
         # lowered matrix pct never lands without the matching baseline prune.
+        # So does the ports-and-loops standard: its registry tables are
+        # generated blocks, and a regen PR that ships fresh artifacts with a
+        # stale table fails the very `make arch-check` it exists to satisfy.
         assert kwargs["path_specs"] == [
             "docs/arch/generated",
             "docs/arch/.meta.json",
             "disturbance/baselines/traceability.yaml",
+            "docs/standards/ports-and-loops/README.md",
         ]
