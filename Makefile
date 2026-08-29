@@ -26,13 +26,17 @@ DEPS_STAMP := $(VENV)/.deps-synced
 # deterministic failures still fail on every retry and stay red, so real breaks
 # are not masked. PERSISTENT isolation leaks (a global mock left set) are NOT
 # rescued by reruns and are quarantined via PYTEST_SERIAL_PATHS instead.
+# NOT named PYTEST_TIMEOUT: the Makefile does a bare `export` (line 9), and
+# pytest-timeout reads a PYTEST_TIMEOUT env var as a FLOAT
+# (pytest_timeout.py:360), so that name makes every pytest invocation die with
+# `ValueError: Invalid timeout ... from PYTEST_TIMEOUT environment variable`.
 # --timeout/--durations match .github/workflows/ci.yml exactly. Without them a
 # single non-terminating test eats the whole local run invisibly: a working-tree
 # rglob in tests/test_beads_manager.py wedged one xdist worker for 33 minutes
 # while seven idled, and nothing reported which test it was. CI had the guard;
 # the local lane did not, so the failure only ever appeared here.
-PYTEST_TIMEOUT ?= --timeout=300 --durations=25
-PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(PYTEST_TIMEOUT)
+HF_PYTEST_DEADLINE_FLAGS ?= --timeout=300 --durations=25
+PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(HF_PYTEST_DEADLINE_FLAGS)
 
 # Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
 # process-global state that collides across workers).
@@ -628,7 +632,7 @@ quality-unlocked:
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
-		PYTHONPATH=src $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(PYTEST_TIMEOUT) && echo "[serial-tests OK]" & \
+		PYTHONPATH=src $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(HF_PYTEST_DEADLINE_FLAGS) && echo "[serial-tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
