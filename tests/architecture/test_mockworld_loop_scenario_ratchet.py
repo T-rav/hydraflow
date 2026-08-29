@@ -143,11 +143,28 @@ def test_the_coverage_needle_rejects_a_loop_nothing_drives() -> None:
 
 @pytest.mark.parametrize("loop_class", LOOP_CLASS_NAMES)
 def test_every_loop_is_driven_by_a_mockworld_scenario(loop_class: str) -> None:
-    """One red test per loop that no scenario drives, naming the loop."""
-    if loop_class in _grandfathered():
-        pytest.skip(f"{loop_class} is grandfathered in {_BASELINE_REL}")
+    """One red test per loop that no scenario drives, naming the loop.
 
-    assert loop_class in covered_loops(), (
+    Every parameter asserts something — a grandfathered loop is NOT skipped.
+    A runtime skip would be an ignored active test (caught by
+    ``test_no_ignored_active_tests``), and worse, it would let an exemption
+    outlive its reason silently. So the grandfathered branch asserts the
+    exemption is still EARNED: the moment such a loop gains a scenario, this
+    reddens and tells you to bank the win in ``resolved``.
+    """
+    covered = loop_class in covered_loops()
+
+    if loop_class in _grandfathered():
+        assert not covered, (
+            f"{loop_class} is grandfathered as uncovered in {_BASELINE_REL}, "
+            "but a MockWorld scenario now drives it. Move it into the "
+            "`resolved` list so the live grandfathered set shrinks — that is "
+            "how this ratchet is paid down, and an exemption nobody removes "
+            "is an exemption that stops meaning anything."
+        )
+        return
+
+    assert covered, (
         f"{loop_class} has no MockWorld scenario. docs/standards/testing/"
         "README.md requires one: unit tests are blind to the loop's "
         "integration with its ports, and that is the layer this loop is "

@@ -156,7 +156,7 @@ This standard lives at three load-bearing surfaces in any HydraFlow-format repo:
 
 Drift detection: the **scenario** layer of the "New loop or runner" row is now
 enforced, not aspirational —
-[`tests/architecture/test_mockworld_loop_scenario_ratchet.py`](../../../tests/architecture/test_mockworld_loop_scenario_ratchet.py)
+`tests/architecture/test_mockworld_loop_scenario_ratchet.py`
 holds every `BaseBackgroundLoop` subclass in `src/` to having at least one
 scenario that actually drives it (a docstring naming the loop is not
 coverage; the scan reads the AST). It is a shrink-only ratchet whose
