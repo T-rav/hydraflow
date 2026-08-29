@@ -6950,7 +6950,27 @@ class HydraFlowConfig(BaseModel):
             self.workspace_base,
             home / ".hydraflow" / "worktrees",
             home / ".hydraflow" / "dev",
+            home / ".hydraflow" / "manual-repairs",
             self.repo_root / ".claude" / "worktrees",
+            self.repo_root / ".codex" / "worktrees",
+            # Where worktrees ACTUALLY land. `scripts/hf_worktree.sh <dir>`
+            # passes <dir> to `git worktree add` verbatim, so the sanctioned
+            # workflow puts them beside or inside the checkout, not under an
+            # agent-harness directory. Measured 2026-08-29 on this repo: of
+            # 100 registered worktrees the previous list reached 53 — the
+            # other 47 sat in the repo root (13), a sibling
+            # `<repo>-worktrees/` directory (25), the checkout's parent (5)
+            # and `manual-repairs` (4). A collector that cannot see where the
+            # creator writes is a GC that only looks like one.
+            #
+            # Breadth is safe here because the gate is not the only guard:
+            # enumeration comes from THIS repo's `git worktree list`, so no
+            # other repository's files are visible, and every candidate must
+            # still clear the fail-closed policy (min-age, not state-owned,
+            # not an active/HITL/in-retry issue, and a positive landed-work
+            # proof) before it is reaped.
+            self.repo_root,
+            self.repo_root.parent,
         ]
         seen: set[Path] = set()
         roots: list[Path] = []
