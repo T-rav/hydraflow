@@ -6932,6 +6932,31 @@ class HydraFlowConfig(BaseModel):
         """Return the repo-scoped workspace directory path for a given issue number."""
         return self.workspace_base / self.repo_slug / f"issue-{issue_number}"
 
+    def agent_worktree_root(self) -> Path:
+        """Where a bare-name agent worktree is created — ONE setting.
+
+        `scripts/hf_worktree.sh` resolves a bare `<name>` under this path, and
+        `worktree_gc_root_paths` lists it, so the creator and the collector
+        cannot drift apart. Before #11729 they had no shared value: the script
+        passed `<dir>` to `git worktree add` verbatim while the loop swept a
+        hardcoded list of harness directories, and 47 of this repo's 100
+        worktrees (37 GB) sat where the collector could not see them.
+
+        The shell default is spelled again in `hf_worktree.sh`, because a shell
+        script cannot import this module cheaply. That duplication is the
+        residual risk, so it is pinned:
+        `tests/regressions/test_issue_11729_worktree_root_is_one_setting.py`
+        reads the literal out of the script and asserts it equals this.
+
+        `HYDRAFLOW_AGENT_WORKTREE_ROOT` overrides. Pointing it outside the
+        checkout (e.g. `~/.hydraflow/dev`) also keeps large trees out of the
+        repo, which is what let a working-tree walk read 19 GB in #11768.
+        """
+        override = os.environ.get("HYDRAFLOW_AGENT_WORKTREE_ROOT", "").strip()
+        if override:
+            return Path(override).expanduser()
+        return self.repo_root / ".claude" / "worktrees"
+
     def worktree_gc_root_paths(self) -> list[Path]:
         """Return the allow-list of roots the WorkspaceGCLoop may sweep (#10698).
 
@@ -6950,7 +6975,27 @@ class HydraFlowConfig(BaseModel):
             self.workspace_base,
             home / ".hydraflow" / "worktrees",
             home / ".hydraflow" / "dev",
-            self.repo_root / ".claude" / "worktrees",
+            home / ".hydraflow" / "manual-repairs",
+            self.agent_worktree_root(),
+            self.repo_root / ".codex" / "worktrees",
+            # Where worktrees ACTUALLY land. `scripts/hf_worktree.sh <dir>`
+            # passes <dir> to `git worktree add` verbatim, so the sanctioned
+            # workflow puts them beside or inside the checkout, not under an
+            # agent-harness directory. Measured 2026-08-29 on this repo: of
+            # 100 registered worktrees the previous list reached 53 — the
+            # other 47 sat in the repo root (13), a sibling
+            # `<repo>-worktrees/` directory (25), the checkout's parent (5)
+            # and `manual-repairs` (4). A collector that cannot see where the
+            # creator writes is a GC that only looks like one.
+            #
+            # Breadth is safe here because the gate is not the only guard:
+            # enumeration comes from THIS repo's `git worktree list`, so no
+            # other repository's files are visible, and every candidate must
+            # still clear the fail-closed policy (min-age, not state-owned,
+            # not an active/HITL/in-retry issue, and a positive landed-work
+            # proof) before it is reaped.
+            self.repo_root,
+            self.repo_root.parent,
         ]
         seen: set[Path] = set()
         roots: list[Path] = []
