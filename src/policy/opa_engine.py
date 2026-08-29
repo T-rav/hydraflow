@@ -265,14 +265,25 @@ class OpaDecisionEngine:
         charter: Charter, subjects: dict[str, dict[str, object]]
     ) -> dict[str, object]:
         return {
-            "charter": {"standards": list(charter.articles.standards)},
+            "charter": {
+                "standards": list(charter.articles.standards),
+                "assurance": charter.articles.assurance,
+            },
             "subjects": subjects,
         }
 
     def _evaluate(self, document: dict[str, object]) -> dict[str, dict[str, object]]:
         """One ``opa eval``; refuse loudly on a fail-closed or malformed result."""
         raw = self._eval_query(document, f"[{DECISIONS_QUERY}, {MISSING_QUERY}]")
+        if len(raw) != 2:
+            raise OpaEvaluationError(
+                f"expected [decisions, missing_facts], got {raw!r}"
+            )
         decisions, missing = raw
+        if not isinstance(missing, list):
+            raise OpaEvaluationError(
+                f"expected a list of missing facts, got {missing!r}"
+            )
         if missing:
             raise MissingFactError(
                 "; ".join(str(m) for m in missing)

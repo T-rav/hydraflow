@@ -57,14 +57,21 @@ _DEBT_CLASSES: frozenset[str] = frozenset(
     {EnforcementClass.WEAK.value, EnforcementClass.MISSING.value}
 )
 
-#: Facts every ``adr_enforcement`` subject must carry. All four are load-bearing:
-#: dropping ``resolved`` alone turns a paid debt back into a grandfathered one.
+#: Facts every ``adr_enforcement`` subject must carry. All five are
+#: load-bearing: dropping ``resolved`` alone turns a paid debt back into a
+#: grandfathered one, and dropping ``binds`` disarms the regulated-charter rule
+#: below without reddening anything — so both are required, never defaulted.
 _ENFORCEMENT_REQUIRED: tuple[str, ...] = (
     "enforcement_class",
     "in_baseline_snapshot",
     "resolved",
     "exempt",
+    "binds",
 )
+
+#: ADR-0123 ``**Binds:**`` values that constrain the FACTORY itself. ``both``
+#: is included because ADR-0123 defines it as binding work *and* factory.
+_BINDS_FACTORY: frozenset[str] = frozenset({"factory", "both"})
 
 #: Facts every ``adr_conformance`` subject must carry. ``rename_match`` is
 #: optional by design — its absence *is* the observation "no rename detected".
@@ -107,7 +114,9 @@ class PythonDecisionEngine:
         for standard, subject in sorted(grouped):
             subject_facts = grouped[(standard, subject)]
             if standard == STANDARD_ADR_ENFORCEMENT:
-                decisions.append(self._decide_enforcement(subject, subject_facts))
+                decisions.append(
+                    self._decide_enforcement(subject, subject_facts, active)
+                )
             elif standard == STANDARD_ADR_CONFORMANCE:
                 decisions.append(self._decide_conformance(subject, subject_facts))
             else:
@@ -119,7 +128,9 @@ class PythonDecisionEngine:
         return decisions
 
     @staticmethod
-    def _decide_enforcement(subject: str, facts: Sequence[Fact]) -> StandardDecision:
+    def _decide_enforcement(
+        subject: str, facts: Sequence[Fact], charter: Charter
+    ) -> StandardDecision:
         """The ADR-enforcement ratchet's rule, re-derived from primitive facts.
 
         The ladder below is deliberately NOT a call into
@@ -136,6 +147,7 @@ class PythonDecisionEngine:
         exempt = bool(by_key["exempt"])
         in_snapshot = bool(by_key["in_baseline_snapshot"])
         resolved = bool(by_key["resolved"])
+        binds = str(by_key["binds"])
 
         if cls not in _DEBT_CLASSES:
             return StandardDecision(
@@ -158,6 +170,24 @@ class PythonDecisionEngine:
                     "docs/standards/adr_enforcement/exemptions.md"
                 ),
                 remediation=RemediationAction.NONE,
+                facts=list(facts),
+            )
+        if (
+            charter.is_regulated()
+            and binds in _BINDS_FACTORY
+            and cls == EnforcementClass.WEAK.value
+        ):
+            return StandardDecision(
+                standard=STANDARD_ADR_ENFORCEMENT,
+                subject=subject,
+                status=DecisionStatus.VIOLATED,
+                blocking=True,
+                reason=(
+                    f"WEAK enforcement on a Binds:{binds} decision under a "
+                    "regulated charter — the ratchet does not carry "
+                    "factory-binding debt in a regulated repo"
+                ),
+                remediation=RemediationAction.FILE_ISSUE,
                 facts=list(facts),
             )
         if in_snapshot and not resolved:

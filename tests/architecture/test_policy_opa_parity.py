@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from policy.facts import STANDARD_ADR_ENFORCEMENT, collect_adr_enforcement_facts
-from policy.models import Charter, DecisionStatus, Fact
+from policy.models import Charter, CharterArticles, DecisionStatus, Fact
 from policy.opa_engine import POLICY_REL, OpaDecisionEngine
 from policy.python_engine import PythonDecisionEngine
 from policy.store import facts_from_jsonl, facts_to_jsonl
@@ -57,9 +57,19 @@ pytestmark = pytest.mark.opa
 REPO = Path(__file__).resolve().parents[2]
 OBSERVED_AT = datetime(2026, 8, 29, 9, 30, tzinfo=UTC)
 
-#: Every enforcement class the classifier can emit, crossed with every lane.
+#: Every enforcement class the classifier can emit, crossed with every lane and
+#: every ADR-0123 authority direction.
 _CLASSES = ("REAL", "WEAK", "MISSING")
 _FLAGS = (False, True)
+_BINDS = ("work", "factory", "both", "unknown")
+
+#: The two assurance classes the composition probe distinguishes. Both charters
+#: are run through every parity assertion: a probe that only fires under one of
+#: them would otherwise be parity-tested on one side only.
+_CHARTERS: tuple[tuple[str, Charter], ...] = (
+    ("internal", Charter(articles=CharterArticles(assurance="internal"))),
+    ("regulated", Charter(articles=CharterArticles(assurance="regulated-phi"))),
+)
 
 
 def _facts_for(
@@ -69,12 +79,14 @@ def _facts_for(
     in_baseline_snapshot: bool,
     resolved: bool,
     exempt: bool,
+    binds: str,
 ) -> list[Fact]:
     observations: list[tuple[str, str | bool]] = [
         ("enforcement_class", enforcement_class),
         ("in_baseline_snapshot", in_baseline_snapshot),
         ("resolved", resolved),
         ("exempt", exempt),
+        ("binds", binds),
     ]
     return [
         Fact(
@@ -90,13 +102,15 @@ def _facts_for(
 
 
 def _exhaustive_corpus() -> list[Fact]:
-    """One subject per point in the full ``class x snapshot x resolved x exempt``
-    space (24 subjects). Exhaustive rather than sampled: a sampled parity corpus
-    is the shape that agrees everywhere it looks and diverges where it doesn't.
+    """One subject per point in the full
+    ``class x snapshot x resolved x exempt x binds`` space (96 subjects).
+
+    Exhaustive rather than sampled: a sampled parity corpus is the shape that
+    agrees everywhere it looks and diverges where it doesn't.
     """
     facts: list[Fact] = []
-    for index, (cls, snap, res, exempt) in enumerate(
-        itertools.product(_CLASSES, _FLAGS, _FLAGS, _FLAGS)
+    for index, (cls, snap, res, exempt, binds) in enumerate(
+        itertools.product(_CLASSES, _FLAGS, _FLAGS, _FLAGS, _BINDS)
     ):
         facts.extend(
             _facts_for(
@@ -105,6 +119,7 @@ def _exhaustive_corpus() -> list[Fact]:
                 in_baseline_snapshot=snap,
                 resolved=res,
                 exempt=exempt,
+                binds=binds,
             )
         )
     return facts
@@ -184,15 +199,22 @@ def test_opa_reproduces_python_for_every_accepted_adr() -> None:
     )
 
 
-def test_opa_reproduces_python_across_the_exhaustive_fact_space() -> None:
-    """Every combination of class and lane, not only the ones the repo reaches."""
+@pytest.mark.parametrize(
+    ("assurance", "charter"), _CHARTERS, ids=[c[0] for c in _CHARTERS]
+)
+def test_opa_reproduces_python_across_the_exhaustive_fact_space(
+    assurance: str, charter: Charter
+) -> None:
+    """Every combination of class, lane and authority direction, under both
+    assurance classes — not only the ones the repo reaches."""
     engine = OpaDecisionEngine(repo_root=REPO)
 
-    divergences = _divergences(_exhaustive_corpus(), engine=engine)
+    divergences = _divergences(_exhaustive_corpus(), engine=engine, charter=charter)
 
     assert not divergences, (
         "OpaDecisionEngine diverged from PythonDecisionEngine on the exhaustive "
-        f"class x lane corpus:\n{_report(divergences)}"
+        f"class x lane x binds corpus under a {assurance} charter:"
+        f"\n{_report(divergences)}"
     )
 
 
@@ -230,6 +252,23 @@ def test_parity_corpus_reaches_every_status() -> None:
     statuses = {d.status for d in PythonDecisionEngine().decide(_exhaustive_corpus())}
 
     assert statuses == set(DecisionStatus), f"corpus reached only {statuses}"
+
+
+def test_the_regulated_charter_actually_changes_decisions() -> None:
+    """Anti-vacuity for the probe: the two charters must reach DIFFERENT
+    answers over the corpus, on both engines. If they did not, running every
+    parity assertion twice would prove nothing twice."""
+    corpus = _exhaustive_corpus()
+    engine = OpaDecisionEngine(repo_root=REPO)
+    internal, regulated = (charter for _, charter in _CHARTERS)
+
+    opa_internal = _keyed(engine.decide(corpus, internal))
+    opa_regulated = _keyed(engine.decide(corpus, regulated))
+
+    assert opa_internal != opa_regulated
+    assert _keyed(PythonDecisionEngine().decide(corpus, internal)) != _keyed(
+        PythonDecisionEngine().decide(corpus, regulated)
+    )
 
 
 def test_parity_spans_the_whole_accepted_population() -> None:
@@ -270,6 +309,16 @@ _MUTATIONS: tuple[tuple[str, str, str], ...] = (
         'remediation(verdict) := "file_issue" if verdict == "violated"',
         'remediation(verdict) := "none" if verdict == "violated"',
     ),
+    (
+        "the-probe-stops-reading-the-charter",
+        'regulated if startswith(object.get(input, ["charter", "assurance"], "internal"), "regulated-")',
+        "regulated if true",
+    ),
+    (
+        "the-probe-forgets-binds-both",
+        'obs.binds in {"factory", "both"}',
+        'obs.binds in {"factory"}',
+    ),
 )
 
 
@@ -296,7 +345,10 @@ def test_a_mutated_policy_is_caught_by_the_parity_comparison(
     mutated.write_text(source.replace(old, new), encoding="utf-8")
     engine = OpaDecisionEngine(repo_root=REPO, policy=mutated)
 
-    divergences = _divergences(_exhaustive_corpus(), engine=engine)
+    corpus = _exhaustive_corpus()
+    divergences: dict[str, dict[str, object]] = {}
+    for _, charter in _CHARTERS:
+        divergences |= _divergences(corpus, engine=engine, charter=charter)
 
     assert divergences, (
         f"mutation {name!r} changed the policy's decision rules and the parity "

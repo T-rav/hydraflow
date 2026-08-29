@@ -62,6 +62,7 @@ def _enforcement_facts() -> list[Fact]:
         _fact("in_baseline_snapshot", False),
         _fact("resolved", False),
         _fact("exempt", False),
+        _fact("binds", "work"),
     ]
 
 

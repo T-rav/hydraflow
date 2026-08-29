@@ -21,11 +21,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from adr_conformance import (
+    accepted_adrs,
     enforcement_classification,
     load_enforcement_baseline,
     parse_exemptions,
 )
-from policy.models import Fact
+from charter import load_charter
+from policy.models import Charter, CharterArticles, Fact
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import datetime
@@ -69,11 +71,17 @@ def collect_adr_enforcement_facts(
     * ``in_baseline_snapshot`` — is the ADR in the frozen landing snapshot?
     * ``resolved`` — has its debt been claimed paid in the baseline JSON?
     * ``exempt`` — is it allow-listed as process-only?
+    * ``binds`` — ``work`` / ``factory`` / ``both`` / ``unknown``, the ADR-0123
+      authority direction. Not used by the ADR-enforcement ladder itself; it is
+      the subject-side half of a cross-standard rule that joins it to the
+      repo's ``articles.assurance`` (see ``Charter.is_regulated``).
 
-    The engine derives ``grandfathered`` from the middle two; see the module
-    docstring for why that derivation is not done here.
+    The engine derives ``grandfathered`` from ``in_baseline_snapshot`` and
+    ``resolved``; see the module docstring for why that derivation is not done
+    here.
     """
     classes = enforcement_classification(repo_root)
+    binds = {adr.number: adr.binds for adr in accepted_adrs(repo_root)}
     snapshot, resolved = load_enforcement_baseline(repo_root)
     exempted = frozenset(parse_exemptions(repo_root))
 
@@ -85,6 +93,7 @@ def collect_adr_enforcement_facts(
             ("in_baseline_snapshot", number in snapshot),
             ("resolved", number in resolved),
             ("exempt", number in exempted),
+            ("binds", binds[number]),
         ]
         facts.extend(
             Fact(
@@ -138,3 +147,28 @@ def conformance_facts(
         )
         for key, value in observations
     ]
+
+
+def seam_charter(repo_root: Path) -> Charter:
+    """The decision seam's slice of the repo's ``charter.yaml``.
+
+    Two ``Charter`` types exist and they are not interchangeable:
+    :class:`charter.Charter` is the full ADR-0143 loader (Purpose, Articles,
+    Actors, Artifacts, rails, drift findings) and it reads the filesystem;
+    :class:`policy.models.Charter` is the pure slice the engine is allowed to
+    hold. This is the one bridge between them, and it lives in the collector
+    because crossing it is a repo read.
+
+    An ungoverned repo (no ``charter.yaml``) yields the default charter, which
+    governs every standard — the same fail-OPEN ``Charter.governs`` documents,
+    for the same reason: "no charter written yet" is not "nothing is enforced".
+    """
+    loaded = load_charter(repo_root)
+    if loaded is None:
+        return Charter()
+    return Charter(
+        articles=CharterArticles(
+            standards=list(loaded.articles.standards),
+            assurance=loaded.articles.assurance,
+        )
+    )

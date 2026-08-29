@@ -16,12 +16,18 @@ _obs(overrides) := object.union(
 		"in_baseline_snapshot": false,
 		"resolved": false,
 		"exempt": false,
+		"binds": "work",
 	},
 	overrides,
 )
 
 _input(overrides) := {
 	"charter": {"standards": ["adr_enforcement"], "assurance": "internal"},
+	"subjects": {"SUBJECT": _obs(overrides)},
+}
+
+_regulated_input(overrides) := {
+	"charter": {"standards": ["adr_enforcement"], "assurance": "regulated-phi"},
 	"subjects": {"SUBJECT": _obs(overrides)},
 }
 
@@ -122,4 +128,65 @@ test_an_empty_standards_list_governs_everything if {
 		"subjects": {"SUBJECT": _obs({})},
 	}
 	count(result) == 1
+}
+
+# --- the composition probe (measurement 4) ---------------------------------
+
+test_regulated_charter_blocks_grandfathered_weak_factory_binding_debt if {
+	d := adr_enforcement.decisions.SUBJECT with input as _regulated_input({
+		"enforcement_class": "WEAK",
+		"in_baseline_snapshot": true,
+		"binds": "factory",
+	})
+	d.status == "violated"
+	d.blocking == true
+}
+
+test_binds_both_counts_as_binding_the_factory if {
+	d := adr_enforcement.decisions.SUBJECT with input as _regulated_input({
+		"enforcement_class": "WEAK",
+		"in_baseline_snapshot": true,
+		"binds": "both",
+	})
+	d.status == "violated"
+}
+
+test_an_internal_charter_still_grandfathers_the_same_debt if {
+	# The probe must be the CHARTER's doing, not a new unconditional rule.
+	d := adr_enforcement.decisions.SUBJECT with input as _input({
+		"enforcement_class": "WEAK",
+		"in_baseline_snapshot": true,
+		"binds": "factory",
+	})
+	d.status == "grandfathered"
+}
+
+test_work_binding_debt_is_untouched_by_a_regulated_charter if {
+	d := adr_enforcement.decisions.SUBJECT with input as _regulated_input({
+		"enforcement_class": "WEAK",
+		"in_baseline_snapshot": true,
+		"binds": "work",
+	})
+	d.status == "grandfathered"
+}
+
+test_missing_class_debt_is_untouched_by_the_probe if {
+	# The probe names WEAK specifically: a MISSING decision-of-record has no
+	# enforcement to weaken, so the ratchet's carry still applies.
+	d := adr_enforcement.decisions.SUBJECT with input as _regulated_input({
+		"enforcement_class": "MISSING",
+		"in_baseline_snapshot": true,
+		"binds": "factory",
+	})
+	d.status == "grandfathered"
+}
+
+test_an_exemption_still_outranks_the_probe if {
+	d := adr_enforcement.decisions.SUBJECT with input as _regulated_input({
+		"enforcement_class": "WEAK",
+		"in_baseline_snapshot": true,
+		"exempt": true,
+		"binds": "factory",
+	})
+	d.status == "exempt"
 }

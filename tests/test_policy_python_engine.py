@@ -47,6 +47,7 @@ def _enforcement_facts(
     in_baseline_snapshot: bool = False,
     resolved: bool = False,
     exempt: bool = False,
+    binds: str = "work",
     drop: str | None = None,
 ) -> list[Fact]:
     observations: dict[str, bool | str] = {
@@ -54,6 +55,7 @@ def _enforcement_facts(
         "in_baseline_snapshot": in_baseline_snapshot,
         "resolved": resolved,
         "exempt": exempt,
+        "binds": binds,
     }
     if drop is not None:
         observations.pop(drop)
@@ -228,6 +230,7 @@ def test_decision_carries_the_facts_it_was_made_from() -> None:
         "in_baseline_snapshot",
         "resolved",
         "exempt",
+        "binds",
     }
 
 
@@ -363,3 +366,104 @@ def test_a_missing_rename_fact_is_not_the_same_as_an_empty_one() -> None:
     assert "rename_match" not in {f.key for f in facts}
     decision = PythonDecisionEngine().decide(facts)[0]
     assert decision.remediation is RemediationAction.FILE_ISSUE
+
+
+# ---------------------------------------------------------------------------
+# The cross-standard rule: charter assurance x ADR-0123 authority (#11750)
+# ---------------------------------------------------------------------------
+
+
+def _regulated() -> Charter:
+    return Charter.model_validate({"articles": {"assurance": "regulated-phi"}})
+
+
+def test_a_regulated_charter_blocks_grandfathered_weak_factory_binding_debt() -> None:
+    """The ratchet carries this debt; a regulated charter does not."""
+    facts = _enforcement_facts(
+        "ADR-0091",
+        enforcement_class="WEAK",
+        in_baseline_snapshot=True,
+        binds="factory",
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated())[0]
+
+    assert decision.status is DecisionStatus.VIOLATED
+    assert decision.blocking is True
+
+
+def test_binds_both_counts_as_binding_the_factory() -> None:
+    """ADR-0123 defines ``both`` as binding work AND factory."""
+    facts = _enforcement_facts(
+        "ADR-0091", enforcement_class="WEAK", in_baseline_snapshot=True, binds="both"
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated())[0]
+
+    assert decision.status is DecisionStatus.VIOLATED
+
+
+def test_the_same_debt_stays_grandfathered_under_an_internal_charter() -> None:
+    """The rule must be the CHARTER's doing, not a new unconditional branch."""
+    facts = _enforcement_facts(
+        "ADR-0091", enforcement_class="WEAK", in_baseline_snapshot=True, binds="factory"
+    )
+
+    decision = PythonDecisionEngine().decide(facts)[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+
+
+def test_work_binding_debt_is_untouched_by_a_regulated_charter() -> None:
+    facts = _enforcement_facts(
+        "ADR-0091", enforcement_class="WEAK", in_baseline_snapshot=True, binds="work"
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated())[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+
+
+def test_missing_class_debt_is_untouched_by_the_probe() -> None:
+    """The rule names WEAK: a MISSING decision-of-record has no enforcement to
+    weaken, so the ratchet's carry still applies."""
+    facts = _enforcement_facts(
+        "ADR-0091",
+        enforcement_class="MISSING",
+        in_baseline_snapshot=True,
+        binds="factory",
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated())[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+
+
+def test_an_exemption_still_outranks_the_regulated_rule() -> None:
+    facts = _enforcement_facts(
+        "ADR-0091",
+        enforcement_class="WEAK",
+        in_baseline_snapshot=True,
+        exempt=True,
+        binds="factory",
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated())[0]
+
+    assert decision.status is DecisionStatus.EXEMPT
+
+
+def test_a_dropped_binds_fact_raises_rather_than_disarming_the_rule() -> None:
+    """Rego's native default is that an absent key makes a rule not fire. The
+    Python engine must not acquire that behaviour by the back door: a missing
+    ``binds`` silently turns the regulated rule off."""
+    facts = _enforcement_facts(
+        "ADR-0091",
+        enforcement_class="WEAK",
+        in_baseline_snapshot=True,
+        binds="factory",
+        drop="binds",
+    )
+
+    with pytest.raises(MissingFactError, match="binds"):
+        PythonDecisionEngine().decide(facts, _regulated())

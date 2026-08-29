@@ -129,11 +129,31 @@ class CharterArticles(BaseModel):
 
     standards: list[str] = Field(default_factory=list)
 
+    #: The repo's assurance class, in ``repo_store.RepoRecord``'s vocabulary
+    #: (``internal`` or ``regulated-<name>``) — the SAME field
+    #: ``charter.Articles.assurance`` carries, sliced into the seam so a rule
+    #: can join a fact about the *subject* to a fact about the *repo* without
+    #: the engine loading ``charter.yaml`` for itself. ``policy.facts
+    #: .seam_charter`` fills it; ``tests/test_policy_models.py`` pins the
+    #: default against ``charter.DEFAULT_ASSURANCE`` so the copy cannot rot.
+    assurance: str = "internal"
+
 
 class Charter(BaseModel):
     """A repo's governing declaration, as far as the decision seam sees it."""
 
     articles: CharterArticles = Field(default_factory=CharterArticles)
+
+    def is_regulated(self) -> bool:
+        """Is this repo in a regulated assurance class?
+
+        The vocabulary has exactly two shapes (``charter.Articles``): the
+        literal ``internal``, or ``regulated-<name>``. Matching the prefix
+        rather than an enumeration is deliberate — the ``<name>`` half is
+        open, and a rule that had to list the regulated classes would silently
+        stop covering the next one.
+        """
+        return self.articles.assurance.startswith("regulated-")
 
     @classmethod
     def for_standards(cls, *standards: str) -> Charter:

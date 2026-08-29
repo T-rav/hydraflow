@@ -21,7 +21,9 @@
 package hydraflow.adr_enforcement
 
 # ---------------------------------------------------------------------------
-# Everything `policy.python_engine._decide_enforcement` does, and nothing else.
+# PARITY SECTION — everything `policy.python_engine._decide_enforcement` does.
+# The cross-standard rule the pilot is really measuring is in the PROBE SECTION
+# at the bottom; the two are kept apart so each can be line-counted on its own.
 # ---------------------------------------------------------------------------
 
 # WEAK + MISSING are the unenforced-decision debt (adr_conformance.EnforcementClass).
@@ -32,7 +34,7 @@ debt_classes := {"WEAK", "MISSING"}
 # behaviour is the opposite — an absent key makes a rule body simply not fire,
 # which would silently downgrade a violation to "no decision" — so the check
 # has to be written out.
-required_facts := {"enforcement_class", "in_baseline_snapshot", "resolved", "exempt"}
+required_facts := {"enforcement_class", "in_baseline_snapshot", "resolved", "exempt", "binds"}
 
 missing_facts contains msg if {
 	some subject, obs in input.subjects
@@ -55,6 +57,8 @@ status(obs) := "compliant" if not in_debt(obs)
 
 else := "exempt" if obs.exempt
 
+else := "violated" if probe_blocks(obs)
+
 else := "grandfathered" if {
 	obs.in_baseline_snapshot
 	not obs.resolved
@@ -73,6 +77,8 @@ else := sprintf("%s but allow-listed as process-only in docs/standards/adr_enfor
 else := sprintf("%s but carried by the frozen enforcement-debt baseline; shrink-only — pay it down by giving the ADR a real check", [obs.enforcement_class]) if {
 	status(obs) == "grandfathered"
 }
+
+else := probe_reason(obs) if probe_blocks(obs)
 
 else := sprintf("%s enforcement debt that is neither grandfathered nor exempt", [obs.enforcement_class])
 
@@ -96,3 +102,30 @@ decisions[subject] := d if {
 remediation(verdict) := "file_issue" if verdict == "violated"
 
 else := "none"
+
+# ---------------------------------------------------------------------------
+# PROBE SECTION (measurement 4) — the cross-standard rule.
+#
+#   An ADR that binds the FACTORY and is only weakly enforced is blocking even
+#   when the ratchet grandfathers it, once the repo's charter declares a
+#   regulated assurance class.
+#
+# Cross-standard because it joins a fact about the SUBJECT (`binds`, ADR-0123)
+# to a fact about the REPO (`articles.assurance`, ADR-0143) — the shape that
+# has no home in a per-subject ladder. `both` counts with `factory`: ADR-0123
+# defines `both` as binding work AND factory.
+#
+# The assurance vocabulary is `internal` | `regulated-<name>`, open on the
+# right, so this matches the prefix rather than an enumeration that would
+# silently stop covering the next regulated class.
+# ---------------------------------------------------------------------------
+
+regulated if startswith(object.get(input, ["charter", "assurance"], "internal"), "regulated-")
+
+probe_blocks(obs) if {
+	regulated
+	obs.binds in {"factory", "both"}
+	obs.enforcement_class == "WEAK"
+}
+
+probe_reason(obs) := sprintf("WEAK enforcement on a Binds:%s decision under a regulated charter — the ratchet does not carry factory-binding debt in a regulated repo", [obs.binds])
