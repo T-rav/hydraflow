@@ -27,7 +27,7 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python }}
       core_python: ${{ steps.core_filter.outputs.core_python }}
-      console_ledger: ${{ steps.filter.outputs.console_ledger }}
+      council_ledger: ${{ steps.filter.outputs.council_ledger }}
       arch: ${{ steps.filter.outputs.arch }}
       scenario_tests: ${{ steps.filter.outputs.scenario_tests }}
       regression_tests: ${{ steps.filter.outputs.regression_tests }}
@@ -79,14 +79,14 @@ jobs:
               # and flips a live regulator from inert to acting — so it must
               # run the loader/regulator/parity tests that read these files.
               - 'control/**'
-              # agents/** — the console decision ledger and persona contracts
+              # agents/** — the Council decision ledger and persona contracts
               # (ARCH-0001). This entry gates lint/typecheck/security only;
               # the pytest lane is gated by core_python (below), which
               # deliberately excludes agents/** so a decision-record-only PR
               # doesn't drag in the heavy smoke/scenario/regression/sandbox
-              # lanes. The ledger's real guard — `make console-conformance`,
+              # lanes. The ledger's real guard — `make council-conformance`,
               # including git-history immutability — runs on the dedicated
-              # console_ledger filter below, OR'd into the `audit` job's
+              # council_ledger filter below, OR'd into the `audit` job's
               # `if:` (#11164; see tests/regressions/test_issue_11164.py).
               - 'agents/**'
               # src/hydraflow_resources/**: the shipped runtime resources —
@@ -100,11 +100,11 @@ jobs:
               # tests/test_ci_path_filter_completeness.py, which exists because
               # this same omission caused two incidents in two days.
               - 'src/hydraflow_resources/**'
-            # console_ledger: a narrower agents/** signal used only to make
-            # the `audit` job (which runs `make console-conformance`) fire
+            # council_ledger: a narrower agents/** signal used only to make
+            # the `audit` job (which runs `make council-conformance`) fire
             # for ledger-only PRs, without widening core_python's heavier
             # blast radius (#11164).
-            console_ledger:
+            council_ledger:
               - 'agents/**'
             arch:
               - 'src/arch/**'
@@ -894,10 +894,10 @@ jobs:
   audit:
     name: Principles Audit
     needs: changes
-    # console_ledger OR'd in (#11164): a PR touching only agents/** (the
-    # ARCH-0001 decision ledger) must still run `make console-conformance`
+    # council_ledger OR'd in (#11164): a PR touching only agents/** (the
+    # ARCH-0001 decision ledger) must still run `make council-conformance`
     # below — see tests/regressions/test_issue_11164.py.
-    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.console_ledger == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.council_ledger == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -939,22 +939,24 @@ jobs:
           # is NA there and only the telemetry history scan runs (#9902).
           HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
         run: make audit
-      - name: Console conformance (ledger immutability)
+      - name: Council conformance (ledger immutability)
         # #11110 (sampled-audit upheld): ARCH-0001 declares ledger
-        # immutability `Enforced by: make console-conformance`, but nothing
+        # immutability `Enforced by: make console-conformance` (its era's
+        # name — the record is immutable; the target is `council-conformance`
+        # since ARCH-0003 and the old name is a deprecated alias), but nothing
         # in CI ever ran it — the git-history check (#6) needs a full clone,
         # which this job has (fetch-depth: 0 above; `arch` also checks out
         # with fetch-depth: 0, but its own filter doesn't cover agents/**
-        # either). The unit test (tests/test_console_conformance.py) covers
+        # either). The unit test (tests/test_council_conformance.py) covers
         # the shape/numbering/staleness checks with check_git=False; this
         # step closes the immutability half so a merged decision record
         # cannot be silently rewritten green.
         # #11164 (sampled-audit upheld): the step above existed but this job
         # never fired for an agents/**-only PR — the exact "silently
         # rewritten decision record" scenario #11110 was filed against. The
-        # console_ledger filter + this job's `if:` close that reachability
+        # council_ledger filter + this job's `if:` close that reachability
         # gap; see tests/regressions/test_issue_11164.py.
-        run: make console-conformance
+        run: make council-conformance
 
   ui-build:
     name: Dashboard Build

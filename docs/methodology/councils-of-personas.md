@@ -1,10 +1,18 @@
-# Consoles of Personas — chartered review chambers for HydraFlow-format repos
+# Councils of Personas — chartered review chambers for HydraFlow-format repos
+
+**Name of record:** *the Council, with chambers* — the PAAA house standard
+ruled 2026-08-25. Lineage: harvestd/HydraFlow **console** → GNAA **Board**
+(briefly) → **Council** (GNAA decision record `council/decisions/general/0009`).
+"Console" named a control surface rather than a deliberative structure, and
+"Board" read as fiduciary. Earlier records and dated knowledge rows keep the
+word they were written under; see HydraFlow `agents/council/decisions/arch/0003-council-rename.md`.
 
 **Pattern origin:** harvestd, 2026-07-31 (`T-rav/harvestd` — `agents/` personas +
-`console/` with a general contract and three chambers + `console/decisions/`
-with ten founding records). This document generalizes that reference
-implementation into a methodology any HydraFlow-format repo can stamp
-(`make stamp DIR=… AGENTS_CONSOLE=1` adds the skeleton; see
+a general contract with three chambers + `decisions/` with ten founding
+records; that repo's directory was called `console/` at the time). This
+document generalizes that reference implementation into a methodology any
+HydraFlow-format repo can stamp
+(`make stamp DIR=… AGENTS_COUNCIL=1` adds the skeleton; see
 [Onboarding](onboarding-hydraflow-format-repos.md)).
 
 **What it is:** a governed way to get *multi-perspective review with recorded
@@ -99,20 +107,21 @@ three-frame stack forbids.
 
 Documented in the reference repo and preserved here as the growth path:
 personas graduate into **GitHub-driven feeder loops** (proposal-only, the
-ports-and-loops standard), and the console graduates into a **rendered
+ports-and-loops standard), and the Council graduates into a **rendered
 surface** — a faceplate per persona-loop over the common evidence shape every
 run emits. The files remain the contract; the loops become the enactment.
 
 ## Stamping the skeleton
 
-`make stamp DIR=<repo> PKG=<pkg> AGENTS_CONSOLE=1` adds the optional layer:
+`make stamp DIR=<repo> PKG=<pkg> AGENTS_COUNCIL=1` adds the optional layer
+(`AGENTS_CONSOLE=1` still works — deprecated alias, one cycle):
 
 ```
 agents/
   README.md                 # this pattern, condensed; points here
   personas/README.md        # the persona-contract format (Layer 1)
-  console/README.md         # the general chamber contract (Layer 2)
-  console/decisions/README.md  # record discipline (Layer 3) — listing is the index
+  council/README.md         # the general chamber contract (Layer 2)
+  council/decisions/README.md  # record discipline (Layer 3) — listing is the index
 ```
 
 Skeleton READMEs are template-owned (re-stampable with `FORCE=1`); the

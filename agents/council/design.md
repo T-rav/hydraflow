@@ -1,4 +1,4 @@
-# Design Console
+# Design Chamber
 
 **Chair:** product-manager · **Seats:** senior-principal (structure, boundaries), vp-eng (claims the artifact makes) · **Inherits:** [the general contract](README.md).
 
@@ -13,4 +13,4 @@ Specs and methodology docs before adoption; epic/roadmap restructures; intake-sh
 
 ## Bounds
 
-Cannot approve kernel-standard or policy changes (architecture console → operator). Cannot create — it judges. Records: [decisions/design/](decisions/design/) — committing the record is the chair's closing act.
+Cannot approve kernel-standard or policy changes (architecture chamber → operator). Cannot create — it judges. Records: [decisions/design/](decisions/design/) — committing the record is the chair's closing act.
