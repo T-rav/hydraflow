@@ -1,6 +1,6 @@
-"""Regression: ADRCouncilReviewer must surface credit-exhaustion (W2MS-04).
+"""Regression: ADRReviewPanel must surface credit-exhaustion (W2MS-04).
 
-The ADR council orchestrator runs through ``run_simple``, which surfaces a
+The ADR review-panel orchestrator runs through ``run_simple``, which surfaces a
 credit-out as a nonzero rc / "usage limit reached" blob *without* raising.
 Previously the reviewer degraded that to ``return None`` (treated as an
 unavailable orchestrator) and the per-ADR ``except Exception`` swallowed
@@ -48,13 +48,13 @@ async def test_execute_orchestrator_raises_on_credit_out_blob(tmp_path: Path) ->
 
 @pytest.mark.asyncio
 async def test_review_proposed_adrs_propagates_credit_out(tmp_path: Path) -> None:
-    """A credit-out during a per-ADR council session must propagate out of
+    """A credit-out during a per-ADR review-panel session must propagate out of
     review_proposed_adrs rather than being swallowed-and-continued."""
     reviewer = _make_reviewer(tmp_path)
     adr_dir = tmp_path / "repo" / "docs" / "adr"
     _write_adr(adr_dir, 9001, "Sample Decision", "Proposed")
 
-    # Pre-validation gate must pass so the council session actually runs.
+    # Pre-validation gate must pass so the review-panel session actually runs.
     reviewer._pre_validator.validate = lambda *a, **k: SimpleNamespace(
         passed=True, issues=[]
     )
