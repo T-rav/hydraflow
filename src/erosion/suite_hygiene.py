@@ -29,11 +29,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from erosion.models import CrossFileDuplicate, ParametrizeGroup, SuiteHygieneFinding
+from pytest_collection import collected_test_globs
 
 #: Minimum identical tests in one file before they are reported as a parametrize group.
 DEFAULT_MIN_GROUP = 3
 
-_TEST_GLOBS = ("test_*.py", "regression_*.py")
 _SKIP_DIRS = frozenset({"__pycache__", "node_modules", ".venv"})
 
 
@@ -149,14 +149,36 @@ def compute(
     )
 
 
-def collect_tests(tests_dir: Path) -> dict[str, str]:
+def collect_tests(
+    tests_dir: Path, globs: tuple[str, ...] | None = None
+) -> dict[str, str]:
     """Read every pytest-collected module under *tests_dir* (impure), keyed by ``<tests_dir.name>/<relative>`` posix path.
 
-    Matches the repo's ``python_files`` globs (``test_*.py`` and the legacy
-    ``regression_*.py``) recursively; skips bytecode caches and vendored trees.
+    Matches the repo's ``python_files`` globs recursively; skips bytecode
+    caches and vendored trees. The globs come from
+    :func:`pytest_collection.collected_test_globs` rather than a constant here,
+    so this sensor and the anti-skip guard cannot disagree about what a test
+    file is — they read the same key of the same file.
+
+    *globs* defaults to what the repo CONTAINING *tests_dir* declares, which is
+    the same thing pytest would decide from that rootdir — including pytest's
+    own defaults when the repo declares nothing, so a repo with no
+    ``python_files`` key is measured exactly as pytest would collect it.
+
+    That fallback narrows the set (no ``regression_*.py``), so it must never be
+    reached silently for a repo that DOES configure the key. It cannot be:
+    the globs come from the pyproject sitting beside ``tests_dir``, and the
+    only way to miss it is to point this at a directory that is not a repo
+    root's ``tests/``. Callers auditing a tree laid out differently pass that
+    repo's globs explicitly rather than relying on the walk-up.
+
+    Deliberately NOT resolved by walking up from ``__file__``: that lands
+    inside site-packages in a wheel install (#11589).
     """
+    if globs is None:
+        globs = collected_test_globs(tests_dir.parent)
     out: dict[str, str] = {}
-    for glob in _TEST_GLOBS:
+    for glob in globs:
         for path in tests_dir.rglob(glob):
             rel = path.relative_to(tests_dir)
             if _SKIP_DIRS.intersection(rel.parts[:-1]):

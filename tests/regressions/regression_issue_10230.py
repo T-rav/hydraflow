@@ -40,7 +40,6 @@ _FIXTURE = (
 )
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="git binary not on PATH")
 async def test_fresh_recording_replays_through_fake(tmp_path: Path) -> None:
     """A cassette freshly recorded from real git must replay green through FakeGit."""
     from contract_recording import record_git

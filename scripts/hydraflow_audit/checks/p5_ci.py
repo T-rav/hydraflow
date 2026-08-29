@@ -343,9 +343,11 @@ def _no_direct_pushes_to_main(ctx: CheckContext) -> Finding:
             timeout=20,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return finding("P5.6", Status.NA, "git log timed out — skipping")
+        return finding("P5.6", Status.INERT, "git log timed out — history unread")
     if result.returncode != 0:
-        return finding("P5.6", Status.NA, f"git log {main_ref} failed — skipping")
+        return finding(
+            "P5.6", Status.INERT, f"git log {main_ref} failed — history unread"
+        )
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     # Squash-merge workflows leave non-merge commits on main, but each one
     # still went through a PR — GitHub appends `(#NNN)` to the subject.

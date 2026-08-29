@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import ast
 import re
-import subprocess
 import sys
 from pathlib import Path
 
+from .. import layout
 from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import finding
@@ -53,43 +53,6 @@ def _ports_cover_boundaries(ctx: CheckContext) -> Finding:
     )
 
 
-@register("P2.3")
-def _layer_check_script_exists(ctx: CheckContext) -> Finding:
-    script = ctx.root / "scripts" / "check_layer_imports.py"
-    if script.exists():
-        return finding("P2.3", Status.PASS)
-    return finding(
-        "P2.3",
-        Status.NA,
-        "scripts/check_layer_imports.py not yet ported — layer-check pending",
-    )
-
-
-@register("P2.4")
-def _layer_check_exits_zero(ctx: CheckContext) -> Finding:
-    script = ctx.root / "scripts" / "check_layer_imports.py"
-    if not script.exists():
-        return finding("P2.4", Status.NA, "layer-check script not yet ported")
-    try:
-        result = subprocess.run(
-            [sys.executable, str(script)],
-            check=False,
-            cwd=ctx.root,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return finding("P2.4", Status.FAIL, f"layer-check did not complete: {exc}")
-    if result.returncode == 0:
-        return finding("P2.4", Status.PASS)
-    tail = (result.stdout + result.stderr).strip().splitlines()
-    sample = "; ".join(tail[-3:]) if tail else "no output"
-    return finding(
-        "P2.4", Status.FAIL, f"layer-check failed (exit {result.returncode}): {sample}"
-    )
-
-
 @register("P2.5")
 def _composition_root_exists(ctx: CheckContext) -> Finding:
     candidates = [
@@ -104,57 +67,154 @@ def _composition_root_exists(ctx: CheckContext) -> Finding:
     return finding("P2.5", Status.FAIL, f"no composition root found (tried {probed})")
 
 
-_ALLOWLIST_RE = re.compile(r"\bALLOWLIST\b")
+#: Third-party distributions a domain module may import without losing purity.
+#:
+#: These are DECLARATIVE modelling libraries: they describe the shape of data
+#: and perform no I/O of their own. Pydantic in particular MUST be allowed —
+#: ADR-0044 P2 (and sibling check P2.8) explicitly bless Pydantic models as
+#: domain DTOs, so banning the import here would make the two checks
+#: contradict each other.
+_DOMAIN_SAFE_THIRD_PARTY = frozenset(
+    {"pydantic", "typing_extensions", "attr", "attrs", "annotated_types"}
+)
 
-
-@register("P2.6")
-def _layer_check_has_allowlist(ctx: CheckContext) -> Finding:
-    script = ctx.root / "scripts" / "check_layer_imports.py"
-    if not script.exists():
-        return finding("P2.6", Status.NA, "layer-check script not yet ported")
-    text = script.read_text(encoding="utf-8", errors="replace")
-    if _ALLOWLIST_RE.search(text):
-        return finding("P2.6", Status.PASS, "ALLOWLIST declared in layer-check")
-    return finding(
-        "P2.6",
-        Status.WARN,
-        "no ALLOWLIST in layer-check — composition-root exceptions are implicit",
-    )
+#: Name conventions that mark a first-party module as infrastructure.
+#:
+#: Convention-based on purpose. #8383 deleted the previous layer checker
+#: because its hardcoded LAYER_MAP "can't generalize to the projects HydraFlow
+#: manages", and prescribed that "any future arch-drift mechanism should be
+#: convention-based or per-repo config". A suffix is a convention; a map of
+#: this repo's directory names is not.
+_INFRA_NAME_SUFFIXES = ("_loop", "_runner", "_adapter", "_client", "_gateway")
+_INFRA_NAME_EXACT = frozenset({"server"})
 
 
 @register("P2.7")
 def _domain_layer_purity(ctx: CheckContext) -> Finding:
-    """Piggyback on the layer-check — if it's green, domain purity holds.
+    """Domain modules import no infrastructure, runners, or adapter SDKs.
 
-    A separate domain-only variant would re-implement the same traversal;
-    this check succeeds when layer-check does, with a tighter failure
-    message pointing at the principle.
+    Re-implemented in place of the deleted ``scripts/check_layer_imports.py``
+    shell-out. The old body ran that script and reported NA when it was
+    missing, which it had been since #8383 — so P2.7 never once verified
+    domain purity despite being the check ADR-0044 calls "the load-bearing
+    invariant".
+
+    The rule is convention-based rather than topology-based, which is what
+    #8383 asked any replacement to be: an import is a violation when its root
+    module is third-party and not a declarative modelling library, or when it
+    is first-party and named like infrastructure. Both tests generalise to any
+    repo the audit is pointed at; neither needs a per-repo layer map.
     """
-    script = ctx.root / "scripts" / "check_layer_imports.py"
-    if not script.exists():
+    domain_files = _domain_files(ctx)
+    if not domain_files:
         return finding(
             "P2.7",
             Status.NA,
-            "layer-check script not yet ported — domain purity unverified",
+            f"no {ctx.rel(ctx.src_module('models'))} or "
+            f"{ctx.rel(ctx.src_dir('domain'))}/ — this repo declares no domain layer",
         )
-    try:
-        result = subprocess.run(
-            [sys.executable, str(script)],
-            check=False,
-            cwd=ctx.root,
-            capture_output=True,
-            text=True,
-            timeout=60,
+    first_party = _first_party_names(ctx)
+    violations: list[str] = []
+    for path in domain_files:
+        for lineno, root, kind in _imported_roots(path):
+            reason = _impurity(root, kind, first_party)
+            if reason:
+                violations.append(f"{ctx.rel(path)}:{lineno} imports {root} ({reason})")
+    if violations:
+        sample = "; ".join(violations[:5])
+        more = f" (+{len(violations) - 5} more)" if len(violations) > 5 else ""
+        return finding(
+            "P2.7",
+            Status.FAIL,
+            f"{len(violations)} impure import(s) in the domain layer: {sample}{more}",
         )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return finding("P2.7", Status.FAIL, f"layer-check did not complete: {exc}")
-    if result.returncode == 0:
-        return finding("P2.7", Status.PASS)
     return finding(
         "P2.7",
-        Status.FAIL,
-        "layer-check red → domain may be importing infrastructure",
+        Status.PASS,
+        f"{len(domain_files)} domain module(s) import no infrastructure or adapter SDKs",
     )
+
+
+def _infra_by_name(root: str, how: str = "") -> str | None:
+    """Flag a first-party module whose NAME marks it as infrastructure."""
+    if root in _INFRA_NAME_EXACT or root.endswith(_INFRA_NAME_SUFFIXES):
+        return f"first-party infrastructure/runner module{how}"
+    return None
+
+
+def _impurity(root: str, kind: str, first_party: frozenset[str]) -> str | None:
+    """Why importing *root* breaks domain purity, or None if it is fine."""
+    if kind == "relative":
+        return None  # domain importing its own package is the point
+    if kind == "relative-outer":
+        # First-party by construction, so only the naming convention applies.
+        return _infra_by_name(root, " reached by relative import")
+    if root in sys.stdlib_module_names:
+        return None
+    if root in first_party:
+        return _infra_by_name(root)
+    if root in _DOMAIN_SAFE_THIRD_PARTY:
+        return None
+    return "third-party adapter SDK"
+
+
+def _first_party_names(ctx: CheckContext) -> frozenset[str]:
+    """Top-level module/package names importable from this repo's source tree."""
+    src = ctx.src_root()
+    if not src.is_dir():
+        return frozenset()
+    names = {p.stem for p in src.glob("*.py")}
+    names |= {p.name for p in src.iterdir() if p.is_dir() and _is_identifier(p.name)}
+    for package in layout.root_packages(ctx.root):
+        pkg_dir = src / package
+        names.add(package)
+        if pkg_dir.is_dir():
+            names |= {p.stem for p in pkg_dir.glob("*.py")}
+            names |= {
+                p.name
+                for p in pkg_dir.iterdir()
+                if p.is_dir() and _is_identifier(p.name)
+            }
+    return frozenset(names - {"__pycache__"})
+
+
+def _is_identifier(name: str) -> bool:
+    return name.isidentifier()
+
+
+def _imported_roots(path: Path) -> list[tuple[int, str, str]]:
+    """(lineno, root module name, "absolute"|"relative") for every import."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return []
+    found: list[tuple[int, str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [
+                (node.lineno, alias.name.split(".")[0], "absolute")
+                for alias in node.names
+            ]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level >= 2:
+                # `from ..adapters import x` leaves the domain's own package
+                # and reaches a SIBLING one — the shape a packaged-layout
+                # domain module would use to grab an infrastructure adapter.
+                # Only `level == 1` is "importing my own package".
+                if node.module:
+                    found.append(
+                        (node.lineno, node.module.split(".")[0], "relative-outer")
+                    )
+                else:
+                    found += [
+                        (node.lineno, alias.name, "relative-outer")
+                        for alias in node.names
+                    ]
+            elif node.level:
+                found.append((node.lineno, node.module or "", "relative"))
+            elif node.module:
+                found.append((node.lineno, node.module.split(".")[0], "absolute"))
+    return found
 
 
 @register("P2.8")
