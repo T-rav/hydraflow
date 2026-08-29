@@ -1,4 +1,64 @@
-# See docs/standards/adr_enforcement/standard.yaml for what these keys mean.
-# Properties: tests/architecture/test_standards_registry.py
+# See docs/standards/adr_enforcement/standard.yaml for what `id` and
+# `enforced_by` mean.
+#
+# The rest of this file is the normative encoding of the two tables in
+# README.md that make factual claims: the three-layer table and the
+# "When each layer is required" matrix. The prose around them stays prose —
+# it is how-to, not a claim a machine can check.
+#
+# Two writers, one set: editing a table without editing this file (or the
+# other way round) reddens
+# tests/architecture/test_testing_standard_drift.py.
 id: testing
-enforced_by: []
+enforced_by:
+  - tests/architecture/test_testing_standard_drift.py
+
+# The three layers, in the order both README tables read left to right.
+# `column` is the matrix header; `label` is the bolded name in the layer
+# table; `where` must be how that table's Where cell opens.
+layers:
+  - id: unit
+    label: Unit
+    column: Unit
+    where: "tests/test_*.py"
+  - id: scenario
+    label: MockWorld scenario
+    column: Scenario
+    where: "tests/scenarios/test_*_scenario.py"
+  - id: sandbox
+    label: Sandbox e2e
+    column: Sandbox
+    where: "tests/sandbox_scenarios/scenarios/sNN_*.py"
+
+# One entry per row of "When each layer is required". `shape` is the row's
+# first cell, verbatim (the `readme_row` convention from
+# docs/standards/factory_autonomy/policy.yaml).
+#
+#   required     -> the cell opens with ✅
+#   conditional  -> the cell opens with ⚠️
+#   not_required -> the cell opens with ❌
+requirements:
+  - shape: "New port method (e.g. `update_pr_branch`)"
+    unit: required
+    scenario: required
+    sandbox: required
+  - shape: "New loop or runner"
+    unit: required
+    scenario: required
+    sandbox: required
+  - shape: "New phase decoration / cross-cutting concern (OTel, telemetry)"
+    unit: required
+    scenario: required
+    sandbox: conditional
+  - shape: "Pure refactor with no behavior change"
+    unit: required
+    scenario: not_required
+    sandbox: not_required
+  - shape: "Bug fix"
+    unit: required
+    scenario: required
+    sandbox: conditional
+  - shape: "New ADR / wiki / config"
+    unit: not_required
+    scenario: not_required
+    sandbox: not_required

@@ -31,24 +31,28 @@ in isolation but break under real conditions.
               └─────────────────────────────┘
 ```
 
+<!-- standard:layers -->
 | Layer | Where | What it proves | Mocks at |
 |---|---|---|---|
 | **Unit** | `tests/test_*.py` | Code paths and edge cases of one function/class | All collaborators |
 | **MockWorld scenario** | `tests/scenarios/test_*_scenario.py` (mark `pytest.mark.scenario_loops`) | Real loop / runner code interacts with `MockWorld`'s `Fake*` adapters at the I/O boundary. Catches integration bugs unit tests can't see. | Subprocess / network boundary only |
 | **Sandbox e2e** | `tests/sandbox_scenarios/scenarios/sNN_*.py` + `tests/sandbox_scenarios/runner/` | The real orchestrator boots inside `docker-compose.sandbox.yml`, Playwright drives the UI, the dashboard API verifies state. The dark-factory production bar. | Only at the docker-compose seam (FakeLLM, FakeGitHub via the sandbox entrypoint) |
+<!-- /standard:layers -->
 
 ## When each layer is required
 
 A feature merges into `staging` when ALL three layers exist for it. Specifically:
 
+<!-- standard:requirements -->
 | Feature shape | Unit | Scenario | Sandbox |
 |---|---|---|---|
 | New port method (e.g. `update_pr_branch`) | ✅ required | ✅ required (via the loop that calls it, using a real PRManager + FakeGitHub at the boundary) | ✅ required (drive the loop end-to-end in docker) |
 | New loop or runner | ✅ required | ✅ required (Pattern B direct instantiation OR full MockWorld flow) | ✅ required (sNN scenario) |
 | New phase decoration / cross-cutting concern (OTel, telemetry) | ✅ required | ✅ required (assert against `world.honeycomb` / equivalent fake) | ⚠️ recommended (skip only if the cross-cut has no observable runtime effect) |
-| Pure refactor with no behavior change | ✅ required | (existing scenario coverage stays green) | (no new sandbox needed) |
+| Pure refactor with no behavior change | ✅ required | ❌ no new scenario (existing coverage stays green) | ❌ no new sandbox |
 | Bug fix | ✅ required (regression test in `tests/regressions/`) | ✅ required if the bug is observable through a loop / runner path | ⚠️ if the bug only manifests under sandbox conditions |
 | New ADR / wiki / config | ❌ no test (docs) | ❌ | ❌ |
+<!-- /standard:requirements -->
 
 ## How to write each layer
 
@@ -172,6 +176,5 @@ also checks that every cited path is still **collected by pytest** — a
 gate that exists but never runs is a citation to nothing.
 
 <!-- standard:enforced-by -->
-_None yet — this standard's prose is not yet bound to a machine-readable
-artifact. Filed as #11751._
+- `tests/architecture/test_testing_standard_drift.py`
 <!-- /standard:enforced-by -->
