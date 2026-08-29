@@ -50,10 +50,37 @@ server, the rule is not enforced here — it is *reported* here, which is vitals
 absent. A conformance check that stops running must fail, not pass.
 
 ## Enforcement
+
+The gates are named in the [Enforced by](#enforced-by) block at the foot of
+this document, which is the same set as `enforced_by` in
+[`standard.yaml`](standard.yaml). That list is not decorative: a test asserts
+each cited path is **collected by pytest**, not merely present on disk, which
+is this standard's own rule turned on itself — a conformance check that stops
+running must fail, not pass, and "the file is still there" cannot tell the
+difference. The same test asserts every concrete repo path this document
+cites in backticks still resolves, which is the #11669 class (a rule that
+stops seeing its subject) applied to prose.
+
 Registration is manual and explicit, in
 `tests/architecture/vitals_conformance_registry.py`, for the same reason
 `path_membership_registry` is: discovery-by-convention is the failure mode one
 level up, a rule that quietly stops seeing its subject.
+
+### Where this standard applies
+
+**HydraFlow-local. It is deliberately not in `STANDARDS_DIRS`**
+(`src/onboarding/kernel_writer.py`), so `hydraflow init` does not stamp it into
+a child repo, and that is a decision rather than an oversight (#11751).
+
+What this document enforces is a *classification of this repo's own checks*
+plus a CI lane that runs them with egress blocked. A fresh repo has neither.
+Copying the prose across would hand it a rule with no gate behind it — a
+standard whose conformance claim nothing answers, which is the precise failure
+the document is about. The kernel index records the decision in its
+["Standards that stay here" table](../factory_operation/README.md), which is
+bound to the complement of `STANDARDS_DIRS`; moving this standard into the
+kernel means shipping the lane with it, and the table will not let one happen
+without the other.
 
 Adding a check that enforces a rule? Register it as conformance. Adding a
 counter? Register it as vitals, and it may go to the data plane.

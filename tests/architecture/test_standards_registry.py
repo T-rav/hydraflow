@@ -48,6 +48,12 @@ _COLLECTED_RE = re.compile(r"^(\S+\.py): (\d+)$")
 #: exists" answers yes for it while "pytest collects it" answers no.
 _UNCOLLECTED_CONTROL = "tests/architecture/standards_registry.py"
 
+#: Any backticked token, and the subset of them that reads as a repo path.
+_BACKTICKED_RE = re.compile(r"`([A-Za-z0-9_./*-]+)`")
+_REPO_PATH_RE = re.compile(
+    r"^(src|tests|scripts|docs|disturbance|\.github)/[A-Za-z0-9_./*-]+$"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Collection:
@@ -190,6 +196,35 @@ class TestCitedGatesActuallyRun:
             f"standard.yaml cites gates pytest does not collect: {uncollected} "
             "— a gate that never runs is a citation to nothing. "
             f"pytest rc={collection.returncode}\n{collection.output}"
+        )
+
+    def test_every_concrete_repo_path_a_standard_cites_resolves(self) -> None:
+        """Prose citations rot the same way membership entries do (#11669).
+
+        Restricted to concrete paths on purpose: a glob in a standard is
+        usually a naming convention (``tests/sandbox_scenarios/scenarios/
+        sNN_*.py``) rather than a claim about a file, and admitting globs
+        would need an exemption list — which is the shape these standards
+        exist to prevent.
+        """
+        dangling: dict[str, list[str]] = {}
+        for standard in registered_standards():
+            text = standard.readme_path.read_text(encoding="utf-8")
+            missing = sorted(
+                {
+                    token
+                    for token in _BACKTICKED_RE.findall(text)
+                    if _REPO_PATH_RE.match(token)
+                    and "*" not in token
+                    and not (repo_root() / token).exists()
+                }
+            )
+            if missing:
+                dangling[standard.directory] = missing
+        assert not dangling, (
+            f"standard README cites repo paths that do not exist: {dangling} "
+            "— a citation that names nothing reads exactly like one that is "
+            "still true"
         )
 
     def test_a_module_pytest_does_not_collect_is_not_reported_as_collected(
