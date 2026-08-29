@@ -223,65 +223,75 @@ Each has exactly what the other lacks.
 4. **How does re-hydration treat a `loops:` block?** This is the one that needs
    deciding before implementation, because the existing mechanism does not reach it.
 
-   The kernel writer already separates template from product with a four-state action
-   model (`written | rewritten | skipped | protected`) and an **in-file boundary
-   marker**:
+   The kernel writer today separates template from product with a four-state action
+   model (`written | rewritten | skipped | protected`) plus an **in-band comment
+   marker** in each stamped markdown file:
 
    ```
    <!-- writer never overwrites anything below this marker. -->
    ```
 
-   That works for markdown. **YAML has no equivalent convention here**, so a
-   `loops:` block in `charter.yaml` currently has no way to say "the kernel owns this
-   half, the repo owns that half." Two options, and they are genuinely different:
+   **Decision: enforcement is structural YAML. No comment markers.**
 
-   - **`loops:` is wholly product.** The kernel stamps it once at greenfield hydration
-     and never again; re-stamping skips the file entirely, as `charter_init.py` already
-     does (it "refuses to overwrite an existing charter, and is never wired into a
-     loop"). Simple, and consistent with today's behaviour — but a repo never receives
-     schema improvements to its loops block.
-   - **YAML gains a boundary convention** — a `# hydraflow:managed` / `# hydraflow:end`
-     pair, or a nested `managed:` key. Lets the kernel keep a scaffold current while the
-     repo owns the entries. More capable, and one more parser that can drift from its
-     subject.
+   A comment marker fails as an enforcement mechanism for reasons this repo has now
+   demonstrated repeatedly:
 
-   **Recommended: the charter declares its own hydration boundary.** Neither option
-   above is right, because both put the rule somewhere other than the file it governs —
-   a comment convention the kernel has to parse, or an implicit "never touch this"
-   nobody can read. The charter is the repo's *governing declaration*; it should
-   therefore declare who governs which part of it:
+   - **It can only be honoured, never verified.** Nothing can assert that a writer
+     respected a marker except the writer itself. An unverifiable boundary is the exact
+     shape of the fifteen guards found watching nothing on 2026-08-29.
+   - **It is parsed by a predicate.** Every in-band convention needs a matcher, and every
+     matcher in this repo that was narrower than its subject failed silently — one
+     filename convention, one import spelling, one marker spelling. A marker whose
+     regex misses is a boundary that silently isn't there.
+   - **It is per-file and unenumerable.** You cannot ask "what does the kernel own in
+     this repo?" of a set of comments scattered through stamped files. You can ask it of
+     one block.
+
+   So the boundary is declared once, structurally, in the file that governs the repo:
 
    ```yaml
    hydration:
      managed:                      # the kernel may refresh these on re-stamp
        - loops.scaffold            #   structure only — keys, never `enabled`
        - artifacts.required
+       - docs/adr/README.md
      owned:                        # the kernel never writes these, ever
        - purpose
        - articles.local
        - loops.entries
+       - CLAUDE.md
    ```
 
-   This is better than a marker for three reasons, each drawn from something that has
-   already gone wrong here:
+   Paths and dotted charter keys sit in the same two lists, because the question is the
+   same one in both cases: may a stamp write here? That makes the boundary answerable in
+   one read — *what does the kernel own in this repo?* — which is not a question a set of
+   scattered comment markers can answer at all.
 
-   - **It is readable by the repo owner**, not just by the writer. A
-     `<!-- do not edit below -->` marker states the rule in the kernel's voice; a
-     `hydration:` block states it in the repo's.
-   - **It is checkable in both directions.** `charter_drift_caretaker` can assert that
-     everything the kernel wrote is under `managed`, and that nothing under `owned` was
-     modified by a stamp. A comment marker can only be honoured, never verified — and
-     an unverifiable boundary is the shape of every guard this repo found watching
-     nothing.
-   - **It makes the ENACT/RATIFY line explicit rather than implicit.** Today the rule
-     that a kernel may not enable a loop lives in an ADR and in `charter_init.py`'s
-     docstring. Under this scheme it is a fact in the repo's own file, and a stamp that
-     violates it is a drift finding rather than a code review someone has to catch.
+   Three properties follow, each drawn from something that has already gone wrong here:
+
+   - **It states the rule in the repo's voice, not the writer's.** A
+     `<!-- do not edit below -->` marker is the kernel instructing itself. A `hydration:`
+     block is the repo instructing the kernel.
+   - **It is checkable in both directions.** `charter_drift_caretaker` asserts that every
+     path a stamp wrote is under `managed`, *and* that nothing under `owned` was modified
+     by a stamp. Both arms matter: the first catches a writer exceeding its mandate, the
+     second catches a boundary that quietly stopped covering something.
+   - **It makes the ENACT/RATIFY line a fact in the file.** Today the rule that a kernel
+     may not enable a loop lives in an ADR and in `charter_init.py`'s docstring. Under
+     this scheme a violating stamp is a drift finding, not something a reviewer has to
+     notice.
+
+   **Consequence for the existing markdown markers.** They stop being an enforcement
+   mechanism and become at most a courtesy note to a human reader. Wherever a marker is
+   currently the *only* thing protecting a stamped region, that region needs a
+   `hydration.owned` entry — otherwise the boundary remains unverifiable and the
+   migration has moved the problem rather than fixed it. Auditing which markers are
+   load-bearing today is part of the work, not a follow-up.
 
    The cost is honest: `hydration` is one more declaration that can drift from what the
-   kernel actually does. That is precisely why it must be enforced by the drift caretaker
-   from the first commit, with a negative control proving the check can fail — not
-   documented and trusted.
+   kernel actually does. That is precisely why it must be caretaker-enforced from the
+   first commit, with a negative control proving the check can fail — not documented and
+   trusted.
 
    Whichever is chosen, **one rule is already settled by ADR-0143 Ruling 6 guard 4** and
    is not open for redesign: the kernel may stamp the *structure* — a `loops:` block with
