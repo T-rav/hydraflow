@@ -15,8 +15,25 @@
 # human/agent decision, and the exact command is printed, never run.
 #
 # Usage:
-#   scripts/hf_worktree.sh <dir> <branch>
-#   make worktree DIR=<dir> BRANCH=<branch>
+#   scripts/hf_worktree.sh <name-or-path> <branch>
+#   make worktree DIR=<name-or-path> BRANCH=<branch>
+#
+# A bare NAME (no '/') is created under the agent worktree root, so the
+# collector can reach it. `HYDRAFLOW_AGENT_WORKTREE_ROOT` overrides;
+# the default is '<repo>/.claude/worktrees' and MUST match
+# HydraFlowConfig.agent_worktree_root — pinned by
+# tests/regressions/test_issue_11729_worktree_root_is_one_setting.py.
+#
+# A value containing '/' is used verbatim, for the cases that genuinely
+# need a specific location. The resolved absolute path is echoed as the
+# FINAL stdout line, so callers can do:
+#     wt="$(scripts/hf_worktree.sh mywork my/branch | tail -1)" && cd "$wt"
+#
+# Why: `git worktree add <dir>` took <dir> verbatim, so the sanctioned
+# workflow scattered worktrees beside and inside the checkout while
+# WorkspaceGCLoop only swept a hardcoded list of harness directories.
+# Measured 2026-08-29 (#11729): 47 of 100 worktrees unreachable, 37 GB.
+# The creator and the collector now read ONE setting.
 #
 # Outcomes:
 #   <dir> absent                 -> create worktree, echo branch   (exit 0)
@@ -53,7 +70,7 @@ if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
   exit 2
 fi
 
-DIR_RAW="$1"
+DIR_ARG="$1"
 BRANCH="$2"
 
 # Resolve the enclosing repo from the CALLER's cwd — this helper must work
@@ -61,6 +78,16 @@ BRANCH="$2"
 if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   fail 2 "not inside a git repository (cwd: $(pwd)); run from within the repo the worktree should belong to."
 fi
+
+# A bare name goes under the agent worktree root so the GC can reach it; a
+# value containing '/' is an explicit location and is honoured verbatim.
+# Keep this default in lockstep with HydraFlowConfig.agent_worktree_root.
+AGENT_WORKTREE_ROOT="${HYDRAFLOW_AGENT_WORKTREE_ROOT:-$REPO_ROOT/.claude/worktrees}"
+case "$DIR_ARG" in
+  */*) DIR_RAW="$DIR_ARG" ;;
+  *)   DIR_RAW="$AGENT_WORKTREE_ROOT/$DIR_ARG"
+       mkdir -p "$AGENT_WORKTREE_ROOT" ;;
+esac
 
 # Canonicalize an existing path (cd -P resolves symlinks). macOS git prints
 # /private/... for /tmp/... in `worktree list --porcelain`, so comparing raw
@@ -126,6 +153,7 @@ if [ ! -e "$DIR_RAW" ]; then
     fail 5 "post-create verification failed for '$DIR_RAW': expected branch '$BRANCH', registry reports '${state:-<not registered>}'."
   fi
   echo "[worktree] created '$DIR_RAW' on branch '$BRANCH'"
+  _realpath "$DIR_RAW"
   exit 0
 fi
 
@@ -140,6 +168,7 @@ state="$(_lookup "$DIR_REAL")"
 
 if [ "$state" = "branch:$BRANCH" ]; then
   echo "[worktree] '$DIR_RAW' already on branch '$BRANCH' — nothing to do"
+  _realpath "$DIR_RAW"
   exit 0
 fi
 
