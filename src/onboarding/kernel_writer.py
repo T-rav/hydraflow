@@ -278,8 +278,12 @@ def _claude_md(spec: KernelSpec) -> str:
     """CLAUDE.md skeleton with explicit template-owned vs product-owned sections."""
     return f"""# {spec.title}
 
-<!-- TEMPLATE-OWNED: managed by the HydraFlow kernel. Re-stamping with --force may -->
-<!-- overwrite this block. Put project-specific rules in the PRODUCT-OWNED section. -->
+<!-- TEMPLATE-OWNED: these rules came from the HydraFlow kernel at birth. This file -->
+<!-- is product-owned, so re-stamping NEVER rewrites it -- not even with --force. When -->
+<!-- the kernel's version of these rules moves on, `make kernel-staleness` reports it -->
+<!-- as KERNEL_UPDATED and you merge the change deliberately. Markers are notes to a -->
+<!-- human reader, not an enforced boundary: ownership is enforced per FILE, and the -->
+<!-- committed record of it is hydraflow-kernel.lock. -->
 
 ## Quick rules (always apply)
 
@@ -299,7 +303,7 @@ def _claude_md(spec: KernelSpec) -> str:
 <!-- END TEMPLATE-OWNED -->
 
 <!-- PRODUCT-OWNED: your project's load-bearing rules and glossary. The kernel -->
-<!-- writer never overwrites anything below this marker. -->
+<!-- never overwrites this file at all, so anything you add here is safe. -->
 
 ## Domain rules
 
