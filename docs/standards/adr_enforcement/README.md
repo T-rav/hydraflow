@@ -124,3 +124,15 @@ rung: it is not enough to declare `manual` and cite prose — the decision must
 either bind to a REAL asserting check or earn a justified exemption, and the
 debt can only fall. It replaces the earlier debt-only ratchet with a single
 standard-linked gate that also reads the exemptions allow-list.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+- `tests/architecture/test_adr_enforcement_ratchet.py`
+<!-- /standard:enforced-by -->

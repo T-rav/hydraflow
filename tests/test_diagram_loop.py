@@ -118,6 +118,7 @@ async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
         "docs/arch/generated",
         "docs/arch/.meta.json",
         "disturbance/baselines/traceability.yaml",
+        "docs/standards/ports-and-loops/README.md",
     ]
     # Only a SUBSTANTIVE artifact change opens a PR: the git-log-derived
     # changelog / traceability-matrix (and the .meta.json digest + baseline,
@@ -127,8 +128,66 @@ async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
         "docs/arch/generated",
         ":(exclude)docs/arch/generated/changelog.md",
         ":(exclude)docs/arch/generated/traceability_matrix.md",
+        "docs/standards/ports-and-loops/README.md",
     ]
     assert callable(captured["generate"])
+
+
+@pytest.mark.asyncio
+async def test_regen_generate_emits_inline_blocks_before_the_artifacts(
+    loop_deps, tmp_path, monkeypatch
+):
+    """The SECOND call site of the blocks-before-artifacts rule, pinned.
+
+    `arch.runner._main` is pinned by `TestRegenConvergesInOnePass`. This is the
+    other place the rule is stated, and until this test existed, replacing the
+    `emit_inline_blocks` call in `_generate` with `pass` left 24 tests green —
+    "stated in N places, pinned in N-1", inside the fix for that very class.
+
+    It hides on the path nobody watches: with the call dropped the regen PR
+    carries only `docs/arch/generated/**`, so `arch-regen.yml`'s pure-regen
+    gate skips the drift check, the stale registry lands green on a bot PR,
+    and it reddens some later unrelated PR instead.
+    """
+    config = MagicMock()
+    config.diagram_loop_enabled = True
+    config.base_branch.return_value = "staging"
+    loop = DiagramLoop(config=config, pr_manager=MagicMock(), deps=loop_deps)
+    loop._set_repo_root(tmp_path)
+
+    import arch.runner as _runner_mod
+    import auto_pr as _auto_pr_mod
+    import diagram_loop as _diagram_loop_mod
+    from auto_pr import AutoPrResult
+
+    order: list[str] = []
+    monkeypatch.setattr(
+        _runner_mod, "emit_inline_blocks", lambda **_: (order.append("blocks"), [])[1]
+    )
+    monkeypatch.setattr(_runner_mod, "emit", lambda **_: order.append("artifacts"))
+    monkeypatch.setattr(
+        _diagram_loop_mod, "sync_traceability_baseline", lambda _: False
+    )
+
+    captured = {}
+
+    async def intercept(**kw):
+        captured.update(kw)
+        return AutoPrResult(
+            status="opened", pr_url="https://pr/3", branch=kw["branch"], error=None
+        )
+
+    monkeypatch.setattr(_auto_pr_mod, "generate_and_open_pr_async", intercept)
+    await loop._regen_pr()
+
+    await captured["generate"](tmp_path)
+
+    assert order == ["blocks", "artifacts"], (
+        "DiagramLoop must write the docs/standards blocks BEFORE emitting "
+        "docs/arch/generated — coverage_matrix.py reads the registry, so the "
+        "reverse order ships a regen PR whose matrix describes the previous "
+        f"registry. Recorded: {order}"
+    )
 
 
 @pytest.mark.asyncio

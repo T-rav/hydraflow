@@ -29,6 +29,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -60,6 +61,9 @@ from arch.generators.loop_registry import render_loop_registry
 from arch.generators.mockworld_map import render_mockworld_map
 from arch.generators.module_graph import render_module_graph
 from arch.generators.port_map import render_port_map
+from arch.generators.ports_and_loops_standard import (
+    render_blocks as render_ports_and_loops_blocks,
+)
 from arch.generators.traceability_matrix import (
     collect_trace_commits,
     render_traceability_matrix,
@@ -422,6 +426,182 @@ def check(*, repo_root: Path, generated_dir: Path) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Inline generated blocks
+#
+# Some generated content belongs inside an otherwise hand-written document
+# rather than in its own file under ``docs/arch/generated/``. A standard's
+# registry table is the case: the contract around it is prose a person writes,
+# the inventory inside it is an extract nobody should be typing. The block
+# markers are the ``scripts/gen_gates.py`` pattern
+# (``docs/standards/branch_protection/README.md``), joined here to the arch
+# runner so ``make arch-regen`` fixes the drift ``make arch-check`` reports —
+# one loop rather than a second command to remember.
+#
+# These are written by ``--emit`` and diffed by ``--check``. They deliberately
+# live outside ``emit()``: ``check()`` calls ``emit()`` against a tmpdir, and
+# an in-place rewrite of a repo file has no tmpdir equivalent.
+# ---------------------------------------------------------------------------
+
+_PORTS_AND_LOOPS_STANDARD = "docs/standards/ports-and-loops/README.md"
+_PORTS_AND_LOOPS_DECLARATION = "docs/standards/ports-and-loops/standard.yaml"
+
+
+@dataclass(frozen=True)
+class InlineBlockTarget:
+    """A hand-written document that carries generated blocks.
+
+    ``declaration`` is what tells "absent because broken" apart from "absent
+    because this tree does not ship this standard" — two conditions that look
+    identical at the host file and need opposite answers.
+
+    A tree that DECLARES the standard (its ``standard.yaml`` is present) and
+    has no block is broken: the generator would silently no-op and the registry
+    would rot, which is the whole failure this machinery exists to catch. A
+    tree that does not declare it never had the block, and writing one would be
+    inventing a standard it has not adopted — an ephemeral worktree branched
+    off a base commit that predates the block, a child repo stamped before it
+    existed, a synthetic tree in a test.
+
+    Keyed on ``standard.yaml`` rather than on ``charter.yaml``: the per-standard
+    declaration ships inside the standard's own directory, so it travels with
+    the thing it describes and answers the question for a stamped child repo
+    that carries no repo-level manifest.
+    """
+
+    host: str
+    declaration: str
+    blocks: dict[tuple[str, str], str]
+
+
+def _compute_inline_blocks(repo_root: Path) -> list[InlineBlockTarget]:
+    """Every document carrying generated blocks, with its rendered bodies."""
+    src_dir = repo_root / "src"
+    loops = extract_loops(src_dir)
+    ports = extract_ports(src_dir=src_dir, fakes_dir=repo_root / "src/mockworld/fakes")
+    return [
+        InlineBlockTarget(
+            host=_PORTS_AND_LOOPS_STANDARD,
+            declaration=_PORTS_AND_LOOPS_DECLARATION,
+            blocks=render_ports_and_loops_blocks(loops, ports, repo_root=repo_root),
+        )
+    ]
+
+
+def _declares_standard(repo_root: Path, target: InlineBlockTarget) -> bool:
+    return (repo_root / target.declaration).exists()
+
+
+def _carries_blocks(text: str, blocks: dict[tuple[str, str], str]) -> bool:
+    return all(begin in text and end in text for begin, end in blocks)
+
+
+def substitute_blocks(
+    rel: str, current: str, blocks: dict[tuple[str, str], str]
+) -> str:
+    """Return ``current`` with each delimited region replaced by its body."""
+    for (begin, end), body in blocks.items():
+        if begin not in current or end not in current:
+            raise ValueError(
+                f"{rel} is missing the {begin} … {end} block; the generator "
+                "has nowhere to write"
+            )
+        start = current.index(begin)
+        stop = current.index(end) + len(end)
+        if stop <= start:
+            # Transposed pair: END appears before BEGIN. Both `in` checks pass,
+            # so the vacuity guard above does not see it, and the slice
+            # arithmetic then DUPLICATES the document instead of replacing a
+            # region — `--emit` writes the corruption, every later regen grows
+            # it, and `--check` never converges. A merge resolution or a hand
+            # edit that inverts the markers is all it takes.
+            raise ValueError(
+                f"{rel} has {end} before {begin}; the block markers are "
+                "transposed and the region cannot be located"
+            )
+        current = current[:start] + f"{begin}\n{body}\n{end}" + current[stop:]
+    return current
+
+
+def emit_inline_blocks(*, repo_root: Path) -> list[str]:
+    """Rewrite every inline generated block in place; return what changed.
+
+    A host document that is absent is skipped rather than fatal: ``--emit``
+    runs against synthetic trees in tests and against partially-stamped repos,
+    where "that document does not exist here" is a legitimate answer. The
+    asymmetry is deliberate — ``check_inline_blocks`` treats the same absence
+    as drift, so a document that goes missing in a repo that should have one
+    reddens rather than quietly stopping being generated.
+    """
+    repo_root = Path(repo_root).resolve()
+    written: list[str] = []
+    for target in _compute_inline_blocks(repo_root):
+        path = repo_root / target.host
+        if not path.exists():
+            continue
+        current = path.read_text()
+        if not _carries_blocks(current, target.blocks):
+            if _declares_standard(repo_root, target):
+                # Declared here, so the block is supposed to exist. Raising is
+                # the point: a silent no-op is how the registry rots.
+                substitute_blocks(target.host, current, target.blocks)
+            continue
+        updated = substitute_blocks(target.host, current, target.blocks)
+        if updated != current:
+            path.write_text(updated)
+            written.append(target.host)
+    return written
+
+
+def check_inline_blocks(*, repo_root: Path) -> int:
+    """Diff every inline generated block against source; return rc 0/1.
+
+    A missing host document is drift, not a skip. Fail-closed here is the
+    whole point: the alternative is a staleness gate that stops having a
+    subject the moment somebody deletes the file it was watching.
+    """
+    repo_root = Path(repo_root).resolve()
+    rc = 0
+    for target in _compute_inline_blocks(repo_root):
+        rel = target.host
+        path = repo_root / rel
+        declared = _declares_standard(repo_root, target)
+        if not path.exists() or not _carries_blocks(path.read_text(), target.blocks):
+            if not declared:
+                # This tree does not ship the standard; there is nothing to be
+                # stale about. Skipping is the correct answer, not a loosening.
+                continue
+            print(
+                f"[arch-check] missing block(s) in {rel} (declared by "
+                f"{target.declaration}); run `make arch-regen`"
+            )
+            rc = 1
+            continue
+        current = path.read_text()
+        expected = substitute_blocks(rel, current, blocks=target.blocks)
+        if expected == current:
+            continue
+        rc = 1
+        print(f"[arch-check] drift in {rel}; run `make arch-regen`")
+        import difflib
+
+        diff_lines = list(
+            difflib.unified_diff(
+                current.splitlines(),
+                expected.splitlines(),
+                fromfile=f"committed/{rel}",
+                tofile=f"regenerated/{rel}",
+                lineterm="",
+                n=1,
+            )
+        )
+        for line in diff_lines[:80]:
+            print(line)
+        if len(diff_lines) > 80:
+            print(f"... ({len(diff_lines) - 80} more diff lines truncated)")
+    return rc
+
+
 def _main() -> int:
     p = argparse.ArgumentParser(
         prog="arch.runner",
@@ -439,6 +619,20 @@ def _main() -> int:
     repo_root = args.repo_root.resolve()
     generated = repo_root / "docs/arch/generated"
     if args.emit:
+        # Inline blocks FIRST. `coverage_matrix.py` greps `docs/standards/**`
+        # for every loop and port name, and the ports-and-loops registry is a
+        # generated block inside that tree — so emitting the artifacts before
+        # the blocks computes the matrix against the PREVIOUS registry. One
+        # `make arch-regen` then leaves the tree still stale and `arch-check`
+        # still red, which is a regen loop that does not converge in one pass
+        # (found merging #11759's CharterDriftCaretakerLoop rename).
+        #
+        # This order is a true fixed point: the blocks derive from `src/`,
+        # `docs/adr/` and `docs/wiki/terms/`, none of which `emit()` writes,
+        # and `emit()` writes only `docs/arch/generated/` + `.meta.json`.
+        # The dependency runs one way, so writing the blocks first settles it.
+        for rel in emit_inline_blocks(repo_root=repo_root):
+            print(f"[arch-regen] refreshed generated block(s) in {rel}")
         emit(repo_root=repo_root, out_dir=generated)
         # Keep the traceability ratchet baseline in lockstep with the fresh
         # matrix (prune-only). Lives here rather than in emit() so check()'s
@@ -447,7 +641,11 @@ def _main() -> int:
             print("[arch-regen] pruned disturbance/baselines/traceability.yaml")
         return 0
     if args.check:
-        return check(repo_root=repo_root, generated_dir=generated)
+        # Both halves run: a stale artifact and a stale inline block are
+        # separate edits with separate fixes, and CI should report both.
+        artifacts_rc = check(repo_root=repo_root, generated_dir=generated)
+        blocks_rc = check_inline_blocks(repo_root=repo_root)
+        return max(artifacts_rc, blocks_rc)
     p.error("specify --emit or --check")
     return 2
 

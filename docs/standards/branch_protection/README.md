@@ -144,3 +144,16 @@ passed" and blocks docs-only PRs forever).
 See [ADR-0042 §Enforcement](../../adr/0042-two-tier-branch-release-promotion.md#enforcement)
 and [`docs/wiki/patterns.md`](../../wiki/patterns.md) "Branch protection — rulesets that
 enforce the two-tier model" for the why and the operator reference.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+- `tests/architecture/test_adr0042_two_tier_branch_rulesets.py`
+- `tests/test_gen_gates_cli.py`
+<!-- /standard:enforced-by -->
