@@ -29,11 +29,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from erosion.models import CrossFileDuplicate, ParametrizeGroup, SuiteHygieneFinding
+from pytest_collection import collected_test_globs
 
 #: Minimum identical tests in one file before they are reported as a parametrize group.
 DEFAULT_MIN_GROUP = 3
 
-_TEST_GLOBS = ("test_*.py", "regression_*.py")
 _SKIP_DIRS = frozenset({"__pycache__", "node_modules", ".venv"})
 
 
@@ -152,11 +152,14 @@ def compute(
 def collect_tests(tests_dir: Path) -> dict[str, str]:
     """Read every pytest-collected module under *tests_dir* (impure), keyed by ``<tests_dir.name>/<relative>`` posix path.
 
-    Matches the repo's ``python_files`` globs (``test_*.py`` and the legacy
-    ``regression_*.py``) recursively; skips bytecode caches and vendored trees.
+    Matches the repo's ``python_files`` globs recursively; skips bytecode
+    caches and vendored trees. The globs come from
+    :func:`pytest_collection.collected_test_globs` rather than a constant here,
+    so this sensor and the anti-skip guard cannot disagree about what a test
+    file is — they read the same key of the same file.
     """
     out: dict[str, str] = {}
-    for glob in _TEST_GLOBS:
+    for glob in collected_test_globs(tests_dir.parent):
         for path in tests_dir.rglob(glob):
             rel = path.relative_to(tests_dir)
             if _SKIP_DIRS.intersection(rel.parts[:-1]):

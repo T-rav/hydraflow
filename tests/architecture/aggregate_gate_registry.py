@@ -100,8 +100,11 @@ AGGREGATE_GATES: tuple[AggregateGate, ...] = (
     AggregateGate(
         test_path="tests/architecture/test_no_ignored_active_tests.py",
         subject=(
-            "skip/xfail/commented-out coverage across every .py under tests/ "
-            "(no allowance — the count must stay at zero)"
+            "skip/xfail/commented-out coverage across every pytest-collected "
+            "file under tests/ (python_files globs + conftest.py), against the "
+            "shrink-only DEFERRED_XFAILS set; everything outside that set must "
+            "stay at zero, and an entry inside it that no longer resolves fails "
+            "too"
         ),
         subject_roots=("tests",),
         evidence='TESTS_ROOT.rglob("*.py")',
