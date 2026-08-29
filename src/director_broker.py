@@ -32,6 +32,12 @@ set with no tool axis); the second is refused by ``WorkerDispatchRequest``'s own
 validator; the third never enters the capsule (``extra="forbid"``, and no field
 for it); the last three have no representation in ``DirectorCommandKind``, whose
 three members are dispatch / yield / finish.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations

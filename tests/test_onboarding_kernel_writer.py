@@ -208,7 +208,7 @@ def test_ownership_enum_tags_are_stable() -> None:
     assert Ownership.PRODUCT.value == "product"
 
 
-def test_agents_console_layer_absent_by_default(tmp_path) -> None:
+def test_agents_council_layer_absent_by_default(tmp_path) -> None:
     # Chartering review chambers is a project choice, not kernel plumbing
     # (#10949): the default stamp writes no agents/ files.
     result = stamp_kernel(_spec(), tmp_path / "repo")
@@ -216,39 +216,58 @@ def test_agents_console_layer_absent_by_default(tmp_path) -> None:
     assert not (tmp_path / "repo" / "agents").exists()
 
 
-def test_agents_console_layer_stamps_the_four_skeleton_readmes(tmp_path) -> None:
-    result = stamp_kernel(_spec(agents_console=True), tmp_path / "repo")
+def test_agents_council_layer_stamps_the_four_skeleton_readmes(tmp_path) -> None:
+    result = stamp_kernel(_spec(agents_council=True), tmp_path / "repo")
     expected = {
         "agents/README.md",
         "agents/personas/README.md",
-        "agents/console/README.md",
-        "agents/console/decisions/README.md",
+        "agents/council/README.md",
+        "agents/council/decisions/README.md",
     }
     assert expected <= result.paths()
     personas = (tmp_path / "repo" / "agents" / "personas" / "README.md").read_text()
     # Vote-counting honesty is mandatory wherever panels are described.
     assert "1.x effective votes" in personas
-    console = (tmp_path / "repo" / "agents" / "console" / "README.md").read_text()
-    assert "never averaged" in console
+    council = (tmp_path / "repo" / "agents" / "council" / "README.md").read_text()
+    assert "never averaged" in council
     decisions = (
-        tmp_path / "repo" / "agents" / "console" / "decisions" / "README.md"
+        tmp_path / "repo" / "agents" / "council" / "decisions" / "README.md"
     ).read_text()
     assert "no verdict" in decisions
     # The skeleton points at the methodology doc, not a copy of it.
     root_readme = (tmp_path / "repo" / "agents" / "README.md").read_text()
-    assert "consoles-of-personas.md" in root_readme
+    assert "councils-of-personas.md" in root_readme
 
 
-def test_agents_console_skeleton_is_template_owned_and_restampable(tmp_path) -> None:
+def test_agents_council_skeleton_is_template_owned_and_restampable(tmp_path) -> None:
     target = tmp_path / "repo"
-    stamp_kernel(_spec(agents_console=True), target)
+    stamp_kernel(_spec(agents_council=True), target)
     marker = target / "agents" / "personas" / "README.md"
     marker.write_text("locally edited\n")
     # Plain re-stamp never clobbers; force re-stamps TEMPLATE-owned skeletons.
-    stamp_kernel(_spec(agents_console=True), target)
+    stamp_kernel(_spec(agents_council=True), target)
     assert marker.read_text() == "locally edited\n"
-    stamp_kernel(_spec(agents_console=True), target, force=True)
+    stamp_kernel(_spec(agents_council=True), target, force=True)
     assert "Persona contracts" in marker.read_text()
+
+
+def test_legacy_agents_console_lock_key_still_selects_the_council_layer() -> None:
+    # ARCH-0003 renamed the spec field agents_console -> agents_council on
+    # 2026-08-25. Child repos stamped before that date carry the OLD key in
+    # their committed hydraflow-kernel.lock; dropping the read would silently
+    # default them to False and make the staleness CLI report the whole
+    # Council skeleton as "not prescribed" instead of "up to date".
+    spec = spec_from_lock({"spec": {"name": "legacy-child", "agents_console": True}})
+
+    assert spec.agents_council is True
+
+
+def test_current_agents_council_lock_key_wins_over_the_legacy_one() -> None:
+    spec = spec_from_lock(
+        {"spec": {"name": "child", "agents_console": False, "agents_council": True}}
+    )
+
+    assert spec.agents_council is True
 
 
 def test_stamp_writes_committed_kernel_lock(tmp_path) -> None:

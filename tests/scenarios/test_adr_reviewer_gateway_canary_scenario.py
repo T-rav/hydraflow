@@ -35,7 +35,7 @@ pytestmark = pytest.mark.scenario_loops
 
 _CONTROL_TOKEN = "adr-canary-control-token-0123456789abcdef"
 _PROVIDER_KEY = "adr-canary-real-provider-key"
-_COUNCIL_TRANSCRIPT = """COUNCIL_RESULT:
+_PANEL_TRANSCRIPT = """PANEL_RESULT:
 rounds_needed: 1
 architect_verdict: REJECT
 architect_reasoning: The rollout needs a smaller failure domain.
@@ -46,7 +46,7 @@ editor_reasoning: The consequences omit recovery behavior.
 approve_count: 0
 reject_count: 3
 final_decision: REJECT
-summary: The council rejected the proposal pending rollback and recovery details.
+summary: The review panel rejected the proposal pending rollback and recovery details.
 duplicate_of: none
 minority_note: none
 """
@@ -121,7 +121,7 @@ class _FakeAnthropicOrigin:
             + json.dumps(
                 {
                     "type": "content_block_delta",
-                    "delta": {"type": "text_delta", "text": _COUNCIL_TRANSCRIPT},
+                    "delta": {"type": "text_delta", "text": _PANEL_TRANSCRIPT},
                 },
                 separators=(",", ":"),
             )
@@ -311,7 +311,7 @@ class TestADRReviewerGatewayCanaryScenario:
         assert exchange.headers["x-canary-control-present"] == "false"
         assert exchange.headers["x-canary-provider-key-present"] == "false"
         assert exchange.payload["model"] == "sonnet"
-        assert "ADR Review Council" in exchange.payload["messages"][0]["content"]
+        assert "ADR review panel" in exchange.payload["messages"][0]["content"]
 
         rows = ledger.read_all()
         assert len(rows) == 1

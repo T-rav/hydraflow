@@ -423,7 +423,7 @@ class TestAdversarialPipelineWiring:
     """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
 
     ADR-0107 retired the standalone Discover/Shape phases, so the adversarial
-    council/surfacer wiring now lives only on the plan phase. The discover/shape
+    ensemble/surfacer wiring now lives only on the plan phase. The discover/shape
     engines are the ``DiscoverRunner`` / ``ShapeRunner`` the planner invokes on
     demand; the factory constructs them and binds their escalation deps.
     """
@@ -467,13 +467,13 @@ class TestAdversarialPipelineWiring:
         plan_phase = registry.planner_phase
 
         assert isinstance(plan_phase._surfacer_agent, SubprocessAgentRunner)
-        assert plan_phase._council_agents is not None
-        assert set(plan_phase._council_agents.keys()) == {
+        assert plan_phase._ensemble_agents is not None
+        assert set(plan_phase._ensemble_agents.keys()) == {
             "builder",
             "tester",
             "risk_skeptic",
         }
-        for voter in plan_phase._council_agents.values():
+        for voter in plan_phase._ensemble_agents.values():
             assert isinstance(voter, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_ac_agent, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_judge_agent, SubprocessAgentRunner)

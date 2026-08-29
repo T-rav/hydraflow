@@ -165,7 +165,7 @@ class TestSurfacerMechanismSpikeCheck:
         )
 
     def test_risk_skeptic_prompt_requires_empirical_validation_for_mechanisms(self):
-        from plan_council_prompts import RISK_SKEPTIC_PROMPT
+        from plan_ensemble_prompts import RISK_SKEPTIC_PROMPT
 
         lower = RISK_SKEPTIC_PROMPT.lower()
         assert "empirical" in lower or "spike" in lower or "scratch repo" in lower, (

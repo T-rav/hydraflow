@@ -83,7 +83,7 @@ areas:
       - GateActivatorLoop
       - LiveCorpusReplayLoop
       - PrinciplesAuditLoop
-      - RailsDriftCaretakerLoop
+      - CharterDriftCaretakerLoop
       - WikiRotDetectorLoop
     related_adrs: ['0045', '0082', '0100', '0101', '0121']
 

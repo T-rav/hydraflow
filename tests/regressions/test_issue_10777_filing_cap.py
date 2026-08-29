@@ -68,7 +68,7 @@ _PROVABLY_BOUNDED: dict[str, str] = {
     "issue_refinement_loop": "single rolling digest issue, create-once dedup",
     "live_corpus_replay_loop": "at most 2 rolling issues (drift rollup + escalation), never a per-finding loop",
     "pricing_refresh_loop": "at most one issue/tick (parse OR bounds), violations folded into one body",
-    "rails_drift_caretaker_loop": "iterates the fixed 3-class finding taxonomy (missing-layer/coverage-floor/missing-gate-script) per repo, each deduped by (repo, finding_class)",
+    "charter_drift_caretaker_loop": "iterates the fixed fatal finding taxonomy (missing-layer/coverage-floor/missing-gate-script/missing-standard/missing-artifact/uncheckable-charter) per repo, each deduped by (repo, finding_class)",
     "rc_budget_loop": "signals are a subset of {median, spike}, so <=2 create_issue/tick",
     "report_issue_loop": "processes exactly one peeked report per tick; budget sweep is one deduped call",
     "retrospective_loop": "bounded by the fixed review-category taxonomy, per-category dedup",

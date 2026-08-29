@@ -1,5 +1,21 @@
 name: Build Agent Base Image
 
+# Multi-arch, built NATIVELY on each architecture — no QEMU.
+#
+# QEMU-emulating an arm64 build of this image is not a mild slowdown: it is a
+# ~2 GB image whose heavy stages are a NodeSource install, a uv dependency
+# resolve and a Python venv build, all of which are CPU-bound. Emulated, that
+# turns a ~10 minute build into something nobody waits for, and a job nobody
+# waits for is a job someone disables.
+#
+# So each arch builds on its own runner and pushes BY DIGEST with no tag; a
+# final job assembles the two digests into one manifest list. `docker pull`
+# then resolves the right arch automatically, and `FROM` in the downstream
+# agent/factory images does too.
+#
+# arm64 runners (`ubuntu-24.04-arm`) are free for public repositories, which
+# this is.
+
 on:
   push:
     branches: [main]
@@ -7,12 +23,14 @@ on:
       - "Dockerfile.agent-base"
       - "pyproject.toml"
       - "uv.lock"
+      - ".github/workflows/build-agent-base-image.yml"
   pull_request:
     branches: [main]
     paths:
       - "Dockerfile.agent-base"
       - "pyproject.toml"
       - "uv.lock"
+      - ".github/workflows/build-agent-base-image.yml"
   workflow_dispatch:
 
 permissions:
@@ -20,8 +38,21 @@ permissions:
 
 jobs:
   build:
-    name: Build & Test Base
-    runs-on: ubuntu-latest
+    name: Build & Test Base (${{ matrix.arch }})
+    # fail-fast off: when one arch breaks, the other arch's result is the
+    # single most useful piece of evidence for whether it is an architecture
+    # problem or a plain build break.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -37,16 +68,20 @@ jobs:
         with:
           context: .
           file: Dockerfile.agent-base
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           load: true
-          tags: ${{ env.IMAGE_NAME }}:test
-          cache-from: type=gha,scope=agent-base
-          cache-to: type=gha,mode=max,scope=agent-base
+          tags: ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }}
+          # Scoped PER ARCH. A shared scope makes the two builds fight over one
+          # cache and evict each other's layers every run.
+          cache-from: type=gha,scope=agent-base-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=agent-base-${{ matrix.arch }}
 
+      # Runs natively on this arch, so it verifies the binaries that will
+      # actually ship for it — an emulated check proves the wrong thing.
       - name: Verify base image tools
         run: |
-          docker run --rm ${{ env.IMAGE_NAME }}:test bash -ec '
-            echo "=== Checking tools ==="
+          docker run --rm ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }} bash -ec '
+            echo "=== Checking tools ($(uname -m)) ==="
             git --version
             gh --version
             node --version
@@ -64,21 +99,33 @@ jobs:
             echo "=== All tools present ==="
           '
 
+      # Per-arch: arm64 layers are not the same size as amd64, so a cap checked
+      # on one arch says nothing about the other.
       - name: Check image size
         run: |
-          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:test --format='{{.Size}}')
+          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:test-${{ matrix.arch }} --format='{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "Image size: ${SIZE_MB}MB"
+          echo "Image size (${{ matrix.arch }}): ${SIZE_MB}MB"
           if [ "$SIZE_MB" -gt 2048 ]; then
-            echo "::error::Base image size ${SIZE_MB}MB exceeds 2GB limit"
+            echo "::error::Base image size ${SIZE_MB}MB exceeds 2GB limit on ${{ matrix.arch }}"
             exit 1
           fi
 
   push:
-    name: Push Base to GHCR
+    name: Push Base (${{ matrix.arch }})
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       packages: write
@@ -98,15 +145,88 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Pushed by DIGEST with no tag. Tagging here would have the two arches
+      # race to own `:latest`, and the loser would silently overwrite the
+      # winner with a single-arch manifest — which is the bug this whole
+      # workflow exists to remove.
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent-base
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=gha,scope=agent-base
-          cache-to: type=gha,mode=max,scope=agent-base
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=agent-base-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=agent-base-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          test -n "$digest" || { echo "::error::build produced no digest"; exit 1; }
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish Base Manifest
+    needs: push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/hydraflow-agent-base" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: base-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both digests must be present. Assembling a "multi-arch" manifest from
+      # one digest produces a single-arch image under a name everyone now
+      # believes is multi-arch — worse than not publishing.
+      - name: Create manifest list
+        working-directory: /tmp/digests
+        run: |
+          count=$(ls -1 | wc -l)
+          echo "digests found: $count"
+          ls -1
+          if [ "$count" -ne 2 ]; then
+            echo "::error::expected 2 digests (amd64, arm64), found $count — refusing to publish a partial manifest"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:latest" \
+            -t "${IMAGE_NAME}:${{ github.sha }}" \
+            $(printf "${IMAGE_NAME}@sha256:%s " *)
+
+      - name: Verify both architectures are published
+        run: |
+          manifest=$(docker buildx imagetools inspect "${IMAGE_NAME}:latest" --raw)
+          echo "$manifest" | grep -q '"architecture":"amd64"' \
+            || { echo "::error::published manifest has no amd64"; exit 1; }
+          echo "$manifest" | grep -q '"architecture":"arm64"' \
+            || { echo "::error::published manifest has no arm64"; exit 1; }
+          echo "manifest carries both amd64 and arm64"

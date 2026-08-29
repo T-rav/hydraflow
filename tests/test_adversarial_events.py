@@ -66,13 +66,13 @@ def test_adversarial_stage_started_payload_constructs():
     data: AdversarialStageStartedPayload = {
         "issue_id": 42,
         "phase": "plan",
-        "stage": "plan_council",
+        "stage": "plan_ensemble",
         "retry_count": 0,
     }
     ev = HydraFlowEvent(type=EventType.ADVERSARIAL_STAGE_STARTED, data=data)
     assert ev.data["issue_id"] == 42
     assert ev.data["phase"] == "plan"
-    assert ev.data["stage"] == "plan_council"
+    assert ev.data["stage"] == "plan_ensemble"
     assert ev.data["retry_count"] == 0
 
 
@@ -82,7 +82,7 @@ def test_adversarial_stage_converged_payload_constructs():
     data: AdversarialStageConvergedPayload = {
         "issue_id": 7,
         "phase": "discover",
-        "stage": "discovery_council",
+        "stage": "discovery_ensemble",
         "retries": 2,
         "concerns_raised": 3,
         "concerns_forwarded": 0,
@@ -99,7 +99,7 @@ def test_adversarial_stage_exhausted_payload_constructs():
     data: AdversarialStageExhaustedPayload = {
         "issue_id": 9,
         "phase": "shape",
-        "stage": "shape_expert_council",
+        "stage": "shape_expert_ensemble",
         "retries": 3,
         "concerns_forwarded": 2,
     }
@@ -114,7 +114,7 @@ def test_concern_forwarded_payload_constructs():
     data: ConcernForwardedPayload = {
         "issue_id": 11,
         "concern_id": "C-1",
-        "from_stage": "plan_council",
+        "from_stage": "plan_ensemble",
         "to_stage": "implement",
         "severity": "HIGH",
     }
@@ -175,7 +175,7 @@ async def test_retry_loop_emits_stage_started_on_each_attempt():
         event_bus=bus,
         issue_id=101,
         phase="plan",
-        stage="plan_council",
+        stage="plan_ensemble",
     )
     await loop.run(_FakeCtx(plan_text="v"), critic, retry, is_converged=lambda f: False)
 
@@ -185,7 +185,7 @@ async def test_retry_loop_emits_stage_started_on_each_attempt():
     assert started[0].data == {
         "issue_id": 101,
         "phase": "plan",
-        "stage": "plan_council",
+        "stage": "plan_ensemble",
         "retry_count": 0,
     }
     assert started[1].data["retry_count"] == 1
@@ -212,7 +212,7 @@ async def test_retry_loop_emits_converged_when_findings_clear():
         event_bus=bus,
         issue_id=55,
         phase="discover",
-        stage="discovery_council",
+        stage="discovery_ensemble",
     )
     await loop.run(_FakeCtx(), critic, retry, is_converged=lambda f: not f.findings)
 
@@ -221,7 +221,7 @@ async def test_retry_loop_emits_converged_when_findings_clear():
     payload = converged[0].data
     assert payload["issue_id"] == 55
     assert payload["phase"] == "discover"
-    assert payload["stage"] == "discovery_council"
+    assert payload["stage"] == "discovery_ensemble"
     assert payload["retries"] == 1  # converged after one retry
     assert payload["concerns_forwarded"] == 0
     # exhausted should NOT be emitted on convergence
@@ -245,7 +245,7 @@ async def test_retry_loop_emits_exhausted_on_budget_exhaustion():
         event_bus=bus,
         issue_id=77,
         phase="shape",
-        stage="shape_expert_council",
+        stage="shape_expert_ensemble",
     )
     final, unresolved = await loop.run(
         _FakeCtx(plan_text="v"),
@@ -259,7 +259,7 @@ async def test_retry_loop_emits_exhausted_on_budget_exhaustion():
     payload = exhausted[0].data
     assert payload["issue_id"] == 77
     assert payload["phase"] == "shape"
-    assert payload["stage"] == "shape_expert_council"
+    assert payload["stage"] == "shape_expert_ensemble"
     assert payload["retries"] == 2
     assert payload["concerns_forwarded"] == len(unresolved)
     # converged should NOT be emitted
@@ -295,7 +295,7 @@ async def test_retry_loop_emits_concern_forwarded_for_each_unresolved():
         event_bus=bus,
         issue_id=88,
         phase="plan",
-        stage="plan_council",
+        stage="plan_ensemble",
     )
     _final, unresolved = await loop.run(
         _FakeCtx(),
@@ -310,7 +310,7 @@ async def test_retry_loop_emits_concern_forwarded_for_each_unresolved():
     assert forwarded_ids == {c.id for c in concerns}
     for ev in forwarded:
         assert ev.data["issue_id"] == 88
-        assert ev.data["from_stage"] == "plan_council"
+        assert ev.data["from_stage"] == "plan_ensemble"
         assert ev.data["severity"] in {"HIGH", "CRITICAL"}
 
 

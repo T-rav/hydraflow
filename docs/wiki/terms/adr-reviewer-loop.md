@@ -16,9 +16,9 @@ updated_at: "2026-07-18T19:31:17.682213+00:00"
 
 ## Definition
 
-Caretaker loop that polls for ADRs in `Proposed` status and runs council reviews via `ADRCouncilReviewer`. The loop is intentionally thin: all review logic and output formatting live in `ADRCouncilReviewer`, keeping tick scheduling and business logic separately testable. Review interval is `config.adr_review_interval`.
+Caretaker loop that polls for ADRs in `Proposed` status and runs panel reviews via `ADRReviewPanel`. The loop is intentionally thin: all review logic and output formatting live in `ADRReviewPanel`, keeping tick scheduling and business logic separately testable. Review interval is `config.adr_review_interval`.
 
 ## Invariants
 
-- The loop delegates entirely to `ADRCouncilReviewer.review_proposed_adrs()`; no review logic lives in the loop itself.
+- The loop delegates entirely to `ADRReviewPanel.review_proposed_adrs()`; no review logic lives in the loop itself.
 - Kill-switch is via `enabled_cb("adr_reviewer")` and `config.adr_reviewer_loop_enabled` (ADR-0049).

@@ -103,7 +103,7 @@ class SelfSolveOutcome(StrEnum):
     # resolve-or-dismiss-with-evidence — still a machine self-solve, NOT a human.
     DIAGNOSED = "diagnose"
     # A fix for the issue has already landed or is in flight (#11480): the
-    # decompose terminal found the evidence before asking the council. There is
+    # decompose terminal found the evidence before asking the ensemble. There is
     # nothing left to solve — no relabel, no diagnose, no human. The issue stays
     # in the pipeline and closes with its fix.
     ALREADY_SATISFIED = "already-satisfied"
@@ -120,7 +120,7 @@ class SelfSolver(Protocol):
     The implementation (see :mod:`giveup_self_solve`) runs the ADR-0105
     decompose terminal and falls back to the diagnose label, returning which
     self-solve action fired. Kept a Protocol so the route-back coordinator
-    stays decoupled from the epic/decomposer/council machinery and can be
+    stays decoupled from the epic/decomposer/ensemble machinery and can be
     unit-tested with a trivial fake.
     """
 

@@ -40,7 +40,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "ci_monitor": (60, 86400),
     "branch_protection_auditor": (3600, 2_592_000),
     "goal_supervisor": (60, 86400),  # 1m min, 1d max (default 10m, ADR-0124)
-    "rails_drift_caretaker": (3600, 2_592_000),
+    "charter_drift_caretaker": (3600, 2_592_000),
     "gate_activator": (3600, 2_592_000),
     "security_patch": (300, 86400),
     "repo_wiki": (300, 604800),

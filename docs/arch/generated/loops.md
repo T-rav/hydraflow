@@ -12,6 +12,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **AutoTightenLoop** | `src.auto_tighten_loop` | 86400 | — | RATCHET_TIGHTENED | — |
 | **BranchProtectionAuditorLoop** | `src.branch_protection_auditor_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **CIMonitorLoop** | `src.ci_monitor_loop` | 300 | — | — | — |
+| **CharterDriftCaretakerLoop** | `src.charter_drift_caretaker_loop` | 86400 | — | — | — |
 | **ContractRefreshLoop** | `src.contract_refresh_loop` | 604800 | — | — | — |
 | **ConvergenceOscillationLoop** | `src.convergence_oscillation_loop` | 3600 | — | — | ADR-0029, ADR-0049 |
 | **CorpusLearningLoop** | `src.corpus_learning_loop` | 3600 | — | — | — |
@@ -50,7 +51,6 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | 86400 | `HYDRAFLOW_DISABLE_PRICING_REFRESH` | — | — |
 | **PrinciplesAuditLoop** | `src.principles_audit_loop` | 604800 | — | — | ADR-0044 |
 | **RCBudgetLoop** | `src.rc_budget_loop` | 14400 | — | — | — |
-| **RailsDriftCaretakerLoop** | `src.rails_drift_caretaker_loop` | 86400 | — | — | — |
 | **RepoWikiLoop** | `src.repo_wiki_loop` | 3600 | — | — | — |
 | **ReportIssueLoop** | `src.report_issue_loop` | 30 | — | REPORT_UPDATE | — |
 | **RetrospectiveLoop** | `src.retrospective_loop` | 86400 | — | RETROSPECTIVE_UPDATE | — |

@@ -10,23 +10,26 @@ from pathlib import Path
 
 from ..models import CheckContext, Finding, Status
 from ..registry import register
-from ._helpers import exists, finding
+from ._helpers import finding
 
 
 @register("P2.1")
 def _src_dir_exists(ctx: CheckContext) -> Finding:
-    return exists(ctx.root, "src", "P2.1")
+    src = ctx.src_root()
+    if src.is_dir():
+        return finding("P2.1", Status.PASS)
+    return finding("P2.1", Status.FAIL, f"missing: {ctx.rel(src)}")
 
 
 @register("P2.2")
 def _ports_module_has_protocol(ctx: CheckContext) -> Finding:
-    ports = ctx.root / "src" / "ports.py"
+    ports = ctx.src_module("ports")
     if not ports.exists():
-        return finding("P2.2", Status.FAIL, "src/ports.py missing")
+        return finding("P2.2", Status.FAIL, f"{ctx.rel(ports)} missing")
     protocols = _count_protocol_classes(ports)
     if protocols >= 1:
         return finding("P2.2", Status.PASS, f"{protocols} Protocol(s) defined")
-    return finding("P2.2", Status.FAIL, "src/ports.py defines no Protocol classes")
+    return finding("P2.2", Status.FAIL, f"{ctx.rel(ports)} defines no Protocol classes")
 
 
 @register("P2.2a")
@@ -37,16 +40,16 @@ def _ports_cover_boundaries(ctx: CheckContext) -> Finding:
     being used instead of ports for other boundaries. A hard FAIL would be
     too aggressive for greenfield repos; emit a WARN so the gap is visible.
     """
-    ports = ctx.root / "src" / "ports.py"
+    ports = ctx.src_module("ports")
     if not ports.exists():
-        return finding("P2.2a", Status.FAIL, "src/ports.py missing")
+        return finding("P2.2a", Status.FAIL, f"{ctx.rel(ports)} missing")
     protocols = _count_protocol_classes(ports)
     if protocols >= 2:
         return finding("P2.2a", Status.PASS, f"{protocols} Protocols cover boundaries")
     return finding(
         "P2.2a",
         Status.WARN,
-        f"only {protocols} Protocol in ports.py — likely boundaries are AsyncMock-faked",
+        f"only {protocols} Protocol in {ctx.rel(ports)} — likely boundaries are AsyncMock-faked",
     )
 
 
@@ -90,18 +93,15 @@ def _layer_check_exits_zero(ctx: CheckContext) -> Finding:
 @register("P2.5")
 def _composition_root_exists(ctx: CheckContext) -> Finding:
     candidates = [
-        ctx.root / "src" / "service_registry.py",
-        ctx.root / "src" / "composition_root.py",
-        ctx.root / "src" / "container.py",
+        ctx.src_module("service_registry"),
+        ctx.src_module("composition_root"),
+        ctx.src_module("container"),
     ]
     for path in candidates:
         if path.exists():
-            return finding("P2.5", Status.PASS, f"composition root: {path.name}")
-    return finding(
-        "P2.5",
-        Status.FAIL,
-        "no composition root found (tried service_registry.py, composition_root.py, container.py)",
-    )
+            return finding("P2.5", Status.PASS, f"composition root: {ctx.rel(path)}")
+    probed = ", ".join(ctx.rel(path) for path in candidates)
+    return finding("P2.5", Status.FAIL, f"no composition root found (tried {probed})")
 
 
 _ALLOWLIST_RE = re.compile(r"\bALLOWLIST\b")
@@ -167,10 +167,13 @@ def _domain_types_carry_behaviour(ctx: CheckContext) -> Finding:
     from the anaemic check — they are deliberately data-only. What we care
     about is domain entities that ought to model behaviour but don't.
     """
-    candidates = _domain_files(ctx.root)
+    candidates = _domain_files(ctx)
     if not candidates:
         return finding(
-            "P2.8", Status.NA, "no src/models.py or src/domain/ — nothing to sample"
+            "P2.8",
+            Status.NA,
+            f"no {ctx.rel(ctx.src_module('models'))} or "
+            f"{ctx.rel(ctx.src_dir('domain'))}/ — nothing to sample",
         )
     anaemic = 0
     entity_total = 0
@@ -324,12 +327,12 @@ def _inherits_protocol(node: ast.ClassDef) -> bool:
     return False
 
 
-def _domain_files(root: Path) -> list[Path]:
+def _domain_files(ctx: CheckContext) -> list[Path]:
     candidates: list[Path] = []
-    models = root / "src" / "models.py"
+    models = ctx.src_module("models")
     if models.exists():
         candidates.append(models)
-    domain_dir = root / "src" / "domain"
+    domain_dir = ctx.src_dir("domain")
     if domain_dir.is_dir():
         candidates.extend(sorted(domain_dir.glob("*.py")))
     return candidates

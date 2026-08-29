@@ -666,9 +666,9 @@ def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     if adr_reviewer is None:
         runner = ports.get("adr_reviewer_runner")
         if runner is not None:
-            from adr_reviewer import ADRCouncilReviewer  # noqa: PLC0415
+            from adr_reviewer import ADRReviewPanel  # noqa: PLC0415
 
-            adr_reviewer = ADRCouncilReviewer(
+            adr_reviewer = ADRReviewPanel(
                 config,
                 deps.event_bus,
                 runner,
@@ -1353,37 +1353,39 @@ def _build_goal_supervisor(ports: dict[str, Any], config: Any, deps: Any) -> Any
     return loop
 
 
-def _build_rails_drift_caretaker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build RailsDriftCaretakerLoop for scenarios (ADR-0121, #10936).
+def _build_charter_drift_caretaker(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build CharterDriftCaretakerLoop for scenarios (ADR-0121, ADR-0143).
 
     Tests pre-seed:
-    * ``rails_drift_audit`` → an async auditor returning a
-      ``list[RailsDriftReport]`` (replaces the checkout-observing auditor).
+    * ``charter_drift_audit`` → an async auditor returning a
+      ``list[CharterDriftReport]`` (replaces the checkout-observing auditor).
       Defaults to ``[]`` (no managed repos ⇒ nothing to audit).
 
     ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
-    ``rails_drift_caretaker_dedup``.
+    ``charter_drift_caretaker_dedup``.
     """
-    from rails_drift_caretaker_loop import (  # noqa: PLC0415
-        RailsDriftCaretakerLoop,
+    from charter_drift_caretaker_loop import (  # noqa: PLC0415
+        CharterDriftCaretakerLoop,
     )
 
     dedup = _scenario_dedup(
         ports,
         config,
-        "rails_drift_caretaker_dedup",
-        "rails_drift_caretaker",
-        "rails_drift_caretaker.json",
+        "charter_drift_caretaker_dedup",
+        "charter_drift_caretaker",
+        "charter_drift_caretaker.json",
     )
 
-    auditor = ports.get("rails_drift_audit")
+    auditor = ports.get("charter_drift_audit")
     if auditor is None:
         auditor = AsyncMock(return_value=[])
-        ports["rails_drift_audit"] = auditor
+        ports["charter_drift_audit"] = auditor
 
     pr_manager = ports.get("pr_manager") or ports["github"]
 
-    return RailsDriftCaretakerLoop(
+    return CharterDriftCaretakerLoop(
         config=config,
         pr_manager=pr_manager,
         dedup=dedup,
@@ -1662,7 +1664,7 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
     can override via the ``auto_agent_state`` port to use a real StateTracker.
 
     ADR-0105 decompose-to-converge: ``AutoAgentPreflightLoop`` only builds its
-    internal ``IssueDecomposer``/``DecompositionCouncil`` (and therefore only
+    internal ``IssueDecomposer``/``DecompositionEnsemble`` (and therefore only
     calls ``decompose_or_escalate`` instead of going straight to
     ``human-required``) when ``epic_manager``/``runner`` are passed at
     construction. Both default to ``None`` here — unseeded scenarios keep
@@ -1670,9 +1672,9 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
     path seed ``auto_agent_epic_manager`` (typically a real ``EpicManager``
     wired against the scenario's real ``StateTracker``, so the epic it
     registers is visible to ``epic_sweeper``) and
-    ``auto_agent_decompose_runner`` (any placeholder — the council's LLM
+    ``auto_agent_decompose_runner`` (any placeholder — the ensemble's LLM
     seam is scripted by monkeypatching ``runner_utils.run_lightweight_agent``
-    directly, mirroring ``tests/test_decomposition_council.py``, so the
+    directly, mirroring ``tests/test_decomposition_ensemble.py``, so the
     runner object itself is never actually invoked). Distinct port keys from
     ``_build_epic_monitor``'s ``epic_manager`` (a differently-shaped mock)
     avoid a collision if a scenario ever runs both loops in one MockWorld.
@@ -2306,7 +2308,7 @@ _BUILDERS: dict[str, Any] = {
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
     "goal_supervisor": _build_goal_supervisor,
-    "rails_drift_caretaker": _build_rails_drift_caretaker,
+    "charter_drift_caretaker": _build_charter_drift_caretaker,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,

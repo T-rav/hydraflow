@@ -91,27 +91,27 @@ async def _run_plan(config: HydraFlowConfig, issue_id: int, concerns: list[Conce
 
 class TestDesignDecisionClassifier:
     def test_critical_risk_skeptic_is_design_decision(self) -> None:
-        c = _concern(stage="plan_council_risk_skeptic", severity="CRITICAL")
+        c = _concern(stage="plan_ensemble_risk_skeptic", severity="CRITICAL")
         assert is_design_decision_concern(c) is True
 
     def test_critical_builder_is_not_design_decision(self) -> None:
         # Buildability is implementer-addressable, not a human decision.
-        c = _concern(stage="plan_council_builder", severity="CRITICAL")
+        c = _concern(stage="plan_ensemble_builder", severity="CRITICAL")
         assert is_design_decision_concern(c) is False
 
     def test_high_risk_skeptic_is_not_design_decision(self) -> None:
         # Only CRITICAL from a design-gate stage parks; HIGH still forwards.
-        c = _concern(stage="plan_council_risk_skeptic", severity="HIGH")
+        c = _concern(stage="plan_ensemble_risk_skeptic", severity="HIGH")
         assert is_design_decision_concern(c) is False
 
     def test_explicit_human_required_flag_qualifies_regardless_of_stage(self) -> None:
-        c = _concern(stage="plan_council_builder", severity="LOW", human_required=True)
+        c = _concern(stage="plan_ensemble_builder", severity="LOW", human_required=True)
         assert is_design_decision_concern(c) is True
 
     def test_count_helper_counts_only_design_decision_concerns(self) -> None:
         concerns = [
-            _concern(stage="plan_council_risk_skeptic", severity="CRITICAL", idx=1),
-            _concern(stage="plan_council_builder", severity="CRITICAL", idx=2),
+            _concern(stage="plan_ensemble_risk_skeptic", severity="CRITICAL", idx=1),
+            _concern(stage="plan_ensemble_builder", severity="CRITICAL", idx=2),
             _concern(stage="assumption_surfacer", severity="CRITICAL", idx=3),
             _concern(stage="spec_judge", severity="HIGH", idx=4),
         ]
@@ -130,7 +130,7 @@ class TestPlanGateRoutesDesignDecisionsToHitl:
     ) -> None:
         """(a) N>=K design-decision CRITICAL concerns -> human-required, NOT ready."""
         concerns = [
-            _concern(stage="plan_council_risk_skeptic", severity="CRITICAL", idx=1),
+            _concern(stage="plan_ensemble_risk_skeptic", severity="CRITICAL", idx=1),
             _concern(stage="assumption_surfacer", severity="CRITICAL", idx=2),
         ]
         state, prs = await _run_plan(config, 10602, concerns)
@@ -150,8 +150,8 @@ class TestPlanGateRoutesDesignDecisionsToHitl:
     ) -> None:
         """(b) only implementer-addressable concerns -> ready as before."""
         concerns = [
-            _concern(stage="plan_council_builder", severity="HIGH", idx=1),
-            _concern(stage="plan_council_tester", severity="CRITICAL", idx=2),
+            _concern(stage="plan_ensemble_builder", severity="HIGH", idx=1),
+            _concern(stage="plan_ensemble_tester", severity="CRITICAL", idx=2),
             _concern(stage="spec_judge", severity="HIGH", idx=3),
         ]
         _state, prs = await _run_plan(config, 4242, concerns)
@@ -165,7 +165,7 @@ class TestPlanGateRoutesDesignDecisionsToHitl:
     ) -> None:
         """A lone design-decision CRITICAL (below K) still flows to ready."""
         concerns = [
-            _concern(stage="plan_council_risk_skeptic", severity="CRITICAL", idx=1),
+            _concern(stage="plan_ensemble_risk_skeptic", severity="CRITICAL", idx=1),
         ]
         _state, prs = await _run_plan(config, 4343, concerns)
 

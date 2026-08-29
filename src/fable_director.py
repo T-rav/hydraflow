@@ -41,6 +41,12 @@ number ADR-0137 B5's rollout bar depends on.
 ``--resume`` exits 1 with no assistant turn, so this runtime does not have a
 session to lose: every turn is built from live label truth and the driver's own
 fencing tokens, and the vendor session id is captured only as a rotation hint.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations

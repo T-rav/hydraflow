@@ -17,6 +17,12 @@ shipped canary's receipts, which is a decision for the phase that owns that
 behaviour rather than a side effect of adding a third actuator.
 
 Pure: no I/O beyond the pricing table's own lazy load, no clock, no spawn.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations
@@ -40,8 +46,17 @@ __all__ = [
 
 
 def artifact_digest(text: str) -> str:
-    """The content address of one child's retained output."""
-    return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:64]}"
+    """The content address of one child's retained output.
+
+    The **whole** digest. This read ``hexdigest()[:64]`` until #11718 — a slice
+    of a 64-character hexdigest to 64 characters, so a bound that bounded
+    nothing while reading like a deliberate truncation. Dropping it changes no
+    address the factory has ever minted. The real bound is
+    ``WorkerReceipt.artifact_digest``'s 128-character field, which ``sha256:``
+    plus 64 hex characters fits with room to spare, and which fails loudly
+    rather than silently shortening a content address.
+    """
+    return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
 
 
 def estimate_worker_cost(model: str, usage: object) -> float:

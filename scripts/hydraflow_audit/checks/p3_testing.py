@@ -73,16 +73,23 @@ _FAKE_CLASS_RE = re.compile(r"^class\s+(Fake\w+|Mock\w+)", re.MULTILINE)
 # code paths (the sandbox entrypoint). The legacy directory now only
 # holds orchestration scaffolding (``mock_world.py``,
 # ``scenario_result.py``) — no actual ``Fake*`` adapter classes.
-_FAKE_DIRS_REL: tuple[tuple[str, ...], ...] = (("src", "mockworld", "fakes"),)
+#
+# Held relative to the *source root*, not to the repo root: a packaged repo
+# puts the same directory at ``src/<pkg>/mockworld/fakes/`` and a repo-root
+# literal finds nothing there (#11709).
+_FAKE_DIR_PARTS: tuple[tuple[str, ...], ...] = (("mockworld", "fakes"),)
+
+
+def _fake_dirs(ctx: CheckContext) -> list[Path]:
+    """Canonical Fake directories that exist, resolved across both layouts."""
+    resolved = [ctx.src_dir(*parts) for parts in _FAKE_DIR_PARTS]
+    return [d for d in resolved if d.is_dir()]
 
 
 def _collect_fake_classes(ctx: CheckContext) -> set[str]:
     """Collect Fake/Mock class names from every canonical Fake directory."""
     classes: set[str] = set()
-    for parts in _FAKE_DIRS_REL:
-        d = ctx.root.joinpath(*parts)
-        if not d.is_dir():
-            continue
+    for d in _fake_dirs(ctx):
         for py in d.rglob("*.py"):
             text = py.read_text(encoding="utf-8", errors="replace")
             classes.update(_FAKE_CLASS_RE.findall(text))
@@ -93,10 +100,11 @@ def _collect_fake_classes(ctx: CheckContext) -> set[str]:
 def _scenario_fakes(ctx: CheckContext) -> Finding:
     classes = _collect_fake_classes(ctx)
     if not classes:
+        probed = ", ".join(ctx.rel(ctx.src_dir(*parts)) for parts in _FAKE_DIR_PARTS)
         return finding(
             "P3.3",
             Status.FAIL,
-            "no Fake/Mock classes in src/mockworld/fakes/ or tests/scenarios/fakes/",
+            f"no Fake/Mock classes in {probed}/ or tests/scenarios/fakes/",
         )
     if len(classes) >= 3:
         return finding(
@@ -137,7 +145,7 @@ def _fake_clock(ctx: CheckContext) -> Finding:
     so we walk that too.
     """
     search_roots = (
-        ctx.root / "src" / "mockworld" / "fakes",
+        *_fake_dirs(ctx),
         ctx.root / "tests" / "scenarios",
     )
     for d in search_roots:
@@ -154,18 +162,16 @@ def _fake_clock(ctx: CheckContext) -> Finding:
     return finding(
         "P3.13",
         Status.FAIL,
-        "no FakeClock/FrozenClock/DeterministicClock in src/mockworld/fakes/ or tests/scenarios/",
+        "no FakeClock/FrozenClock/DeterministicClock in "
+        + ", ".join(ctx.rel(ctx.src_dir(*parts)) for parts in _FAKE_DIR_PARTS)
+        + "/ or tests/scenarios/",
     )
 
 
 @register("P3.14")
 def _fakes_are_stateful(ctx: CheckContext) -> Finding:
     """Warn when Fake classes inherit from AsyncMock / MagicMock rather than plain object."""
-    fake_dirs = [
-        ctx.root.joinpath(*parts)
-        for parts in _FAKE_DIRS_REL
-        if ctx.root.joinpath(*parts).is_dir()
-    ]
+    fake_dirs = _fake_dirs(ctx)
     if not fake_dirs:
         return finding(
             "P3.14",

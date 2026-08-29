@@ -1,4 +1,4 @@
-"""Tests for the Enforcement injector in the ADR council writer.
+"""Tests for the Enforcement injector in the ADR review-panel writer.
 
 Closes the gap where bot-authored ADRs flipped to Accepted without an
 ``**Enforcement:**`` line, which would then fail the ADR-0100 coverage

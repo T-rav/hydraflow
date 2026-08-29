@@ -33,7 +33,7 @@ def _make_concern(
     return Concern(
         id=cid,
         raised_in_phase="plan",
-        raised_in_stage="plan_council",
+        raised_in_stage="plan_ensemble",
         severity=severity,
         concern=concern,
         raised_at=datetime.now(UTC),

@@ -1,11 +1,11 @@
-"""Background worker loop — ADR council review for proposed ADRs."""
+"""Background worker loop — ADR review-panel sessions for proposed ADRs."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from adr_reviewer import ADRCouncilReviewer
+from adr_reviewer import ADRReviewPanel
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 
@@ -13,12 +13,12 @@ logger = logging.getLogger("hydraflow.adr_reviewer_loop")
 
 
 class ADRReviewerLoop(BaseBackgroundLoop):
-    """Polls for proposed ADRs and runs council reviews."""
+    """Polls for proposed ADRs and runs review-panel sessions."""
 
     def __init__(
         self,
         config: HydraFlowConfig,
-        adr_reviewer: ADRCouncilReviewer,
+        adr_reviewer: ADRReviewPanel,
         deps: LoopDeps,
     ) -> None:
         super().__init__(worker_name="adr_reviewer", config=config, deps=deps)
@@ -28,7 +28,7 @@ class ADRReviewerLoop(BaseBackgroundLoop):
         return self._config.adr_review_interval
 
     async def _do_work(self) -> dict[str, Any] | None:
-        """Review proposed ADRs via the council process."""
+        """Review proposed ADRs via the review panel."""
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
         if not self._config.adr_reviewer_loop_enabled:

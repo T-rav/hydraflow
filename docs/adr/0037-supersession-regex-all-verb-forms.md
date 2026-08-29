@@ -9,7 +9,7 @@
 
 HydraFlow's ADR tooling needs to detect when one ADR supersedes another so that
 the pre-validator (`src/adr_pre_validator.py`) can cross-check status fields and
-the council reviewer (`src/adr_reviewer.py`) can exclude superseded ADRs from
+the review panel (`src/adr_reviewer.py`) can exclude superseded ADRs from
 the active index. The English verb "supersede" appears in four common forms in
 ADR prose:
 
@@ -56,10 +56,10 @@ rather than inventing a new variant.
 
 - **Triage / Plan phases:** No direct impact — these phases do not parse
   supersession references.
-- **Review phase:** The ADR council reviewer builds an index of active ADRs
+- **Review phase:** The ADR review panel builds an index of active ADRs
   by filtering out those with `Status: Superseded`. Correct regex matching
   ensures the `_check_supersession()` validator catches all references, so
-  the council sees an accurate active-ADR list.
+  the review panel sees an accurate active-ADR list.
 - **HITL phase:** Fewer false negatives in validation means fewer
   human-escalated ADR issues caused by missed supersession links.
 

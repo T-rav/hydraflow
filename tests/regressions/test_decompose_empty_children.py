@@ -8,7 +8,7 @@ Two code-review findings on the decompose-to-converge terminal (ADR-0105):
    work and paging no one. The source must stay open for HITL instead.
 2. The ``decomposed`` idempotency marker was written LAST (after the fallible
    ``post_comment``/``close_issue`` gh calls), so a failure there left the
-   source un-marked and open — the next tick re-ran the council and created a
+   source un-marked and open — the next tick re-ran the ensemble and created a
    DUPLICATE epic + children. The marker must be set before those side-effects.
 """
 

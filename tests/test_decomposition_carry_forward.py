@@ -12,14 +12,14 @@ converge instead of re-stalling as smaller clones of the parent:
    ``tests/test_issue_decomposer.py::test_stall_context_embedded_in_every_child_body``);
    this file pins the specific "Parent #<n> stalled on: ... must not repeat"
    phrasing this task adds on top of that.
-2. **Salvage ordering** -- when the DecompositionCouncil's direction pass
+2. **Salvage ordering** -- when the DecompositionEnsemble's direction pass
    scopes one child as "land the already-working slice" (marked via a
    ``salvage`` label), ``IssueDecomposer`` creates that child FIRST, ahead
    of the riskier children, regardless of its position in
    ``EpicDecompResult.children``.
 
-The LLM seam is always mocked in the council-level tests here -- they never
-call a real model (mirrors ``tests/test_decomposition_council.py``).
+The LLM seam is always mocked in the ensemble-level tests here -- they never
+call a real model (mirrors ``tests/test_decomposition_ensemble.py``).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from decomposition_council import DecompositionCouncil
+from decomposition_ensemble import DecompositionEnsemble
 from issue_decomposer import IssueDecomposer
 from mockworld.fakes.fake_github import FakeGitHub
 from models import EpicDecompResult, NewIssueSpec
@@ -202,10 +202,10 @@ class TestSalvageOrdering:
         assert prs.issue(epic_number + 2).title == "Child 2"
 
 
-def _council(monkeypatch, *, results):
-    """Wire a DecompositionCouncil whose seam call returns each of *results*
+def _ensemble(monkeypatch, *, results):
+    """Wire a DecompositionEnsemble whose seam call returns each of *results*
     in turn (as ``SimpleResult(stdout=..., returncode=0)``). Mirrors
-    ``tests/test_decomposition_council.py``'s helper -- the LLM seam is
+    ``tests/test_decomposition_ensemble.py``'s helper -- the LLM seam is
     always mocked here, never called for real.
     """
     from execution import SimpleResult
@@ -219,14 +219,14 @@ def _council(monkeypatch, *, results):
         return SimpleResult(stdout=stdout, stderr="", returncode=0)
 
     monkeypatch.setattr("runner_utils.run_lightweight_agent", _fake_seam)
-    council = DecompositionCouncil(runner=AsyncMock(), config=ConfigFactory.create())
-    return council, calls
+    ensemble = DecompositionEnsemble(runner=AsyncMock(), config=ConfigFactory.create())
+    return ensemble, calls
 
 
-class TestCouncilSalvageIntegration:
+class TestEnsembleSalvageIntegration:
     """The direction prompt is given the diff-so-far (packed into
     stall_context by the caller) and salvage instructions; a salvage-tagged
-    child the council proposes survives parsing and lands first through
+    child the ensemble proposes survives parsing and lands first through
     IssueDecomposer.
     """
 
@@ -248,10 +248,10 @@ class TestCouncilSalvageIntegration:
         validation = json.dumps(
             {"decision": "reject", "confidence": "high", "reasoning": "n/a"}
         )
-        council, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=7, title="Stalled task")
 
-        await council.decide(
+        await ensemble.decide(
             task=task,
             stall_context=(
                 "parent #7 stalled on flaky CI in module X\n\n"
@@ -268,7 +268,7 @@ class TestCouncilSalvageIntegration:
         assert "salvage" in calls[0].lower()
 
     @pytest.mark.asyncio
-    async def test_council_output_with_salvage_child_lands_first_via_issue_decomposer(
+    async def test_ensemble_output_with_salvage_child_lands_first_via_issue_decomposer(
         self, monkeypatch, tmp_path: Path
     ) -> None:
         direction = json.dumps(
@@ -293,10 +293,10 @@ class TestCouncilSalvageIntegration:
         validation = json.dumps(
             {"decision": "approve", "confidence": "high", "reasoning": "Sound split"}
         )
-        council, _calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, _calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=7, title="Stalled task")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task,
             stall_context="parent #7 stalled on flaky CI in module X",
             doc_context="",
@@ -307,8 +307,8 @@ class TestCouncilSalvageIntegration:
         assert any("salvage" in c.labels for c in result.children), (
             "the salvage label must survive JSON parsing onto NewIssueSpec.labels"
         )
-        # The salvage child is second in the council's own output order --
-        # proving IssueDecomposer (not the council) does the reordering.
+        # The salvage child is second in the ensemble's own output order --
+        # proving IssueDecomposer (not the ensemble) does the reordering.
         assert result.children[0].title == "Risky child A"
 
         decomposer, prs, _epic_manager, _state, _config = _make_decomposer(tmp_path)

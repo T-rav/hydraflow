@@ -69,9 +69,9 @@ def _world(tmp_path: Path, *, check_state: str):
     for _ in range(config.auto_agent_max_attempts):
         state.bump_auto_agent_attempts(ISSUE)
 
-    council = AsyncMock()
-    council.decide = AsyncMock(
-        side_effect=AssertionError("the council must not be asked about landed work")
+    ensemble = AsyncMock()
+    ensemble.decide = AsyncMock(
+        side_effect=AssertionError("the ensemble must not be asked about landed work")
     )
     audit = MagicMock()
     audit.daily_spend = MagicMock(return_value=0.0)
@@ -88,7 +88,7 @@ def _world(tmp_path: Path, *, check_state: str):
     epic_manager = MagicMock()
     epic_manager.register_epic = AsyncMock()
     loop._decomposer = IssueDecomposer(gh, epic_manager, state, config)
-    loop._council = council
+    loop._ensemble = ensemble
     return loop, gh
 
 
@@ -123,7 +123,7 @@ async def test_liveness_red_ci_pr_on_the_same_branch_still_decomposes(
     from models import EpicDecompResult, NewIssueSpec
 
     loop, gh = _world(tmp_path, check_state="FAILURE")
-    loop._council.decide = AsyncMock(  # type: ignore[union-attr]
+    loop._ensemble.decide = AsyncMock(  # type: ignore[union-attr]
         return_value=EpicDecompResult(
             should_decompose=True,
             epic_title="Epic: split the stalled issue",

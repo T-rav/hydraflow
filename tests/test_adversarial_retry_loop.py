@@ -231,7 +231,7 @@ async def test_run_with_metrics_total_concerns_raised_accumulates():
     The bug: callers were using ``len(unresolved)`` for
     ``StageRun.concerns_raised`` — that's the *forwarded* count.
     ``StageRun.concerns_raised`` semantically means "total concerns the
-    council raised in this stage", which on convergence-after-retry
+    ensemble raised in this stage", which on convergence-after-retry
     must include the concerns from the failed attempts that were
     resolved by the retry.
 

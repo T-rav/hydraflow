@@ -155,6 +155,25 @@ class RejectionReason(StrEnum):
     LIVE_LABEL_CHANGED = "live_label_changed"
     ROLE_NOT_IN_CATALOG = "role_not_in_catalog"
     ROLE_PHASE_FORBIDDEN = "role_phase_forbidden"
+    """The CATALOGUE forbids this role at this phase. Nothing about the dial.
+
+    Produced legitimately by exactly one place: ``admit_dispatch``'s
+    ``legality`` table, where ``lease.phase not in entry.allowed_phases`` is a
+    statement about :data:`WORKER_CATALOG` and nothing else.
+
+    ``plan_broker.REFUSAL_CODES`` also maps four route-refusal reasons here.
+    Two of them — ``ROLE_NOT_CATALOGUED_FOR_*`` — are the same claim in the
+    resolver's vocabulary and belong. The other two, ``PHASE_NOT_PLAN`` and
+    ``PHASE_NOT_IMPLEMENT``, say the PHASE is not the canary's, which is silent
+    about the role: they are the conflation :attr:`OUTSIDE_CANARY_BOUND` was
+    minted to end, left in place deliberately because they belong to
+    #11541/#11542's vocabulary rather than P5's. That exception is named in
+    code as ``plan_broker.PHASE_ROWS_STILL_CONFLATED`` and pinned by
+    ``tests/architecture/test_canary_family_conformance.py`` — recorded where
+    the invariant is asserted rather than only in a comment beside the rows,
+    because nothing else distinguished "left on purpose" from "not finished"
+    and flipping either row survived the suite in both directions (#11716).
+    """
     ROLE_NOT_IN_CAPSULE = "role_not_in_capsule"
     MODEL_REQUIREMENT_UNSATISFIABLE = "model_requirement_unsatisfiable"
     ROUTE_POLICY_REVISION_STALE = "route_policy_revision_stale"
@@ -260,6 +279,30 @@ class RejectionReason(StrEnum):
 
     # Added by #11543, when REVIEW became the boundary independence binds at.
     # Additive member only; no field changed, so the schema version is unmoved.
+
+    OUTSIDE_CANARY_BOUND = "outside_canary_bound"
+    """This boundary is not inside the canary the operator armed.
+
+    Three operator situations reach it — the dial is empty, the dial names
+    another repository, or the phase is not the canary's — and they share a
+    code because they share a *shape*: this boundary is outside what the
+    operator armed. The remedy differs by situation, and only two of the three
+    are a dial (`CANARY_PHASE` is a module constant, not a setting, so the
+    third is answered by dispatching at REVIEW rather than by arming
+    anything). What they must NOT share is :attr:`ROLE_PHASE_FORBIDDEN`, which
+    says the catalogue forbids this role here. That was the code minted for all
+    three, and it was false for two of them: an unarmed dial says nothing about
+    the role, and B5's bar is read from these counters, where "one code cannot
+    say two things" is the rule every neighbouring docstring states.
+
+    **The invariant is not yet total, and the exception is named in code.**
+    ``plan_broker.PHASE_ROWS_STILL_CONFLATED`` holds the ``PHASE_NOT_*`` rows
+    that still report :attr:`ROLE_PHASE_FORBIDDEN`; it is shrink-only and
+    empty is the goal. Before #11716 the exception existed only as a comment
+    beside the rows and nowhere near the claim it contradicts, so nothing told
+    a reader whether the two remaining rows were a decision or an unfinished
+    migration — and flipping either survived the suite in both directions.
+    """
 
     LINEAGE_UNKNOWN = "lineage_unknown"
     """A role that must be independent of the implementer cannot say where it
@@ -834,7 +877,21 @@ def admit_dispatch(
     fenced = entry.independent_of_implementer
     stated_lineage = (request.requesting_spawn_id or "").strip()
     lineage_unknown = fenced and not stated_lineage
-    self_review = fenced and stated_lineage in implementer_spawn_ids
+    # Both operands normalised. Stripping only the request's meant two
+    # byte-identical padded ids compared unequal and the fence admitted an
+    # implementer reviewing itself (#11543).
+    # `stated_lineage` guards the membership test so the two arms cannot both
+    # be true. Stripping BOTH operands (the previous fix) made `"" in {"   "}`
+    # true, so a blank lineage satisfied `lineage_unknown` AND `self_review`
+    # at once, and only the row order below decided which an operator saw —
+    # an unpinned tuple position standing in for a rule. `review_broker`'s
+    # copy is safe by construction because it returns on `not stated` first;
+    # this one now is too, rather than by arrangement.
+    self_review = (
+        fenced
+        and bool(stated_lineage)
+        and stated_lineage in {(spawn or "").strip() for spawn in implementer_spawn_ids}
+    )
     # Writer-lease checks apply only to roles that can actually take the lease.
     # A read-only explorer must not be blocked because the lease has not been
     # re-minted at the current epoch, and a lease lagging its driver's epoch is

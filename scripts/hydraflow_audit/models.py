@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from . import layout
+
 
 class Severity(StrEnum):
     STRUCTURAL = "STRUCTURAL"
@@ -69,9 +71,57 @@ class CheckContext:
     """Execution context passed to every check function.
 
     Checks read from `root` (the target repo). They do not mutate anything.
+
+    Source modules are resolved through :meth:`src_module` / :meth:`src_dir`,
+    never as a literal ``ctx.root / "src" / "<name>.py"``: the greenfield
+    kernel writer stamps ``src/<pkg>/`` and a flat literal is blind to every
+    repo it creates (#11709). See :mod:`scripts.hydraflow_audit.layout`.
     """
 
     root: Path
     is_orchestration_repo: bool = False
     has_ui: bool = False
     extras: dict = field(default_factory=dict)
+    #: Root packages under ``src/``, resolved once per context. One audit run
+    #: sees one layout; the target repo does not change underneath it.
+    _src_packages: tuple[str, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def src_packages(self) -> tuple[str, ...]:
+        """Root package names under ``src/`` — empty for a flat repo."""
+        if self._src_packages is None:
+            self._src_packages = layout.root_packages(self.root)
+        return self._src_packages
+
+    def src_root(self) -> Path:
+        """The source directory — the root of a RECURSIVE scan.
+
+        Layout-agnostic already: ``rglob`` from here reaches ``src/<pkg>/**``
+        too. Spelled as a method rather than ``ctx.root / "src"`` so the
+        literal lives in exactly one module and the #11709 ratchet can gate on
+        the literal instead of on AST shapes it would have to enumerate.
+        """
+        return layout.src_root(self.root)
+
+    def src_module(self, name: str) -> Path:
+        """Resolve source module ``name`` across flat and packaged layouts.
+
+        ``ctx.src_module("ports")`` -> the first of ``src/ports.py``,
+        ``src/<pkg>/ports.py`` that exists. When neither does, the returned
+        path is the one this repo's layout implies, so ``f"{ctx.rel(p)}
+        missing"`` names something actionable.
+        """
+        return layout.src_module(self.root, name, self.src_packages)
+
+    def src_dir(self, *parts: str) -> Path:
+        """Resolve a source *directory* — ``src_dir("mockworld", "fakes")``."""
+        return layout.src_dir(self.root, *parts, packages=self.src_packages)
+
+    def rel(self, path: Path) -> str:
+        """``path`` as a posix path relative to the repo root, for messages."""
+        try:
+            return path.relative_to(self.root).as_posix()
+        except ValueError:
+            return path.as_posix()

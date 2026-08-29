@@ -1,7 +1,7 @@
 """decompose_or_escalate — the auto-agent's decompose-before-HITL terminal
 (ADR-0105 task 7).
 
-Covers the terminal's own decision logic directly (council + decomposer
+Covers the terminal's own decision logic directly (ensemble + decomposer
 mocked, per the task brief) plus the redirect wiring at both
 ``human-required`` sites: ``AutoAgentPreflightLoop``'s attempt-cap pre-check
 (``auto_agent_preflight_loop.py``) and ``preflight/decision.py``'s
@@ -76,7 +76,7 @@ def _decline_result(**overrides: object) -> EpicDecompResult:
 
 
 def _make_deps(tmp_path: Path):
-    """Terminal-level deps: config real, state/prs mocked, council/decomposer mocked."""
+    """Terminal-level deps: config real, state/prs mocked, ensemble/decomposer mocked."""
     config = ConfigFactory.create(repo_root=tmp_path / "repo")
     state = MagicMock()
     state.get_issue_status = MagicMock(return_value="")
@@ -99,8 +99,8 @@ def _make_deps(tmp_path: Path):
     prs.get_pr_mergeable = AsyncMock(return_value=True)
     prs.list_branch_commits = AsyncMock(return_value=[])
     decomposer = AsyncMock()
-    council = AsyncMock()
-    return config, state, prs, decomposer, council
+    ensemble = AsyncMock()
+    return config, state, prs, decomposer, ensemble
 
 
 def _seed_open_pr(
@@ -148,11 +148,11 @@ def _seed_open_pr(
 
 class TestDecomposeOrEscalate:
     @pytest.mark.asyncio
-    async def test_council_approves_creates_epic_no_human_required(
+    async def test_ensemble_approves_creates_epic_no_human_required(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         prs.find_open_pr_for_branch = AsyncMock(return_value=MagicMock(number=42))
 
@@ -161,7 +161,7 @@ class TestDecomposeOrEscalate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -180,11 +180,11 @@ class TestDecomposeOrEscalate:
         state.reset_review_attempts.assert_called_once_with(7)
 
     @pytest.mark.asyncio
-    async def test_council_declines_returns_human_required(
+    async def test_ensemble_declines_returns_human_required(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decline_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decline_result())
         decomposer.create_epic_from_result = AsyncMock()
 
         outcome = await decompose_or_escalate(
@@ -192,7 +192,7 @@ class TestDecomposeOrEscalate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -206,10 +206,10 @@ class TestDecomposeOrEscalate:
     async def test_epic_creation_capped_by_decomposer_falls_through(
         self, tmp_path: Path
     ) -> None:
-        """Council approves but IssueDecomposer's own depth/fanout cap
+        """Ensemble approves but IssueDecomposer's own depth/fanout cap
         declines (returns None) -- same floor as an outright decline."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=None)
 
         outcome = await decompose_or_escalate(
@@ -217,7 +217,7 @@ class TestDecomposeOrEscalate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -227,11 +227,11 @@ class TestDecomposeOrEscalate:
         state.clear_auto_agent_attempts.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_depth_capped_skips_council_entirely(self, tmp_path: Path) -> None:
+    async def test_depth_capped_skips_ensemble_entirely(self, tmp_path: Path) -> None:
         """Issue #7 is itself an auto-decomposed child one split below the
         cap -- resolved depth == max_decomposition_depth. Must escalate
         WITHOUT spending an LLM call to find that out."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
         epic = EpicState(
             epic_number=900,
             title="Parent epic",
@@ -239,8 +239,8 @@ class TestDecomposeOrEscalate:
             decomposition_depth=config.max_decomposition_depth - 1,
         )
         state.get_all_epic_states = MagicMock(return_value={"900": epic})
-        council.decide = AsyncMock(
-            side_effect=AssertionError("council must not be called at depth cap")
+        ensemble.decide = AsyncMock(
+            side_effect=AssertionError("ensemble must not be called at depth cap")
         )
 
         outcome = await decompose_or_escalate(
@@ -248,23 +248,23 @@ class TestDecomposeOrEscalate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
 
         assert outcome == "human-required"
-        council.decide.assert_not_called()
+        ensemble.decide.assert_not_called()
         decomposer.create_epic_from_result.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_idempotent_skips_when_already_decomposed(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
         state.get_issue_status = MagicMock(return_value="decomposed")
-        council.decide = AsyncMock(
-            side_effect=AssertionError("council must not be called when idempotent")
+        ensemble.decide = AsyncMock(
+            side_effect=AssertionError("ensemble must not be called when idempotent")
         )
 
         outcome = await decompose_or_escalate(
@@ -272,13 +272,13 @@ class TestDecomposeOrEscalate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
 
         assert outcome == "decomposed"
-        council.decide.assert_not_called()
+        ensemble.decide.assert_not_called()
         decomposer.create_epic_from_result.assert_not_called()
 
     @pytest.mark.asyncio
@@ -299,15 +299,15 @@ class TestDecomposeOrEscalate:
         epic_manager.register_epic = AsyncMock()
         state = make_tracker(tmp_path)
         decomposer = IssueDecomposer(prs, epic_manager, state, config)
-        council = AsyncMock()
-        council.decide = AsyncMock(return_value=_decomp_result())
+        ensemble = AsyncMock()
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
 
         outcome1 = await decompose_or_escalate(
             issue_number=7,
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -320,7 +320,7 @@ class TestDecomposeOrEscalate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -328,39 +328,39 @@ class TestDecomposeOrEscalate:
         assert outcome2 == "decomposed"
         # No new epic/children were created on the second, idempotent call.
         assert len(prs._issues) == issue_count_after_first
-        council.decide.assert_called_once()
+        ensemble.decide.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_missing_decomposer_falls_back_to_human_required(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
 
         outcome = await decompose_or_escalate(
             issue_number=7,
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=None,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
 
         assert outcome == "human-required"
-        council.decide.assert_not_called()
+        ensemble.decide.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_missing_council_falls_back_to_human_required(
+    async def test_missing_ensemble_falls_back_to_human_required(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
 
         outcome = await decompose_or_escalate(
             issue_number=7,
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=None,
+            ensemble=None,
             state=state,
             prs=prs,
         )
@@ -384,10 +384,10 @@ class TestAlreadySatisfiedGate:
     ) -> None:
         """#11427's exact shape: the fix lives on the auto-agent's own
         branch, which the old branch lookup never read."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(
             side_effect=AssertionError(
-                "council must not be called — fix already landed"
+                "ensemble must not be called — fix already landed"
             )
         )
         _seed_open_pr(
@@ -402,13 +402,13 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=11427),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
 
         assert outcome == "already-satisfied"
-        council.decide.assert_not_called()
+        ensemble.decide.assert_not_called()
         decomposer.create_epic_from_result.assert_not_called()
         prs.close_pr.assert_not_awaited()
 
@@ -416,8 +416,8 @@ class TestAlreadySatisfiedGate:
     async def test_closing_keyword_pr_on_manual_branch_skips_decomposition(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(side_effect=AssertionError("ensemble must not run"))
         _seed_open_pr(
             prs,
             branch=config.branch_for_issue(7),
@@ -431,7 +431,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -445,8 +445,8 @@ class TestAlreadySatisfiedGate:
     ) -> None:
         """The headline #11480 case: the fix merged hours ago and the issue
         just hasn't closed yet."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(side_effect=AssertionError("ensemble must not run"))
         prs.list_branch_commits = AsyncMock(
             return_value=[
                 {"date": "2026-08-18T09:00:00Z", "message": "chore: unrelated"},
@@ -462,7 +462,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=11427),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -475,8 +475,8 @@ class TestAlreadySatisfiedGate:
 
     @pytest.mark.asyncio
     async def test_closed_issue_skips_decomposition(self, tmp_path: Path) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(side_effect=AssertionError("ensemble must not run"))
         prs.get_issue_state = AsyncMock(return_value="COMPLETED")
 
         outcome = await decompose_or_escalate(
@@ -484,7 +484,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -496,7 +496,7 @@ class TestAlreadySatisfiedGate:
     async def test_skip_posts_evidence_comment_once(self, tmp_path: Path) -> None:
         """The issue stays in the pipeline, so every later tick re-enters
         this path — the comment must not repeat."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
         prs.get_issue_state = AsyncMock(return_value="COMPLETED")
 
         await decompose_or_escalate(
@@ -504,7 +504,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -526,7 +526,7 @@ class TestAlreadySatisfiedGate:
             ),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -536,7 +536,7 @@ class TestAlreadySatisfiedGate:
     async def test_skip_happens_before_the_depth_cap(self, tmp_path: Path) -> None:
         """A landed fix must not reach human-required either — the depth cap
         escalates, so the gate has to run ahead of it."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
         state.get_all_epic_states = MagicMock(
             return_value={
                 "900": EpicState(
@@ -554,7 +554,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -567,8 +567,8 @@ class TestAlreadySatisfiedGate:
     async def test_genuinely_stalled_issue_with_no_landed_fix_still_decomposes(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         prs.list_branch_commits = AsyncMock(
             return_value=[{"date": "", "message": "Fixes #999: someone else's issue"}]
@@ -579,7 +579,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -591,8 +591,8 @@ class TestAlreadySatisfiedGate:
     async def test_red_ci_pr_still_decomposes(self, tmp_path: Path) -> None:
         """A PR that declares the fix but fails CI IS the stall — the gate
         must not read its title as success."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         _seed_open_pr(
             prs,
@@ -607,7 +607,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -617,8 +617,8 @@ class TestAlreadySatisfiedGate:
 
     @pytest.mark.asyncio
     async def test_changes_requested_pr_still_decomposes(self, tmp_path: Path) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         _seed_open_pr(
             prs,
@@ -633,7 +633,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -643,8 +643,8 @@ class TestAlreadySatisfiedGate:
     @pytest.mark.asyncio
     async def test_pr_with_no_ci_checks_still_decomposes(self, tmp_path: Path) -> None:
         """An empty check list is absence of evidence, not evidence of health."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         _seed_open_pr(
             prs,
@@ -659,7 +659,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -672,8 +672,8 @@ class TestAlreadySatisfiedGate:
     ) -> None:
         """`UNKNOWN` is how both adapters report an unreadable issue; it must
         never be mistaken for 'closed, so the work is done'."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         prs.get_issue_state = AsyncMock(return_value="UNKNOWN")
 
@@ -682,7 +682,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -693,8 +693,8 @@ class TestAlreadySatisfiedGate:
     async def test_draft_pr_is_not_evidence_of_a_landed_fix(
         self, tmp_path: Path
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         _seed_open_pr(
             prs,
@@ -709,7 +709,7 @@ class TestAlreadySatisfiedGate:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -764,8 +764,8 @@ class TestLandedFixReadsFailOpen:
     async def test_read_failure_falls_through_to_decomposition(
         self, tmp_path: Path, seam: str, needs_landing_pr: bool
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         _arm_landed_fix_read(
             prs,
@@ -780,7 +780,7 @@ class TestLandedFixReadsFailOpen:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -794,7 +794,7 @@ class TestLandedFixReadsFailOpen:
 class TestLandedFixReadsReraiseCredit:
     """``reraise_on_credit_or_bug`` is honoured at every seam: a credit cap
     raised by a read must reach the loop's pause handler, not be eaten as
-    "no evidence" and then spent again on the council."""
+    "no evidence" and then spent again on the ensemble."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -803,9 +803,9 @@ class TestLandedFixReadsReraiseCredit:
     async def test_credit_exhaustion_propagates(
         self, tmp_path: Path, seam: str, needs_landing_pr: bool
     ) -> None:
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(
-            side_effect=AssertionError("council must not run after a credit cap")
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(
+            side_effect=AssertionError("ensemble must not run after a credit cap")
         )
         _arm_landed_fix_read(
             prs,
@@ -821,12 +821,12 @@ class TestLandedFixReadsReraiseCredit:
                 ctx=_ctx(issue_number=7),
                 config=config,
                 decomposer=decomposer,
-                council=council,
+                ensemble=ensemble,
                 state=state,
                 prs=prs,
             )
 
-        council.decide.assert_not_called()
+        ensemble.decide.assert_not_called()
         decomposer.create_epic_from_result.assert_not_called()
 
 
@@ -842,9 +842,9 @@ class TestPRResolutionCoversBothAgentBranches:
     ) -> None:
         """Before #11480, `_find_pr_number` read only `agent/issue-{N}`, so
         the auto-agent's own PR was invisible: never superseded, and its diff
-        never reached the council as salvage evidence."""
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        never reached the ensemble as salvage evidence."""
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         _seed_open_pr(
             prs,
@@ -859,7 +859,7 @@ class TestPRResolutionCoversBothAgentBranches:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -875,8 +875,8 @@ class TestPRResolutionCoversBothAgentBranches:
         """`agent_branches_for_issue` documents manual-first precedence."""
         from models import PRInfo
 
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         numbers = {
             config.branch_for_issue(7): 100,
@@ -895,7 +895,7 @@ class TestPRResolutionCoversBothAgentBranches:
             ctx=_ctx(issue_number=7),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -911,8 +911,8 @@ class TestPRResolutionCoversBothAgentBranches:
         resolution entirely, so the close path re-checks the PR itself."""
         from models import EscalationContext
 
-        config, state, prs, decomposer, council = _make_deps(tmp_path)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=501)
         prs.get_pr_title_and_body = AsyncMock(
             return_value=("Fixes #7: the complete fix", "")
@@ -929,7 +929,7 @@ class TestPRResolutionCoversBothAgentBranches:
             ),
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=prs,
         )
@@ -944,10 +944,10 @@ class TestPRResolutionCoversBothAgentBranches:
 
 
 class TestConstructorWiring:
-    def test_epic_manager_and_runner_build_decomposer_and_council(
+    def test_epic_manager_and_runner_build_decomposer_and_ensemble(
         self, tmp_path: Path
     ) -> None:
-        from decomposition_council import DecompositionCouncil
+        from decomposition_ensemble import DecompositionEnsemble
         from issue_decomposer import IssueDecomposer
 
         deps = make_bg_loop_deps(tmp_path)
@@ -964,7 +964,7 @@ class TestConstructorWiring:
             runner=MagicMock(),
         )
         assert isinstance(loop._decomposer, IssueDecomposer)
-        assert isinstance(loop._council, DecompositionCouncil)
+        assert isinstance(loop._ensemble, DecompositionEnsemble)
 
     def test_without_epic_manager_or_runner_stays_none(self, tmp_path: Path) -> None:
         """Matches every existing fixture in test_auto_agent_preflight_loop.py
@@ -981,7 +981,7 @@ class TestConstructorWiring:
             deps=deps.loop_deps,
         )
         assert loop._decomposer is None
-        assert loop._council is None
+        assert loop._ensemble is None
 
 
 # ---------------------------------------------------------------------------
@@ -989,7 +989,7 @@ class TestConstructorWiring:
 # ---------------------------------------------------------------------------
 
 
-def _make_wired_loop(tmp_path: Path, *, decomposer, council):
+def _make_wired_loop(tmp_path: Path, *, decomposer, ensemble):
     deps = make_bg_loop_deps(tmp_path)
     state = MagicMock()
     state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
@@ -1026,7 +1026,7 @@ def _make_wired_loop(tmp_path: Path, *, decomposer, council):
     # gates the label", not the terminal's own internals or the
     # constructor's epic_manager/runner build path (covered above).
     loop._decomposer = decomposer
-    loop._council = council
+    loop._ensemble = ensemble
     return loop, state, pr
 
 
@@ -1044,10 +1044,10 @@ class TestAttemptCapPreCheckWiring:
     async def test_decompose_success_skips_human_required(self, tmp_path: Path) -> None:
         decomposer = AsyncMock()
         decomposer.create_epic_from_result = AsyncMock(return_value=777)
-        council = AsyncMock()
-        council.decide = AsyncMock(return_value=_decomp_result())
+        ensemble = AsyncMock()
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         loop, state, pr = _make_wired_loop(
-            tmp_path, decomposer=decomposer, council=council
+            tmp_path, decomposer=decomposer, ensemble=ensemble
         )
         pr.list_issues_by_label = AsyncMock(return_value=[_hitl_issue()])
 
@@ -1061,15 +1061,15 @@ class TestAttemptCapPreCheckWiring:
     async def test_decompose_decline_still_marks_exhausted(
         self, tmp_path: Path
     ) -> None:
-        """CRITICAL regression (ADR-0084): when the council declines, the
+        """CRITICAL regression (ADR-0084): when the ensemble declines, the
         pre-check site's existing human-required + auto-agent-exhausted
         behavior must fire exactly as it does with no decomposer wired at
         all (see test_auto_agent_preflight_loop.py::test_attempt_cap_marks_exhausted)."""
         decomposer = AsyncMock()
-        council = AsyncMock()
-        council.decide = AsyncMock(return_value=_decline_result())
+        ensemble = AsyncMock()
+        ensemble.decide = AsyncMock(return_value=_decline_result())
         loop, state, pr = _make_wired_loop(
-            tmp_path, decomposer=decomposer, council=council
+            tmp_path, decomposer=decomposer, ensemble=ensemble
         )
         pr.list_issues_by_label = AsyncMock(return_value=[_hitl_issue()])
 
@@ -1087,10 +1087,10 @@ class TestAttemptCapPreCheckWiring:
         fix for the issue already landed — no epic, no human-required, and
         no TTL re-drive armed (that would page a human on a delay)."""
         decomposer = AsyncMock()
-        council = AsyncMock()
-        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        ensemble = AsyncMock()
+        ensemble.decide = AsyncMock(side_effect=AssertionError("ensemble must not run"))
         loop, state, pr = _make_wired_loop(
-            tmp_path, decomposer=decomposer, council=council
+            tmp_path, decomposer=decomposer, ensemble=ensemble
         )
         pr.list_issues_by_label = AsyncMock(return_value=[_hitl_issue()])
         pr.list_branch_commits = AsyncMock(
@@ -1126,9 +1126,9 @@ class TestApplyDecisionDecomposeWiring:
     async def test_needs_human_decompose_success_skips_label(
         self, tmp_path: Path
     ) -> None:
-        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        config, state, pr_port, decomposer, ensemble = _make_deps(tmp_path)
         state.get_auto_agent_attempts = MagicMock(return_value=1)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=42)
 
         out = await apply_decision(
@@ -1139,7 +1139,7 @@ class TestApplyDecisionDecomposeWiring:
             state=state,
             max_attempts=3,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             config=config,
             ctx=_ctx(issue_number=9),
         )
@@ -1154,9 +1154,9 @@ class TestApplyDecisionDecomposeWiring:
     ) -> None:
         """#11480: the third outcome must not fall into the human-required
         path — `decomposed == False` alone used to guarantee exactly that."""
-        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        config, state, pr_port, decomposer, ensemble = _make_deps(tmp_path)
         state.get_auto_agent_attempts = MagicMock(return_value=1)
-        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        ensemble.decide = AsyncMock(side_effect=AssertionError("ensemble must not run"))
         pr_port.get_issue_state = AsyncMock(return_value="COMPLETED")
 
         out = await apply_decision(
@@ -1167,7 +1167,7 @@ class TestApplyDecisionDecomposeWiring:
             state=state,
             max_attempts=3,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             config=config,
             ctx=_ctx(issue_number=9),
         )
@@ -1187,10 +1187,10 @@ class TestApplyDecisionDecomposeWiring:
     ) -> None:
         """CRITICAL regression: preserves ADR-0084's existing HITL path —
         matches test_preflight_decision.py::test_needs_human_adds_label's
-        assertion exactly when the council declines."""
-        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        assertion exactly when the ensemble declines."""
+        config, state, pr_port, decomposer, ensemble = _make_deps(tmp_path)
         state.get_auto_agent_attempts = MagicMock(return_value=1)
-        council.decide = AsyncMock(return_value=_decline_result())
+        ensemble.decide = AsyncMock(return_value=_decline_result())
 
         out = await apply_decision(
             issue_number=9,
@@ -1200,7 +1200,7 @@ class TestApplyDecisionDecomposeWiring:
             state=state,
             max_attempts=3,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             config=config,
             ctx=_ctx(issue_number=9),
         )
@@ -1212,9 +1212,9 @@ class TestApplyDecisionDecomposeWiring:
     async def test_fatal_decompose_decline_still_adds_paired_label(
         self, tmp_path: Path
     ) -> None:
-        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        config, state, pr_port, decomposer, ensemble = _make_deps(tmp_path)
         state.get_auto_agent_attempts = MagicMock(return_value=1)
-        council.decide = AsyncMock(return_value=_decline_result())
+        ensemble.decide = AsyncMock(return_value=_decline_result())
 
         out = await apply_decision(
             issue_number=9,
@@ -1224,7 +1224,7 @@ class TestApplyDecisionDecomposeWiring:
             state=state,
             max_attempts=3,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             config=config,
             ctx=_ctx(issue_number=9),
         )
@@ -1237,11 +1237,11 @@ class TestApplyDecisionDecomposeWiring:
     @pytest.mark.asyncio
     async def test_resolved_never_attempts_decompose(self, tmp_path: Path) -> None:
         """`resolved` never carries human-required in its label set, so the
-        council must not even be consulted."""
-        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        ensemble must not even be consulted."""
+        config, state, pr_port, decomposer, ensemble = _make_deps(tmp_path)
         state.get_auto_agent_attempts = MagicMock(return_value=1)
-        council.decide = AsyncMock(
-            side_effect=AssertionError("council must not be called on resolve")
+        ensemble.decide = AsyncMock(
+            side_effect=AssertionError("ensemble must not be called on resolve")
         )
 
         out = await apply_decision(
@@ -1252,13 +1252,13 @@ class TestApplyDecisionDecomposeWiring:
             state=state,
             max_attempts=3,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             config=config,
             ctx=_ctx(issue_number=9),
         )
 
         assert out["decomposed"] is False
-        council.decide.assert_not_called()
+        ensemble.decide.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_retry_at_cap_decompose_success_skips_exhaustion_label(
@@ -1266,9 +1266,9 @@ class TestApplyDecisionDecomposeWiring:
     ) -> None:
         """The exhaustion top-up path (a `retry` that spends its budget)
         also redirects through decompose_or_escalate."""
-        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        config, state, pr_port, decomposer, ensemble = _make_deps(tmp_path)
         state.get_auto_agent_attempts = MagicMock(return_value=3)
-        council.decide = AsyncMock(return_value=_decomp_result())
+        ensemble.decide = AsyncMock(return_value=_decomp_result())
         decomposer.create_epic_from_result = AsyncMock(return_value=42)
 
         out = await apply_decision(
@@ -1279,7 +1279,7 @@ class TestApplyDecisionDecomposeWiring:
             state=state,
             max_attempts=3,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             config=config,
             ctx=_ctx(issue_number=9),
         )

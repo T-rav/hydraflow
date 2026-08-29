@@ -2,9 +2,9 @@
 
 Gathers a small, bounded slice of the repo's own documentation -- ADR
 excerpts and wiki entries -- relevant to the files a stalled task has
-touched, so the decomposition council (``decomposition_council.py``)
+touched, so the decomposition ensemble (``decomposition_ensemble.py``)
 can weigh a split against the architectural decisions and gotchas that
-already govern that area of the codebase. The council treats the
+already govern that area of the codebase. The ensemble treats the
 result as an opaque string; it does not interpret its structure.
 
 Two independent, best-effort lookups feed the result:

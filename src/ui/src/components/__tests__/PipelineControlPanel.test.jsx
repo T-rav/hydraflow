@@ -97,7 +97,7 @@ describe('PipelineControlPanel', () => {
 
     it('shows an "N active" slot-occupancy badge for a phase with active work', () => {
       // plan has active=1 (e.g. worked by a non-registered runner such as the
-      // Decomposition Council). The slot must read as occupied even with no
+      // Decomposition Ensemble). The slot must read as occupied even with no
       // registered plan worker card — "a slot is a slot".
       const pipelineStats = {
         stages: {

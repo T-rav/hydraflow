@@ -13,7 +13,7 @@ Pins (operator steering: prompt tuning is the lever, NO information loss):
 - A concise-but-complete execution brief passes validation.
 - The planner prompt demands the brief shape + states the budget; the
   "detailed implementation plan" phrasing is gone.
-- The Builder council voter carries the anti-verbosity guard — brevity is
+- The Builder ensemble voter carries the anti-verbosity guard — brevity is
   never a finding.
 """
 
@@ -27,7 +27,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from config import HydraFlowConfig
-from plan_council_prompts import BUILDER_PROMPT
+from plan_ensemble_prompts import BUILDER_PROMPT
 from plan_validation import validate_plan
 from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory

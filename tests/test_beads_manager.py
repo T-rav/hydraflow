@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import re
 import stat
+import subprocess
 import threading
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -81,24 +82,59 @@ def test_manager_source_has_no_bd_or_dolt_subprocess_path():
     assert '"dolt"' not in text
 
 
+def _tracked_paths(repo: Path) -> list[Path]:
+    """Every file in the COMMITTED tree, as absolute paths.
+
+    Deliberately ``git ls-files``, NOT ``rglob`` over the working tree — the
+    same ruling #11728 already made for "what is in the tree?", which this
+    test predated and missed.
+
+    Walking the working tree here was not a slow way to get the right answer,
+    it was a fast way to get a wrong one. On a developer host
+    ``.claude/worktrees/`` is gitignored scratch (measured: 19 GB, 1,556,079
+    files, 44 worktrees) and ``.beads/`` holds an untracked 206 MB database.
+    ``rglob`` pulled all of it in: 1,568,823 paths against the 13,498 the repo
+    actually ships. That cost ~102 s just to walk before reading a byte, and
+    the corpus it produced then FAILED — worktree copies contain every literal
+    the scan forbids, including a copy of this file. With ``--reruns 2`` the
+    whole scan ran three times, wedging one xdist worker for 30-50 minutes
+    while its siblings idled.
+
+    The subject was always "runtime files that ship". Gitignored scratch is
+    not that, so this is a correctness fix that happens to be 116x faster.
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [repo / rel for rel in out.stdout.split("\0") if rel]
+
+
 def test_repo_runtime_has_no_database_backed_task_cli_path():
     repo = Path(__file__).parents[1]
+    tracked = _tracked_paths(repo)
+
+    # A corpus that silently came back empty would pass this test while
+    # scanning nothing — the exact vacuity this suite exists to prevent.
+    assert len(tracked) > 5000, (
+        f"git ls-files returned {len(tracked)} paths; the scan corpus is "
+        "unexpectedly small and would pass without examining the tree"
+    )
+
+    scanned_roots = ("src", "scripts", ".github", ".githooks", ".claude")
     runtime_files: set[Path] = {
         path
-        for root in (
-            repo / "src",
-            repo / "scripts",
-            repo / ".github",
-            repo / ".githooks",
-            repo / ".claude",
-        )
-        for path in root.rglob("*")
-        if path.is_file()
+        for path in tracked
+        if path.relative_to(repo).parts[:1]
+        and path.relative_to(repo).parts[0] in scanned_roots
     }
     runtime_files.update(
         path
-        for path in (repo / "tests").rglob("*")
-        if path.is_file()
+        for path in tracked
+        if path.relative_to(repo).parts[:1] == ("tests",)
         and path.suffix in {".py", ".sh", ".json", ".toml", ".txt", ".yaml", ".yml"}
         and "fixtures" not in path.parts
         and path.resolve() != Path(__file__).resolve()
@@ -117,18 +153,18 @@ def test_repo_runtime_has_no_database_backed_task_cli_path():
     }
     runtime_files.update(
         path
-        for path in repo.iterdir()
-        if path.is_file()
+        for path in tracked
+        if len(path.relative_to(repo).parts) == 1
         and (path.name in root_operational_files or path.name.startswith("Dockerfile"))
     )
     runtime_files.update(
-        path for path in (repo / ".beads").rglob("*") if path.is_file()
+        path for path in tracked if path.relative_to(repo).parts[:1] == (".beads",)
     )
     runtime_files.update(
         path
-        for root in (repo / "docs" / "adr", repo / "docs" / "standards")
-        for path in root.rglob("*.md")
-        if path.is_file()
+        for path in tracked
+        if path.relative_to(repo).parts[:2] in {("docs", "adr"), ("docs", "standards")}
+        and path.suffix == ".md"
     )
 
     tracked_locator = repo / ".beads" / "metadata.json"

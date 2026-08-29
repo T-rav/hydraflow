@@ -10,6 +10,16 @@
 - **Enforced by:** pytest:tests/test_adversarial_retry_loop.py
 - **Source touchpoints:** `src/adversarial_retry_loop.py:AdversarialRetryLoop` (shared retry primitive), `src/plan_phase.py:PlanPhase` (plan-track call site), `src/wiki_carryover.py:build_wiki_entry` (carryover→knowledge). The Discover/Shape adversarial call sites were removed by ADR-0107.
 
+> **Note (2026-08-28, ubiquitous-language rename):** the adversarial
+> planning ensemble this ADR introduces was named **PlanCouncil**, in a module
+> of the same name. Under [ADR-0053](0053-ubiquitous-language-as-living-artifact.md)
+> "Council" now has exactly one meaning in this repo — the `agents/council/`
+> governance layer — so the class is **`PlanEnsemble`** in
+> `src/plan_ensemble.py` (voter prompts in `src/plan_ensemble_prompts.py`) and
+> the stage string is `plan_ensemble_*`. **The decision below is unchanged**;
+> only the source citations above are repointed so the P2 drift gate keeps
+> firing. The prose keeps the original names, which is what was decided.
+
 ## Context
 
 Today the first adversarial gate in the issue lifecycle is the **Plan Reviewer** — a 7-dimension critique that runs *after* the planner has finished writing. Every step upstream (Discovery, Shape, research, planner) operates with a single perspective and no structured dissent. Mistakes made early carry downstream: misframed problems become misfit specs become misfit code, and the gap only surfaces at PR-time fresh-eyes review (per [ADR-0051](0051-iterative-production-readiness-review.md)) — by which point the cost of correction is high.
@@ -29,7 +39,7 @@ Insert three new adversarial stages into the pre-implementation pipeline, plus r
 |---|---|---|---|
 | AssumptionSurfacer | Discover + Plan | `src/assumption_surfacer.py:AssumptionSurfacer` | New |
 | DiscoveryCouncil (Problem-Sharpener, Existing-Solution-Hunter, Cheapest-Test-Advocate) | Discover | DiscoveryCouncil — **removed by ADR-0107** (standalone Discover phase retired) | New |
-| PlanCouncil (Builder, Tester, Risk-Skeptic) | Plan | `src/plan_council.py:PlanCouncil` + `src/plan_council_prompts.py` | New |
+| PlanCouncil (Builder, Tester, Risk-Skeptic) — renamed **PlanEnsemble** 2026-08-28, see note above | Plan | `src/plan_ensemble.py:PlanEnsemble` + `src/plan_ensemble_prompts.py` | New |
 | Pre-impl SpecJudge | Plan (post-planner, pre-implementer) | `src/spec_ac_generator.py:SpecACGenerator` + `src/spec_judge.py:SpecJudge` | New |
 | Challenger + ExpertCouncil | Shape | ShapeChallenger + ShapeExpertCouncil — **removed by ADR-0107** (standalone Shape phase retired) | Retrofit — later removed |
 
@@ -120,7 +130,7 @@ Flagged during Task 14 reflections — these are *not* in scope for the initial 
 - `src/pending_concerns.py:Concern` — `Concern`, `ConcernResolution`, `AdversarialState` Pydantic models.
 - `ComplexityGate` routing — **removed by ADR-0107** (gated the retired Discover phase).
 - `src/assumption_surfacer.py:AssumptionSurfacer` — Discover + Plan surfacer.
-- `src/plan_council.py:PlanCouncil` + `src/plan_council_prompts.py` — Builder / Tester / Risk-Skeptic voters.
+- `src/plan_ensemble.py:PlanEnsemble` + `src/plan_ensemble_prompts.py` — Builder / Tester / Risk-Skeptic voters (named `PlanCouncil` when this decision was taken).
 - DiscoveryCouncil (Problem-Sharpener / Existing-Solution-Hunter / Cheapest-Test-Advocate voters) — **removed by ADR-0107** (standalone Discover phase retired).
 - `src/spec_ac_generator.py:SpecACGenerator` + `src/spec_judge.py:SpecJudge` — pre-impl spec consistency judge (sibling to post-merge AC pipeline).
 - ShapeChallenger + ShapeExpertCouncil (Shape phase retrofit) — **removed by ADR-0107** (standalone Shape phase retired).

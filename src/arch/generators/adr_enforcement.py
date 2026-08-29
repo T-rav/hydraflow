@@ -21,7 +21,6 @@ carries. Live pass/fail outcomes still live only in the gitignored
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from adr_conformance import (
@@ -29,39 +28,32 @@ from adr_conformance import (
     adr_is_unattributed,
     check_is_tautological,
     classify_adr_enforcement,
+    parse_exemptions,
     resolve_check,
 )
 from adr_index import ADR, Check
-
-# Process-only exemption allow-list. An Accepted ADR listed here classifies
-# WEAK/MISSING for a *justified* reason (no machine-checkable invariant) and is
-# excluded from the outstanding-debt headline — mirroring the merge gate in
-# ``tests/architecture/test_adr_enforcement_ratchet.py`` (which gates on
-# ``_live_debt() - exempted``). This report must read the same allow-list the
-# gate does, or the two drift.
-_EXEMPTIONS_REL = Path("docs") / "standards" / "adr_enforcement" / "exemptions.md"
-
-# One exemption entry line: ``- ADR-NNNN: <non-empty justification>``. Kept
-# byte-for-byte in sync with ``test_adr_enforcement_ratchet._EXEMPTION_RE`` so
-# the report and the gate never disagree on what counts as an exemption. Prose
-# that merely mentions an ADR does not match (must be a bullet + colon +
-# non-empty justification).
-_EXEMPTION_RE = re.compile(r"^-\s+ADR-(\d{4}):\s*(\S.*?)\s*$", re.MULTILINE)
 
 
 def _parse_exemptions(repo_root: Path) -> dict[int, str]:
     """Return ``{adr_number: justification}`` from the exemptions allow-list.
 
-    Degrades to an empty mapping when the file is absent or unreadable so the
-    report still renders (identical to its pre-exemption output) rather than
-    crashing the whole arch pipeline over a missing standards doc — the same
-    fail-open contract the tmp_path unit fixtures rely on.
+    Thin fail-open wrapper over ``adr_conformance.parse_exemptions`` — the ONE
+    definition of the allow-list path and its entry regex, shared with the
+    merge gate in ``tests/architecture/test_adr_enforcement_ratchet.py`` and
+    with ``policy.facts`` (#11749). Before the consolidation the regex lived
+    here a second time and the two copies were kept in sync by a comment.
+
+    The fail-open ``except OSError`` stays *here*, not in the shared helper:
+    this report must still render (identical to its pre-exemption output)
+    rather than crash the whole arch pipeline over a missing standards doc —
+    the contract the tmp_path unit fixtures rely on. The ratchet keeps the
+    strict behaviour, so consolidating did not hand either caller a wider
+    exemption lane than it had.
     """
     try:
-        text = (repo_root / _EXEMPTIONS_REL).read_text(encoding="utf-8")
+        return parse_exemptions(repo_root)
     except OSError:
         return {}
-    return {int(m.group(1)): m.group(2).strip() for m in _EXEMPTION_RE.finditer(text)}
 
 
 _HEADER = "# ADR Enforcement Debt\n\n"

@@ -247,13 +247,46 @@ def test_add_failure_on_unknown_branch_propagates_git_error(
 def test_path_occupied_by_regular_file_fails_untouched(
     tmp_path: Path,
 ) -> None:
+    """An EXPLICIT path occupied by a file must fail and be left alone.
+
+    Uses `./occupied` rather than a bare `occupied`: since #11729 a bare name
+    is resolved under the agent worktree root so the GC can reach it, while a
+    value containing `/` is honoured verbatim. This case is about the
+    verbatim form, so it says so explicitly instead of relying on what a bare
+    name happens to mean.
+    """
     repo = _sandbox(tmp_path / "repo")
     occupied = repo / "occupied"
     occupied.write_text("data", encoding="utf-8")
 
-    proc = _helper(repo, "occupied", "feature-x")
+    proc = _helper(repo, "./occupied", "feature-x")
 
     assert proc.returncode != 0
+    assert occupied.read_text(encoding="utf-8") == "data"
+
+
+def test_bare_name_occupied_in_the_agent_root_fails_untouched(
+    tmp_path: Path,
+) -> None:
+    """The same protection must hold where bare names now land (#11729).
+
+    Relocating bare names must not create a hole: if the RESOLVED path is
+    occupied by a regular file, the helper must still refuse and leave it
+    untouched. Without this, moving the resolution would have silently
+    narrowed the #11501 guard to explicit paths only.
+    """
+    repo = _sandbox(tmp_path / "repo")
+    occupied = repo / ".claude" / "worktrees" / "occupied"
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    occupied.write_text("data", encoding="utf-8")
+
+    proc = _helper(repo, "occupied", "feature-x")
+
+    assert proc.returncode != 0, (
+        "a bare name resolving onto an occupied path must fail; the #11501 "
+        "guard must not have narrowed to explicit paths when #11729 moved "
+        "where bare names land"
+    )
     assert occupied.read_text(encoding="utf-8") == "data"
 
 

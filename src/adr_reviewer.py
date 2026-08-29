@@ -1,4 +1,4 @@
-"""ADR Council Reviewer — multi-agent review of proposed ADRs."""
+"""ADR Review Panel — multi-agent review of proposed ADRs."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from adr_pre_validator import ADRPreValidator, ADRValidationResult
 from adr_utils import ADR_FILE_RE
 from dedup_store import DedupStore
 from file_util import append_jsonl
-from models import ADRCouncilResult, CouncilVerdict, CouncilVote
+from models import ADRReviewPanelResult, PanelVerdict, PanelVote
 from prompt_gate_alerts import (
     alert_prompt_gate_block,
     clear_prompt_gate_block,
@@ -33,6 +33,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.adr_reviewer")
 
 _ADR_H1_RE = re.compile(r"^#\s+ADR-\d+\s*:\s*(.+?)\s*$", re.MULTILINE)
+
+#: Heading for the clerk's amendment block, written into the ADR file itself.
+AMENDMENT_HEADING = "## Review Panel Amendment Notes"
+#: The heading this block carried before the review panel was renamed off
+#: "Council" (#11764). ADRs amended by the old code still hold it on disk —
+#: ``docs/adr/0007-dashboard-api-multi-repo-scoping.md`` is one — so the
+#: replace-in-place path must keep recognising it. Drop this and a re-review
+#: appends a second block instead of superseding the first, silently.
+LEGACY_AMENDMENT_HEADING = "## Council Amendment Notes"
+
+#: Matches an existing amendment block under either heading, so a stale one is
+#: replaced rather than duplicated.
+_AMENDMENT_BLOCK_RE = re.compile(
+    r"(?ims)^##\s+(?:Review Panel|Council)\s+Amendment Notes\s*\n.*?(?=^##\s+|\Z)"
+)
 
 
 def _title_from_h1(content: str) -> str:
@@ -111,8 +126,8 @@ def _ensure_enforcement_line(content: str) -> str:
 _DUPLICATE_THRESHOLD = 0.7
 
 
-class ADRCouncilReviewer:
-    """Runs a multi-agent council review on proposed ADRs."""
+class ADRReviewPanel:
+    """Runs a multi-agent review-panel session on proposed ADRs."""
 
     def __init__(
         self,
@@ -136,7 +151,7 @@ class ADRCouncilReviewer:
         )
 
     async def review_proposed_adrs(self) -> dict[str, int]:
-        """Scan for proposed ADRs and run council reviews.
+        """Scan for proposed ADRs and run review-panel sessions.
 
         Returns stats: {reviewed, accepted, rejected, escalated, duplicates,
         rounds_total, auto_triaged, pre_validation_skipped}.
@@ -195,7 +210,7 @@ class ADRCouncilReviewer:
                 )
                 duplicate_context = self._build_duplicate_context(duplicates)
 
-                result = await self._run_council_session(
+                result = await self._run_panel_session(
                     adr_number, adr_title, adr_content, index_context, duplicate_context
                 )
 
@@ -260,7 +275,7 @@ class ADRCouncilReviewer:
         return results
 
     def _build_index_context(self, all_adrs: list[tuple[int, str, str, str]]) -> str:
-        """Build a summary index of all ADRs for council context."""
+        """Build a summary index of all ADRs for review-panel context."""
         lines: list[str] = []
         for number, title, content, _filename in all_adrs:
             status_match = _STATUS_RE.search(content)
@@ -324,14 +339,14 @@ class ADRCouncilReviewer:
             lines.append(f"- ADR-{number:04d}: {title} (similarity: {score:.0%})")
         return "\n".join(lines)
 
-    async def _run_council_session(
+    async def _run_panel_session(
         self,
         adr_number: int,
         adr_title: str,
         adr_content: str,
         index_context: str,
         duplicate_context: str,
-    ) -> ADRCouncilResult:
+    ) -> ADRReviewPanelResult:
         """Run the orchestrator subprocess and parse its result."""
         prompt = self._build_orchestrator_prompt(
             adr_content, index_context, duplicate_context
@@ -339,13 +354,13 @@ class ADRCouncilReviewer:
         transcript = await self._execute_orchestrator(prompt)
         if transcript is None:
             logger.warning("ADR-%04d: orchestrator returned no output", adr_number)
-            return ADRCouncilResult(
+            return ADRReviewPanelResult(
                 adr_number=adr_number,
                 adr_title=adr_title,
                 final_decision="NO_CONSENSUS",
                 summary="Orchestrator returned no output",
             )
-        return self._parse_council_result(transcript, adr_number, adr_title)
+        return self._parse_panel_result(transcript, adr_number, adr_title)
 
     def _build_orchestrator_prompt(
         self,
@@ -353,10 +368,10 @@ class ADRCouncilReviewer:
         index_context: str,
         duplicate_context: str,
     ) -> str:
-        """Construct the chair prompt for the council meeting."""
+        """Construct the chair prompt for the review panel meeting."""
         threshold = self._config.adr_review_approval_threshold
         max_rounds = self._config.adr_review_max_rounds
-        return f"""You are chairing an ADR Review Council meeting with up to {max_rounds} rounds of voting.
+        return f"""You are chairing an ADR review panel session with up to {max_rounds} rounds of voting.
 Your job: spawn judge agents, check for consensus, run deliberation if needed,
 and output a structured final result.
 
@@ -393,7 +408,7 @@ After Round 1, check:
 ### ROUND 2 — Deliberation
 Spawn 3 judges again IN PARALLEL, but this time include ALL Round 1 votes
 and reasoning in each judge's prompt. Tell each judge:
-  "The council did not reach consensus in Round 1. Review your colleagues'
+  "The panel did not reach consensus in Round 1. Review your colleagues'
    positions and reasoning below. You may maintain or change your vote.
    Address specific disagreements in your reasoning."
 
@@ -401,7 +416,7 @@ After Round 2, check same consensus rules. If still no consensus → Round 3.
 
 ### ROUND 3 — Final Vote
 Same as Round 2 but include Round 1 AND Round 2 votes. Tell each judge:
-  "This is the final round. The council must reach a decision. If you have
+  "This is the final round. The panel must reach a decision. If you have
    concerns but the majority disagrees, consider whether your concerns are
    blocking or advisory. Vote accordingly."
 
@@ -411,7 +426,7 @@ the verdict is REQUEST_CHANGES (safest default — escalates to human).
 ## Required Output Format
 After all rounds complete, output EXACTLY this block:
 
-COUNCIL_RESULT:
+PANEL_RESULT:
 rounds_needed: <1|2|3>
 architect_verdict: <final verdict>
 architect_reasoning: <final reasoning>
@@ -422,24 +437,29 @@ editor_reasoning: <final reasoning>
 approve_count: <N>
 reject_count: <N>
 final_decision: ACCEPT | REJECT | REQUEST_CHANGES | DUPLICATE
-summary: <1-2 sentence synthesis of the council's discussion>
+summary: <1-2 sentence synthesis of the panel's discussion>
 duplicate_of: <number or none>
 minority_note: <dissenting opinion if not unanimous, or "none">"""
 
-    def _parse_council_result(
+    def _parse_panel_result(
         self, transcript: str, adr_number: int, adr_title: str
-    ) -> ADRCouncilResult:
-        """Parse COUNCIL_RESULT block from orchestrator transcript."""
+    ) -> ADRReviewPanelResult:
+        """Parse PANEL_RESULT block from orchestrator transcript."""
         # Greedy match to capture full block (fields are single-line key:value,
         # so we grab everything after the header until end-of-string).
-        match = re.search(r"COUNCIL_RESULT:\s*\n(.+)", transcript, re.DOTALL)
+        # ``COUNCIL_RESULT`` is the pre-rename marker (#11764) — a stale or
+        # cached prompt still elicits it, and reading only the new one would
+        # discard a real verdict as NO_CONSENSUS.
+        match = re.search(
+            r"(?:PANEL_RESULT|COUNCIL_RESULT):\s*\n(.+)", transcript, re.DOTALL
+        )
         if not match:
-            logger.warning("ADR-%04d: no COUNCIL_RESULT block found", adr_number)
-            return ADRCouncilResult(
+            logger.warning("ADR-%04d: no PANEL_RESULT block found", adr_number)
+            return ADRReviewPanelResult(
                 adr_number=adr_number,
                 adr_title=adr_title,
                 final_decision="NO_CONSENSUS",
-                summary="Failed to parse council result",
+                summary="Failed to parse review-panel result",
             )
 
         block = match.group(1)
@@ -456,19 +476,19 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         except ValueError:
             duplicate_of = None
 
-        votes: list[CouncilVote] = []
-        all_round_votes: list[list[CouncilVote]] = []
+        votes: list[PanelVote] = []
+        all_round_votes: list[list[PanelVote]] = []
         for role in ("architect", "pragmatist", "editor"):
             verdict_str = fields.get(f"{role}_verdict", "").upper()
             reasoning = fields.get(f"{role}_reasoning", "")
             verdict = self._map_verdict(verdict_str)
-            vote = CouncilVote(
+            vote = PanelVote(
                 role=role,
                 verdict=verdict,
                 reasoning=reasoning,
                 round_number=rounds_needed,
                 duplicate_of=duplicate_of
-                if verdict == CouncilVerdict.DUPLICATE
+                if verdict == PanelVerdict.DUPLICATE
                 else None,
             )
             votes.append(vote)
@@ -476,7 +496,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         if votes:
             all_round_votes.append(votes)
 
-        duplicate_detected = any(v.verdict == CouncilVerdict.DUPLICATE for v in votes)
+        duplicate_detected = any(v.verdict == PanelVerdict.DUPLICATE for v in votes)
 
         # Map ACCEPT/REJECT/etc to canonical forms
         if final_decision in ("ACCEPT", "REJECT"):
@@ -486,7 +506,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         elif final_decision not in ("REQUEST_CHANGES",):
             final_decision = "NO_CONSENSUS"
 
-        return ADRCouncilResult(
+        return ADRReviewPanelResult(
             adr_number=adr_number,
             adr_title=adr_title,
             rounds_needed=rounds_needed,
@@ -508,18 +528,18 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 result[key.strip().lower()] = value.strip()
         return result
 
-    def _map_verdict(self, verdict_str: str) -> CouncilVerdict:
-        """Map a verdict string to a CouncilVerdict enum."""
+    def _map_verdict(self, verdict_str: str) -> PanelVerdict:
+        """Map a verdict string to a PanelVerdict enum."""
         mapping = {
-            "APPROVE": CouncilVerdict.APPROVE,
-            "REJECT": CouncilVerdict.REJECT,
-            "REQUEST_CHANGES": CouncilVerdict.REQUEST_CHANGES,
-            "DUPLICATE": CouncilVerdict.DUPLICATE,
+            "APPROVE": PanelVerdict.APPROVE,
+            "REJECT": PanelVerdict.REJECT,
+            "REQUEST_CHANGES": PanelVerdict.REQUEST_CHANGES,
+            "DUPLICATE": PanelVerdict.DUPLICATE,
         }
-        return mapping.get(verdict_str, CouncilVerdict.REQUEST_CHANGES)
+        return mapping.get(verdict_str, PanelVerdict.REQUEST_CHANGES)
 
     async def _execute_orchestrator(self, prompt: str) -> str | None:
-        """Call the configured CLI backend to run the council session."""
+        """Call the configured CLI backend to run the review-panel session."""
         from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
         # run_lightweight_agent builds the command, runs run_simple, raises
@@ -546,7 +566,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             # unimplemented backend yields None -> NO_CONSENSUS, not a skipped
             # ADR. NotImplementedError is the live case -- DockerRunner.run_simple
             # raises it for >100KB stdin prompts (WS-2.2 self-review S1).
-            logger.warning("ADR council orchestrator unavailable: %s", exc)
+            logger.warning("ADR review-panel orchestrator unavailable: %s", exc)
             return None
         if result.returncode != 0:
             if is_prompt_gate_blocked(result.stderr):
@@ -563,7 +583,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 )
                 return None
             logger.warning(
-                "ADR council orchestrator failed (rc=%d): %s",
+                "ADR review-panel orchestrator failed (rc=%d): %s",
                 result.returncode,
                 result.stderr[:200],
             )
@@ -600,9 +620,9 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         body = (
             "## Pre-validation Failure\n\n"
             f"**ADR:** ADR-{adr_number:04d} — {adr_title}\n\n"
-            "The following structural issues were detected before council review:\n\n"
+            "The following structural issues were detected before review-panel review:\n\n"
             f"{issue_msgs}\n\n"
-            "Please fix these issues so the ADR can proceed to council review.\n\n"
+            "Please fix these issues so the ADR can proceed to review-panel review.\n\n"
             "---\n"
             "Generated by HydraFlow ADR Pre-validator"
         )
@@ -629,12 +649,12 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
     async def _route_result(
         self,
-        result: ADRCouncilResult,
+        result: ADRReviewPanelResult,
         adr_path: Path,
         adr_dir: Path,
         stats: dict[str, int],
     ) -> None:
-        """Route council result to the appropriate handler."""
+        """Route review-panel result to the appropriate handler."""
         if result.duplicate_detected:
             await self._handle_duplicate(result, stats)
             stats["duplicates"] += 1
@@ -663,7 +683,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
     async def _execute_triage_or_hitl(
         self,
-        result: ADRCouncilResult,
+        result: ADRReviewPanelResult,
         *,
         reason: str,
         stats: dict[str, int],
@@ -680,36 +700,38 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         await self._escalate_to_hitl(result, reason=reason)
         stats["escalated"] += 1
 
-    async def _route_to_triage(self, result: ADRCouncilResult, *, reason: str) -> bool:
+    async def _route_to_triage(
+        self, result: ADRReviewPanelResult, *, reason: str
+    ) -> bool:
         """Create a follow-up issue in triage so normal plan/fix flow can run.
 
         Returns True when a triage issue was created; otherwise False so callers
         can escalate to HITL as a fallback.
         """
         reason_labels = {
-            "rejected": "Council recommends rejection",
-            "changes_requested": "Council requests changes",
-            "no_consensus": "Council deadlocked",
+            "rejected": "Review panel recommends rejection",
+            "changes_requested": "Review panel requests changes",
+            "no_consensus": "Review panel deadlocked",
         }
         reason_text = reason_labels.get(reason, reason)
-        summary = self._build_council_summary(result)
+        summary = self._build_panel_summary(result)
 
         title = f"[ADR Follow-up] ADR-{result.adr_number:04d}: {reason_text}"
         if len(title) > 70:
             title = title[:67] + "..."
         body = (
             "## Context\n\n"
-            "The ADR council reviewed an ADR and requested additional work.\n\n"
+            "The ADR review panel reviewed an ADR and requested additional work.\n\n"
             f"**ADR:** ADR-{result.adr_number:04d} — {result.adr_title}\n"
-            f"**Council outcome:** {result.final_decision}\n"
+            f"**Review panel outcome:** {result.final_decision}\n"
             f"**Reason:** {reason_text}\n\n"
             "## Requested Follow-Up\n\n"
             "Route through triage and attempt a normal plan -> implement -> review cycle.\n"
             "Escalate to HITL only if triage/planning cannot produce a viable fix.\n\n"
-            "## Council Summary\n\n"
+            "## Review Panel Summary\n\n"
             f"{summary}\n\n"
             "---\n"
-            "Generated by HydraFlow ADR Council"
+            "Generated by HydraFlow ADR Review Panel"
         )
         _write_adr_decision(self._config, title, body, "follow_up")
         logger.info(
@@ -721,11 +743,11 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
     async def _attempt_clerk_amend_and_revote(
         self,
-        result: ADRCouncilResult,
+        result: ADRReviewPanelResult,
         adr_path: Path,
         adr_dir: Path,
     ) -> bool:
-        """Try one deterministic clerk edit pass, then re-run council once.
+        """Try one deterministic clerk edit pass, then re-run the panel once.
 
         Returns True when the amended ADR is accepted after re-vote.
         """
@@ -759,7 +781,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         index_context = self._build_index_context(all_adrs)
         duplicates = self._detect_duplicates(adr_path.name, amended, all_adrs)
         duplicate_context = self._build_duplicate_context(duplicates)
-        rerun = await self._run_council_session(
+        rerun = await self._run_panel_session(
             result.adr_number,
             result.adr_title,
             amended,
@@ -785,33 +807,30 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         await self._accept_adr(rerun, adr_path, adr_dir, source_content=amended)
         return True
 
-    def _build_clerk_amendment(self, content: str, result: ADRCouncilResult) -> str:
+    def _build_clerk_amendment(self, content: str, result: ADRReviewPanelResult) -> str:
         """Append a focused amendment section based on non-approve votes."""
         suggestions: list[str] = []
         for vote in result.votes:
-            if vote.verdict == CouncilVerdict.APPROVE:
+            if vote.verdict == PanelVerdict.APPROVE:
                 continue
             reasoning = vote.reasoning.strip()
             if reasoning:
                 suggestions.append(f"- {vote.role.capitalize()}: {reasoning}")
         if not suggestions and result.summary.strip():
-            suggestions.append(f"- Council summary: {result.summary.strip()}")
+            suggestions.append(f"- Review panel summary: {result.summary.strip()}")
         if not suggestions:
             return content
 
         section = (
-            "## Council Amendment Notes\n\n"
-            "The following amendments were generated from council feedback:\n\n"
+            f"{AMENDMENT_HEADING}\n\n"
+            "The following amendments were generated from review-panel feedback:\n\n"
             + "\n".join(suggestions)
             + "\n\n"
             "These notes are intended to be incorporated before final acceptance."
         )
 
-        pattern = re.compile(
-            r"(?ims)^##\s+Council Amendment Notes\s*\n.*?(?=^##\s+|\Z)"
-        )
-        if pattern.search(content):
-            return pattern.sub(section + "\n\n", content, count=1)
+        if _AMENDMENT_BLOCK_RE.search(content):
+            return _AMENDMENT_BLOCK_RE.sub(section + "\n\n", content, count=1)
 
         suffix = "\n\n" if not content.endswith("\n") else "\n"
         return content.rstrip() + suffix + section + "\n"
@@ -821,7 +840,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         *,
         original: str,
         amended: str,
-        result: ADRCouncilResult,
+        result: ADRReviewPanelResult,
     ) -> tuple[bool, str]:
         """Validate clerk amendments before re-vote.
 
@@ -830,12 +849,12 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         """
         if amended == original:
             return False, "no-op amendment"
-        if "## Council Amendment Notes" not in amended:
+        if AMENDMENT_HEADING not in amended and LEGACY_AMENDMENT_HEADING not in amended:
             return False, "missing amendment notes section"
 
         missing_feedback: list[str] = []
         for vote in result.votes:
-            if vote.verdict == CouncilVerdict.APPROVE:
+            if vote.verdict == PanelVerdict.APPROVE:
                 continue
             reasoning = vote.reasoning.strip()
             if reasoning and reasoning not in amended:
@@ -852,7 +871,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
     async def _accept_adr(
         self,
-        result: ADRCouncilResult,
+        result: ADRReviewPanelResult,
         adr_path: Path,
         adr_dir: Path,
         *,
@@ -866,7 +885,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         clerk-amend path hand in its already-amended body so the file is not
         re-read from disk.
         """
-        logger.info("ADR-%04d accepted by council", result.adr_number)
+        logger.info("ADR-%04d accepted by the review panel", result.adr_number)
 
         if source_content is not None:
             content = source_content
@@ -925,7 +944,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         readme_path: Path,
         adr_content: str,
         readme_content: str | None,
-        result: ADRCouncilResult,
+        result: ADRReviewPanelResult,
     ) -> None:
         """Generate the acceptance files in a worktree, commit, push, open PR.
 
@@ -972,20 +991,20 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         )
         commit_message = (
             f"Accept ADR-{result.adr_number:04d}: {result.adr_title}"
-            f"\n\nCouncil decision: {result.summary}{minority}"
+            f"\n\nReview panel decision: {result.summary}{minority}"
         )
 
-        summary = self._build_council_summary(result)
+        summary = self._build_panel_summary(result)
         pr_title = f"Accept ADR-{result.adr_number:04d}: {result.adr_title}"
         if len(pr_title) > 70:
             pr_title = pr_title[:67] + "..."
         pr_body = (
-            f"## ADR Council Review\n\n"
-            f"The ADR review council has voted to **accept** "
+            f"## ADR Review Panel\n\n"
+            f"The ADR review panel has voted to **accept** "
             f"ADR-{result.adr_number:04d}.\n\n"
             f"{summary}\n\n"
             f"---\n"
-            f"Generated by HydraFlow ADR Council"
+            f"Generated by HydraFlow ADR Review Panel"
         )
 
         await generate_and_open_pr_async(
@@ -1008,35 +1027,37 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             commit_author_email=self._config.git_user_email,
         )
 
-    async def _escalate_to_hitl(self, result: ADRCouncilResult, *, reason: str) -> None:
+    async def _escalate_to_hitl(
+        self, result: ADRReviewPanelResult, *, reason: str
+    ) -> None:
         """Record a HITL escalation decision to adr_decisions.jsonl."""
         logger.info("ADR-%04d escalated to HITL: %s", result.adr_number, reason)
 
         reason_labels = {
-            "rejected": "Council recommends rejection",
-            "changes_requested": "Council requests changes",
-            "no_consensus": "Council deadlocked",
+            "rejected": "Review panel recommends rejection",
+            "changes_requested": "Review panel requests changes",
+            "no_consensus": "Review panel deadlocked",
         }
         reason_text = reason_labels.get(reason, reason)
-        summary = self._build_council_summary(result)
+        summary = self._build_panel_summary(result)
 
         title = f"[ADR Review] ADR-{result.adr_number:04d}: {reason_text}"
         if len(title) > 70:
             title = title[:67] + "..."
         body = (
-            f"## ADR Council Review — Escalation\n\n"
+            f"## ADR Review Panel — Escalation\n\n"
             f"**ADR:** {result.adr_number:04d} — {result.adr_title}\n"
             f"**Reason:** {reason_text}\n"
             f"**Rounds needed:** {result.rounds_needed}\n\n"
-            f"## Council Summary\n\n{summary}\n\n"
+            f"## Review Panel Summary\n\n{summary}\n\n"
             f"---\n"
-            f"Generated by HydraFlow ADR Council"
+            f"Generated by HydraFlow ADR Review Panel"
         )
 
         _write_adr_decision(self._config, title, body, "hitl_escalation")
 
     async def _handle_duplicate(
-        self, result: ADRCouncilResult, stats: dict[str, int]
+        self, result: ADRReviewPanelResult, stats: dict[str, int]
     ) -> None:
         """Record a duplicate ADR decision to adr_decisions.jsonl."""
         dup_of = result.duplicate_of
@@ -1058,18 +1079,18 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
         if len(title) > 70:
             title = title[:67] + "..."
-        summary = self._build_council_summary(result)
+        summary = self._build_panel_summary(result)
 
         body = (
             f"## Duplicate ADR Detected\n\n"
             f"**ADR under review:** {result.adr_number:04d} — {result.adr_title}\n"
             f"{dup_line}"
-            f"A council judge flagged this ADR as a potential duplicate.\n"
+            f"A review-panel judge flagged this ADR as a potential duplicate.\n"
             f"Please review both ADRs and determine whether to merge, "
             f"supersede, or keep both.\n\n"
-            f"## Council Summary\n\n{summary}\n\n"
+            f"## Review Panel Summary\n\n{summary}\n\n"
             f"---\n"
-            f"Generated by HydraFlow ADR Council"
+            f"Generated by HydraFlow ADR Review Panel"
         )
 
         _write_adr_decision(self._config, title, body, "duplicate")
@@ -1079,7 +1100,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         )
         stats["auto_triaged"] += 1
 
-    def _build_council_summary(self, result: ADRCouncilResult) -> str:
+    def _build_panel_summary(self, result: ADRReviewPanelResult) -> str:
         """Format the full deliberation record."""
         lines: list[str] = [
             f"**Final decision:** {result.final_decision}",

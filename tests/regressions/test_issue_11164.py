@@ -1,30 +1,30 @@
 # tests/regressions/test_issue_11164.py
 """Regression pins for #11164 — the #11110 fix never fires for its own attack vector.
 
-#11110 wired ``make console-conformance`` into CI as a step of the ``audit``
+#11110 wired ``make council-conformance`` into CI as a step of the ``audit``
 job, closing ARCH-0001's "no record modified after its creating commit"
-guarantee (the git-history half that ``tests/test_console_conformance.py``
+guarantee (the git-history half that ``tests/test_council_conformance.py``
 deliberately skips with ``check_git=False``).
 
 The step exists. The job it lives in does not run for the change class the
 gate was built to catch. ``audit`` is gated on
 ``core_python == 'true' || ci == 'true'``, and ``core_python``'s include
 brace-glob has no ``agents/**`` entry — the ledger lives at
-``agents/console/decisions/**``. Only the separate ``python`` filter output
+``agents/council/decisions/**``. Only the separate ``python`` filter output
 lists ``agents/**``, and ``audit`` never reads ``python``. So a PR that
 silently rewrites a merged decision record — the scenario #11110 was filed
 against — sets ``python=true``, ``core_python=false``, ``ci=false``, skips the
 whole ``audit`` job, and merges green with the immutability check never
 executed.
 
-The pin shipped with #11110 (``test_ci_audit_job_runs_console_conformance``)
+The pin shipped with #11110 (``test_ci_audit_job_runs_council_conformance``)
 asserts the step is present in the job's step list and that checkout keeps
 ``fetch-depth: 0``. It never evaluates the job's ``if:`` against a changed-file
 set, so it stayed green across this entire gap.
 
 These tests evaluate the real ci.yml the way ``dorny/paths-filter`` does:
 expand each filter's globs, match them against a representative changed-file
-path, and ask whether a job that runs ``make console-conformance`` would
+path, and ask whether a job that runs ``make council-conformance`` would
 actually be triggered.
 """
 
@@ -41,7 +41,7 @@ _CI = _REPO / ".github" / "workflows" / "ci.yml"
 
 # The attack vector in ARCH-0001's own words: a merged decision record edited
 # after its creating commit. This file is real and tracked.
-LEDGER_EDIT = "agents/console/decisions/arch/0001-console-charter.md"
+LEDGER_EDIT = "agents/council/decisions/arch/0001-console-charter.md"
 
 
 def _load_ci() -> dict[str, Any]:
@@ -150,7 +150,7 @@ def test_filter_evaluator_agrees_with_known_ci_behaviour() -> None:
     # Ordinary source and test edits drive the core lane.
     assert fires("src/orchestrator.py", "core_python")
     assert fires("src/orchestrator.py", "python")
-    assert fires("tests/test_console_conformance.py", "core_python")
+    assert fires("tests/test_council_conformance.py", "core_python")
     # The `every`-quantifier negations subtract, rather than matching everything
     # outside a single negated dir (#9908's regression).
     assert not fires("tests/regressions/test_issue_11164.py", "core_python")
@@ -166,12 +166,12 @@ def test_filter_evaluator_agrees_with_known_ci_behaviour() -> None:
     assert not fires(LEDGER_EDIT, "core_python")
 
 
-def _console_conformance_jobs(ci: dict[str, Any]) -> list[str]:
+def _council_conformance_jobs(ci: dict[str, Any]) -> list[str]:
     return [
         name
         for name, job in ci["jobs"].items()
         if any(
-            "make console-conformance" in str(step.get("run", ""))
+            "make council-conformance" in str(step.get("run", ""))
             for step in job.get("steps", [])
         )
     ]
@@ -189,11 +189,13 @@ def _full_history_jobs(ci: dict[str, Any]) -> list[str]:
     )
 
 
-def test_console_conformance_runs_for_a_decision_record_only_change() -> None:
+def test_council_conformance_runs_for_a_decision_record_only_change() -> None:
     """The step must exist AND live in a job a ledger-only PR actually triggers.
 
     The #11110 pin proves only the first half. Both halves have to hold for
-    ARCH-0001's ``Enforced by: make console-conformance`` to be true.
+    ARCH-0001's ``Enforced by: make console-conformance`` (its era's name;
+    ARCH-0003 renamed the target to ``council-conformance`` and kept the old
+    one as a deprecated alias) to be true.
 
     Deliberately remedy-agnostic: gating ``audit`` on ``python`` too, adding
     ``agents/**`` to ``core_python``, adding a dedicated filter output OR'd
@@ -203,8 +205,8 @@ def test_console_conformance_runs_for_a_decision_record_only_change() -> None:
     ci = _load_ci()
     outputs = _changes_outputs(ci)
 
-    hosting = _console_conformance_jobs(ci)
-    assert hosting, "no CI job runs `make console-conformance` at all (#11110)"
+    hosting = _council_conformance_jobs(ci)
+    assert hosting, "no CI job runs `make council-conformance` at all (#11110)"
 
     gates = {name: _job_gate_outputs(ci, name) for name in hosting}
     reachable = [
@@ -219,7 +221,7 @@ def test_console_conformance_runs_for_a_decision_record_only_change() -> None:
         for name, names in gates.items()
     }
     assert reachable, (
-        f"`make console-conformance` runs only in {hosting}, and no such job is "
+        f"`make council-conformance` runs only in {hosting}, and no such job is "
         f"triggered by a PR that changes only {LEDGER_EDIT} — the exact "
         "'silently rewritten decision record' scenario #11110 was filed "
         f"against. Gate evaluation: {detail}. The `python` output DOES cover "
@@ -255,7 +257,7 @@ def test_ledger_only_change_does_not_trigger_heavy_lanes() -> None:
     ]
     assert not triggered, (
         f"a ledger-only PR ({LEDGER_EDIT}) newly triggers heavy lane(s) "
-        f"{triggered} — the console_ledger filter must stay narrowly scoped "
+        f"{triggered} — the council_ledger filter must stay narrowly scoped "
         "to agents/**, not widen core_python or any lane gated by it (#11164)"
     )
 

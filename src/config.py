@@ -202,8 +202,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("goal_supervisor_interval", "HYDRAFLOW_GOAL_SUPERVISOR_INTERVAL", 600),
     (
-        "rails_drift_caretaker_interval",
-        "HYDRAFLOW_RAILS_DRIFT_CARETAKER_INTERVAL",
+        "charter_drift_caretaker_interval",
+        "HYDRAFLOW_CHARTER_DRIFT_CARETAKER_INTERVAL",
         86400,
     ),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
@@ -620,6 +620,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ),
     ("sampled_audit_model", "HYDRAFLOW_SAMPLED_AUDIT_MODEL", ""),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
+    ("github_host", "HYDRAFLOW_GITHUB_HOST", "github.com"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
     ("docker_network", "HYDRAFLOW_DOCKER_NETWORK", ""),
@@ -759,6 +760,7 @@ _ENV_INT_OVERRIDES += [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("origin_guard_fail_closed", "HYDRAFLOW_ORIGIN_GUARD_FAIL_CLOSED", True),
     ("factory_autostart", "HYDRAFLOW_FACTORY_AUTOSTART", True),
     (
         "test_adequacy_verifier_enabled",
@@ -947,8 +949,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         False,  # ADR-0124: Tier-2 goal supervisor ships default OFF.
     ),
     (
-        "rails_drift_caretaker_loop_enabled",
-        "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED",
+        "charter_drift_caretaker_loop_enabled",
+        "HYDRAFLOW_CHARTER_DRIFT_CARETAKER_LOOP_ENABLED",
         False,
     ),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
@@ -1255,6 +1257,29 @@ class HydraFlowConfig(BaseModel):
     repo: str = Field(
         default="",
         description="GitHub repo (owner/name); auto-detected from git remote if empty",
+    )
+    github_host: str = Field(
+        default="github.com",
+        min_length=1,
+        description=(
+            "Git host the origin-remote guard expects (#11720). Default "
+            "github.com; set to a GitHub Enterprise Server host (e.g. "
+            "github.mycorp.com) so `WorkspaceManager._assert_origin_matches_repo` "
+            "can parse and verify that deployment's origin URLs instead of "
+            "refusing them."
+        ),
+    )
+    origin_guard_fail_closed: bool = Field(
+        default=True,
+        description=(
+            "Raise when the origin remote cannot be parsed and so cannot be "
+            "verified, instead of warning and continuing (#11720). Default ON "
+            "(fail-closed): the guard exists to stop HydraFlow mutating the "
+            "wrong repo, and 'could not verify' is not a pass. Set False to "
+            "restore the pre-#11720 fail-open behaviour — needed only for "
+            "checkouts whose origin is a filesystem path or another non-"
+            "github_host remote. Prefer setting github_host first."
+        ),
     )
 
     # Worker configuration — managed via config JSON file and dashboard UI,
@@ -2579,13 +2604,14 @@ class HydraFlowConfig(BaseModel):
             "activating planned gates whose protected surface now exists (ADR-0082)"
         ),
     )
-    rails_drift_caretaker_interval: int = Field(
+    charter_drift_caretaker_interval: int = Field(
         default=86400,
         ge=3600,
         le=2592000,
         description=(
-            "RailsDriftCaretakerLoop interval in seconds (default 1 day); audits "
-            "each managed repo's live state against its rails.yaml manifest (ADR-0121)"
+            "CharterDriftCaretakerLoop interval in seconds (default 1 day); audits "
+            "each managed repo's live state against its charter.yaml (ADR-0121, "
+            "ADR-0143)"
         ),
     )
     collaborator_check_enabled: bool = Field(
@@ -5014,7 +5040,7 @@ class HydraFlowConfig(BaseModel):
         "try rebuilding on a fresh branch from main before escalating to HITL",
     )
 
-    # ADR Council Review
+    # ADR Review Panel
     adr_review_interval: int = Field(
         default=86400,
         ge=28800,
@@ -5035,11 +5061,11 @@ class HydraFlowConfig(BaseModel):
     )
     adr_review_tool: Literal["claude", "codex"] = Field(
         default="claude",
-        description="CLI backend for the ADR council review orchestrator",
+        description="CLI backend for the ADR review-panel orchestrator",
     )
     adr_review_model: str = Field(
         default="sonnet",
-        description="Model for the ADR council review orchestrator",
+        description="Model for the ADR review-panel orchestrator",
     )
 
     # Session retention
@@ -6186,15 +6212,15 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for GateActivatorLoop.",
     )
-    rails_drift_caretaker_loop_enabled: bool = Field(
+    charter_drift_caretaker_loop_enabled: bool = Field(
         default=False,
         description=(
-            "Deploy-time kill-switch for RailsDriftCaretakerLoop (ADR-0121). "
-            "Defaults OFF: the loop's live-observation layer (rails.yaml manifest "
-            "vs marker-based layer detection) is v1 and the manifest-writer "
-            "retrofit is still rolling out across managed repos; set "
-            "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED=true to enable once "
-            "every managed repo carries a manifest."
+            "Deploy-time kill-switch for CharterDriftCaretakerLoop (ADR-0121, "
+            "ADR-0143). Defaults OFF: the loop's live-observation layer "
+            "(charter.yaml vs marker-based layer detection) is v1 and the "
+            "charter-writer retrofit is still rolling out across managed repos; "
+            "set HYDRAFLOW_CHARTER_DRIFT_CARETAKER_LOOP_ENABLED=true to enable "
+            "once every managed repo carries a charter."
         ),
     )
     contract_refresh_loop_enabled: bool = Field(
@@ -6906,6 +6932,31 @@ class HydraFlowConfig(BaseModel):
         """Return the repo-scoped workspace directory path for a given issue number."""
         return self.workspace_base / self.repo_slug / f"issue-{issue_number}"
 
+    def agent_worktree_root(self) -> Path:
+        """Where a bare-name agent worktree is created — ONE setting.
+
+        `scripts/hf_worktree.sh` resolves a bare `<name>` under this path, and
+        `worktree_gc_root_paths` lists it, so the creator and the collector
+        cannot drift apart. Before #11729 they had no shared value: the script
+        passed `<dir>` to `git worktree add` verbatim while the loop swept a
+        hardcoded list of harness directories, and 47 of this repo's 100
+        worktrees (37 GB) sat where the collector could not see them.
+
+        The shell default is spelled again in `hf_worktree.sh`, because a shell
+        script cannot import this module cheaply. That duplication is the
+        residual risk, so it is pinned:
+        `tests/regressions/test_issue_11729_worktree_root_is_one_setting.py`
+        reads the literal out of the script and asserts it equals this.
+
+        `HYDRAFLOW_AGENT_WORKTREE_ROOT` overrides. Pointing it outside the
+        checkout (e.g. `~/.hydraflow/dev`) also keeps large trees out of the
+        repo, which is what let a working-tree walk read 19 GB in #11768.
+        """
+        override = os.environ.get("HYDRAFLOW_AGENT_WORKTREE_ROOT", "").strip()
+        if override:
+            return Path(override).expanduser()
+        return self.repo_root / ".claude" / "worktrees"
+
     def worktree_gc_root_paths(self) -> list[Path]:
         """Return the allow-list of roots the WorkspaceGCLoop may sweep (#10698).
 
@@ -6924,7 +6975,27 @@ class HydraFlowConfig(BaseModel):
             self.workspace_base,
             home / ".hydraflow" / "worktrees",
             home / ".hydraflow" / "dev",
-            self.repo_root / ".claude" / "worktrees",
+            home / ".hydraflow" / "manual-repairs",
+            self.agent_worktree_root(),
+            self.repo_root / ".codex" / "worktrees",
+            # Where worktrees ACTUALLY land. `scripts/hf_worktree.sh <dir>`
+            # passes <dir> to `git worktree add` verbatim, so the sanctioned
+            # workflow puts them beside or inside the checkout, not under an
+            # agent-harness directory. Measured 2026-08-29 on this repo: of
+            # 100 registered worktrees the previous list reached 53 — the
+            # other 47 sat in the repo root (13), a sibling
+            # `<repo>-worktrees/` directory (25), the checkout's parent (5)
+            # and `manual-repairs` (4). A collector that cannot see where the
+            # creator writes is a GC that only looks like one.
+            #
+            # Breadth is safe here because the gate is not the only guard:
+            # enumeration comes from THIS repo's `git worktree list`, so no
+            # other repository's files are visible, and every candidate must
+            # still clear the fail-closed policy (min-age, not state-owned,
+            # not an active/HITL/in-retry issue, and a positive landed-work
+            # proof) before it is reaped.
+            self.repo_root,
+            self.repo_root.parent,
         ]
         seen: set[Path] = set()
         roots: list[Path] = []
@@ -7564,12 +7635,29 @@ def _validate_repo_format(repo: str) -> None:
 
 
 def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
-    """Resolve repo slug and git identity from env vars."""
-    # Repo slug: env var → git remote → empty
+    """Resolve repo slug and git identity from env vars.
+
+    The pipeline target is **explicit only**. It used to fall back to the git
+    remote of the checkout the factory boots from, which meant starting the
+    factory anywhere inside HydraFlow silently targeted HydraFlow itself — the
+    one repo an operator is most likely to be standing in while testing
+    something else. No other repo ever auto-started, because no other repo is
+    ever the checkout. Detection is still performed, but only to explain the
+    idle state; it no longer selects a target.
+    """
     if not config.repo:
-        config.repo = os.environ.get("HYDRAFLOW_GITHUB_REPO", "") or _detect_repo_slug(
-            config.repo_root
-        )
+        config.repo = os.environ.get("HYDRAFLOW_GITHUB_REPO", "")
+        if not config.repo:
+            detected = _detect_repo_slug(config.repo_root)
+            logger.warning(
+                "No pipeline target: HYDRAFLOW_GITHUB_REPO is unset, so the "
+                "triage/plan/implement/review/HITL loops will idle.%s Set "
+                "HYDRAFLOW_GITHUB_REPO=<owner>/<repo> to give the factory work.",
+                f" (The checkout's own remote is {detected!r}, which is NOT"
+                " targeted automatically.)"
+                if detected
+                else "",
+            )
 
     if config.repo:
         _validate_repo_format(config.repo)

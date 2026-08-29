@@ -1,4 +1,4 @@
-"""Tests for the ADRCouncilReviewer."""
+"""Tests for the ADRReviewPanel."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from adr_reviewer import ADRCouncilReviewer
-from models import ADRCouncilResult, CouncilVerdict, CouncilVote
+from adr_reviewer import ADRReviewPanel
+from models import ADRReviewPanelResult, PanelVerdict, PanelVote
 from tests.conftest import TaskFactory, TriageResultFactory
 from tests.helpers import ConfigFactory, make_triage_phase, supply_once
 
@@ -21,8 +21,8 @@ def _make_reviewer(
     *,
     adr_review_approval_threshold: int = 2,
     adr_review_max_rounds: int = 3,
-) -> ADRCouncilReviewer:
-    """Build an ADRCouncilReviewer with test-friendly defaults."""
+) -> ADRReviewPanel:
+    """Build an ADRReviewPanel with test-friendly defaults."""
     config = ConfigFactory.create(
         repo_root=tmp_path / "repo",
         adr_review_approval_threshold=adr_review_approval_threshold,
@@ -32,10 +32,10 @@ def _make_reviewer(
 
     bus = EventBus()
     runner = MagicMock()
-    return ADRCouncilReviewer(config, bus, runner)
+    return ADRReviewPanel(config, bus, runner)
 
 
-def _read_adr_decisions(reviewer: ADRCouncilReviewer) -> list[dict]:
+def _read_adr_decisions(reviewer: ADRReviewPanel) -> list[dict]:
     """Read all entries from adr_decisions.jsonl for the reviewer's config."""
     import json
 
@@ -441,7 +441,7 @@ class TestBuildOrchestratorPrompt:
         assert ">= 3 APPROVE" in prompt
 
 
-class TestParseCouncilResult:
+class TestParsePanelResult:
     def _make_transcript(
         self,
         *,
@@ -456,7 +456,7 @@ class TestParseCouncilResult:
     ) -> str:
         return f"""Some preamble text.
 
-COUNCIL_RESULT:
+PANEL_RESULT:
 rounds_needed: {rounds}
 architect_verdict: {architect}
 architect_reasoning: Architect thinks this is good
@@ -476,11 +476,11 @@ Some trailing text."""
     def test_parse_unanimous_approve(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
         transcript = self._make_transcript()
-        result = reviewer._parse_council_result(transcript, 1, "Test ADR")
+        result = reviewer._parse_panel_result(transcript, 1, "Test ADR")
         assert result.final_decision == "ACCEPT"
         assert result.rounds_needed == 1
         assert len(result.votes) == 3
-        assert all(v.verdict == CouncilVerdict.APPROVE for v in result.votes)
+        assert all(v.verdict == PanelVerdict.APPROVE for v in result.votes)
 
     def test_parse_reject(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
@@ -490,9 +490,9 @@ Some trailing text."""
             editor="REJECT",
             final="REJECT",
         )
-        result = reviewer._parse_council_result(transcript, 1, "Test ADR")
+        result = reviewer._parse_panel_result(transcript, 1, "Test ADR")
         assert result.final_decision == "REJECT"
-        assert all(v.verdict == CouncilVerdict.REJECT for v in result.votes)
+        assert all(v.verdict == PanelVerdict.REJECT for v in result.votes)
 
     def test_parse_request_changes(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
@@ -502,7 +502,7 @@ Some trailing text."""
             editor="REQUEST_CHANGES",
             final="REQUEST_CHANGES",
         )
-        result = reviewer._parse_council_result(transcript, 1, "Test ADR")
+        result = reviewer._parse_panel_result(transcript, 1, "Test ADR")
         assert result.final_decision == "REQUEST_CHANGES"
 
     def test_parse_duplicate(self, tmp_path: Path) -> None:
@@ -514,7 +514,7 @@ Some trailing text."""
             final="DUPLICATE",
             duplicate_of="13",
         )
-        result = reviewer._parse_council_result(transcript, 18, "Test ADR")
+        result = reviewer._parse_panel_result(transcript, 18, "Test ADR")
         assert result.duplicate_detected is True
         assert result.duplicate_of == 13
         assert result.final_decision == "DUPLICATE"
@@ -522,18 +522,18 @@ Some trailing text."""
     def test_parse_multi_round(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
         transcript = self._make_transcript(rounds=3)
-        result = reviewer._parse_council_result(transcript, 1, "Test ADR")
+        result = reviewer._parse_panel_result(transcript, 1, "Test ADR")
         assert result.rounds_needed == 3
         assert len(result.all_round_votes) == 1  # Only final round in output block
 
-    def test_missing_council_result_block(self, tmp_path: Path) -> None:
+    def test_missing_panel_result_block(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = reviewer._parse_council_result("No result here", 1, "Test ADR")
+        result = reviewer._parse_panel_result("No result here", 1, "Test ADR")
         assert result.final_decision == "NO_CONSENSUS"
 
     def test_malformed_output_defaults_to_request_changes(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        transcript = """COUNCIL_RESULT:
+        transcript = """PANEL_RESULT:
 rounds_needed: 1
 architect_verdict: UNKNOWN_THING
 pragmatist_verdict: ALSO_UNKNOWN
@@ -542,16 +542,16 @@ final_decision: SOMETHING_WEIRD
 summary: unclear
 
 """
-        result = reviewer._parse_council_result(transcript, 1, "Test")
+        result = reviewer._parse_panel_result(transcript, 1, "Test")
         # Unknown final decision should map to NO_CONSENSUS
         assert result.final_decision == "NO_CONSENSUS"
         # Unknown verdicts map to REQUEST_CHANGES
-        assert all(v.verdict == CouncilVerdict.REQUEST_CHANGES for v in result.votes)
+        assert all(v.verdict == PanelVerdict.REQUEST_CHANGES for v in result.votes)
 
     def test_non_numeric_rounds_needed_defaults_to_one(self, tmp_path: Path) -> None:
         """Bug fix: non-numeric rounds_needed should not crash."""
         reviewer = _make_reviewer(tmp_path)
-        transcript = """COUNCIL_RESULT:
+        transcript = """PANEL_RESULT:
 rounds_needed: three
 architect_verdict: APPROVE
 architect_reasoning: OK
@@ -564,16 +564,16 @@ summary: All agree
 duplicate_of: none
 minority_note: none
 """
-        result = reviewer._parse_council_result(transcript, 1, "Test")
+        result = reviewer._parse_panel_result(transcript, 1, "Test")
         assert result.rounds_needed == 1
         assert result.final_decision == "ACCEPT"
 
-    def test_blank_lines_in_council_result_block(self, tmp_path: Path) -> None:
+    def test_blank_lines_in_panel_result_block(self, tmp_path: Path) -> None:
         """Bug fix: blank lines in output should not truncate parsing."""
         reviewer = _make_reviewer(tmp_path)
         transcript = """Some preamble.
 
-COUNCIL_RESULT:
+PANEL_RESULT:
 rounds_needed: 1
 architect_verdict: APPROVE
 architect_reasoning: Good structure
@@ -588,7 +588,7 @@ summary: Approved despite pragmatist dissent
 duplicate_of: none
 minority_note: Pragmatist dissented
 """
-        result = reviewer._parse_council_result(transcript, 1, "Test")
+        result = reviewer._parse_panel_result(transcript, 1, "Test")
         # Should still parse all fields despite blank lines
         assert result.final_decision == "ACCEPT"
         assert len(result.votes) == 3
@@ -598,14 +598,14 @@ class TestVerdictRouting:
     @pytest.mark.asyncio
     async def test_approve_routes_to_accept(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="ACCEPT",
             votes=[
-                CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="pragmatist", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="pragmatist", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
             ],
         )
         stats = {
@@ -630,7 +630,7 @@ class TestVerdictRouting:
     @pytest.mark.asyncio
     async def test_reject_routes_to_triage_first(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REJECT",
@@ -659,7 +659,7 @@ class TestVerdictRouting:
     @pytest.mark.asyncio
     async def test_request_changes_routes_to_triage_first(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
@@ -696,18 +696,18 @@ class TestVerdictRouting:
     @pytest.mark.asyncio
     async def test_duplicate_takes_priority(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=18,
             adr_title="Test",
             final_decision="ACCEPT",
             duplicate_detected=True,
             duplicate_of=13,
             votes=[
-                CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(
-                    role="pragmatist", verdict=CouncilVerdict.DUPLICATE, duplicate_of=13
+                PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                PanelVote(
+                    role="pragmatist", verdict=PanelVerdict.DUPLICATE, duplicate_of=13
                 ),
-                CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
             ],
         )
         stats = {
@@ -729,7 +729,7 @@ class TestVerdictRouting:
     @pytest.mark.asyncio
     async def test_no_consensus_routes_to_triage_first(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="NO_CONSENSUS",
@@ -761,7 +761,7 @@ class TestVerdictRouting:
         self, tmp_path: Path
     ) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
@@ -799,7 +799,7 @@ class TestVerdictRouting:
         self, tmp_path: Path
     ) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
@@ -836,7 +836,7 @@ class TestVerdictRouting:
 class TestDeliberationRounds:
     def test_one_round_unanimous(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        transcript = """COUNCIL_RESULT:
+        transcript = """PANEL_RESULT:
 rounds_needed: 1
 architect_verdict: APPROVE
 architect_reasoning: Good
@@ -852,12 +852,12 @@ duplicate_of: none
 minority_note: none
 
 """
-        result = reviewer._parse_council_result(transcript, 1, "Test")
+        result = reviewer._parse_panel_result(transcript, 1, "Test")
         assert result.rounds_needed == 1
 
     def test_two_round_convergence(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        transcript = """COUNCIL_RESULT:
+        transcript = """PANEL_RESULT:
 rounds_needed: 2
 architect_verdict: APPROVE
 architect_reasoning: Changed mind
@@ -873,13 +873,13 @@ duplicate_of: none
 minority_note: none
 
 """
-        result = reviewer._parse_council_result(transcript, 1, "Test")
+        result = reviewer._parse_panel_result(transcript, 1, "Test")
         assert result.rounds_needed == 2
         assert len(result.all_round_votes) == 1
 
     def test_three_round_deadlock(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        transcript = """COUNCIL_RESULT:
+        transcript = """PANEL_RESULT:
 rounds_needed: 3
 architect_verdict: APPROVE
 architect_reasoning: Still approve
@@ -895,7 +895,7 @@ duplicate_of: none
 minority_note: Architect wanted to approve but was outvoted
 
 """
-        result = reviewer._parse_council_result(transcript, 1, "Test")
+        result = reviewer._parse_panel_result(transcript, 1, "Test")
         assert result.rounds_needed == 3
         assert result.final_decision == "REQUEST_CHANGES"
 
@@ -906,14 +906,14 @@ class TestAcceptADR:
         reviewer = _make_reviewer(tmp_path)
         adr_dir = tmp_path / "repo" / "docs" / "adr"
         adr_path = _write_adr(adr_dir, 1, "Test ADR", "Proposed")
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test ADR",
             final_decision="ACCEPT",
-            summary="Council approves",
+            summary="Review panel approves",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="Good"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.APPROVE, reasoning="Good"
                 ),
             ],
         )
@@ -944,14 +944,14 @@ class TestAcceptADR:
         reviewer = _make_reviewer(tmp_path)
         adr_dir = tmp_path / "repo" / "docs" / "adr"
         adr_path = _write_adr(adr_dir, 1, "Test ADR", "Proposed")
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test ADR",
             final_decision="ACCEPT",
-            summary="Council approves",
+            summary="Review panel approves",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="Good"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.APPROVE, reasoning="Good"
                 ),
             ],
         )
@@ -984,14 +984,14 @@ class TestAcceptADR:
             "| 0001 | Test ADR | Proposed |\n"
             "| 0002 | Other | Accepted |\n"
         )
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test ADR",
             final_decision="ACCEPT",
-            summary="Council approves",
+            summary="Review panel approves",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="Good"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.APPROVE, reasoning="Good"
                 ),
             ],
         )
@@ -1023,22 +1023,22 @@ class TestAcceptADR:
         reviewer = _make_reviewer(tmp_path)
         adr_dir = tmp_path / "repo" / "docs" / "adr"
         adr_path = _write_adr(adr_dir, 1, "Test ADR", "Proposed")
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test ADR",
             final_decision="ACCEPT",
             summary="Majority approves",
             minority_note="Editor had concerns about formatting",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="Good"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.APPROVE, reasoning="Good"
                 ),
-                CouncilVote(
-                    role="pragmatist", verdict=CouncilVerdict.APPROVE, reasoning="Fine"
+                PanelVote(
+                    role="pragmatist", verdict=PanelVerdict.APPROVE, reasoning="Fine"
                 ),
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Formatting",
                 ),
             ],
@@ -1059,26 +1059,26 @@ class TestEscalateToHITL:
     @pytest.mark.asyncio
     async def test_creates_issue_with_summary(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=5,
             adr_title="Bad ADR",
             final_decision="REJECT",
             rounds_needed=2,
-            summary="Council rejects this ADR",
+            summary="Review panel rejects this ADR",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.REJECT,
+                    verdict=PanelVerdict.REJECT,
                     reasoning="Too broad",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="pragmatist",
-                    verdict=CouncilVerdict.REJECT,
+                    verdict=PanelVerdict.REJECT,
                     reasoning="Not needed",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Well written",
                 ),
             ],
@@ -1100,7 +1100,7 @@ class TestEscalateToHITL:
     @pytest.mark.asyncio
     async def test_reason_field_set_correctly(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1, adr_title="Test", final_decision="REQUEST_CHANGES"
         )
 
@@ -1116,15 +1116,15 @@ class TestRouteToTriage:
     @pytest.mark.asyncio
     async def test_creates_find_labeled_issue(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=5,
             adr_title="Bad ADR",
             final_decision="REQUEST_CHANGES",
             summary="Needs revision",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Clarify scope",
                 ),
             ],
@@ -1143,28 +1143,28 @@ class TestRouteToTriage:
 
 
 class TestADRTriageIntegration:
-    """Integration-style coverage for ADR council -> triage routing behavior."""
+    """Integration-style coverage for ADR review panel -> triage routing behavior."""
 
     @pytest.mark.asyncio
     async def test_request_changes_routes_to_triage_then_plan_when_ready(
         self, tmp_path: Path
     ) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=12,
-            adr_title="Rework council handling",
+            adr_title="Rework review-panel handling",
             final_decision="REQUEST_CHANGES",
             summary="Needs implementation adjustments",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Adjust pipeline routing",
                 ),
             ],
         )
 
-        # Step 1: ADR council routes rework into JSONL queue.
+        # Step 1: ADR review panel routes rework into JSONL queue.
         routed = await reviewer._route_to_triage(result, reason="changes_requested")
         assert routed is True
 
@@ -1173,7 +1173,7 @@ class TestADRTriageIntegration:
         created_title = entries[0]["title"]
         created_body = entries[0]["body"]
         assert "ADR-0012" in created_title
-        assert "Council Summary" in created_body
+        assert "Review Panel Summary" in created_body
 
         # Step 2: triage picks the created issue and sends it to planning.
         triage_phase, _state, triage_runner, prs, store, _stop = make_triage_phase(
@@ -1201,7 +1201,7 @@ class TestADRTriageIntegration:
         self, tmp_path: Path
     ) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=22,
             adr_title="Unclear proposal",
             final_decision="REQUEST_CHANGES",
@@ -1215,7 +1215,7 @@ class TestADRTriageIntegration:
 
         triage_task = TaskFactory.create(
             id=654,
-            title="[ADR Follow-up] ADR-0022: Council requests changes",
+            title="[ADR Follow-up] ADR-0022: Review panel requests changes",
             body="Needs more details before planning.",
             tags=list(reviewer._config.find_label),
         )
@@ -1243,44 +1243,44 @@ class TestClerkAmendment:
     async def test_clerk_revote_accepts_and_commits(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
         adr_dir = tmp_path / "repo" / "docs" / "adr"
-        adr_path = _write_adr(adr_dir, 9, "Council Edits", "Proposed")
-        original_result = ADRCouncilResult(
+        adr_path = _write_adr(adr_dir, 9, "Panel Edits", "Proposed")
+        original_result = ADRReviewPanelResult(
             adr_number=9,
-            adr_title="Council Edits",
+            adr_title="Panel Edits",
             final_decision="REQUEST_CHANGES",
             summary="Needs refinements",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Clarify tradeoffs",
                 )
             ],
         )
-        rerun_result = ADRCouncilResult(
+        rerun_result = ADRReviewPanelResult(
             adr_number=9,
-            adr_title="Council Edits",
+            adr_title="Panel Edits",
             final_decision="ACCEPT",
             summary="Looks good now",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Accept",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="pragmatist",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Accept",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Accept",
                 ),
             ],
         )
-        reviewer._run_council_session = AsyncMock(return_value=rerun_result)
+        reviewer._run_panel_session = AsyncMock(return_value=rerun_result)
         original = adr_path.read_text(encoding="utf-8")
 
         with patch.object(
@@ -1297,7 +1297,7 @@ class TestClerkAmendment:
         call = mock_accept.await_args
         assert call.args == (rerun_result, adr_path, adr_dir)
         amended = call.kwargs["source_content"]
-        assert "## Council Amendment Notes" in amended
+        assert "## Review Panel Amendment Notes" in amended
         assert "Clarify tradeoffs" in amended
         assert adr_path.read_text(encoding="utf-8") == original
 
@@ -1305,24 +1305,24 @@ class TestClerkAmendment:
     async def test_clerk_revote_non_accept_falls_back(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
         adr_dir = tmp_path / "repo" / "docs" / "adr"
-        adr_path = _write_adr(adr_dir, 10, "Council Edits", "Proposed")
+        adr_path = _write_adr(adr_dir, 10, "Panel Edits", "Proposed")
         original = adr_path.read_text(encoding="utf-8")
-        original_result = ADRCouncilResult(
+        original_result = ADRReviewPanelResult(
             adr_number=10,
-            adr_title="Council Edits",
+            adr_title="Panel Edits",
             final_decision="REQUEST_CHANGES",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Need narrower scope",
                 )
             ],
         )
-        reviewer._run_council_session = AsyncMock(
-            return_value=ADRCouncilResult(
+        reviewer._run_panel_session = AsyncMock(
+            return_value=ADRReviewPanelResult(
                 adr_number=10,
-                adr_title="Council Edits",
+                adr_title="Panel Edits",
                 final_decision="REQUEST_CHANGES",
             )
         )
@@ -1342,21 +1342,21 @@ class TestClerkAmendment:
     async def test_clerk_self_review_blocks_revote(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
         adr_dir = tmp_path / "repo" / "docs" / "adr"
-        adr_path = _write_adr(adr_dir, 11, "Council Edits", "Proposed")
-        result = ADRCouncilResult(
+        adr_path = _write_adr(adr_dir, 11, "Panel Edits", "Proposed")
+        result = ADRReviewPanelResult(
             adr_number=11,
-            adr_title="Council Edits",
+            adr_title="Panel Edits",
             final_decision="REQUEST_CHANGES",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Clarify migration safety",
                 )
             ],
         )
 
-        reviewer._run_council_session = AsyncMock()
+        reviewer._run_panel_session = AsyncMock()
         with patch.object(
             reviewer,
             "_clerk_self_review",
@@ -1370,7 +1370,7 @@ class TestClerkAmendment:
 
         assert accepted is False
         mock_self_review.assert_called_once()
-        reviewer._run_council_session.assert_not_awaited()
+        reviewer._run_panel_session.assert_not_awaited()
 
     def test_clerk_self_review_detects_missing_feedback(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
@@ -1387,17 +1387,17 @@ class TestClerkAmendment:
             "## Context\n\nA\n\n"
             "## Decision\n\nB\n\n"
             "## Consequences\n\nC\n\n"
-            "## Council Amendment Notes\n\n"
+            "## Review Panel Amendment Notes\n\n"
             "- Editor: generic note"
         )
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=12,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    verdict=PanelVerdict.REQUEST_CHANGES,
                     reasoning="Need explicit rollback strategy",
                 )
             ],
@@ -1417,16 +1417,16 @@ class TestHandleDuplicate:
     @pytest.mark.asyncio
     async def test_creates_duplicate_issue(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=18,
             adr_title="Duplicate Thing",
             final_decision="DUPLICATE",
             duplicate_detected=True,
             duplicate_of=13,
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.DUPLICATE,
+                    verdict=PanelVerdict.DUPLICATE,
                     duplicate_of=13,
                     reasoning="Same as ADR-13",
                 ),
@@ -1446,7 +1446,7 @@ class TestHandleDuplicate:
     @pytest.mark.asyncio
     async def test_duplicate_of_populated(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=18,
             adr_title="Dup",
             final_decision="DUPLICATE",
@@ -1466,7 +1466,7 @@ class TestHandleDuplicate:
     async def test_duplicate_of_none_does_not_crash(self, tmp_path: Path) -> None:
         """Bug fix: duplicate_of=None should not cause TypeError on :04d format."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=18,
             adr_title="Mystery Dup",
             final_decision="DUPLICATE",
@@ -1493,13 +1493,13 @@ class TestExecuteOrchestrator:
         reviewer = _make_reviewer(tmp_path)
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "COUNCIL_RESULT:\nfinal_decision: ACCEPT"
+        mock_result.stdout = "PANEL_RESULT:\nfinal_decision: ACCEPT"
         mock_result.stderr = ""
         reviewer._runner.run_simple = AsyncMock(return_value=mock_result)
 
         result = await reviewer._execute_orchestrator("test prompt")
 
-        assert result == "COUNCIL_RESULT:\nfinal_decision: ACCEPT"
+        assert result == "PANEL_RESULT:\nfinal_decision: ACCEPT"
         call_args = reviewer._runner.run_simple.call_args
         cmd = call_args.args[0]
         assert cmd[0] == "claude"
@@ -1522,7 +1522,7 @@ class TestExecuteOrchestrator:
         )
         from events import EventBus
 
-        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock())
+        reviewer = ADRReviewPanel(config, EventBus(), MagicMock())
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "output"
@@ -1545,7 +1545,7 @@ class TestExecuteOrchestrator:
         )
         from events import EventBus
 
-        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock())
+        reviewer = ADRReviewPanel(config, EventBus(), MagicMock())
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "output"
@@ -1604,14 +1604,14 @@ class TestExecuteOrchestrator:
         assert result is None
 
 
-class TestRunCouncilSession:
+class TestRunPanelSession:
     @pytest.mark.asyncio
     async def test_none_transcript_returns_no_consensus(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
         with patch.object(
             reviewer, "_execute_orchestrator", new_callable=AsyncMock, return_value=None
         ):
-            result = await reviewer._run_council_session(
+            result = await reviewer._run_panel_session(
                 1, "Test", "content", "index", "no dupes"
             )
         assert result.final_decision == "NO_CONSENSUS"
@@ -1620,7 +1620,7 @@ class TestRunCouncilSession:
     @pytest.mark.asyncio
     async def test_valid_transcript_parses(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        transcript = """COUNCIL_RESULT:
+        transcript = """PANEL_RESULT:
 rounds_needed: 1
 architect_verdict: APPROVE
 architect_reasoning: Good
@@ -1639,7 +1639,7 @@ minority_note: none
             new_callable=AsyncMock,
             return_value=transcript,
         ):
-            result = await reviewer._run_council_session(
+            result = await reviewer._run_panel_session(
                 1, "Test", "content", "index", "no dupes"
             )
         assert result.final_decision == "ACCEPT"
@@ -1658,12 +1658,12 @@ class TestAcceptADREdgeCases:
         adr_path = adr_dir / "0001-test.md"
         # Write binary content that can't be decoded as UTF-8
         adr_path.write_bytes(b"\x80\x81\x82\xff\xfe")
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="ACCEPT",
             summary="Approved",
-            votes=[CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE)],
+            votes=[PanelVote(role="architect", verdict=PanelVerdict.APPROVE)],
         )
 
         # Should not raise
@@ -1685,8 +1685,8 @@ class TestCommitAcceptance:
         )
         from events import EventBus
 
-        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock())
-        result = ADRCouncilResult(
+        reviewer = ADRReviewPanel(config, EventBus(), MagicMock())
+        result = ADRReviewPanelResult(
             adr_number=1, adr_title="Test", final_decision="ACCEPT", summary="OK"
         )
 
@@ -1709,7 +1709,7 @@ class TestCommitAcceptance:
         """_commit_acceptance delegates to the helper with raise_on_failure=False
         so transient git/gh failures don't crash the reviewer loop."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1, adr_title="Test", final_decision="ACCEPT", summary="OK"
         )
         adr_path = tmp_path / "repo" / "docs" / "adr" / "0001-test.md"
@@ -1744,7 +1744,7 @@ class TestTitleTruncation:
     @pytest.mark.asyncio
     async def test_escalation_title_truncated(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REJECT",
@@ -1765,7 +1765,7 @@ class TestTitleTruncation:
     async def test_duplicate_title_within_bounds(self, tmp_path: Path) -> None:
         """Duplicate issue titles stay within 70 chars."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="A" * 100,
             final_decision="DUPLICATE",
@@ -1782,35 +1782,35 @@ class TestTitleTruncation:
         assert len(title) <= 70
 
 
-class TestBuildCouncilSummary:
+class TestBuildPanelSummary:
     def test_multi_round_format(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             rounds_needed=2,
             final_decision="ACCEPT",
             summary="Converged after discussion",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Good structure",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="pragmatist",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Practical",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Well written",
                 ),
             ],
         )
 
-        summary = reviewer._build_council_summary(result)
+        summary = reviewer._build_panel_summary(result)
         assert "ACCEPT" in summary
         assert "2" in summary  # rounds_needed
         assert "Architect" in summary
@@ -1820,96 +1820,96 @@ class TestBuildCouncilSummary:
 
     def test_minority_notes(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="ACCEPT",
             minority_note="Editor had concerns",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="OK"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.APPROVE, reasoning="OK"
                 ),
             ],
         )
 
-        summary = reviewer._build_council_summary(result)
+        summary = reviewer._build_panel_summary(result)
         assert "Editor had concerns" in summary
 
     def test_per_judge_reasoning(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REJECT",
             votes=[
-                CouncilVote(
+                PanelVote(
                     role="architect",
-                    verdict=CouncilVerdict.REJECT,
+                    verdict=PanelVerdict.REJECT,
                     reasoning="Too narrow scope",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="pragmatist",
-                    verdict=CouncilVerdict.REJECT,
+                    verdict=PanelVerdict.REJECT,
                     reasoning="Already covered",
                 ),
-                CouncilVote(
+                PanelVote(
                     role="editor",
-                    verdict=CouncilVerdict.APPROVE,
+                    verdict=PanelVerdict.APPROVE,
                     reasoning="Clear prose",
                 ),
             ],
         )
 
-        summary = reviewer._build_council_summary(result)
+        summary = reviewer._build_panel_summary(result)
         assert "Too narrow scope" in summary
         assert "Already covered" in summary
         assert "Clear prose" in summary
 
 
-class TestBuildCouncilSummaryEdgeCases:
-    """Edge case tests for _build_council_summary."""
+class TestBuildPanelSummaryEdgeCases:
+    """Edge case tests for _build_panel_summary."""
 
     def test_no_minority_note(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="ACCEPT",
             minority_note="none",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="OK"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.APPROVE, reasoning="OK"
                 ),
             ],
         )
-        summary = reviewer._build_council_summary(result)
+        summary = reviewer._build_panel_summary(result)
         assert "Minority Note" not in summary
 
     def test_no_summary(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REJECT",
             summary="",
             votes=[
-                CouncilVote(
-                    role="architect", verdict=CouncilVerdict.REJECT, reasoning="Bad"
+                PanelVote(
+                    role="architect", verdict=PanelVerdict.REJECT, reasoning="Bad"
                 ),
             ],
         )
-        summary = reviewer._build_council_summary(result)
+        summary = reviewer._build_panel_summary(result)
         assert "### Summary" not in summary
 
     def test_no_votes(self, tmp_path: Path) -> None:
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="NO_CONSENSUS",
             votes=[],
         )
-        summary = reviewer._build_council_summary(result)
+        summary = reviewer._build_panel_summary(result)
         assert "NO_CONSENSUS" in summary
 
 
@@ -1936,20 +1936,20 @@ class TestReviewProposedADRs:
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         _write_adr(adr_dir, 1, "Proposed ADR", "Proposed")
 
-        accept_result = ADRCouncilResult(
+        accept_result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="proposed adr",
             final_decision="ACCEPT",
             votes=[
-                CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="pragmatist", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="pragmatist", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
             ],
         )
         with (
             patch.object(
                 reviewer,
-                "_run_council_session",
+                "_run_panel_session",
                 new_callable=AsyncMock,
                 return_value=accept_result,
             ),
@@ -1962,7 +1962,7 @@ class TestReviewProposedADRs:
 
     @pytest.mark.asyncio
     async def test_multiple_adrs_mixed_outcomes(self, tmp_path: Path) -> None:
-        """Integration test: multiple ADRs with different council outcomes."""
+        """Integration test: multiple ADRs with different review-panel outcomes."""
         reviewer = _make_reviewer(tmp_path)
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         _write_adr(adr_dir, 1, "Good ADR", "Proposed")
@@ -1971,36 +1971,36 @@ class TestReviewProposedADRs:
         _write_adr(adr_dir, 4, "Already Accepted", "Accepted")
 
         results = [
-            ADRCouncilResult(
+            ADRReviewPanelResult(
                 adr_number=1,
                 adr_title="good adr",
                 final_decision="ACCEPT",
                 votes=[
-                    CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                    CouncilVote(role="pragmatist", verdict=CouncilVerdict.APPROVE),
-                    CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                    PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                    PanelVote(role="pragmatist", verdict=PanelVerdict.APPROVE),
+                    PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
                 ],
             ),
-            ADRCouncilResult(
+            ADRReviewPanelResult(
                 adr_number=2,
                 adr_title="bad adr",
                 final_decision="REJECT",
                 rounds_needed=2,
                 votes=[
-                    CouncilVote(role="architect", verdict=CouncilVerdict.REJECT),
-                    CouncilVote(role="pragmatist", verdict=CouncilVerdict.REJECT),
-                    CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                    PanelVote(role="architect", verdict=PanelVerdict.REJECT),
+                    PanelVote(role="pragmatist", verdict=PanelVerdict.REJECT),
+                    PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
                 ],
             ),
-            ADRCouncilResult(
+            ADRReviewPanelResult(
                 adr_number=3,
                 adr_title="duplicate adr",
                 final_decision="DUPLICATE",
                 duplicate_detected=True,
                 duplicate_of=1,
                 votes=[
-                    CouncilVote(
-                        role="editor", verdict=CouncilVerdict.DUPLICATE, duplicate_of=1
+                    PanelVote(
+                        role="editor", verdict=PanelVerdict.DUPLICATE, duplicate_of=1
                     ),
                 ],
             ),
@@ -2008,14 +2008,16 @@ class TestReviewProposedADRs:
 
         call_idx = 0
 
-        async def _mock_council(*_args: object, **_kwargs: object) -> ADRCouncilResult:
+        async def _mock_panel(
+            *_args: object, **_kwargs: object
+        ) -> ADRReviewPanelResult:
             nonlocal call_idx
             r = results[call_idx]
             call_idx += 1
             return r
 
         with (
-            patch.object(reviewer, "_run_council_session", side_effect=_mock_council),
+            patch.object(reviewer, "_run_panel_session", side_effect=_mock_panel),
             patch.object(reviewer, "_accept_adr", new_callable=AsyncMock),
             patch.object(reviewer, "_escalate_to_hitl", new_callable=AsyncMock),
             patch.object(reviewer, "_handle_duplicate", new_callable=AsyncMock),
@@ -2036,7 +2038,7 @@ class TestAutoTriage:
     ) -> None:
         """When auto_triage is True and triage succeeds, auto_triaged increments."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="NO_CONSENSUS",
@@ -2067,7 +2069,7 @@ class TestAutoTriage:
     ) -> None:
         """When auto_triage is True but triage fails, escalated increments."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="NO_CONSENSUS",
@@ -2096,15 +2098,15 @@ class TestAutoTriage:
     async def test_duplicate_auto_triaged_when_enabled(self, tmp_path: Path) -> None:
         """Duplicate with auto_triage=True routes to triage label, not HITL."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Dup",
             final_decision="DUPLICATE",
             duplicate_detected=True,
             duplicate_of=2,
             votes=[
-                CouncilVote(
-                    role="editor", verdict=CouncilVerdict.DUPLICATE, duplicate_of=2
+                PanelVote(
+                    role="editor", verdict=PanelVerdict.DUPLICATE, duplicate_of=2
                 ),
             ],
         )
@@ -2117,8 +2119,8 @@ class TestAutoTriage:
 
 class TestPreValidationGate:
     @pytest.mark.asyncio
-    async def test_skips_council_on_validation_failure(self, tmp_path: Path) -> None:
-        """ADRs that fail pre-validation should not go to council."""
+    async def test_skips_panel_on_validation_failure(self, tmp_path: Path) -> None:
+        """ADRs that fail pre-validation should not reach the review panel."""
         reviewer = _make_reviewer(tmp_path)
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         adr_dir.mkdir(parents=True)
@@ -2130,14 +2132,14 @@ class TestPreValidationGate:
 
         with (
             patch.object(
-                reviewer, "_run_council_session", new_callable=AsyncMock
-            ) as mock_council,
+                reviewer, "_run_panel_session", new_callable=AsyncMock
+            ) as mock_panel,
             patch.object(
                 reviewer, "_route_pre_validation_failure", new_callable=AsyncMock
             ) as mock_route,
         ):
             stats = await reviewer.review_proposed_adrs()
-            mock_council.assert_not_awaited()
+            mock_panel.assert_not_awaited()
             mock_route.assert_awaited_once()
 
         assert stats["reviewed"] == 1
@@ -2157,47 +2159,47 @@ class TestPreValidationGate:
 
         with (
             patch.object(
-                reviewer, "_run_council_session", new_callable=AsyncMock
-            ) as mock_council,
+                reviewer, "_run_panel_session", new_callable=AsyncMock
+            ) as mock_panel,
             patch.object(
                 reviewer, "_route_pre_validation_failure", new_callable=AsyncMock
             ),
         ):
             stats = await reviewer.review_proposed_adrs()
-            # Council should NOT be called since pre-validation should catch this
-            mock_council.assert_not_awaited()
+            # The review panel should NOT be called: pre-validation catches this
+            mock_panel.assert_not_awaited()
 
         assert stats["reviewed"] == 1
         assert stats["pre_validation_skipped"] == 1
 
     @pytest.mark.asyncio
-    async def test_valid_adr_proceeds_to_council(self, tmp_path: Path) -> None:
-        """A fully valid ADR should pass pre-validation and reach the council."""
+    async def test_valid_adr_proceeds_to_panel(self, tmp_path: Path) -> None:
+        """A fully valid ADR should pass pre-validation and reach the review panel."""
         reviewer = _make_reviewer(tmp_path)
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         _write_adr(adr_dir, 1, "Good ADR", "Proposed")
 
-        accept_result = ADRCouncilResult(
+        accept_result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="good adr",
             final_decision="ACCEPT",
             votes=[
-                CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="pragmatist", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="pragmatist", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
             ],
         )
         with (
             patch.object(
                 reviewer,
-                "_run_council_session",
+                "_run_panel_session",
                 new_callable=AsyncMock,
                 return_value=accept_result,
-            ) as mock_council,
+            ) as mock_panel,
             patch.object(reviewer, "_accept_adr", new_callable=AsyncMock),
         ):
             stats = await reviewer.review_proposed_adrs()
-            mock_council.assert_awaited_once()
+            mock_panel.assert_awaited_once()
 
         assert stats["reviewed"] == 1
         assert stats["accepted"] == 1
@@ -2227,15 +2229,15 @@ class TestPreValidationGate:
         )
         with (
             patch.object(
-                reviewer, "_run_council_session", new_callable=AsyncMock
-            ) as mock_council,
+                reviewer, "_run_panel_session", new_callable=AsyncMock
+            ) as mock_panel,
             patch.object(
                 reviewer, "_route_pre_validation_failure", new_callable=AsyncMock
             ) as mock_route,
         ):
             stats = await reviewer.review_proposed_adrs()
-            # Phantom symbol should trigger pre-validation failure, not council
-            mock_council.assert_not_awaited()
+            # Phantom symbol should trigger pre-validation failure, not a panel session
+            mock_panel.assert_not_awaited()
             mock_route.assert_awaited_once()
 
         assert stats["pre_validation_skipped"] == 1
@@ -2373,7 +2375,7 @@ class TestStatsIntegrity:
     ) -> None:
         """escalated must not increment when auto_triaged increments."""
         reviewer = _make_reviewer(tmp_path)
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
@@ -2416,24 +2418,26 @@ class TestReviewProposedADRsPerItemGuard:
 
         call_count = 0
 
-        async def _mock_council(*_args: object, **_kwargs: object) -> ADRCouncilResult:
+        async def _mock_panel(
+            *_args: object, **_kwargs: object
+        ) -> ADRReviewPanelResult:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise RuntimeError("council exploded")
-            return ADRCouncilResult(
+                raise RuntimeError("panel exploded")
+            return ADRReviewPanelResult(
                 adr_number=2,
                 adr_title="good adr",
                 final_decision="ACCEPT",
                 votes=[
-                    CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                    CouncilVote(role="pragmatist", verdict=CouncilVerdict.APPROVE),
-                    CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                    PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                    PanelVote(role="pragmatist", verdict=PanelVerdict.APPROVE),
+                    PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
                 ],
             )
 
         with (
-            patch.object(reviewer, "_run_council_session", side_effect=_mock_council),
+            patch.object(reviewer, "_run_panel_session", side_effect=_mock_panel),
             patch.object(reviewer, "_accept_adr", new_callable=AsyncMock),
         ):
             stats = await reviewer.review_proposed_adrs()
@@ -2453,14 +2457,14 @@ class TestReviewProposedADRsPerItemGuard:
         _write_adr(adr_dir, 1, "ADR One", "Proposed")
         _write_adr(adr_dir, 2, "ADR Two", "Proposed")
 
-        accept_result = ADRCouncilResult(
+        accept_result = ADRReviewPanelResult(
             adr_number=1,
             adr_title="adr one",
             final_decision="ACCEPT",
             votes=[
-                CouncilVote(role="architect", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="pragmatist", verdict=CouncilVerdict.APPROVE),
-                CouncilVote(role="editor", verdict=CouncilVerdict.APPROVE),
+                PanelVote(role="architect", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="pragmatist", verdict=PanelVerdict.APPROVE),
+                PanelVote(role="editor", verdict=PanelVerdict.APPROVE),
             ],
         )
 
@@ -2475,7 +2479,7 @@ class TestReviewProposedADRsPerItemGuard:
         with (
             patch.object(
                 reviewer,
-                "_run_council_session",
+                "_run_panel_session",
                 new_callable=AsyncMock,
                 return_value=accept_result,
             ),
@@ -2489,8 +2493,8 @@ class TestReviewProposedADRsPerItemGuard:
         assert stats["reviewed"] == 2
 
 
-class TestADRCouncilReviewerCredentials:
-    """Verify that ADRCouncilReviewer correctly wires the credentials parameter."""
+class TestADRReviewPanelCredentials:
+    """Verify that ADRReviewPanel correctly wires the credentials parameter."""
 
     def test_default_credentials_constructed_when_none_passed(
         self, tmp_path: Path
@@ -2509,7 +2513,7 @@ class TestADRCouncilReviewerCredentials:
         creds = Credentials(gh_token="test-token-xyz")
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
         bus = EventBus()
-        reviewer = ADRCouncilReviewer(config, bus, MagicMock(), credentials=creds)
+        reviewer = ADRReviewPanel(config, bus, MagicMock(), credentials=creds)
         assert reviewer._credentials is creds
         assert reviewer._credentials.gh_token == "test-token-xyz"
 
@@ -2587,12 +2591,12 @@ class TestGateBlockEscalation:
         return blocked, allowed
 
     @staticmethod
-    def _make(config) -> tuple[ADRCouncilReviewer, MagicMock, MagicMock]:
+    def _make(config) -> tuple[ADRReviewPanel, MagicMock, MagicMock]:
         bus = MagicMock()
         bus.publish = AsyncMock()
         runner = MagicMock()
         runner.run_simple = AsyncMock()
-        reviewer = ADRCouncilReviewer(config, bus, runner)
+        reviewer = ADRReviewPanel(config, bus, runner)
         return reviewer, bus, runner
 
     @pytest.mark.asyncio

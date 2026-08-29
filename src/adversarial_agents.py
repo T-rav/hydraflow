@@ -1,6 +1,6 @@
 """Shared Protocol + types for adversarial-pipeline agent adapters.
 
-The earlier-adversarial pipeline (AssumptionSurfacer, PlanCouncil,
+The earlier-adversarial pipeline (AssumptionSurfacer, PlanEnsemble,
 SpecACGenerator, SpecJudge) each take an agent satisfying the same
 two-string-in, JSON-string-out contract. Extracting that Protocol once
 keeps the four adversarial stages testable with a single fake.

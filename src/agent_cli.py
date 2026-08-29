@@ -51,7 +51,7 @@ def _plugin_dir_flags() -> list[str]:
 # notably a host-installed superpowers ``SessionStart`` hook that injects
 # "invoke a skill BEFORE any response, explore first" guidance into every
 # headless ``claude -p`` session. That guidance derails strict-JSON contract
-# agents (triage, judges, councils) off their output contract — they explore
+# agents (triage, judges, ensembles) off their output contract — they explore
 # the repo instead of emitting the verdict — so the verdict parser finds
 # nothing. ``--setting-sources project`` leaves OAuth/keychain auth intact
 # (unlike ``--bare``, which forces ANTHROPIC_API_KEY). Callers that isolate also
@@ -117,7 +117,7 @@ def build_agent_command(
 
     *isolate_user_settings* (claude only) restricts the spawn to ``project``
     settings and skips the pre-cloned ``--plugin-dir`` flags. Strict-JSON
-    contract agents (triage, judges, councils) set this so a host/user-level
+    contract agents (triage, judges, ensembles) set this so a host/user-level
     plugin's ``SessionStart`` hook can't inject skill-invocation guidance that
     breaks the JSON contract — see :data:`_CONTRACT_SETTING_SOURCES`.
     """

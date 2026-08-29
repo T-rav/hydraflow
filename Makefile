@@ -26,7 +26,30 @@ DEPS_STAMP := $(VENV)/.deps-synced
 # deterministic failures still fail on every retry and stay red, so real breaks
 # are not masked. PERSISTENT isolation leaks (a global mock left set) are NOT
 # rescued by reruns and are quarantined via PYTEST_SERIAL_PATHS instead.
-PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1
+# NOT named PYTEST_TIMEOUT: the Makefile does a bare `export` (line 9), and
+# pytest-timeout reads a PYTEST_TIMEOUT env var as a FLOAT
+# (pytest_timeout.py:360), so that name makes every pytest invocation die with
+# `ValueError: Invalid timeout ... from PYTEST_TIMEOUT environment variable`.
+# --timeout/--durations match .github/workflows/ci.yml exactly. Without them a
+# single non-terminating test eats the whole local run invisibly: a working-tree
+# rglob in tests/test_beads_manager.py wedged one xdist worker for 33 minutes
+# while seven idled, and nothing reported which test it was. CI had the guard;
+# the local lane did not, so the failure only ever appeared here.
+HF_PYTEST_DEADLINE_FLAGS ?= --timeout=300 --durations=25
+
+# The watchdog is complementary to --timeout, not a duplicate of it.
+# --timeout ENDS a hang but kills the stack with it, and its signal only
+# lands between bytecodes so it cannot name a test wedged in one long C
+# call. tests/hf_spin_watch dumps every thread's traceback from a separate
+# thread WITHOUT interrupting anything, so the wedged test is named while
+# it is still wedged. See tests/test_hf_spin_watch.py.
+# Lanes loading this MUST also carry $(PROJECT_ROOT) on PYTHONPATH: the
+# Makefile drives pytest through `uv run pytest`, a console script, which
+# does NOT put cwd on sys.path — so `-p tests.hf_spin_watch` fails with
+# `No module named 'tests'` under exactly the invocation CI and quality use,
+# while working fine under `python -m pytest`.
+HF_PYTEST_WATCHDOG ?= -p tests.hf_spin_watch
+PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG)
 
 # Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
 # process-global state that collides across workers).
@@ -89,6 +112,19 @@ GATEWAY_PACKAGE_TEST_PATHS := tests/test_gateway_*.py tests/test_routing_*.py
 GATEWAY_PACKAGE_TEST_IGNORES := $(addprefix --ignore=,$(wildcard $(GATEWAY_PACKAGE_TEST_PATHS)))
 GATEWAY_PACKAGE_COVERAGE_MIN := 85
 GATEWAY_PACKAGE_COVERAGE_CMD := PYTHONPATH=src $(UV) pytest $(GATEWAY_PACKAGE_TEST_PATHS) --cov=hydraflow_gateway --cov-branch --cov-fail-under=$(GATEWAY_PACKAGE_COVERAGE_MIN) --cov-report=term-missing
+
+# #11730 — the ungated aggregate-ratchet lane. These gates measure a quantity
+# summed over a WHOLE tree (every module under tests/, every module under src/,
+# recent merge history) and compare it to a committed mark. CI decides whether
+# to run a gate from a dorny/paths-filter allowlist, so any such gate that is
+# path-triggered can be breached by a change inside its subject but outside its
+# trigger — the number moves and no gate sees it. The `aggregate-ratchets` CI
+# job runs this list UNGATED, on every PR and on every push to main/staging, so
+# the trigger cannot be narrower than the subject and a breach assembled from
+# individually-green PRs is measured against the real merged tree.
+# The registry that explains each entry — and the guard that keeps this list
+# equal to it — is tests/architecture/aggregate_gate_registry.py.
+AGGREGATE_RATCHET_PATHS := tests/architecture/test_suite_hygiene_ratchet.py tests/architecture/test_no_ignored_active_tests.py tests/architecture/test_adr0023_test_local_class_instantiation.py tests/architecture/test_duration_ratchet.py tests/test_disturbance_ratchet.py
 
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3
@@ -280,7 +316,7 @@ endif
 
 coverage: deps
 	@echo "$(BLUE)Running HydraFlow unit tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) --cov=src --cov-append --cov-fail-under=$(TEST_COVERAGE_EFFECTIVE) --cov-report=term-missing --cov-report=xml:coverage.xml
 	@echo "$(GREEN)All tests passed$(RESET)"
 
@@ -383,7 +419,7 @@ test-fast: deps
 
 test-cov: deps
 	@echo "$(BLUE)Running HydraFlow tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -v --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov
 	@echo "$(GREEN)All tests passed with coverage$(RESET)"
 
@@ -529,7 +565,7 @@ stamp:
 		$(if $(CLI_ENTRY),--cli-entry $(CLI_ENTRY)) \
 		$(if $(COVERAGE_FLOOR),--coverage-floor $(COVERAGE_FLOOR)) \
 		$(if $(FORCE),--force) \
-		$(if $(AGENTS_CONSOLE),--agents-console) \
+		$(if $(or $(AGENTS_COUNCIL),$(AGENTS_CONSOLE)),--agents-council) \
 		$(ARGS)
 
 
@@ -608,8 +644,8 @@ quality-unlocked:
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
-		PYTHONPATH=src $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) && echo "[serial-tests OK]" & \
+		PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG) && echo "[serial-tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
@@ -622,13 +658,17 @@ quality-unlocked:
 # the pre-push gate and must stay fast (lint + typecheck + security only, no
 # test suites of any kind). UI drift is still caught by `make quality` locally
 # and by CI's Dashboard Build job on every PR.
-# Invoked through $(UV), NOT the bare $(VENV)/bin/... binaries. A bare
-# `.venv/bin/pyright` resolves its interpreter without VIRTUAL_ENV set, so in a
-# WORKTREE it analyses against a different environment than `make quality` and
-# CI do — and reports errors neither of them sees (a `models.SessionLog`
-# constructor inferring as `Unknown` on clean origin/staging, #11645). This is
-# the pre-push hook: a false red here blocks every push from every worktree, so
-# it must run the same way the authoritative gate does.
+# Invoked through $(UV), NOT the bare $(VENV)/bin/... binaries — every tool
+# here resolves from the same environment the authoritative gate uses.
+# pyright specifically USED to disagree with itself: a bare `.venv/bin/pyright`
+# resolves its interpreter without VIRTUAL_ENV set, lost site-packages, and
+# every py.typed dependency degraded to `Unknown`. That showed up as false RED
+# in a worktree (a `models.SessionLog` constructor inferring as `Unknown` on
+# clean origin/staging, #11645) AND as false GREEN anywhere (attribute checking
+# silently stopping on every pydantic model, #11707). `venvPath`/`venv` in
+# [tool.pyright] now make the config self-sufficient, so the invocation no
+# longer changes the answer. The canary that reddens if that ever stops being
+# true: tests/regressions/test_issue_11707_pyright_dependency_blindness.py
 quality-lite: deps
 	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
@@ -890,6 +930,14 @@ escape-list: ## List escape-ledger findings still awaiting a human resolution.
 escape-resolve: ## Record a human resolution for an escape (ARGS="<id> --encoded-as <encoding>" and/or "--confidence <level>").
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/resolve_escape.py resolve $(ARGS)
 
+.PHONY: aggregate-ratchets
+
+## aggregate-ratchets — run the whole-tree ratchets (the ungated CI lane, #11730)
+aggregate-ratchets: deps
+	@echo "$(BLUE)Running whole-tree aggregate ratchets...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(AGGREGATE_RATCHET_PATHS) -q
+	@echo "$(GREEN)Aggregate ratchets passed$(RESET)"
+
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
 ## arch-regen — regenerate docs/arch/generated/ from source
@@ -903,7 +951,7 @@ arch-regen:
 arch-regen-stage:
 	@echo "$(BLUE)Regenerating and staging architecture artifacts...$(RESET)"
 	@$(UV) python -m arch.runner --emit --repo-root $(HYDRAFLOW_DIR)
-	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json disturbance/baselines/traceability.yaml
+	@git -C $(HYDRAFLOW_DIR) add docs/arch/generated docs/arch/.meta.json disturbance/baselines/traceability.yaml docs/standards/ports-and-loops/README.md
 	@echo "$(GREEN)docs/arch/ refreshed and staged$(RESET)"
 
 ## rebase-onto — rebase current branch onto origin/<base> past PARENT_TIP
@@ -951,8 +999,22 @@ post-merge-smoke:
 	@echo "$(BLUE)Running post-merge full-machine smoke (s82)...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion
 
+## council-conformance — ARCH-0001 fitness functions over the Council's
+## decision ledger: record shape, per-chamber numbering, persona contracts,
+## chair identity, calibration staleness, git-history immutability.
+## Renamed from `console-conformance` on 2026-08-25 (ARCH-0003, house
+## standard "the Council, with chambers"); the old name is a deprecated
+## alias below.
+.PHONY: council-conformance console-conformance
+council-conformance:
+	@PYTHONPATH=. $(UV) python scripts/check_council_conformance.py
+
+# Deprecated alias (ARCH-0003). Kept so external callers and ARCH-0001's own
+# immutable `Enforced by: make console-conformance` line keep resolving.
+# Retiring it requires a superseding decision record, not a cleanup PR.
 console-conformance:
-	@PYTHONPATH=. $(UV) python scripts/check_console_conformance.py
+	@printf '$(YELLOW)console-conformance is DEPRECATED — use `make council-conformance` (ARCH-0003, 2026-08-25).$(RESET)\n' >&2
+	@$(MAKE) --no-print-directory council-conformance
 
 # --------------------------------------------------------------------------
 # mutation-gauntlet — gate-sensitivity instrument (#10835, ADR-0125). On-demand

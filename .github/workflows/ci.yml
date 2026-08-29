@@ -27,7 +27,7 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python }}
       core_python: ${{ steps.core_filter.outputs.core_python }}
-      console_ledger: ${{ steps.filter.outputs.console_ledger }}
+      council_ledger: ${{ steps.filter.outputs.council_ledger }}
       arch: ${{ steps.filter.outputs.arch }}
       scenario_tests: ${{ steps.filter.outputs.scenario_tests }}
       regression_tests: ${{ steps.filter.outputs.regression_tests }}
@@ -79,14 +79,14 @@ jobs:
               # and flips a live regulator from inert to acting — so it must
               # run the loader/regulator/parity tests that read these files.
               - 'control/**'
-              # agents/** — the console decision ledger and persona contracts
+              # agents/** — the Council decision ledger and persona contracts
               # (ARCH-0001). This entry gates lint/typecheck/security only;
               # the pytest lane is gated by core_python (below), which
               # deliberately excludes agents/** so a decision-record-only PR
               # doesn't drag in the heavy smoke/scenario/regression/sandbox
-              # lanes. The ledger's real guard — `make console-conformance`,
+              # lanes. The ledger's real guard — `make council-conformance`,
               # including git-history immutability — runs on the dedicated
-              # console_ledger filter below, OR'd into the `audit` job's
+              # council_ledger filter below, OR'd into the `audit` job's
               # `if:` (#11164; see tests/regressions/test_issue_11164.py).
               - 'agents/**'
               # src/hydraflow_resources/**: the shipped runtime resources —
@@ -100,11 +100,11 @@ jobs:
               # tests/test_ci_path_filter_completeness.py, which exists because
               # this same omission caused two incidents in two days.
               - 'src/hydraflow_resources/**'
-            # console_ledger: a narrower agents/** signal used only to make
-            # the `audit` job (which runs `make console-conformance`) fire
+            # council_ledger: a narrower agents/** signal used only to make
+            # the `audit` job (which runs `make council-conformance`) fire
             # for ledger-only PRs, without widening core_python's heavier
             # blast radius (#11164).
-            console_ledger:
+            council_ledger:
               - 'agents/**'
             arch:
               - 'src/arch/**'
@@ -279,6 +279,91 @@ jobs:
       - name: Scan tracked files for runtime caches
         run: python3 scripts/check_runtime_cache_tracked.py --tracked
 
+  # Universal backstop (#11730): the whole-tree aggregate ratchets, UNGATED by
+  # `changes` on purpose — this job must have no `if:` at all.
+  #
+  # These gates measure a quantity summed over an entire tree (parametrize
+  # copies across every module under tests/, `# noqa` counts across every
+  # module under src/, the untraced fraction of recent merge history) against a
+  # committed mark. Every other lane that runs them is path-filtered, and a
+  # path filter can only ever be a SUBSET of a whole-tree subject. Two failure
+  # modes follow, and being ungated closes both:
+  #
+  #   1. Scoped by PATH. `core_python` carries predicate-quantifier: every with
+  #      !tests/regressions/**, !tests/scenarios/** and
+  #      !tests/sandbox_scenarios/**, and no other lane that collects
+  #      tests/architecture restores them. So a PR touching only
+  #      tests/regressions/** runs `Regression Tests` (pytest tests/regressions/)
+  #      and nothing that reads the whole-tests/ aggregates — it can move the
+  #      parametrize count with no gate watching.
+  #   2. Scoped by BASE. strict_required_status_checks_policy is false on both
+  #      rulesets, so a PR's checks are evaluated against whatever base it
+  #      branched from. Three individually-green PRs summed to
+  #      `parametrize copies 413 > baseline 412` on origin/staging and blocked
+  #      every open PR. Because this job also runs on `push` to main/staging
+  #      (see the workflow triggers), the merged tree is measured within minutes
+  #      of landing instead of never.
+  #
+  # Deliberately NOT solved by widening the `arch` paths-filter to tests/**:
+  # `Architecture Check` also regenerates every arch artifact (`make
+  # arch-check`) and runs the full tests/architecture suite, minutes of work
+  # that has nothing to do with these counts. A narrow, fast, ungated lane
+  # costs less than a wide trigger on a heavy job.
+  #
+  # Deliberately NOT auto-healing: the ratchets are shrink-only, and the honest
+  # repair is semantic (collapse a parametrize group, delete a duplicate). The
+  # only repair a bot could generate mechanically is raising the mark, which is
+  # the one move that must never be automatic. So this fails loudly and names
+  # the breach instead.
+  #
+  # Default (shallow) checkout ON PURPOSE, matching the `test` job that runs
+  # these same gates today. This job WIDENS a trigger; it must not also change
+  # what the gates measure. The traceability dimension recomputes from merge
+  # history when it has any, and degrades to marker-only mode on a shallow
+  # clone (see src/disturbance/detectors/traceability.py) — which is exactly
+  # how it already behaves in the `test` job. Deepening it here would turn on
+  # the marker-mismatch check for the first time, on an UNGATED required lane:
+  # the day the untraced fraction moves more than a point from the committed
+  # marker, every PR in the repo goes red for a reason no PR caused. That is
+  # the failure this whole job exists to prevent, so do not add fetch-depth.
+  aggregate-ratchets:
+    name: Aggregate Ratchets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # No explicit `uv sync` step: `make aggregate-ratchets` depends on
+      # `deps`, the same way the gateway-package-coverage job calls
+      # `make gateway-coverage`. One command, identical locally and in CI.
+      - name: Whole-tree aggregate ratchets
+        run: make aggregate-ratchets
+      - name: Explain a base-branch breach
+        if: failure() && github.event_name == 'push'
+        run: |
+          echo "::error::Aggregate ratchet breached on ${{ github.ref_name }} itself."
+          {
+            echo "## Aggregate ratchet breached on \`${{ github.ref_name }}\`"
+            echo
+            echo "The base branch is over one of its committed marks. This is a"
+            echo "**semantic merge conflict**: several PRs, each green against its own"
+            echo "merge base, summed past the mark. Git reports no conflict because"
+            echo "there isn't one."
+            echo
+            echo "Every open PR will now go red on \`Aggregate Ratchets\` for a reason"
+            echo "that has nothing to do with its own change. Heal the base branch"
+            echo "first — collapse the extra copies or delete the duplicate."
+            echo
+            echo "Do **not** raise the baseline. These ratchets are shrink-only."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     name: Lint & Format
     needs: changes
@@ -369,8 +454,41 @@ jobs:
           uv run python -c "from arch._functional_areas_schema import load_functional_areas; from pathlib import Path; load_functional_areas(Path('docs/arch/functional_areas.yml')); print('functional_areas.yml: schema OK')"
       - name: Drift check
         run: make arch-check
-      - name: Architecture tests
-        run: uv run pytest tests/architecture -x --tb=short
+      # EGRESS-BLOCKED (#11706). `unshare --net` gives this step a network
+      # namespace with no route off the host, so the offline-conformance rule
+      # is OBSERVED rather than inferred from source: an orchestrator whose
+      # config reaches out (mermaid2 `requests.get`s the CDN bundle on every
+      # `mkdocs build` — the standard said it did not, and this lane is what
+      # found out), a `git fetch` whose remote is set elsewhere, an argv built
+      # from non-literals, a spawn done by a helper — none of which any parser
+      # reaches.
+      #
+      # The wrapper VERIFIES the isolation before running anything and exits 3
+      # if this tree can still reach the network, so a lane that silently
+      # stopped isolating fails instead of passing. `--user` drops back to the
+      # runner after the namespace is set up and `lo` is brought up; the
+      # conformance roots really do use loopback. `.venv/bin/python` rather than
+      # `uv run` because `uv run` may want the network to re-check the lock.
+      #
+      # One registered exclusion, and it is the standard's own worked example.
+      # `mkdocs build --strict` was documented as offline; it is not. mermaid2
+      # `requests.get`s the CDN bundle on every build to check it exists, so
+      # with no route out it warns and --strict aborts. That reach is `requests`
+      # inside a plugin inside a child process — no hook of ours runs there and
+      # no parser could ever have seen it. It runs un-isolated below, and
+      # check_egress_exclusions.py proves it still needs to.
+      #
+      # No `-x` here, deliberately: with it, a lane that finds three problems
+      # reports one and each fix costs a full CI round trip.
+      - name: Architecture tests (egress-blocked)
+        run: |
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python -m pytest tests/architecture \
+            --ignore=tests/architecture/test_mkdocs_strict.py --tb=short
+      - name: Architecture egress-lane exclusion (NOT isolated)
+        run: uv run pytest tests/architecture/test_mkdocs_strict.py --tb=short
 
   test:
     name: Tests
@@ -586,6 +704,22 @@ jobs:
         # (patches subprocess_util.run_subprocess + auto_pr's runner prefix), so
         # a bled mock leaves the patch unapplied and it asserts on the wrong
         # preflight stage. Passes single-threaded.
+        #
+        # EGRESS-BLOCKED (#11706): both invocations run inside a network
+        # namespace with no route off the host, via a wrapper that exits 3 if
+        # the isolation is not real. Same total compute as before — the lane is
+        # not a second copy of this job, it is this job with the network taken
+        # away, which is the only version of it nobody switches off to save
+        # runner minutes.
+        #
+        # EXCLUDED is the honest part. Three files reach a real forge today,
+        # every one of them through a helper the test calls rather than through
+        # an argv any parser could read. They are registered in
+        # vitals_conformance_registry.EGRESS_LANE_EXCLUSIONS (shrink-only),
+        # they run OUTSIDE the namespace in the step below so their verdict is
+        # unchanged, and check_egress_exclusions.py reddens if one of them
+        # stops reaching — an exclusion that outlives its reason pre-approves
+        # whatever lands in that file next.
         run: |
           set -euo pipefail
           REAP="tests/regressions/test_reap_processlookuperror.py \
@@ -596,15 +730,43 @@ jobs:
             tests/regressions/test_issue_9641_unified_group_kill.py \
             tests/regressions/test_hostrunner_reap_grandchildren.py \
             tests/regressions/test_auto_pr_preflight_gate.py"
-          IGNORES=""; for f in $REAP; do IGNORES="$IGNORES --ignore=$f"; done
+          EXCLUDED="tests/regressions/test_issue_10015_streak_escalation_autoclose.py \
+            tests/regressions/test_issue_8650.py \
+            tests/regressions/test_issue_10253_airgap_start_orchestrator.py"
+          IGNORES=""; for f in $REAP $EXCLUDED; do IGNORES="$IGNORES --ignore=$f"; done
           # --forked isolates every test in its own subprocess so a test that
           # leaks worker state (a global holding another test's tmp path) cannot
           # poison a later test on the same xdist worker (#11004). --reruns can't
           # fix this class — a rerun stays on the poisoned worker; only a fresh
           # process does. The REAP lane below stays un-forked (its subprocess-
           # group reap assertions are their own isolation regime).
-          PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --forked --reruns 2 --reruns-delay 1 -q
-          PYTHONPATH=src uv run pytest $REAP -q
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python -m pytest tests/regressions/ $IGNORES -n auto --dist loadscope --forked --reruns 2 --reruns-delay 1 -q
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python -m pytest $REAP -q
+      # The excluded three, run normally: their pass/fail verdict is unchanged
+      # by #11706, only their egress claim is.
+      - name: Run egress-lane exclusions (NOT isolated)
+        run: |
+          PYTHONPATH=src uv run pytest \
+            tests/regressions/test_issue_10015_streak_escalation_autoclose.py \
+            tests/regressions/test_issue_8650.py \
+            tests/regressions/test_issue_10253_airgap_start_orchestrator.py -q
+      # ...and the check that keeps that list from becoming a permanent hole
+      # with a reassuring name. Inside the namespace the reach is OBSERVED (the
+      # audit event fires) and never completes (the syscall fails), so this
+      # proves each entry is still needed without performing the traffic it is
+      # about.
+      - name: Every egress-lane exclusion is still necessary
+        run: |
+          sudo unshare --net -- bash scripts/offline_egress_lane.sh \
+            --user "$(id -u):$(id -g)" -- \
+            env HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
+            ./.venv/bin/python scripts/check_egress_exclusions.py
 
   # Linux signal-context smoke lane (#10049, deferred from #10010). Reruns the
   # reap/signal-focused test subset INSIDE a plain Linux container as root —
@@ -680,8 +842,18 @@ jobs:
       - name: Run bomb-prone subset at +90 days
         run: |
           uv sync --extra test --quiet
+          # This lane's subject is wall-clock time bombs, and it installs only
+          # the `test` extra to stay fast. The pyright canary (#11707) has no
+          # date surface at all and needs `pyright` from the `dev` extra, so
+          # sweeping tests/regressions/ pulled it in and errored on a tool this
+          # lane deliberately does not install. It is NOT skipped inside the
+          # test — a canary that can skip is the silence it exists to catch;
+          # it is deselected here, where the scope mismatch actually lives.
+          # It runs with pyright present in `regression`, `coverage`, and
+          # `make quality`.
           PYTHONPATH=src HYDRAFLOW_TIME_TRAVEL_DAYS=90 uv run pytest \
             tests/regressions/ \
+            --ignore=tests/regressions/test_issue_11707_pyright_dependency_blindness.py \
             tests/test_time_travel_guard.py \
             tests/test_diagnostics_judge_calibration_route.py \
             tests/test_escape_ledger_loop.py \
@@ -722,10 +894,10 @@ jobs:
   audit:
     name: Principles Audit
     needs: changes
-    # console_ledger OR'd in (#11164): a PR touching only agents/** (the
-    # ARCH-0001 decision ledger) must still run `make console-conformance`
+    # council_ledger OR'd in (#11164): a PR touching only agents/** (the
+    # ARCH-0001 decision ledger) must still run `make council-conformance`
     # below — see tests/regressions/test_issue_11164.py.
-    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.console_ledger == 'true'
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.council_ledger == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -767,22 +939,24 @@ jobs:
           # is NA there and only the telemetry history scan runs (#9902).
           HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
         run: make audit
-      - name: Console conformance (ledger immutability)
+      - name: Council conformance (ledger immutability)
         # #11110 (sampled-audit upheld): ARCH-0001 declares ledger
-        # immutability `Enforced by: make console-conformance`, but nothing
+        # immutability `Enforced by: make console-conformance` (its era's
+        # name — the record is immutable; the target is `council-conformance`
+        # since ARCH-0003 and the old name is a deprecated alias), but nothing
         # in CI ever ran it — the git-history check (#6) needs a full clone,
         # which this job has (fetch-depth: 0 above; `arch` also checks out
         # with fetch-depth: 0, but its own filter doesn't cover agents/**
-        # either). The unit test (tests/test_console_conformance.py) covers
+        # either). The unit test (tests/test_council_conformance.py) covers
         # the shape/numbering/staleness checks with check_git=False; this
         # step closes the immutability half so a merged decision record
         # cannot be silently rewritten green.
         # #11164 (sampled-audit upheld): the step above existed but this job
         # never fired for an agents/**-only PR — the exact "silently
         # rewritten decision record" scenario #11110 was filed against. The
-        # console_ledger filter + this job's `if:` close that reachability
+        # council_ledger filter + this job's `if:` close that reachability
         # gap; see tests/regressions/test_issue_11164.py.
-        run: make console-conformance
+        run: make council-conformance
 
   ui-build:
     name: Dashboard Build
@@ -1126,7 +1300,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, security, arch, test, gateway-package-coverage, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
+    needs: [changes, lint, typecheck, security, arch, aggregate-ratchets, test, gateway-package-coverage, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
     if: always()
     steps:
       - name: Require all CI jobs to have passed or been skipped

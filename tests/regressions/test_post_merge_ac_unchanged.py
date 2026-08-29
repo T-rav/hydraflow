@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-#: ``discovery_council``, ``shape_council`` and ``complexity_gate`` were removed
+#: ``discovery_ensemble``, ``shape_ensemble`` and ``complexity_gate`` were removed
 #: on 2026-07-21 (#9773 — Discover+Shape collapsed into Plan). They sat here
 #: dead for 33 days: the five live entries kept working, so the gate was
 #: DEGRADED rather than vacuous and nothing said so.
@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 _ADVERSARIAL_MODULE_NAMES = (
     "spec_ac_generator",
     "spec_judge",
-    "plan_council",
+    "plan_ensemble",
     "assumption_surfacer",
     "adversarial_retry_loop",
 )

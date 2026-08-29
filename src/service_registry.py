@@ -16,7 +16,7 @@ from acceptance_criteria import AcceptanceCriteriaGenerator
 from adr_conformance_loop import AdrConformanceLoop
 from adr_conformance_runner import SubprocessConformanceRunner
 from adr_index import ADRIndex
-from adr_reviewer import ADRCouncilReviewer
+from adr_reviewer import ADRReviewPanel
 from adr_reviewer_loop import ADRReviewerLoop
 from agent import AgentRunner
 from auto_agent_preflight_loop import AutoAgentPreflightLoop
@@ -38,13 +38,17 @@ from branch_protection_audit import (
 from branch_protection_auditor_loop import BranchProtectionAuditorLoop  # noqa: TCH001
 from bug_reproducer import BugReproducer
 from caching_issue_store import CachingIssueStore
+from charter_drift_caretaker_loop import (  # noqa: TCH001
+    CharterDriftCaretakerLoop,
+    build_charter_auditor,
+)
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
 from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
-from decomposition_council import DecompositionCouncil
+from decomposition_ensemble import DecompositionEnsemble
 from dependabot_merge_loop import DependabotMergeLoop
 from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
@@ -120,10 +124,6 @@ from precondition_gate import PreconditionGate
 from preflight.audit import PreflightAuditStore
 from pricing_refresh_loop import PricingRefreshLoop  # noqa: TCH001
 from principles_audit_loop import PrinciplesAuditLoop
-from rails_drift_caretaker_loop import (  # noqa: TCH001
-    RailsDriftCaretakerLoop,
-    build_rails_auditor,
-)
 from rc_budget_loop import RCBudgetLoop
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
@@ -322,7 +322,7 @@ class ServiceRegistry:
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
     goal_supervisor_loop: GoalSupervisorLoop
-    rails_drift_caretaker_loop: RailsDriftCaretakerLoop
+    charter_drift_caretaker_loop: CharterDriftCaretakerLoop
     gate_activator_loop: GateActivatorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
@@ -1260,11 +1260,11 @@ def build_services(
     plan_retry_window: GiveUpWindow | None = None
     plan_retry_self_solver: PlanRetrySelfSolver | None = None
     if config.giveup_window_enabled:
-        # Reuse the shared epic_manager + subprocess_runner so the council's
+        # Reuse the shared epic_manager + subprocess_runner so the ensemble's
         # LLM calls route through the same docker/host dial as every other
-        # loop (mirrors AutoAgentPreflightLoop's own decomposer/council build).
+        # loop (mirrors AutoAgentPreflightLoop's own decomposer/ensemble build).
         giveup_decomposer = IssueDecomposer(prs, epic_manager, state, config)
-        giveup_council = DecompositionCouncil(subprocess_runner, config)
+        giveup_ensemble = DecompositionEnsemble(subprocess_runner, config)
         give_up_tracker = GiveUpTracker(state)
         plan_retry_window = resolve_window(config, GiveUpClass.PLAN_RETRY)
         plan_retry_self_solver = PlanRetrySelfSolver(
@@ -1272,7 +1272,7 @@ def build_services(
             state=state,
             prs=prs,
             decomposer=giveup_decomposer,
-            council=giveup_council,
+            ensemble=giveup_ensemble,
             diagnose_label=config.diagnose_label[0],
         )
     route_back_coordinator = RouteBackCoordinator(
@@ -1380,7 +1380,7 @@ def build_services(
     #
     # Attach a ``SubprocessAgentRunner`` adapter to every adversarial-stage
     # slot on the plan phase. The adapter is stateless (the per-call
-    # ``system_prompt`` differentiates a surfacer from a council voter), so a
+    # ``system_prompt`` differentiates a surfacer from a ensemble voter), so a
     # single instance is shared across all slots.
     #
     # Why one shared instance: the AgentLike contract is
@@ -1400,7 +1400,7 @@ def build_services(
 
     planner_phase.attach_adversarial_agents(
         surfacer_agent=adversarial_agent,
-        council_agents={
+        ensemble_agents={
             "builder": adversarial_agent,
             "tester": adversarial_agent,
             "risk_skeptic": adversarial_agent,
@@ -1612,7 +1612,7 @@ def build_services(
         credentials=credentials,
     )
     runs_gc_loop = RunsGCLoop(config=config, run_recorder=run_recorder, deps=loop_deps)
-    adr_reviewer = ADRCouncilReviewer(
+    adr_reviewer = ADRReviewPanel(
         config, event_bus, subprocess_runner, credentials=credentials
     )
     adr_reviewer_loop = ADRReviewerLoop(
@@ -1974,16 +1974,16 @@ def build_services(
         state=state,
     )
 
-    rails_drift_caretaker_dedup = DedupStore(
-        "rails_drift_caretaker",
-        config.data_root / "dedup" / "rails_drift_caretaker.json",
+    charter_drift_caretaker_dedup = DedupStore(
+        "charter_drift_caretaker",
+        config.data_root / "dedup" / "charter_drift_caretaker.json",
     )
-    rails_drift_caretaker_loop = RailsDriftCaretakerLoop(  # noqa: F841
+    charter_drift_caretaker_loop = CharterDriftCaretakerLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
-        dedup=rails_drift_caretaker_dedup,
+        dedup=charter_drift_caretaker_dedup,
         deps=loop_deps,
-        auditor=build_rails_auditor(config),
+        auditor=build_charter_auditor(config),
     )
 
     gate_activator_dedup = DedupStore(
@@ -2153,7 +2153,7 @@ def build_services(
         # ADR-0105 decompose-to-converge: reuse the shared epic_manager
         # (register_epic writes through the same persisted state + event bus
         # as the rest of the system) and the shared subprocess_runner (so
-        # the council's LLM calls route through the same docker/host dial
+        # the ensemble's LLM calls route through the same docker/host dial
         # as every other loop) rather than constructing loop-local copies.
         epic_manager=epic_manager,
         runner=subprocess_runner,
@@ -2394,7 +2394,7 @@ def build_services(
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
         goal_supervisor_loop=goal_supervisor_loop,
-        rails_drift_caretaker_loop=rails_drift_caretaker_loop,
+        charter_drift_caretaker_loop=charter_drift_caretaker_loop,
         gate_activator_loop=gate_activator_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,

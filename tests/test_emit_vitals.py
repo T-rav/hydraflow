@@ -119,13 +119,56 @@ def test_the_document_stays_small_enough_to_compare_across_hosts() -> None:
     )
 
 
+#: Words that would turn a vitals reading into an assertion that a gate holds.
+_CLAIM_WORDS = ("passed", "conformant", "verdict", "approved", "holds")
+
+#: ``identity`` is PROVENANCE, not payload. Its values are names people choose —
+#: a repo, a branch, a hostname — and a person may put any word in any of them.
+#: A branch called ``fix/...-verdict-...`` does not make the document assert a
+#: verdict; it records where the reading came from. Scanning it conflated "this
+#: document claims X" with "this document was produced somewhere whose name
+#: contains X", and reddened a PR whose only sin was its branch name.
+_PROVENANCE_KEYS = frozenset({"identity"})
+
+
+def _claim_bearing(doc: dict[str, object]) -> dict[str, object]:
+    """The part of *doc* that could assert something, provenance removed."""
+    return {k: v for k, v in doc.items() if k not in _PROVENANCE_KEYS}
+
+
 def test_it_carries_no_conformance_claim() -> None:
     """A VITALS emitter (#11688). Nothing here asserts a gate holds — a claim
     auditable only through a data plane's uptime is not a claim."""
-    doc = emit()
-    flat = json.dumps(doc).lower()
-    for word in ("passed", "conformant", "verdict", "approved", "holds"):
+    flat = json.dumps(_claim_bearing(emit())).lower()
+    for word in _CLAIM_WORDS:
         assert word not in flat, f"{word!r} reads as a conformance claim"
+
+
+def test_a_claim_in_the_payload_is_still_caught() -> None:
+    """The provenance carve-out must not gut the rule it carves out of.
+
+    Without this, narrowing the scan to ``_claim_bearing`` could be widened to
+    exclude everything and the guard would pass while observing nothing.
+    """
+    for word in _CLAIM_WORDS:
+        poisoned = {**emit(), "baselines": {"suite_hygiene": f"{word} 412"}}
+        flat = json.dumps(_claim_bearing(poisoned)).lower()
+        assert word in flat, (
+            f"{word!r} planted in the payload was not visible to the scan — "
+            "the claim-bearing view has stopped seeing its subject"
+        )
+
+
+def test_provenance_is_not_read_as_a_claim() -> None:
+    """A branch, repo or host whose NAME contains a claim word is still fine."""
+    for word in _CLAIM_WORDS:
+        doc = emit()
+        doc["identity"] = {**doc["identity"], "branch": f"fix/11725-{word}-guard"}  # type: ignore[dict-item]
+        flat = json.dumps(_claim_bearing(doc)).lower()
+        assert word not in flat, (
+            f"a branch named with {word!r} still reads as a claim — "
+            "provenance is being scanned as payload"
+        )
 
 
 def test_the_cli_emits_parseable_json_on_stdout() -> None:

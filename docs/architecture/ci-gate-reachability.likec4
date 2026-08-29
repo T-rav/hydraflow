@@ -1,17 +1,19 @@
 // Issue #11164 — sampled re-audit of PR #11154 (upheld).
-// ARCH-0001 declares ledger immutability "Enforced by: make console-conformance".
+// ARCH-0001 declares ledger immutability "Enforced by: make console-conformance"
+// (its era's name — ARCH-0003 renamed the target to `council-conformance`
+// on 2026-08-25 and kept the old one as a deprecated alias).
 // #11110 wired that command as a STEP of the `audit` job. The step exists; the
 // job never fires for the change class it guards.
 //
 // WAS: `audit` was gated on core_python || ci. core_python's brace-glob is
 //   {src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}
-// and has NO agents/** entry. The ledger lives at agents/console/decisions/**.
+// and has NO agents/** entry. The ledger lives at agents/council/decisions/**.
 // Only the separate `python` output lists agents/** — and `python` gates only
 // lint/typecheck/security, none of which execute pytest or the make target.
 // Net: a PR that rewrote a merged decision record ran ZERO ledger checks.
 //
-// LANDED: a dedicated `console_ledger` filter (agents/**) OR'd into the
-// `audit` job's if:. `make console-conformance` runs all six ARCH-0001 checks
+// LANDED: a dedicated `council_ledger` filter (agents/**) OR'd into the
+// `audit` job's if:. `make council-conformance` runs all six ARCH-0001 checks
 // (shape, numbering, personas, chairs, staleness, git immutability) on the
 // full clone the audit job already takes, so one gate closes both halves.
 
@@ -29,7 +31,7 @@ specification {
 }
 
 model {
-  ledger = artifact 'agents/console/decisions/**' {
+  ledger = artifact 'agents/council/decisions/**' {
     description 'ARCH-0001 chamber decision records — the immutable ledger'
   }
 
@@ -48,7 +50,7 @@ model {
           description 'src/arch/**, tests/architecture/**, docs/arch/**, docs/adr/**, Makefile'
         }
         // LANDED (#11164): the surgical addition.
-        outConsole = output 'console_ledger  [ADDED #11164]' {
+        outCouncil = output 'council_ledger  [ADDED #11164]' {
           description "agents/** — the ARCH-0001 ledger + persona contracts"
         }
       }
@@ -66,16 +68,16 @@ model {
 
     test = job 'test (Tests)' {
       description 'the pytest lane'
-      tConformance = step 'tests/test_console_conformance.py' {
+      tConformance = step 'tests/test_council_conformance.py' {
         description 'collect_errors(check_git=False) — shape/numbering/chairs only, immutability deliberately skipped'
       }
     }
 
     audit = job 'audit (Principles Audit)' {
-      description 'if: core_python || ci || console_ledger  [#11164]; checkout fetch-depth: 0'
+      description 'if: core_python || ci || council_ledger  [#11164]; checkout fetch-depth: 0'
       sAudit = step 'make audit'
-      sConf = step 'make console-conformance  [#11110]' {
-        description 'scripts/check_console_conformance.py — all six checks incl. git-history immutability'
+      sConf = step 'make council-conformance  [#11110]' {
+        description 'scripts/check_council_conformance.py — all six checks incl. git-history immutability'
       }
     }
 
@@ -100,8 +102,8 @@ model {
   tConformance -> ledger 'reads with check_git=False'
 
   // ---- LANDED wiring (#11164) ----
-  ledger -> outConsole 'matches agents/**  [LANDED]'
-  outConsole -> audit 'gates  [LANDED: ORed into the if:]'
+  ledger -> outCouncil 'matches agents/**  [LANDED]'
+  outCouncil -> audit 'gates  [LANDED: ORed into the if:]'
 }
 
 views {
@@ -118,11 +120,11 @@ views {
 
   dynamic view ledgerOnlyPr {
     title 'Ledger-only PR before #11164: every ARCH-0001 check was unreachable'
-    ledger -> outPython 'agents/console/decisions/0001-*.md changed -> python=true'
+    ledger -> outPython 'agents/council/decisions/0001-*.md changed -> python=true'
     outPython -> lint 'lint/typecheck/security run (no ledger check)'
     ledger -> outCore 'core_python=false (no agents/** entry)'
-    outCore -> test 'SKIPPED -> test_console_conformance.py never runs'
-    outCore -> audit 'SKIPPED -> make console-conformance never runs'
+    outCore -> test 'SKIPPED -> test_council_conformance.py never runs'
+    outCore -> audit 'SKIPPED -> make council-conformance never runs'
     sConf -> ledger 'immutability check never executed -> PR merges green'
   }
 }

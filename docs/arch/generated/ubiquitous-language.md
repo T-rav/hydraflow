@@ -2,9 +2,20 @@
 
 # Ubiquitous Language
 
-_83 terms across 3 bounded contexts._
+_88 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## Actors
+
+**Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/driver_contracts.py:WorkerRole` · **Confidence:** `accepted`
+
+The third layer of the PAAA governance model (ADR-0143): who or what is authorized to act on a repository, and with what delegated authority. It answers "who may change what?". The `agents/` tree — role contracts and chamber charters — *is* the Actors declaration per the 2026-08-25 house standard (#11741); a governing declaration may point at that directory but must never re-declare roles in YAML. Adjacent surfaces bound what an authorized actor may do rather than naming who it is: `WorkerRole` fixes the closed set of roles a director may request, `RepoRecord.data_class` fixes the data-governance class enforced at every model spawn, and the merge-policy autonomy classes (`act` / `ask`) fix where an agent may proceed alone and where it must ask.
+
+**Invariants:**
+- Actors are declared by the `agents/` directory layout; a manifest may point at it and must not restate roles — two declarations of who may act is one too many.
+- A role outside the declared vocabulary cannot be invented at runtime; unknown authority values fail closed.
+- Delegated authority is bounded: an actor classified `ask` cannot self-promote to `act`.
 
 ## Actuator
 
@@ -14,18 +25,6 @@ The component that applies a Controller's action to the Plant: dispatches an age
 
 **Invariants:**
 - Every Actuator action is subject to the Governor's saturation and safety limits.
-
-## ADRCouncilReviewer
-
-**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer.py:ADRCouncilReviewer` · **Confidence:** `accepted`
-**Aliases:** `adr council reviewer`, `council reviewer`
-
-ADRCouncilReviewer is the domain service that runs multi-agent council review sessions on proposed Architecture Decision Records. It scans the ADR directory for files marked Status: Proposed, gates each candidate through ADRPreValidator, detects near-duplicate ADRs via similarity scoring, orchestrates multi-round council voting, and routes each outcome to acceptance, rejection, escalation, or duplicate-flagging. ADRReviewerLoop delegates all review logic to this service on every polling cycle.
-
-**Invariants:**
-- CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
-- Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
-- Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
 
 ## ADRIndex
 
@@ -43,11 +42,11 @@ Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on fi
 **Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_pre_validator.py:ADRPreValidator` · **Confidence:** `accepted`
 **Aliases:** `adr pre-validator`, `adr structural validator`
 
-A service that validates ADR structure before submission to the ADRCouncilReviewer, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the council to skip reviews for trivially malformed drafts.
+A service that validates ADR structure before submission to the ADRReviewPanel, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the panel to skip reviews for trivially malformed drafts.
 
 **Invariants:**
 - Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
-- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the council.
+- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the review panel.
 - Cross-ADR checks (number collision, supersession, cross-reference titles) are skipped when `all_adrs` is not supplied, so single-ADR validation is always safe.
 
 ## ADRReviewerLoop
@@ -55,11 +54,23 @@ A service that validates ADR structure before submission to the ADRCouncilReview
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer_loop.py:ADRReviewerLoop` · **Confidence:** `accepted`
 **Aliases:** `ADR reviewer loop`, `adr council review loop`, `adr review loop`
 
-Caretaker loop that polls for ADRs in `Proposed` status and runs council reviews via `ADRCouncilReviewer`. The loop is intentionally thin: all review logic and output formatting live in `ADRCouncilReviewer`, keeping tick scheduling and business logic separately testable. Review interval is `config.adr_review_interval`.
+Caretaker loop that polls for ADRs in `Proposed` status and runs panel reviews via `ADRReviewPanel`. The loop is intentionally thin: all review logic and output formatting live in `ADRReviewPanel`, keeping tick scheduling and business logic separately testable. Review interval is `config.adr_review_interval`.
 
 **Invariants:**
-- The loop delegates entirely to `ADRCouncilReviewer.review_proposed_adrs()`; no review logic lives in the loop itself.
+- The loop delegates entirely to `ADRReviewPanel.review_proposed_adrs()`; no review logic lives in the loop itself.
 - Kill-switch is via `enabled_cb("adr_reviewer")` and `config.adr_reviewer_loop_enabled` (ADR-0049).
+
+## ADRReviewPanel
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer.py:ADRReviewPanel` · **Confidence:** `accepted`
+**Aliases:** `adr review panel`, `review panel`
+
+ADRReviewPanel is the domain service that runs multi-agent review-panel sessions on proposed Architecture Decision Records. It scans the ADR directory for files marked Status: Proposed, gates each candidate through ADRPreValidator, detects near-duplicate ADRs via similarity scoring, orchestrates multi-round panel voting, and routes each outcome to acceptance, rejection, escalation, or duplicate-flagging. ADRReviewerLoop delegates all review logic to this service on every polling cycle.
+
+**Invariants:**
+- CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
+- Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
+- Pre-validation must pass before a review-panel session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
 
 ## AgentPort
 
@@ -84,6 +95,28 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 - Phase name is fixed: _phase_name == 'implement'.
 - The runner commits inside the worktree but never pushes or opens a PR — that work belongs to downstream phases.
 - Self-check checklist is dynamically extended with checklist items from recurring review escalations.
+
+## Articles
+
+**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/charter.py:Articles` · **Confidence:** `accepted`
+
+The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo charter of ADR-0121 as amended by #11748 (`charter.yaml`, whose `articles:` block is `charter.Articles`) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered / blocking, and HydraFlow acts on the verdict.
+
+**Invariants:**
+- Building standards are one class of Articles, not the whole of Articles — security, compliance, architecture, and local policy are Articles too.
+- The declaration is reviewable in git; a decision layer never runs tests, reads git, or writes to the repository.
+- Changing an Article is an enactment reserved to the operator (ENACT, not RATIFY); nothing automates an edit to the articles of a declaration.
+
+## Artifacts
+
+**Kind:** `aggregate` · **Context:** `shared-kernel` · **Anchor:** `src/jsonl_ledger.py:AppendOnlyJsonlLedger` · **Confidence:** `accepted`
+
+The fourth layer of the PAAA governance model (ADR-0143): everything a repository has produced and kept — the software itself, plus ADRs, tests, evidence, manifests, ledgers, and recorded decisions. It answers "what evidence and memory already exist?". This is by a wide margin the richest layer in HydraFlow: `docs/arch/generated/` is regenerated every pull request, `docs/wiki/` (including these term files) carries the repo wiki, `.hydraflow/metrics/` carries the measurement streams, the append-only ledgers carry decisions and escapes, and a stamped repository carries a kernel lock. Artifacts are what the evidence collectors read to produce the normalized facts a decision layer classifies; read as input they are evidence, but evidence is not a fifth PAAA layer.
+
+**Invariants:**
+- Evidence is Artifacts read as input, never a fifth layer — the four layers stay four.
+- Ledger records are append-only: an artifact is added or superseded, never silently rewritten.
+- A conformance claim over Artifacts must be reproducible offline from a clean checkout — no claim may depend on an external service being up.
 
 ## Authority
 
@@ -117,6 +150,34 @@ Hexagonal port used by caretaker loops (TermProposerLoop, others) to open auto-m
 **Invariants:**
 - Pure Protocol — no implementation; tests use a fake; production uses a thin adapter.
 - open_bot_pr is the only method; one PR per call; success returns the PR number.
+
+## Charter
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/charter.py:Charter` · **Confidence:** `accepted`
+
+The governing declaration a HydraFlow-governed repository carries at its root, in the file named by `charter.CHARTER_FILENAME` (`charter.yaml`). It states the repository's Purpose, its Articles (adopted standards by id, an assurance class, and local articles), a pointer to where its Actors are declared, and the Artifacts it commits to carrying — the four layers of ADR-0143 — plus a `rails:` block holding the ADR-0121 template-conformance fields with their semantics unchanged. It supersedes `rails.yaml`, which loads for one cycle as a rails-only charter with a non-fatal `legacy-rails-manifest` finding. It is HydraFlow's implementation surface for the PAAA ontology, never a schema anyone outside HydraFlow is asked to conform to.
+
+**Invariants:**
+- `actors` is a path pointer and never a role list; a list or mapping is rejected at load, because the `agents/` tree is the Actors declaration (#11741) and a second copy rots.
+- `articles.assurance` reuses the `RepoRecord.data_class` vocabulary and fails closed on anything outside it — there is no second assurance scale.
+- Unknown standard ids and unknown template-layer names are tolerated and reported, never fatal (the ADR-0121 forward-compat rule).
+- A charter that declares nothing checkable is fatal rather than clean: a drift check with an empty subject list reads as coverage.
+- Editing `purpose` or `articles` is an ENACT reserved to the operator, not something the factory automates (ADR-0143 Ruling 6, guard 4).
+
+## CharterDriftCaretakerLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/charter_drift_caretaker_loop.py:CharterDriftCaretakerLoop` · **Confidence:** `accepted`
+**Aliases:** `charter drift caretaker loop`, `charter drift caretaker`, `charter drift loop`
+
+Caretaker loop (ADR-0121 as amended by #11748, ADR-0143) that audits each managed repo's live state against its charter (`charter.yaml`) and files deduped `hydraflow-find` drift issues. Mirrors the ADR-drift (ADR-0056) and branch-protection-drift (ADR-0082) caretakers: periodic, contract-diffing, one deduped issue per finding class. Per tick it loads the repo's charter, observes live state, and computes drift — a declared standard whose `docs/standards/<id>/` directory is gone, a declared required artifact that is absent, a missing template layer, a coverage-floor breach, or a missing declared domain gate script. Unknown layer names and unknown standard ids are reported but never file an issue (tolerated, forward-compat), and so is a legacy `rails.yaml` read through the one-cycle fallback. Dedup key is `charter_drift_caretaker:<repo>:<finding_class>`; when a finding class resolves, its open issue is closed and the key cleared so a recurrence re-files.
+
+**Invariants:**
+- One deduped drift issue per (repo, finding class); never one issue per individual failing check.
+- A declared standard or artifact that is absent is drift; an undeclared extra of either is fine; an unknown standard id or layer name is reported but never fatal.
+- A charter that declares nothing checkable, or whose standard ids cannot be resolved against any registry, is FATAL rather than silently clean — a drift check with an empty subject list reads as coverage.
+- The coverage floor is evaluated only when observed coverage is known (fail-open: no drift on an unmeasured value).
+- Kill-switch is via `enabled_cb("charter_drift_caretaker")` (ADR-0049), then the static `charter_drift_caretaker_loop_enabled` config gate (default OFF).
+- Cadence is config-driven via `charter_drift_caretaker_interval` (default 1 day).
 
 ## CIMonitorLoop
 
@@ -661,19 +722,16 @@ Caretaker loop that polls HITL items and delegates to `PRUnsticker` to resolve a
 - Kill-switch is via `enabled_cb("pr_unsticker")` and `config.pr_unsticker_loop_enabled` (ADR-0049).
 - Interval is driven by `config.pr_unstick_interval`.
 
-## RailsDriftCaretakerLoop
+## Purpose
 
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/rails_drift_caretaker_loop.py:RailsDriftCaretakerLoop` · **Confidence:** `accepted`
-**Aliases:** `rails drift caretaker loop`, `rails drift caretaker`, `rails manifest drift loop`
+**Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/onboarding/kernel_writer.py:KernelSpec` · **Confidence:** `accepted`
 
-Caretaker loop (ADR-0121, #10936) that audits each managed repo's live state against its rails manifest (`rails.yaml`) and files deduped `hydraflow-find` drift issues. Mirrors the ADR-drift (ADR-0056) and branch-protection-drift (ADR-0082) caretakers: periodic, contract-diffing, one deduped issue per finding class. Per tick it loads the repo's manifest, observes live state, and computes drift — a missing declared layer, a coverage-floor breach, or a missing declared domain gate script. Unknown/future layer names are reported but never file an issue (tolerated, forward-compat with the Book-3 operator-agent pack). Dedup key is `rails_drift_caretaker:<repo>:<finding_class>`; when a finding class resolves, its open issue is closed and the key cleared so a recurrence re-files.
+The first layer of the PAAA governance model (ADR-0143): what a repository is *for* — its direction, goals, set-points, and the intent the work serves. It answers "what is this thing trying to do?" for a system arriving at the repository cold, with no institutional memory. Purpose is the one PAAA layer **nothing checks**. It now has a declaration surface — #11748 landed the `purpose:` block in `charter.yaml`, parsed into `Purpose` (`src/charter.py`) — but **no drift check reads it**, and none should be added without a ruling saying what checking intent would even mean. Outside the charter it still lives implicitly in `README.md` prose, in the one-line description the onboarding kernel stamps into a new repository (`KernelSpec.description`), and in milestone and epic text; nothing reads any of those as a statement of intent either.
 
 **Invariants:**
-- One deduped drift issue per (repo, finding class); never one issue per individual failing check.
-- A missing declared layer is drift; an undeclared extra rail is fine; an unknown/future layer name is reported but never fatal.
-- The coverage floor is evaluated only when observed coverage is known (fail-open: no drift on an unmeasured value).
-- Kill-switch is via `enabled_cb("rails_drift_caretaker")` (ADR-0049), then the static `rails_drift_caretaker_loop_enabled` config gate (default OFF).
-- Cadence is config-driven via `rails_drift_caretaker_interval` (default 1 day).
+- Purpose is declarative intent, never an executable check — nothing today decides anything against it.
+- Changing Purpose is an enactment reserved to the operator (ENACT, not RATIFY); the system cannot enlarge its own mandate.
+- Purpose is not Articles: a goal the repository is aiming at is not a rule that must remain true.
 
 ## RCBudgetLoop
 

@@ -37,9 +37,17 @@ CLOSE_KEYWORD_RE = re.compile(
 # its justification survives into the squash-merge body.
 SKIP_REGRESSION_RE = re.compile(r"^Skip-Regression:\s*(\S.*)$", re.MULTILINE)
 
-# UI regression coverage: a test delta under src/ui counts for UI-only fixes,
-# so such paths are excluded from the "product source" fix-delta set.
-UI_TEST_RE = re.compile(r"^src/ui/.*(?:__tests__/|\.test\.[jt]sx?$)")
+# UI regression coverage: a test delta under the UI tree counts for UI-only
+# fixes, so such paths are excluded from the "product source" fix-delta set.
+#
+# The package segment is optional because two src layouts are in the wild: flat
+# ``src/ui/`` (this repo) and packaged ``src/<pkg>/ui/`` (what
+# ``onboarding/kernel_writer`` stamps). Anchored on a literal ``src/ui/`` this
+# matched nothing on a stamped repo, so a UI-only fix there was read as an
+# uncovered Python fix and P10.6's WARN failed the audit gate (#11709).
+UI_TEST_RE = re.compile(
+    r"^src/(?:[A-Za-z_][A-Za-z0-9_]*/)?ui/.*(?:__tests__/|\.test\.[jt]sx?$)"
+)
 
 
 def closing_issue_refs(body: str) -> set[int]:

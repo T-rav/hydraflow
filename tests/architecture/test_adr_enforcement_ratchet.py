@@ -43,17 +43,20 @@ standard, so debt is tracked in exactly one place.
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 
-from adr_conformance import EnforcementClass, classify_adr_enforcement
-from adr_index import ADR, scan_adr_directory
+from adr_conformance import (
+    EnforcementClass,
+    accepted_adrs,
+    enforcement_classification,
+    live_debt,
+    live_grandfathered,
+    load_enforcement_baseline,
+    parse_exemptions,
+)
+from adr_index import ADR
 
 REPO = Path(__file__).resolve().parents[2]
-ADR_DIR = REPO / "docs" / "adr"
-BASELINE_PATH = REPO / "tests" / "architecture" / "adr_enforcement_baseline.json"
-EXEMPTIONS_PATH = REPO / "docs" / "standards" / "adr_enforcement" / "exemptions.md"
 
 # Frozen tamper-guard: the exact debt set at ratchet landing (part of #10623).
 # The JSON's ``baseline_snapshot`` must equal this literal. It NEVER changes —
@@ -66,44 +69,41 @@ _FROZEN_SNAPSHOT: frozenset[int] = frozenset(
     {3, 9, 23, 25, 27, 30, 35, 42, 51, 65, 91, 107}
 )
 
-# Matches one exemption entry line in exemptions.md: `- ADR-NNNN: justification`.
-# Prose that merely mentions an ADR does not match (must be a bullet + colon +
-# non-empty justification), so the allow-list can live inside a prose doc.
-_EXEMPTION_RE = re.compile(r"^-\s+ADR-(\d{4}):\s*(\S.*?)\s*$", re.MULTILINE)
+# The ratchet's evidence helpers live in ``src/adr_conformance.py`` as of
+# #11749 — ONE definition, three importers (this gate, the debt report in
+# ``arch.generators.adr_enforcement``, and the fact collector in
+# ``policy.facts``). The zero-argument shims below only bind ``REPO``; every
+# assertion in this file is byte-for-byte what it was before the move.
+#
+# Consolidating did not soften anything: the shared ``parse_exemptions`` keeps
+# THIS caller's strict behaviour (a missing allow-list raises rather than
+# degrading to "nothing is exempt"), and the debt report's documented fail-open
+# wrapper stayed in the report. Each mutation of a shared helper is mapped to
+# the test in this file that reddens on it, in the #11749 PR body.
 
 
 def _accepted() -> list[ADR]:
-    return [a for a in scan_adr_directory(ADR_DIR) if a.status == "Accepted"]
+    return accepted_adrs(REPO)
 
 
 def _classification() -> dict[int, EnforcementClass]:
-    return {a.number: classify_adr_enforcement(a, REPO) for a in _accepted()}
+    return enforcement_classification(REPO)
 
 
 def _live_debt() -> set[int]:
-    return {
-        n
-        for n, cls in _classification().items()
-        if cls in (EnforcementClass.WEAK, EnforcementClass.MISSING)
-    }
+    return live_debt(REPO)
 
 
 def _load_baseline() -> tuple[frozenset[int], frozenset[int]]:
-    data = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    snapshot = frozenset(int(n) for n in data["baseline_snapshot"])
-    resolved = frozenset(int(n) for n in data.get("resolved", []))
-    return snapshot, resolved
+    return load_enforcement_baseline(REPO)
 
 
 def _parse_exemptions() -> dict[int, str]:
-    text = EXEMPTIONS_PATH.read_text(encoding="utf-8")
-    return {int(m.group(1)): m.group(2).strip() for m in _EXEMPTION_RE.finditer(text)}
+    return parse_exemptions(REPO)
 
 
 def _live_grandfathered() -> frozenset[int]:
-    snapshot, resolved = _load_baseline()
-    exempted = frozenset(_parse_exemptions())
-    return snapshot - resolved - exempted
+    return live_grandfathered(REPO)
 
 
 def test_baseline_snapshot_is_frozen_and_wellformed() -> None:

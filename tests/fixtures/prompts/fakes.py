@@ -22,10 +22,10 @@ from typing import Any
 
 from audit.models import AuditSample, MergedChange
 
-# `_DirectionProposal` is module-private to decomposition_council, but it is the
+# `_DirectionProposal` is module-private to decomposition_ensemble, but it is the
 # literal argument type of `_build_validation_prompt` — a structural stand-in
-# would silently drift from the real council payload, so the fake uses it.
-from decomposition_council import _DirectionProposal
+# would silently drift from the real ensemble payload, so the fake uses it.
+from decomposition_ensemble import _DirectionProposal
 from disturbance.burndown import BurndownUnit
 from disturbance.registry import DIMENSIONS
 from implement_spec_reviewer import SpecReviewInput
@@ -430,9 +430,9 @@ _MERGED_CHANGE_9820 = MergedChange(
 # ---------------------------------------------------------------------------
 # Same scenario, earlier and later in the lifecycle: shape (#9812 before it was
 # specified), the review advisor's two seams over the escape-digest diff, and
-# the decomposition council splitting #9812 after the implement phase stalled.
+# the decomposition ensemble splitting #9812 after the implement phase stalled.
 #
-# Multi-turn and council builders take a conversation/proposal object rather
+# Multi-turn and ensemble builders take a conversation/proposal object rather
 # than scalars, so those arguments live here while the fixtures keep the plain
 # args (task, stall_context, doc_context, depth, guidance) in JSON.
 # ---------------------------------------------------------------------------
@@ -1806,7 +1806,7 @@ _REGISTRY: dict[tuple[str, str], Any] = {
     # Worked scenario: weekly escape digest (#9812 / #9877 / PR #9820).
     ("terms", "ul_escape_digest"): _UL_TERMS_ESCAPE_DIGEST,
     ("inp", "escape_digest_spec_review"): _SPEC_REVIEW_INPUT_ESCAPE_DIGEST,
-    # Same scenario: shape conversation, review-advisor seams, council split.
+    # Same scenario: shape conversation, review-advisor seams, ensemble split.
     ("conversation", "escape_digest_shape"): _SHAPE_CONVERSATION_ESCAPE_DIGEST,
     ("advocate_result", "escape_digest_directions"): (
         _SHAPE_ADVOCATE_RESULT_ESCAPE_DIGEST

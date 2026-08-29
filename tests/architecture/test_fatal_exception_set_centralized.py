@@ -49,7 +49,7 @@ _GRANDFATHERED = frozenset(
         "base_background_loop.py",
         "entry_evidence_loop.py",
         "evidence_pack.py",
-        "plan_council.py",
+        "plan_ensemble.py",
         "post_merge_handler.py",
         "pr_unsticker/_unsticker.py",
         "subprocess_util.py",

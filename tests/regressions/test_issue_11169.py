@@ -1,7 +1,7 @@
-"""Regression guard for #11169 — console-conformance check #6 was whole-history.
+"""Regression guard for #11169 — council-conformance check #6 was whole-history.
 
-``scripts/check_console_conformance.py`` check #6 (ledger immutability) ran
-``git log --diff-filter=M -- agents/console/decisions/*/`` with no revision
+``scripts/check_council_conformance.py`` check #6 (ledger immutability) ran
+``git log --diff-filter=M -- agents/council/decisions/*/`` with no revision
 range and a pathspec ending in a trailing slash (directories only, never a
 blob). Two compounding defects: the check never actually fired (dead code),
 and once the pathspec is repaired, an unbounded ``git log`` walks *all*
@@ -28,7 +28,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from scripts.check_console_conformance import _PR_BASE_ENV, collect_errors
+from scripts.check_council_conformance import _PR_BASE_ENV, collect_errors
 
 
 @pytest.fixture(autouse=True)
@@ -91,22 +91,22 @@ def _head(repo: Path) -> str:
 def _scaffold(root: Path) -> None:
     agents = root / "agents"
     for sub in (
-        "console/decisions/arch",
-        "console/decisions/design",
-        "console/decisions/general",
+        "council/decisions/arch",
+        "council/decisions/design",
+        "council/decisions/general",
     ):
         (agents / sub).mkdir(parents=True)
     (agents / "sample.md").write_text(PERSONA)
-    (agents / "console" / "design.md").write_text(
-        "# Design Console\n\n**Chair:** product-manager · seats\n"
+    (agents / "council" / "design.md").write_text(
+        "# Design Chamber\n\n**Chair:** product-manager · seats\n"
     )
-    (agents / "console" / "arch.md").write_text(
-        "# Architecture Console\n\n**Chair:** senior-principal · seats\n"
+    (agents / "council" / "arch.md").write_text(
+        "# Architecture Chamber\n\n**Chair:** senior-principal · seats\n"
     )
-    (agents / "console" / "README.md").write_text(
+    (agents / "council" / "README.md").write_text(
         "| **General** | vp-eng | calibration | here |\n"
     )
-    (agents / "console" / "decisions" / "arch" / "0001-test.md").write_text(RECORD)
+    (agents / "council" / "decisions" / "arch" / "0001-test.md").write_text(RECORD)
 
 
 def _commit_all(repo: Path, message: str) -> str:
@@ -126,7 +126,7 @@ def _init_base_repo(tmp_path: Path) -> Path:
 
 
 def _record(repo: Path, chamber: str, name: str) -> Path:
-    return repo / "agents" / "console" / "decisions" / chamber / name
+    return repo / "agents" / "council" / "decisions" / chamber / name
 
 
 class TestPathspecAndScopingCore:
@@ -436,7 +436,7 @@ class TestMergeCommitInclusion:
 
 class TestLiveTreeUnaffected:
     def test_repo_ledger_still_passes_check_git_false(self) -> None:
-        from scripts.check_console_conformance import collect_errors as _collect
+        from scripts.check_council_conformance import collect_errors as _collect
 
         repo_root = Path(__file__).resolve().parent.parent.parent
         assert _collect(repo_root, check_git=False) == []

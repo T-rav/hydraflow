@@ -7,6 +7,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from charter import (
+    Articles,
+    Artifacts,
+    Charter,
+    Purpose,
+    RailsBlock,
+    render_charter,
+)
 from onboarding.models import BootstrapSpec
 
 METHODOLOGY_REF = "docs/methodology/onboarding-hydraflow-format-repos.md"
@@ -136,6 +144,7 @@ def _render_files(ctx: _TemplateContext) -> dict[str, str]:
         ".github/ISSUE_TEMPLATE/bug.md": _issue_template(ctx, "Bug report"),
         ".github/ISSUE_TEMPLATE/feature.md": _issue_template(ctx, "Feature request"),
         ".github/PULL_REQUEST_TEMPLATE.md": _pull_request_template(ctx),
+        "charter.yaml": _charter(ctx),
         "docs/adr/README.md": "# ADRs\n\n- [ADR-0001](0001-initial-architecture.md) - Initial architecture\n",
         "docs/adr/0001-initial-architecture.md": _adr(ctx),
         "docs/standards/testing.md": "# Testing Standard\n\nEvery behavior change gets a focused automated test.\n",
@@ -146,6 +155,34 @@ def _render_files(ctx: _TemplateContext) -> dict[str, str]:
         "docs/specs/bootstrap-spec.md": wizard_frontmatter(ctx) + _spec_doc(ctx),
         "docs/plans/plan-01-bootstrap.md": wizard_frontmatter(ctx) + _plan_doc(ctx),
     }
+
+
+def _charter(ctx: _TemplateContext) -> str:
+    """Render the new repo's ``charter.yaml`` — its governing declaration.
+
+    A materialized repo is governed from its first commit rather than from a
+    later retrofit (ADR-0143's Articles layer; ADR-0121 Ruling 2 for the
+    ``rails:`` block).
+
+    Every field declares only what this template actually writes. The
+    ``universal`` layer is deliberately **not** declared: its marker is the
+    HydraFlow principles ADR, which the kernel stamp delivers and this
+    bootstrap does not — declaring it here would make a brand-new repo drift
+    on its first audit. ``articles.standards`` is empty for the same reason:
+    the bootstrap writes a loose ``docs/standards/testing.md``, and a standard
+    id resolves to a *directory*.
+    """
+    charter = Charter(
+        purpose=Purpose(product=ctx.spec.description),
+        articles=Articles(standards=()),
+        artifacts=Artifacts(required=("docs/adr", "docs/wiki", "tests")),
+        rails=RailsBlock(
+            template_version="1",
+            layers=("language_pack",),
+            coverage_floor=float(ctx.spec.coverage_floor),
+        ),
+    )
+    return render_charter(charter)
 
 
 def _pyproject(ctx: _TemplateContext) -> str:

@@ -903,7 +903,7 @@ A test whose input includes host state (`Path.home()`, installed tools, a live p
 
 `git worktree add <dir> <branch>` fails when `<dir>` already exists, but in one chained shell invocation the later `cd <dir>` + `git merge`/`git commit` still execute and report success — against whatever stale branch the reused directory name was left on. `.claude/worktrees/` accumulates stale directories (nothing sweeps them: `WorkspaceGCLoop` reaps only factory `issue-<N>` worktrees), so any name an agent picks can already exist. Three same-session incidents; the worst staged 1469 files from a merge into the wrong branch and was caught only by a hand-run `git rev-parse --abbrev-ref HEAD`.
 
-**Rule:** create worktrees with `scripts/hf_worktree.sh <dir> <branch>` (or `make worktree DIR=<dir> BRANCH=<branch>`). It creates when the directory is absent, is idempotent when already on the requested branch, and fails loudly on a mismatch — printing expected vs actual branch plus the exact `git worktree remove <dir>` command, never deleting the existing worktree (it may hold uncommitted hand-written work; the factory path in `src/workspace/_manager.py::_create_unlocked` rmtree's instead only because factory issue worktrees are disposable). And after ANY worktree creation, verify branch identity with `git rev-parse --abbrev-ref HEAD` before editing — same class as verifying subagent DONE claims: never trust that a step did what it said.
+**Rule:** create worktrees with `scripts/hf_worktree.sh <name> <branch>` (or `make worktree DIR=<name> BRANCH=<branch>`). A bare `<name>` lands under `HYDRAFLOW_AGENT_WORKTREE_ROOT` (default `<repo>/.claude/worktrees`) so the GC can reach it — the creator and `WorkspaceGCLoop` read that one setting, pinned by `tests/regressions/test_issue_11729_worktree_root_is_one_setting.py`. A value containing `/` is used verbatim. The script echoes the resolved absolute path as its final stdout line; `cd` to that rather than to the name you passed. It creates when the directory is absent, is idempotent when already on the requested branch, and fails loudly on a mismatch — printing expected vs actual branch plus the exact `git worktree remove <dir>` command, never deleting the existing worktree (it may hold uncommitted hand-written work; the factory path in `src/workspace/_manager.py::_create_unlocked` rmtree's instead only because factory issue worktrees are disposable). And after ANY worktree creation, verify branch identity with `git rev-parse --abbrev-ref HEAD` before editing — same class as verifying subagent DONE claims: never trust that a step did what it said.
 
 ```json:entry
 {"id":"WORKTREE-BRANCH-VERIFY-001","source_type":"manual","topic":"gotchas","tags":["worktree","git","wrong-branch","agent-safety","branch-identity","hf-worktree-sh"],"rule":"Create agent worktrees with scripts/hf_worktree.sh <dir> <branch> (or make worktree DIR=<dir> BRANCH=<branch>), never a bare git worktree add: on a reused directory name the add fails but the chained cd/merge still run against the stale branch. Verify branch identity (git rev-parse --abbrev-ref HEAD) inside any newly created worktree before editing. The helper is idempotent on a matching branch and fails loudly on mismatch, printing the git worktree remove command; it never deletes an existing worktree (unlike the disposable factory path in src/workspace/_manager.py::_create_unlocked).","anti_pattern":"Bare git worktree add <dir> <branch> inside a chained shell invocation: the add failure (directory already exists) is masked by the subsequent cd + merge succeeding against whatever branch the stale directory was left on","code_refs":["scripts/hf_worktree.sh","src/workspace/_manager.py","docs/adr/0003-git-worktrees-for-isolation.md","CLAUDE.md"],"source_issue":11501,"added":"2026-08-20"}
@@ -943,4 +943,22 @@ _Source: #11629 (manual)_
 
 ```json:entry
 {"id":"01M0M7JNV07P5TTBS5TH4ER2M6","title":"Runtime `...` stubs in a mixin shadow sibling mixins via the MRO","topic":null,"source_type":"manual","source_issue":11629,"source_repo":null,"created_at":"2026-08-22T00:00:00+00:00","updated_at":"2026-08-22T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
+## `charter.yaml` `actors` is a pointer; a role list is rejected at load
+
+The repo charter declares Actors by pointing at the `agents/` tree (`actors: agents/`), never by listing roles. A list or mapping under `actors` raises `charter.CharterError` at load. This is not style: the `agents/` directory layout *is* the Actors declaration (house standard 2026-08-25, #11741; ADR-0143 Ruling 6, guard 3), and a second declaration in YAML rots against the first.
+
+Two other charter rules fail closed in the same place. `articles.assurance` must be a `RepoRecord.data_class` value (`public-code` / `internal` / `regulated-<name>`) — anything else raises rather than defaulting, because an assurance level nothing can honour must not load as if it could. And a charter that declares nothing checkable — no standards, no required artifacts, no layers, no gate scripts, no coverage floor — is a FATAL `uncheckable-charter` finding rather than a clean report: a drift check with an empty subject list passes silently and reads as coverage.
+
+Unknown standard ids and unknown layer names go the other way: tolerated and reported, never fatal (the ADR-0121 forward-compat rule).
+
+**Why:** the two authority fields (`actors`, `assurance`) and the emptiness case are exactly where a permissive default would be invisible — nothing reddens, and the file reads as governance while governing nothing.
+
+_Source: #11748 (manual)_
+
+
+```json:entry
+{"id":"01M15ZNNP35TN5FRW5093MN2Z1","title":"`charter.yaml` `actors` is a pointer; a role list is rejected at load","topic":null,"source_type":"manual","source_issue":11748,"source_repo":null,"created_at":"2026-08-28T00:00:00+00:00","updated_at":"2026-08-28T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```

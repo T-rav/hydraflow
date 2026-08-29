@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from ci_scaffold import generate_workflow
+from ci_scaffold import QUALITY_GATE_CONTEXT, generate_workflow
 from makefile_scaffold import generate_makefile
 from onboarding.kernel_lock import (
     KERNEL_LOCK_FILENAME,
@@ -103,11 +103,14 @@ class KernelSpec:
     label_prefix: str = "hydraflow"
     main_branch: str = "main"
     staging_branch: str = "staging"
-    # Optional consoles-of-personas layer (#10949): stamp the agents/ skeleton
-    # (persona contracts + console charter + decisions/ record discipline) per
-    # docs/methodology/consoles-of-personas.md. Off by default — chartering
+    # Optional councils-of-personas layer (#10949): stamp the agents/ skeleton
+    # (persona contracts + council charter + decisions/ record discipline) per
+    # docs/methodology/councils-of-personas.md. Off by default — chartering
     # review chambers is a deliberate project choice, not kernel plumbing.
-    agents_console: bool = False
+    # Named `agents_console` until the 2026-08-25 house rename (ARCH-0003);
+    # `spec_from_lock` still reads the old key so pre-rename child locks
+    # keep resolving to the same prescription.
+    agents_council: bool = False
 
     @property
     def pkg(self) -> str:
@@ -346,8 +349,15 @@ def _gitignore() -> str:
     return ".venv/\n__pycache__/\n.coverage\ncoverage.xml\n.pytest_cache/\ndist/\n.hydraflow/\n"
 
 
-def _quality_workflow() -> str:
-    return generate_workflow("python")
+def _quality_workflow(spec: KernelSpec) -> str:
+    """The stamped quality workflow, triggering on every protected branch.
+
+    Both branches matter: ``scripts/setup_branch_protection.py`` protects
+    `main` AND `staging` with the same required context, and the stamped
+    CLAUDE.md tells agents to target `staging`. A workflow that only triggered
+    on `main` would leave that context unreported on every feature PR (#11715).
+    """
+    return generate_workflow("python", branches=(spec.main_branch, spec.staging_branch))
 
 
 def _issue_template(spec: KernelSpec, name: str) -> str:
@@ -455,8 +465,16 @@ def _branch_protection_script(spec: KernelSpec) -> str:
 
 Free-tier private repos cannot use the modern Rulesets API, so this kernel ships
 the classic ``PUT /repos/{{owner}}/{{repo}}/branches/{{branch}}/protection`` variant
-(onboarding doc friction F2). The canonical required-check list is the ``quality``
-workflow job. Requires an authenticated ``gh`` CLI with admin on the repo.
+(onboarding doc friction F2). Requires an authenticated ``gh`` CLI with admin on
+the repo.
+
+The canonical required check is the ``{QUALITY_GATE_CONTEXT}`` aggregator job in
+``.github/workflows/quality.yml`` -- NOT the ``quality`` job itself. ``quality``
+is matrix-expanded over a matrix discovered at runtime, so GitHub only ever
+reports ``quality (<project_dir>)`` check runs; a bare ``quality`` context would
+sit at "expected -- waiting for status" and block every PR forever, and the leg
+names cannot be enumerated at stamp time because the leg set is not known until
+``discover-projects`` runs (#11715).
 
 Usage::
 
@@ -472,7 +490,7 @@ import json
 import subprocess
 import sys
 
-REQUIRED_CHECKS = ["quality"]
+REQUIRED_CHECKS = ["{QUALITY_GATE_CONTEXT}"]
 PROTECTED_BRANCHES = ["{spec.main_branch}", "{spec.staging_branch}"]
 
 
@@ -547,7 +565,7 @@ def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Owners
         (".gitignore", _gitignore(), Ownership.TEMPLATE),
         (".env.example", _env_example(spec), Ownership.PRODUCT),
         ("Makefile", _makefile(spec), Ownership.TEMPLATE),
-        (".github/workflows/quality.yml", _quality_workflow(), Ownership.TEMPLATE),
+        (".github/workflows/quality.yml", _quality_workflow(spec), Ownership.TEMPLATE),
         # --- Docs ---
         ("CLAUDE.md", _claude_md(spec), Ownership.PRODUCT),
         ("README.md", _readme(spec), Ownership.PRODUCT),
@@ -604,30 +622,30 @@ def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Owners
                 continue
             rel = src_file.relative_to(hydraflow_root).as_posix()
             plan.append((rel, src_file.read_text(encoding="utf-8"), Ownership.TEMPLATE))
-    # Optional consoles-of-personas layer (#10949). Skeleton READMEs are
+    # Optional councils-of-personas layer (#10949). Skeleton READMEs are
     # TEMPLATE-owned (re-stampable under force); the personas and decision
     # records a project accrues alongside them are its own files and are never
     # part of this plan.
-    if spec.agents_console:
-        plan.extend(_agents_console_files(spec))
+    if spec.agents_council:
+        plan.extend(_agents_council_files(spec))
     return plan
 
 
-_PERSONAS_METHODOLOGY_REF = "docs/methodology/consoles-of-personas.md"
+_PERSONAS_METHODOLOGY_REF = "docs/methodology/councils-of-personas.md"
 
 
-def _agents_console_files(spec: KernelSpec) -> list[tuple[str, str, Ownership]]:
-    """The consoles-of-personas skeleton (#10949): four TEMPLATE-owned READMEs."""
+def _agents_council_files(spec: KernelSpec) -> list[tuple[str, str, Ownership]]:
+    """The councils-of-personas skeleton (#10949): four TEMPLATE-owned READMEs."""
     agents = (
-        f"# {spec.title} — agents layer (consoles of personas)\n\n"
+        f"# {spec.title} — agents layer (councils of personas)\n\n"
         "Chartered review chambers per the HydraFlow methodology: personas as\n"
         "versioned contracts, chambers with bounded decision rights, ADR-style\n"
         "decision records, and per-persona calibration. Full pattern:\n"
         f"HydraFlow `{_PERSONAS_METHODOLOGY_REF}` (reference implementation:\n"
         "T-rav/harvestd `agents/`).\n\n"
         "- `personas/` — one contract file per persona.\n"
-        "- `console/` — the general chamber contract + one charter per chamber.\n"
-        "- `console/decisions/` — one numbered record per adjudication.\n"
+        "- `council/` — the general chamber contract + one charter per chamber.\n"
+        "- `council/decisions/` — one numbered record per adjudication.\n"
     )
     personas = (
         "# Persona contracts\n\n"
@@ -641,8 +659,8 @@ def _agents_console_files(spec: KernelSpec) -> list[tuple[str, str, Ownership]]:
         "**Vote honesty (mandatory):** seats on the same model substrate are\n"
         "~1.x effective votes, never N. State it wherever seat counts appear.\n"
     )
-    console = (
-        "# Console — chamber charters\n\n"
+    council = (
+        "# The Council — chamber charters\n\n"
         "One charter per chamber: chair, seats, and a bounded decision right.\n"
         "House rules (from the general contract):\n\n"
         "- Seat verdicts BEFORE chair consolidation.\n"
@@ -662,8 +680,8 @@ def _agents_console_files(spec: KernelSpec) -> list[tuple[str, str, Ownership]]:
     return [
         ("agents/README.md", agents, Ownership.TEMPLATE),
         ("agents/personas/README.md", personas, Ownership.TEMPLATE),
-        ("agents/console/README.md", console, Ownership.TEMPLATE),
-        ("agents/console/decisions/README.md", decisions, Ownership.TEMPLATE),
+        ("agents/council/README.md", council, Ownership.TEMPLATE),
+        ("agents/council/decisions/README.md", decisions, Ownership.TEMPLATE),
     ]
 
 
@@ -738,7 +756,7 @@ def _spec_fields(spec: KernelSpec) -> dict[str, object]:
         "label_prefix": spec.label_prefix,
         "main_branch": spec.main_branch,
         "staging_branch": spec.staging_branch,
-        "agents_console": spec.agents_console,
+        "agents_council": spec.agents_council,
     }
 
 
@@ -770,7 +788,9 @@ def spec_from_lock(lock: dict[str, object]) -> KernelSpec:
         label_prefix=str(fields.get("label_prefix", "hydraflow")),
         main_branch=str(fields.get("main_branch", "main")),
         staging_branch=str(fields.get("staging_branch", "staging")),
-        agents_console=bool(fields.get("agents_console", False)),
+        agents_council=bool(
+            fields.get("agents_council", fields.get("agents_console", False))
+        ),
     )
 
 

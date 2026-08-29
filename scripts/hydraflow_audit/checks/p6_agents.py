@@ -29,16 +29,16 @@ def _na_if_not_orchestration(ctx: CheckContext, check_id: str) -> Finding | None
 def _orchestrator_with_concurrent_loops(ctx: CheckContext) -> Finding:
     if (skip := _na_if_not_orchestration(ctx, "P6.1")) is not None:
         return skip
-    orch = ctx.root / "src" / "orchestrator.py"
+    orch = ctx.src_module("orchestrator")
     if not orch.exists():
-        return finding("P6.1", Status.FAIL, "src/orchestrator.py missing")
+        return finding("P6.1", Status.FAIL, f"{ctx.rel(orch)} missing")
     text = orch.read_text(encoding="utf-8", errors="replace")
     if "asyncio.gather" in text or "asyncio.TaskGroup" in text:
         return finding("P6.1", Status.PASS)
     return finding(
         "P6.1",
         Status.FAIL,
-        "src/orchestrator.py has no asyncio.gather / TaskGroup — concurrent loop shape missing",
+        f"{ctx.rel(orch)} has no asyncio.gather / TaskGroup — concurrent loop shape missing",
     )
 
 
@@ -51,9 +51,9 @@ _LABEL_FIELD_RE = re.compile(
 def _labels_centralised(ctx: CheckContext) -> Finding:
     if (skip := _na_if_not_orchestration(ctx, "P6.2")) is not None:
         return skip
-    config = ctx.root / "src" / "config.py"
+    config = ctx.src_module("config")
     if not config.exists():
-        return finding("P6.2", Status.FAIL, "src/config.py missing")
+        return finding("P6.2", Status.FAIL, f"{ctx.rel(config)} missing")
     text = config.read_text(encoding="utf-8", errors="replace")
     matches = _LABEL_FIELD_RE.findall(text)
     if len(matches) >= 4:
@@ -73,12 +73,12 @@ def _labels_centralised(ctx: CheckContext) -> Finding:
 def _base_background_loop_class(ctx: CheckContext) -> Finding:
     if (skip := _na_if_not_orchestration(ctx, "P6.3")) is not None:
         return skip
-    path = ctx.root / "src" / "base_background_loop.py"
+    path = ctx.src_module("base_background_loop")
     if not path.exists():
         return finding(
             "P6.3",
             Status.FAIL,
-            "src/base_background_loop.py missing — BaseBackgroundLoop not defined",
+            f"{ctx.rel(path)} missing — BaseBackgroundLoop not defined",
         )
     text = path.read_text(encoding="utf-8", errors="replace")
     if re.search(r"class\s+BaseBackgroundLoop\b", text):
@@ -147,14 +147,14 @@ def _atomic_label_swap(ctx: CheckContext) -> Finding:
     if (skip := _na_if_not_orchestration(ctx, "P6.5")) is not None:
         return skip
     candidates = [
-        ctx.root / "src" / "pr_manager.py",
+        ctx.src_module("pr_manager"),
         # PRManager's label surface was extracted to its own mixin module in
         # the Refs #11547 god-class decomposition; the helper is reachable
         # unchanged as PRManager.swap_pipeline_labels, but this probe greps
         # files rather than following inheritance.
-        ctx.root / "src" / "pr_manager_labels.py",
-        ctx.root / "src" / "label_manager.py",
-        ctx.root / "src" / "labels.py",
+        ctx.src_module("pr_manager_labels"),
+        ctx.src_module("label_manager"),
+        ctx.src_module("labels"),
     ]
     for path in candidates:
         if not path.exists():
@@ -164,10 +164,12 @@ def _atomic_label_swap(ctx: CheckContext) -> Finding:
             return finding(
                 "P6.5",
                 Status.PASS,
-                f"atomic swap helper in {path.name}",
+                f"atomic swap helper in {ctx.rel(path)}",
             )
+    probed = ", ".join(ctx.rel(path) for path in candidates)
     return finding(
         "P6.5",
         Status.FAIL,
-        "no swap_pipeline_labels / swap_labels / atomic_label_swap function found",
+        "no swap_pipeline_labels / swap_labels / atomic_label_swap function "
+        f"found (tried {probed})",
     )

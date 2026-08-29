@@ -423,7 +423,7 @@ class EpicDecompResult(BaseModel):
         default="",
         description=(
             "Self-reported confidence ('high'/'medium'/'low') from the "
-            "decomposition council's decision. Empty for callers that don't "
+            "decomposition ensemble's decision. Empty for callers that don't "
             "produce a confidence signal (e.g. the legacy single-shot "
             "intake-triage path)."
         ),
@@ -3405,8 +3405,8 @@ class TriageUpdatePayload(TypedDict, total=False):
 # --- Earlier-adversarial pipeline event payloads (ADR pending) -----------
 #
 # These power dashboard observability for the new adversarial stages
-# (DiscoveryCouncil, PlanCouncil, SpecJudge, ShapeChallenger,
-# ShapeExpertCouncil, AssumptionSurfacer). Emitted by
+# (DiscoveryEnsemble, PlanEnsemble, SpecJudge, ShapeChallenger,
+# ShapeExpertEnsemble, AssumptionSurfacer). Emitted by
 # ``AdversarialRetryLoop`` and by post-merge wiki carryover.
 
 
@@ -4157,10 +4157,10 @@ class WorkFn(Protocol):
     async def __call__(self) -> object: ...
 
 
-# --- ADR Council Review ---
+# --- ADR Review Panel ---
 
 
-class CouncilVerdict(StrEnum):
+class PanelVerdict(StrEnum):
     """Possible verdicts from an ADR review judge."""
 
     APPROVE = "approve"
@@ -4169,24 +4169,24 @@ class CouncilVerdict(StrEnum):
     DUPLICATE = "duplicate"
 
 
-class CouncilVote(BaseModel):
+class PanelVote(BaseModel):
     """A single judge's vote in an ADR review round."""
 
     role: str  # "architect" | "pragmatist" | "editor"
-    verdict: CouncilVerdict
+    verdict: PanelVerdict
     reasoning: str = ""
     duplicate_of: int | None = None
     round_number: int = 1
 
 
-class ADRCouncilResult(BaseModel):
-    """Full result of a multi-round ADR council review session."""
+class ADRReviewPanelResult(BaseModel):
+    """Full result of a multi-round ADR review-panel session."""
 
     adr_number: int
     adr_title: str = ""
     rounds_needed: int = 1
-    votes: list[CouncilVote] = Field(default_factory=list)
-    all_round_votes: list[list[CouncilVote]] = Field(default_factory=list)
+    votes: list[PanelVote] = Field(default_factory=list)
+    all_round_votes: list[list[PanelVote]] = Field(default_factory=list)
     final_decision: str = (
         ""  # uppercase: ACCEPT, REJECT, REQUEST_CHANGES, DUPLICATE, NO_CONSENSUS
     )
@@ -4198,8 +4198,8 @@ class ADRCouncilResult(BaseModel):
 
     @property
     def approve_count(self) -> int:
-        return sum(1 for v in self.votes if v.verdict == CouncilVerdict.APPROVE)
+        return sum(1 for v in self.votes if v.verdict == PanelVerdict.APPROVE)
 
     @property
     def reject_count(self) -> int:
-        return sum(1 for v in self.votes if v.verdict == CouncilVerdict.REJECT)
+        return sum(1 for v in self.votes if v.verdict == PanelVerdict.REJECT)

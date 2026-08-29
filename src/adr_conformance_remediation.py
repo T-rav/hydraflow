@@ -24,16 +24,25 @@ class RemediationDecision(BaseModel):
     reason: str = ""
 
 
-def classify_remediation(
-    conf: AdrConformance,
+def classify_remediation_over(
     *,
+    adr_id: str,
+    outcome: CheckOutcome,
     rename_match: str | None,
     attempts: int,
     max_attempts: int = 3,
 ) -> RemediationDecision:
-    if conf.outcome in (CheckOutcome.PASS, CheckOutcome.MANUAL, CheckOutcome.SKIPPED):
+    """The classification itself, over primitives rather than an object.
+
+    Split out for #11749 so ``policy.python_engine`` can reach the SAME
+    decision function from a ``Fact`` sequence instead of re-deriving it from a
+    reconstructed ``AdrConformance``. One definition, two shapes of caller —
+    the loop's behaviour through the decision seam is byte-for-byte what it was
+    when it called ``classify_remediation`` directly.
+    """
+    if outcome in (CheckOutcome.PASS, CheckOutcome.MANUAL, CheckOutcome.SKIPPED):
         return RemediationDecision(action=RemediationAction.NONE)
-    if conf.outcome is CheckOutcome.UNRESOLVED and rename_match:
+    if outcome is CheckOutcome.UNRESOLVED and rename_match:
         return RemediationDecision(
             action=RemediationAction.REPOINT, reason=f"check renamed to {rename_match}"
         )
@@ -45,5 +54,22 @@ def classify_remediation(
         )
     return RemediationDecision(
         action=RemediationAction.FILE_ISSUE,
-        reason=f"conformance {conf.outcome} for {conf.adr_id}",
+        reason=f"conformance {outcome} for {adr_id}",
+    )
+
+
+def classify_remediation(
+    conf: AdrConformance,
+    *,
+    rename_match: str | None,
+    attempts: int,
+    max_attempts: int = 3,
+) -> RemediationDecision:
+    """Object-shaped adapter over :func:`classify_remediation_over`."""
+    return classify_remediation_over(
+        adr_id=conf.adr_id,
+        outcome=conf.outcome,
+        rename_match=rename_match,
+        attempts=attempts,
+        max_attempts=max_attempts,
     )

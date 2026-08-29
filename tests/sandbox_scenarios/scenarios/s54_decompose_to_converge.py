@@ -3,7 +3,7 @@ into child issues instead of paging a human (ADR-0105).
 
 Seeds issue #1 at ``hitl-escalation`` with the auto-agent attempt counter
 already at the cap, so on the first tick the ``decompose_or_escalate`` terminal
-fires. The DecompositionCouncil is driven by scripted transcripts (via the
+fires. The DecompositionEnsemble is driven by scripted transcripts (via the
 ``_mockworld_fake_llm`` sentinel wired in sandbox_main): a direction proposing a
 2-child split, then a validation that APPROVEs. Expected: an auto-decomposed
 epic + its children exist, and issue #1 is NOT marked ``human-required``.
@@ -69,7 +69,7 @@ def seed() -> MockWorldSeed:
         # Start the auto-agent already at its cap so the decompose terminal
         # fires on the first tick (default auto_agent_max_attempts = 3).
         auto_agent_attempts={1: 3},
-        # The council's two seam calls (direction then validation), scripted;
+        # The ensemble's two seam calls (direction then validation), scripted;
         # plus the children's light-lane spawns (see module docstring).
         scripts={
             "decomposition": {1: [_DIRECTION, _VALIDATION]},
@@ -114,7 +114,7 @@ async def assert_outcome(api, page) -> None:
     # work-items). >=2 children under the scripted epic title == the terminal
     # decomposed rather than paging a human.
     # timeout=180.0 (not the original 90.0), matching the tier other
-    # multi-cycle, council-driven scenarios use (s02/s03/s04/s08). The budget
+    # multi-cycle, ensemble-driven scenarios use (s02/s03/s04/s08). The budget
     # is NOT what makes this deterministic — the seed's 6s
     # sandbox_loop_interval is. Under #11298 lane-on this flow needs three
     # SERIALIZED AutoAgentPreflightLoop ticks (decompose, then one light-lane

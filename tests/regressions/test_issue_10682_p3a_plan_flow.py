@@ -4,7 +4,7 @@
 runtime (ADR-0111): the same per-issue plan pipeline, now expressed as an
 explicit ``Node``/``Edge`` graph
 
-    prepass -> surface -> draft -> council -> route
+    prepass -> surface -> draft -> ensemble -> route
         route        --(close / escalate / plain-failure)--> done
         route        --> write-records -> gate
         gate         --(design-decision concerns >= K)------> done  (human-required)
@@ -16,7 +16,7 @@ feature flag, so parity is the only safety net.
 These tests pin the load-bearing invariants of that cutover:
 
 1. **Flow shape / node order.** A successful plan walks
-   ``prepass -> surface -> draft -> council -> route -> write-records -> gate ->
+   ``prepass -> surface -> draft -> ensemble -> route -> write-records -> gate ->
    ready -> done`` with the planner (LLM actuator) confined to ``draft``.
 2. **Output parity.** The flow-backed public entry transitions a seeded plan to
    ``hydraflow-ready`` and returns the planner's ``PlanResult``.
@@ -56,7 +56,7 @@ _HAPPY_ORDER = [
     "prepass",
     "surface",
     "draft",
-    "council",
+    "ensemble",
     "route",
     "write-records",
     "gate",
@@ -129,9 +129,9 @@ async def test_happy_path_node_order_confines_planner_to_draft(
     assert recorded == result.path
     assert result.terminal == "done"
     # The planner (LLM actuator) fires exactly once, and only at ``draft`` —
-    # before ``council`` and after ``surface``.
+    # before ``ensemble`` and after ``surface``.
     planners.plan.assert_awaited_once()
-    assert recorded.index("draft") < recorded.index("council")
+    assert recorded.index("draft") < recorded.index("ensemble")
     assert recorded.index("surface") < recorded.index("draft")
     assert result.state["result"] is planners.plan.return_value
 
@@ -170,7 +170,7 @@ async def test_design_decision_criticals_route_to_human_required(
         AdversarialState(
             phase="plan",
             pending_concerns=[
-                _design_concern(stage="plan_council_risk_skeptic", idx=1),
+                _design_concern(stage="plan_ensemble_risk_skeptic", idx=1),
                 _design_concern(stage="assumption_surfacer", idx=2),
             ],
         ),
@@ -198,7 +198,7 @@ async def test_gate_node_stops_walk_before_ready_on_design_decision(
         AdversarialState(
             phase="plan",
             pending_concerns=[
-                _design_concern(stage="plan_council_risk_skeptic", idx=1),
+                _design_concern(stage="plan_ensemble_risk_skeptic", idx=1),
                 _design_concern(stage="assumption_surfacer", idx=2),
             ],
         ),
@@ -223,7 +223,7 @@ async def test_ordinary_concerns_still_route_to_ready(
         AdversarialState(
             phase="plan",
             pending_concerns=[
-                _design_concern(stage="plan_council_builder", severity="HIGH", idx=1),
+                _design_concern(stage="plan_ensemble_builder", severity="HIGH", idx=1),
             ],
         ),
     )

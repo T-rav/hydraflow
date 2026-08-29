@@ -60,8 +60,21 @@ class AdversarialState(BaseModel):
 # role. The Builder (buildability), Tester (coverage), and SpecJudge (AC
 # compliance) stages are implementer-addressable and are deliberately excluded
 # so ordinary fixable-concern plans keep flowing to ``ready`` (issue #10659).
-DESIGN_DECISION_STAGES: frozenset[str] = frozenset(
-    {"plan_council_risk_skeptic", "assumption_surfacer"}
+#
+# ``plan_council_risk_skeptic`` is the pre-rename spelling of the same stage
+# (the adversarial planning ensemble was called "PlanCouncil" until the
+# ADR-0053 single-meaning rename). ``Concern.raised_in_stage`` is PERSISTED —
+# it rides in ``AdversarialState`` inside the state file — so an issue that
+# was mid-plan across the rename still carries the legacy stage string. Both
+# spellings stay in the set or those in-flight CRITICALs would silently stop
+# qualifying as design-gate concerns and march to ``ready``.
+_LEGACY_DESIGN_DECISION_STAGES: frozenset[str] = frozenset(
+    {"plan_council_risk_skeptic"}
+)
+
+DESIGN_DECISION_STAGES: frozenset[str] = (
+    frozenset({"plan_ensemble_risk_skeptic", "assumption_surfacer"})
+    | _LEGACY_DESIGN_DECISION_STAGES
 )
 
 

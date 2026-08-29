@@ -1,5 +1,5 @@
 classes:
-  src/adr_reviewer.py:ADRCouncilReviewer:
+  src/adr_reviewer.py:ADRReviewPanel:
     loc: 833
     methods: 29
   src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop:

@@ -5,14 +5,30 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ci_scaffold import (
+    QUALITY_GATE_CONTEXT,
+    QUALITY_GATE_JOB,
     CIScaffoldResult,
     generate_workflow,
     has_quality_workflow,
     scaffold_ci,
 )
 from tests.conftest import CIScaffoldResultFactory
+
+
+def _on_block(workflow: str) -> dict:
+    """The workflow's `on:` triggers.
+
+    PyYAML resolves the bare key ``on`` to the boolean ``True`` (YAML 1.1
+    truthy), so a plain ``["on"]`` lookup raises KeyError on a perfectly valid
+    workflow — hence the two-key fallback.
+    """
+    data = yaml.safe_load(workflow)
+    triggers = data.get("on", data.get(True))
+    assert isinstance(triggers, dict), "workflow has no `on:` block"
+    return triggers
 
 
 class TestCIScaffoldResultFactory:
@@ -87,6 +103,48 @@ class TestGenerateWorkflow:
     def test_workflow_discovery_ignores_hydra_folders(self) -> None:
         wf = generate_workflow("python")
         assert '"hydra", "hydraflow"' in wf
+
+    @pytest.mark.parametrize(
+        "lang",
+        ["python", "node", "java", "ruby", "csharp", "go", "rust", "unknown"],
+    )
+    def test_every_template_carries_the_quality_gate_aggregator(
+        self, lang: str
+    ) -> None:
+        """Every language template ships the one stable required context.
+
+        `quality` is matrix-expanded from a matrix discovered at runtime, so a
+        template without the aggregator leaves the stamped repo with no context
+        branch protection can require (#11715).
+        """
+        jobs = yaml.safe_load(generate_workflow(lang))["jobs"]
+        assert QUALITY_GATE_JOB in jobs, f"{lang} template has no aggregator job"
+        gate = jobs[QUALITY_GATE_JOB]
+        assert gate["name"] == QUALITY_GATE_CONTEXT
+        assert "quality" in gate["needs"]
+        assert gate["if"] == "always()"
+
+    def test_default_trigger_branches_unchanged_for_prep(self) -> None:
+        """The `branches` parameter must not change what `make prep` emits.
+
+        `generate_workflow` grew a keyword-only `branches` argument so the
+        kernel can stamp both protected branches (#11715). `scaffold_ci` — the
+        `make prep` path for arbitrary repos — deliberately keeps the default,
+        because it does not stamp branch protection and so has no required
+        context to keep reachable. Pinned so the default cannot drift silently
+        along with the callers that do pass branches.
+        """
+        triggers = _on_block(generate_workflow("python"))
+        assert triggers["pull_request"]["branches"] == ["main"]
+        assert triggers["push"]["branches"] == ["main"]
+
+    def test_trigger_branches_are_threaded_and_deduped(self) -> None:
+        """Explicit branches reach both triggers, with repeats collapsed."""
+        triggers = _on_block(
+            generate_workflow("python", branches=("main", "staging", "main"))
+        )
+        assert triggers["pull_request"]["branches"] == ["main", "staging"]
+        assert triggers["push"]["branches"] == ["main", "staging"]
 
 
 class TestScaffoldCI:

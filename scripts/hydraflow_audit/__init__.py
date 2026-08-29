@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from . import layout
+
 # ``make audit`` runs ``python -m scripts.hydraflow_audit .`` with only the repo
 # ROOT on ``sys.path`` (not ``src``). The P10 checks import the pure false-close
 # classifier, which lives at ``src/false_close.py`` (#10365) because the factory
@@ -21,7 +23,7 @@ from pathlib import Path
 # imported, so the path is ready before the first classifier import. ``src``
 # exposes only unique top-level module names (``false_close`` etc.), so this
 # shadows nothing the audit package's stdlib/relative imports depend on.
-_SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+_SRC_DIR = Path(__file__).resolve().parents[2] / layout.SOURCE_DIR_NAME
 if _SRC_DIR.is_dir():
     _src = str(_SRC_DIR)
     if _src not in sys.path:

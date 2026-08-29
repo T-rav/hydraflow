@@ -70,7 +70,7 @@
 #   - 193b63c fix(sandbox): s54 in-process parity — the fix IS test infra
 #     (MockWorld phase_map + FakeLLM accumulate); its regression guard is the
 #     s54 parity test + the 7 test_decompose_sandbox_harness.py unit tests it
-#     makes pass. New product behavior (the terminal/council/decomposer) ships
+#     makes pass. New product behavior (the terminal/ensemble/decomposer) ships
 #     with unit + MockWorld-scenario + s54 sandbox e2e coverage.
 # Forward-enforcement restarts here.
 #

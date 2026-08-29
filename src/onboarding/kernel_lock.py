@@ -37,7 +37,7 @@ from pathlib import Path
 #: The building-code version children are stamped against. Calendar-versioned;
 #: bumped whenever the kernel's prescribed content changes semantically (the
 #: BuildingCodeLoop — #11060 slice 4 — will own the bump + child update PRs).
-BUILDING_CODE_VERSION = "2026.08.12"
+BUILDING_CODE_VERSION = "2026.08.24"
 
 KERNEL_LOCK_FILENAME = "hydraflow-kernel.lock"
 

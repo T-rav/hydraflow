@@ -534,6 +534,14 @@ class TestConfigureGitIdentity:
 
         with (
             patch("asyncio.create_subprocess_exec", return_value=success_proc),
+            # #11720: the generic ``create_subprocess_exec`` mock answers
+            # ``git remote get-url origin`` with an empty string, which the
+            # now-fail-closed origin guard correctly refuses. This test is
+            # about create() mechanics, not origin identity — the guard has
+            # its own suite — so stub it, as the sibling tests above do.
+            patch.object(
+                manager, "_assert_origin_matches_repo", new_callable=AsyncMock
+            ),
             patch.object(manager, "_remote_branch_exists", return_value=False),
             patch.object(manager, "_setup_env"),
             patch.object(manager, "_configure_git_identity", configure_identity),

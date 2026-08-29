@@ -8,7 +8,7 @@ identity in ``plan_phase``.
 One cohesive concern: the ADR-0064 earlier-adversarial pipeline as it applies
 to a plan — wiring the four optional agents, persisting the shared
 ``AdversarialState``, and running stages 1 (AssumptionSurfacer), 3
-(PlanCouncil tight loop) and 5+6 (SpecAC draft + SpecJudge).
+(PlanEnsemble tight loop) and 5+6 (SpecAC draft + SpecJudge).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from adversarial_retry_loop import AdversarialRetryLoop
 from assumption_surfacer import AssumptionSurfacer, SurfacerOutput
 from models import Task
 from pending_concerns import AdversarialState, StageRun
-from plan_council import CouncilTally, PlanCouncil
+from plan_ensemble import EnsembleTally, PlanEnsemble
 from spec_ac_generator import SpecACGenerator
 from spec_judge import JudgeResult, SpecJudge
 
@@ -41,7 +41,7 @@ class PlanAdversarialMixin:
     # ------------------------------------------------------------------
     _adversarial_budget: int
     _bus: EventBus
-    _council_agents: dict[str, AgentLike] | None
+    _ensemble_agents: dict[str, AgentLike] | None
     _spec_ac_agent: AgentLike | None
     _spec_judge_agent: AgentLike | None
     _state: StateTracker
@@ -55,7 +55,7 @@ class PlanAdversarialMixin:
         self,
         *,
         surfacer_agent: AgentLike | None = None,
-        council_agents: dict[str, AgentLike] | None = None,
+        ensemble_agents: dict[str, AgentLike] | None = None,
         spec_ac_agent: AgentLike | None = None,
         spec_judge_agent: AgentLike | None = None,
         budget: int = 3,
@@ -65,14 +65,14 @@ class PlanAdversarialMixin:
         Called by the factory once on construction (or by tests).
         Each agent is independently optional — when ``None``, that
         stage is skipped, the rest of the pipeline runs unchanged.
-        All four together enable the full Surfacer → Council → AC →
+        All four together enable the full Surfacer → Ensemble → AC →
         Judge sequence around the existing planner + plan_reviewer.
 
-        ``council_agents`` must contain keys ``builder``, ``tester``,
-        ``risk_skeptic`` (per ``PlanCouncil``'s contract).
+        ``ensemble_agents`` must contain keys ``builder``, ``tester``,
+        ``risk_skeptic`` (per ``PlanEnsemble``'s contract).
         """
         self._surfacer_agent = surfacer_agent
-        self._council_agents = council_agents
+        self._ensemble_agents = ensemble_agents
         self._spec_ac_agent = spec_ac_agent
         self._spec_judge_agent = spec_judge_agent
         self._adversarial_budget = budget
@@ -80,7 +80,7 @@ class PlanAdversarialMixin:
     def _has_any_adversarial_agent(self) -> bool:
         return (
             self._surfacer_agent is not None
-            or self._council_agents is not None
+            or self._ensemble_agents is not None
             or self._spec_ac_agent is not None
             or self._spec_judge_agent is not None
         )
@@ -127,61 +127,61 @@ class PlanAdversarialMixin:
         )
         self._persist_adversarial_state(issue, adv)
 
-    async def _run_plan_council(
+    async def _run_plan_ensemble(
         self,
         issue: Task,
         adv: AdversarialState,
         plan_text: str,
     ) -> None:
-        """Stage 3: PlanCouncil tight-loop around the (already-run) plan.
+        """Stage 3: PlanEnsemble tight-loop around the (already-run) plan.
 
         Wired via AdversarialRetryLoop with the configured budget.
         Because the planner has already produced its plan and we don't
-        currently re-invoke it on Council retry, the loop runs the
-        Council with a no-op ``retry`` step so unresolved concerns
+        currently re-invoke it on Ensemble retry, the loop runs the
+        Ensemble with a no-op ``retry`` step so unresolved concerns
         forward forward rather than block. This honors the dark-factory
         contract: never deadlock; surface, persist, forward.
         """
-        if self._council_agents is None:
+        if self._ensemble_agents is None:
             return
-        council = PlanCouncil(agents=self._council_agents)
+        ensemble = PlanEnsemble(agents=self._ensemble_agents)
 
-        async def _critic(_ctx: str) -> CouncilTally:
-            return await council.deliberate(
+        async def _critic(_ctx: str) -> EnsembleTally:
+            return await ensemble.deliberate(
                 plan_text=_ctx, pending_concerns=list(adv.pending_concerns)
             )
 
-        async def _retry(_findings: CouncilTally, ctx: str) -> str:
+        async def _retry(_findings: EnsembleTally, ctx: str) -> str:
             # The plan text is unchanged on retry — we do not currently
-            # re-invoke the planner from inside the council loop. The
-            # Council's ``should_retry`` instead drives whether the
+            # re-invoke the planner from inside the ensemble loop. The
+            # Ensemble's ``should_retry`` instead drives whether the
             # AdversarialRetryLoop returns convergence on the next pass.
             # In a future pass we may thread a planner-retry callback
             # in here. For now: forward findings (dark-factory
             # contract) once budget is exhausted.
             return ctx
 
-        def _converged(t: CouncilTally) -> bool:
+        def _converged(t: EnsembleTally) -> bool:
             return not t.should_retry
 
-        loop: AdversarialRetryLoop[str, CouncilTally] = AdversarialRetryLoop(
+        loop: AdversarialRetryLoop[str, EnsembleTally] = AdversarialRetryLoop(
             budget=self._adversarial_budget,
             event_bus=self._bus,
             issue_id=issue.id,
             phase="plan",
-            stage="plan_council",
+            stage="plan_ensemble",
         )
         # AdversarialRetryLoop.run expects findings to expose a
-        # `.findings: list[Concern]` attribute — CouncilTally satisfies
+        # `.findings: list[Concern]` attribute — EnsembleTally satisfies
         # that (its dataclass field is named ``findings``).
         _ctx_out, unresolved, metrics = await loop.run_with_metrics(
             plan_text, _critic, _retry, _converged
         )
         adv.pending_concerns.extend(unresolved)
-        adv.current_stage = "plan_council"
+        adv.current_stage = "plan_ensemble"
         adv.stage_history.append(
             StageRun(
-                stage="plan_council",
+                stage="plan_ensemble",
                 phase="plan",
                 retries=metrics.retries,
                 converged=not bool(unresolved),
@@ -203,7 +203,7 @@ class PlanAdversarialMixin:
 
         AC generation is one-shot (no retry). The judge runs through
         AdversarialRetryLoop so a FAIL verdict drives the configured
-        budget of retries. As with the Council, retry currently does
+        budget of retries. As with the Ensemble, retry currently does
         not re-invoke the planner — concerns forward on exhaustion per
         the dark-factory contract.
         """
@@ -222,7 +222,7 @@ class PlanAdversarialMixin:
             )
 
         async def _retry(_result: JudgeResult, ctx: str) -> str:
-            return ctx  # see Council retry note above
+            return ctx  # see Ensemble retry note above
 
         def _converged(r: JudgeResult) -> bool:
             return r.verdict == "PASS"

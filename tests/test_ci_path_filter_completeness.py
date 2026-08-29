@@ -15,7 +15,7 @@ and it did so three times:
   lint/typecheck/security — not the ``test`` job, which actually runs pytest
   and is gated by the separate ``core_python`` filter. ``agents/**`` was in
   ``python`` but not ``core_python``, so the ratchet reported it "covered"
-  while the pytest suite (``tests/test_console_conformance.py``) never ran
+  while the pytest suite (``tests/test_council_conformance.py``) never ran
   for an agents-only PR (fixed 2026-08-14, #11164).
 
 Each was the same defect: an allowlist gap invisible until something merged
@@ -43,11 +43,11 @@ _CI = _REPO / ".github" / "workflows" / "ci.yml"
 # with the reason. An unexplained exemption is how the next gap hides.
 EXEMPT_PATHS: dict[str, str] = {
     "agents": (
-        "console decision ledger + persona contracts (ARCH-0001); deliberately "
+        "Council decision ledger + persona contracts (ARCH-0001); deliberately "
         "excluded from core_python so ledger-only PRs don't drag in the heavy "
         "smoke/scenario/regression/sandbox lanes. Guarded instead by the "
-        "console_ledger paths-filter OR'd into the `audit` job's `if:`, which "
-        "runs `make console-conformance` (shape, numbering, personas, chairs, "
+        "council_ledger paths-filter OR'd into the `audit` job's `if:`, which "
+        "runs `make council-conformance` (shape, numbering, personas, chairs, "
         "staleness, git immutability) — see tests/regressions/test_issue_11164.py"
     ),
     "deploy": "deployment manifests; exercised by the sandbox e2e lane, not unit tests",

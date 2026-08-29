@@ -11,9 +11,10 @@ graph LR
     task["Task<br/><i>entity</i>"]
   end
   subgraph caretaker
-    adrcouncilreviewer["ADRCouncilReviewer<br/><i>service</i>"]
     adrprevalidator["ADRPreValidator<br/><i>service</i>"]
     adrreviewerloop["ADRReviewerLoop<br/><i>loop</i>"]
+    adrreviewpanel["ADRReviewPanel<br/><i>service</i>"]
+    charterdriftcaretakerloop["CharterDriftCaretakerLoop<br/><i>loop</i>"]
     cimonitorloop["CIMonitorLoop<br/><i>loop</i>"]
     contractrefreshloop["ContractRefreshLoop<br/><i>loop</i>"]
     corpuslearningloop["CorpusLearningLoop<br/><i>loop</i>"]
@@ -35,7 +36,6 @@ graph LR
     mergestatewatcherloop["MergeStateWatcherLoop<br/><i>loop</i>"]
     pricingrefreshloop["PricingRefreshLoop<br/><i>loop</i>"]
     prunstickerloop["PRUnstickerLoop<br/><i>loop</i>"]
-    railsdriftcaretakerloop["RailsDriftCaretakerLoop<br/><i>loop</i>"]
     rcbudgetloop["RCBudgetLoop<br/><i>loop</i>"]
     skillpromptevalloop["SkillPromptEvalLoop<br/><i>loop</i>"]
     staleissuegcloop["StaleIssueGCLoop<br/><i>loop</i>"]
@@ -44,12 +44,16 @@ graph LR
     workspacegcloop["WorkspaceGCLoop<br/><i>loop</i>"]
   end
   subgraph shared-kernel
+    actors["Actors<br/><i>policy</i>"]
     actuator["Actuator<br/><i>control_role</i>"]
     adrindex["ADRIndex<br/><i>service</i>"]
     agentport["AgentPort<br/><i>port</i>"]
+    articles["Articles<br/><i>invariant</i>"]
+    artifacts["Artifacts<br/><i>aggregate</i>"]
     authority["Authority<br/><i>policy</i>"]
     basebackgroundloop["BaseBackgroundLoop<br/><i>loop</i>"]
     botprport["BotPRPort<br/><i>port</i>"]
+    charter["Charter<br/><i>value_object</i>"]
     circuitbreaker["CircuitBreaker<br/><i>control_role</i>"]
     controller["Controller<br/><i>control_role</i>"]
     credentials["Credentials<br/><i>value_object</i>"]
@@ -76,6 +80,7 @@ graph LR
     plant["Plant<br/><i>control_role</i>"]
     prmanager["PRManager<br/><i>adapter</i>"]
     prport["PRPort<br/><i>port</i>"]
+    purpose["Purpose<br/><i>policy</i>"]
     repowikistore["RepoWikiStore<br/><i>service</i>"]
     reviewinsightstoreport["ReviewInsightStorePort<br/><i>port</i>"]
     routebackcounterport["RouteBackCounterPort<br/><i>port</i>"]
@@ -102,19 +107,19 @@ graph LR
   actuator -->|depends_on| subprocessrunner
   actuator -->|depends_on| eventtype
   actuator -->|depends_on| hydraflowevent
-  adrcouncilreviewer -->|depends_on| eventbus
-  adrcouncilreviewer -->|depends_on| hydraflowconfig
-  adrcouncilreviewer -->|depends_on| credentials
-  adrcouncilreviewer -->|depends_on| adrprevalidator
-  adrcouncilreviewer -->|depends_on| subprocessrunner
-  adrcouncilreviewer -->|depends_on| prmanager
-  adrcouncilreviewer -->|depends_on| dedupstore
-  adrcouncilreviewer -->|depends_on| creditexhaustederror
   adrreviewerloop -->|depends_on| hydraflowconfig
   adrreviewerloop -->|depends_on| basebackgroundloop
   adrreviewerloop -->|implements| basebackgroundloop
-  adrreviewerloop -->|depends_on| adrcouncilreviewer
+  adrreviewerloop -->|depends_on| adrreviewpanel
   adrreviewerloop -->|depends_on| governor
+  adrreviewpanel -->|depends_on| eventbus
+  adrreviewpanel -->|depends_on| hydraflowconfig
+  adrreviewpanel -->|depends_on| credentials
+  adrreviewpanel -->|depends_on| adrprevalidator
+  adrreviewpanel -->|depends_on| subprocessrunner
+  adrreviewpanel -->|depends_on| prmanager
+  adrreviewpanel -->|depends_on| dedupstore
+  adrreviewpanel -->|depends_on| creditexhaustederror
   agentport -->|depends_on| task
   agentport -->|depends_on| hitlitem
   agentport -->|depends_on| reviewverdict
@@ -148,6 +153,14 @@ graph LR
   botprport -->|depends_on| creditexhaustederror
   botprport -->|depends_on| term
   botprport -->|depends_on| termstore
+  charterdriftcaretakerloop -->|depends_on| loopfitness
+  charterdriftcaretakerloop -->|depends_on| prport
+  charterdriftcaretakerloop -->|depends_on| dedupstore
+  charterdriftcaretakerloop -->|depends_on| hydraflowconfig
+  charterdriftcaretakerloop -->|depends_on| basebackgroundloop
+  charterdriftcaretakerloop -->|depends_on| fitnesscontext
+  charterdriftcaretakerloop -->|depends_on| governor
+  charterdriftcaretakerloop -->|implements| basebackgroundloop
   cimonitorloop -->|depends_on| hydraflowconfig
   cimonitorloop -->|depends_on| basebackgroundloop
   cimonitorloop -->|depends_on| prport
@@ -177,7 +190,7 @@ graph LR
   creditexhaustederror -->|depends_on| basebackgroundloop
   creditexhaustederror -->|depends_on| subprocessrunner
   creditexhaustederror -->|depends_on| circuitbreaker
-  dedupstore -->|depends_on| adrcouncilreviewer
+  dedupstore -->|depends_on| adrreviewpanel
   dedupstore -->|depends_on| contractrefreshloop
   dedupstore -->|depends_on| corpuslearningloop
   dedupstore -->|depends_on| dependabotmergeloop
@@ -374,14 +387,6 @@ graph LR
   prunstickerloop -->|depends_on| prport
   prunstickerloop -->|implements| basebackgroundloop
   prunstickerloop -->|depends_on| governor
-  railsdriftcaretakerloop -->|depends_on| loopfitness
-  railsdriftcaretakerloop -->|depends_on| prport
-  railsdriftcaretakerloop -->|depends_on| dedupstore
-  railsdriftcaretakerloop -->|depends_on| hydraflowconfig
-  railsdriftcaretakerloop -->|depends_on| basebackgroundloop
-  railsdriftcaretakerloop -->|depends_on| fitnesscontext
-  railsdriftcaretakerloop -->|depends_on| governor
-  railsdriftcaretakerloop -->|implements| basebackgroundloop
   rcbudgetloop -->|depends_on| basebackgroundloop
   rcbudgetloop -->|depends_on| hydraflowconfig
   rcbudgetloop -->|depends_on| statetracker

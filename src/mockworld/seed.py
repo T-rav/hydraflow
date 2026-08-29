@@ -14,6 +14,12 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+#: Pre-rename ``phase_scripts`` keys → their current spelling. Seed JSON is
+#: authored outside this repo, so a seed written before the ADR-0053
+#: single-meaning rename ("Council" → "Ensemble" for the adversarial planning
+#: ensemble) must keep working. Canonicalized in :meth:`MockWorldSeed.from_json`.
+LEGACY_PHASE_SCRIPT_KEYS: dict[str, str] = {"shape_council": "shape_ensemble"}
+
 
 @dataclass(frozen=True)
 class MockWorldSeed:
@@ -81,8 +87,8 @@ class MockWorldSeed:
     #   ``DiscoverRunner._evaluate_brief``.
     # - ``plan_review``: ``{issue: [{"verdict": "accept"|"reject",
     #   "gaps": [...]}, ...]}`` — FIFO consumed by ``PlanReviewer.review``.
-    # - ``shape_council``: ``{issue: {"<round_num>": "consensus"|"split"}}`` —
-    #   round map consumed by ``ExpertCouncil.vote`` / ``vote_diversified``.
+    # - ``shape_ensemble``: ``{issue: {"<round_num>": "consensus"|"split"}}`` —
+    #   round map consumed by ``ExpertEnsemble.vote`` / ``vote_diversified``.
     # - ``implement_spec_review``: ``{issue: [{"compliant": bool,
     #   "gaps": [...], "reasoning": str}, ...]}`` — FIFO consumed by
     #   ``DefaultSpecComplianceReviewer.review``.
@@ -441,14 +447,20 @@ class MockWorldSeed:
                 for issue, comment_list in data["comments"].items()
             }
         # phase_scripts (ADR-0063): outer key is phase name, inner key is
-        # issue number (JSON string → int). The ``shape_council`` payload's
+        # issue number (JSON string → int). The ``shape_ensemble`` payload's
         # inner-inner key is the round number, also needing string→int.
         if "phase_scripts" in data:
             coerced: dict[str, dict[int, Any]] = {}
-            for phase, by_issue in data["phase_scripts"].items():
+            for raw_phase, by_issue in data["phase_scripts"].items():
+                # Seed files are authored outside this repo and outlive it.
+                # ``shape_council`` is the pre-rename spelling of
+                # ``shape_ensemble``; canonicalize on read so an older seed
+                # keeps scripting the same fake instead of falling through
+                # sandbox_main's unknown-phase branch as a silent no-op.
+                phase = LEGACY_PHASE_SCRIPT_KEYS.get(str(raw_phase), str(raw_phase))
                 inner: dict[int, Any] = {}
                 for k, raw_v in by_issue.items():
-                    if phase == "shape_council" and isinstance(raw_v, dict):
+                    if phase == "shape_ensemble" and isinstance(raw_v, dict):
                         v: Any = {int(rk): rv for rk, rv in raw_v.items()}
                     else:
                         v = raw_v

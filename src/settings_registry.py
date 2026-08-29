@@ -170,6 +170,13 @@ SETTINGS: dict[str, SettingSpec] = {
     # Live: ImplementPhase re-reads this off its shared config on every dispatch
     # (#10778), so a toggle applies to the next slot fill.
     "dispatch_overlap_guard_enabled": SettingSpec("Reliability", live=True, order=4),
+    # Live: WorkspaceManager._assert_origin_matches_repo re-reads both off its
+    # shared config on every workspace creation (#11720), so a change applies to
+    # the next issue picked up — which is also why it is operator-reachable at
+    # all: fail-closed stalls every issue, so the way out must not need a
+    # restart.
+    "origin_guard_fail_closed": SettingSpec("Reliability", live=True, order=7),
+    "github_host": SettingSpec("Reliability", live=True, order=8),
     # Self-repair defaults-on (feat/self-repair-on-by-default). These gate
     # issue-lifecycle reliability behaviours.
     # Restart-required: service_registry wires the PreconditionGate + the

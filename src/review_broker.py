@@ -25,6 +25,12 @@ were green while guarding nothing:
 
 Pure: no I/O, no clock, no spawn. Every function is a decision about a
 configuration and a request.
+
+Decision path, no authority. It may not spawn a process, mutate a label or
+write convergence state -- pinned by
+``tests/architecture/test_director_no_authority.py``, which requires this
+sentence and this module's ``DECISION_PATH_MODULES`` entry to travel together
+in both directions.
 """
 
 from __future__ import annotations
@@ -207,6 +213,11 @@ def reviewer_independence_refusal(
     stated = (requesting_spawn_id or "").strip()
     if not stated:
         return RejectionReason.LINEAGE_UNKNOWN
-    if stated in set(implementer_spawn_ids):
+    # BOTH operands, not just the request's. #11543's first pass at this
+    # stripped one side and called it "one vocabulary, one normalisation",
+    # which made a padded id on the KNOWN-IMPLEMENTER side unmatchable — and,
+    # worst of all, two byte-identical padded strings compared unequal, so the
+    # fence admitted a reviewer that was literally the implementer.
+    if stated in {(s or "").strip() for s in implementer_spawn_ids}:
         return RejectionReason.SELF_REVIEW_FORBIDDEN
     return None

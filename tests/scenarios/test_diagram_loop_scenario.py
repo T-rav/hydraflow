@@ -102,6 +102,7 @@ async def test_drift_opens_pr_with_correct_labels(tmp_path: Path, monkeypatch) -
         "docs/arch/generated",
         "docs/arch/.meta.json",
         "disturbance/baselines/traceability.yaml",
+        "docs/standards/ports-and-loops/README.md",
     ]
     assert callable(call_kwargs["generate"])
 

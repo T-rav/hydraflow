@@ -325,7 +325,7 @@ def test_every_agentport_execute_call_passes_issue_labels() -> None:
 # it is exempt — an undocumented module must thread ``issue_labels=``.
 _LIGHTWEIGHT_LABEL_FREE_CALLERS = frozenset(
     {
-        # Council-reviews ADR *files*: review_proposed_adrs() walks
+        # Review-panel reviews ADR *files*: review_proposed_adrs() walks
         # docs/adr/*.md in the repo checkout. No GitHub issue appears
         # anywhere in the chain (the prompt is built from ADR file content),
         # so only the repo-declared class applies.

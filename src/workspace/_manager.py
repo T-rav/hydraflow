@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import shutil
 from pathlib import Path
 
@@ -64,9 +63,6 @@ class WorkspaceManager(
         """Return a per-repo lock for workspace create/destroy operations."""
         key = f"wt:{self._config.repo_slug}"
         return _WORKTREE_LOCKS.setdefault(key, asyncio.Lock())
-
-    _ORIGIN_HTTPS_RE = re.compile(r"github\.com[/:]([^/]+/[^/.]+?)(?:\.git)?$")
-    _ORIGIN_SSH_RE = re.compile(r"git@github\.com:([^/]+/[^/.]+?)(?:\.git)?$")
 
     # ------------------------------------------------------------------
     # Git hygiene — startup, pre-work, and post-work cleanup
