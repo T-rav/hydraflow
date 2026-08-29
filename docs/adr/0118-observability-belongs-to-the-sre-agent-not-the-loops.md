@@ -9,7 +9,7 @@
 - **Binds:** both
 
 **Enforced by:**
-pytest:tests/architecture/test_no_otel_imports.py
+pytest:tests/architecture/test_import_boundary_gate.py
 
 ## Context
 
