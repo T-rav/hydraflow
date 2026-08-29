@@ -915,6 +915,39 @@ aggregate-ratchets: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(AGGREGATE_RATCHET_PATHS) -q
 	@echo "$(GREEN)Aggregate ratchets passed$(RESET)"
 
+.PHONY: opa-install opa-test
+
+# --- OPA pilot (#11750) — EXPERIMENTAL --------------------------------------
+# A bounded spike, not a shipped gate. The measurements and the adopt /
+# not-adopt verdict live in docs/proposals/opa-pilot-findings.md; read that
+# before wiring anything else to these targets.
+#
+# The binary is pinned here and checksummed in scripts/opa_install.sh. It is
+# not committed (45 MB) and never fetched at decision time (#11687): install is
+# a build step, evaluation is offline against a local file.
+OPA_VERSION := 1.4.2
+OPA_BIN := $(PROJECT_ROOT)/.opa/opa
+
+## opa-install — download + checksum the pinned OPA binary into .opa/opa
+opa-install:
+	@OPA_VERSION=$(OPA_VERSION) bash $(PROJECT_ROOT)/scripts/opa_install.sh
+
+## opa-test — Rego fmt/check/unit tests + the Python parity suite (needs opa-install)
+##
+## Prints a loud SKIPPED line rather than failing when the binary is absent:
+## the pilot is optional, and a missing optional dependency means the feature
+## is off and says so (docs/wiki/dependencies.md). It must never read as a pass
+## — hence the banner, and hence `make quality` not depending on this target.
+opa-test:
+	@if [ ! -x "$(OPA_BIN)" ]; then \
+		echo "$(YELLOW)[opa SKIPPED] no pinned binary at $(OPA_BIN) — run 'make opa-install' (pilot #11750)$(RESET)"; \
+	else \
+		cd $(HYDRAFLOW_DIR) && $(OPA_BIN) fmt --fail --list policy/ && echo "[opa fmt OK]" && \
+		$(OPA_BIN) check --strict policy/ && echo "[opa check OK]" && \
+		$(OPA_BIN) test policy/ && \
+		PYTHONPATH=src $(UV) pytest -m opa -q && echo "$(GREEN)[opa parity OK]$(RESET)"; \
+	fi
+
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
 ## arch-regen — regenerate docs/arch/generated/ from source
