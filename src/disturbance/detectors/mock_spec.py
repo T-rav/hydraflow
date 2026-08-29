@@ -6,9 +6,13 @@ Reuses `src/_mock_spec_detector.py` rather than duplicating the AST logic.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from _mock_spec_detector import detect_violations
 from disturbance.models import Finding
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Mapping
 
 _FIXTURE_MARKER = "_mock_spec_fixtures"
 
@@ -42,3 +46,13 @@ class MockSpecDetector:
                         )
                     )
         return findings
+
+    def reachable_ceilings(self) -> Mapping[str, int]:
+        """No signature is capped: one file may hold arbitrarily many mocks.
+
+        Every signature is ``<file>::mock_spec`` and its count is the number
+        of un-specced mocks in that file, which nothing bounds. There is
+        always a reachable count above any baseline, so every block-new arm
+        here is live by construction.
+        """
+        return {}

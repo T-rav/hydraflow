@@ -28,15 +28,62 @@ if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 
+def _module_source(parts: list[str]) -> Path | None:
+    """The file backing dotted module *parts* under ``src/``, module or package."""
+    base = _SRC_DIR.joinpath(*parts)
+    module = base.with_suffix(".py")
+    if module.is_file():
+        return module
+    package_init = base / "__init__.py"
+    if package_init.is_file():
+        return package_init
+    return None
+
+
+def derive_call_site(builder_qualname: str) -> str:
+    """Where *builder_qualname* is defined, derived from the name itself.
+
+    ``call_site`` used to be a hand-written ``src/<path>.py:<lineno>`` string
+    stored beside the qualname. Line numbers are a clock: they are correct
+    the day they are written and rot on the next edit above them. When this
+    registry was measured, 26 of its 59 line anchors pointed outside the span
+    of the function they named, and ``reviewer_precheck`` still pointed at
+    ``src/reviewer.py`` — a module that had become the package
+    ``src/reviewer/``. Nothing reddened, because nothing read the field
+    except the report.
+
+    Re-anchoring to fresh line numbers only resets that clock. So the anchor
+    is no longer stored at all: it is computed from ``builder_qualname``,
+    which is already load-bearing (``render_target`` resolves the builder
+    through it), so the anchor cannot name one thing and point at another.
+    The longest prefix that resolves to a file under ``src/`` is the module;
+    the rest is the attribute chain, which is what actually locates the
+    builder inside the file.
+    """
+    parts = builder_qualname.split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        source = _module_source(parts[:cut])
+        if source is not None:
+            rel = source.relative_to(_REPO_ROOT).as_posix()
+            return f"{rel}::{'.'.join(parts[cut:])}"
+    raise ValueError(
+        f"no module under {_SRC_DIR} backs any prefix of {builder_qualname!r}"
+    )
+
+
 @dataclass(frozen=True)
 class AuditTarget:
     name: str
     builder_qualname: str
     fixture_path: str
     category: str
-    call_site: str
     unrenderable: bool = False
     unrenderable_reason: str = ""
+
+    @property
+    def call_site(self) -> str:
+        """File and symbol, derived — never stored. See :func:`derive_call_site`."""
+        return derive_call_site(self.builder_qualname)
 
 
 PROMPT_REGISTRY: list[AuditTarget] = [
@@ -46,7 +93,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "triage.TriageRunner._build_prompt_with_stats",
         "tests/fixtures/prompts/triage_build_prompt.json",
         "Triage",
-        "src/triage.py:194",
     ),
     # Plan
     AuditTarget(
@@ -54,21 +100,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "planner.PlannerRunner._build_prompt_with_stats",
         "tests/fixtures/prompts/planner_build_prompt_first_attempt.json",
         "Plan",
-        "src/planner.py:297",
     ),
     AuditTarget(
         "planner_retry",
         "planner.PlannerRunner._build_retry_prompt",
         "tests/fixtures/prompts/planner_retry.json",
         "Plan",
-        "src/planner.py:857",
     ),
     AuditTarget(
         "plan_reviewer",
         "plan_reviewer.PlanReviewer._build_prompt",
         "tests/fixtures/prompts/plan_reviewer.json",
         "Plan",
-        "src/plan_reviewer.py:233",
     ),
     # #11301: the RE-REVIEW branch (prior_block set) is the shape every
     # route-back review takes — without its own target the branch would
@@ -78,7 +121,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "plan_reviewer.PlanReviewer._build_prompt",
         "tests/fixtures/prompts/plan_reviewer_rereview.json",
         "Plan",
-        "src/plan_reviewer.py:233",
     ),
     # Implement
     AuditTarget(
@@ -86,42 +128,36 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "agent._prompts.AgentPromptMixin._build_prompt_with_stats",
         "tests/fixtures/prompts/agent_build_prompt_first_attempt.json",
         "Implement",
-        "src/agent/_prompts.py:135",
     ),
     AuditTarget(
         "agent_build_prompt_with_review_feedback",
         "agent._prompts.AgentPromptMixin._build_prompt_with_stats",
         "tests/fixtures/prompts/agent_build_prompt_with_review_feedback.json",
         "Implement",
-        "src/agent/_prompts.py:135",
     ),
     AuditTarget(
         "agent_build_prompt_with_prior_failure",
         "agent._prompts.AgentPromptMixin._build_prompt_with_stats",
         "tests/fixtures/prompts/agent_build_prompt_with_prior_failure.json",
         "Implement",
-        "src/agent/_prompts.py:135",
     ),
     AuditTarget(
         "agent_quality_fix",
         "agent._quality.AgentQualityMixin._build_quality_fix_prompt",
         "tests/fixtures/prompts/agent_quality_fix.json",
         "Implement",
-        "src/agent/_quality.py:100",
     ),
     AuditTarget(
         "agent_pre_quality_review",
         "agent._prequality.AgentPreQualityReviewMixin._build_pre_quality_review_prompt",
         "tests/fixtures/prompts/agent_pre_quality_review.json",
         "Implement",
-        "src/agent/_prequality.py:64",
     ),
     AuditTarget(
         "agent_pre_quality_run_tool",
         "agent._prequality.AgentPreQualityReviewMixin._build_pre_quality_run_tool_prompt",
         "tests/fixtures/prompts/agent_pre_quality_run_tool.json",
         "Implement",
-        "src/agent/_prequality.py:117",
     ),
     # Review
     AuditTarget(
@@ -129,7 +165,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "reviewer._prompts.ReviewPromptMixin._build_review_prompt_with_stats",
         "tests/fixtures/prompts/reviewer_build_review.json",
         "Review",
-        "src/reviewer/_prompts.py:216",
     ),
     # Same builder as ``reviewer_build_review`` above, but the fixture declares
     # ``config_overrides`` (``max_ci_fix_attempts=0`` +
@@ -142,35 +177,30 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "reviewer._prompts.ReviewPromptMixin._build_review_prompt_with_stats",
         "tests/fixtures/prompts/reviewer_build_review_quality_gate.json",
         "Review",
-        "src/reviewer/_prompts.py:216",
     ),
     AuditTarget(
         "reviewer_ci_fix",
         "reviewer._prompts.ReviewPromptMixin._build_ci_fix_prompt",
         "tests/fixtures/prompts/reviewer_ci_fix.json",
         "Review",
-        "src/reviewer/_prompts.py:216",
     ),
     AuditTarget(
         "reviewer_review_fix",
         "reviewer._prompts.ReviewPromptMixin._build_review_fix_prompt",
         "tests/fixtures/prompts/reviewer_review_fix.json",
         "Review",
-        "src/reviewer/_prompts.py:216",
     ),
     AuditTarget(
         "pr_unsticker_ci_fix",
         "pr_unsticker._prompts.PRUnstickerPromptMixin._build_ci_fix_prompt",
         "tests/fixtures/prompts/pr_unsticker_ci_fix.json",
         "Review",
-        "src/pr_unsticker/_prompts.py:34",
     ),
     AuditTarget(
         "pr_unsticker_ci_timeout",
         "pr_unsticker._prompts.PRUnstickerPromptMixin._build_ci_timeout_fix_prompt",
         "tests/fixtures/prompts/pr_unsticker_ci_timeout.json",
         "Review",
-        "src/pr_unsticker/_prompts.py:88",
     ),
     # HITL
     AuditTarget(
@@ -178,7 +208,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "hitl_runner.HITLRunner._build_prompt_with_stats",
         "tests/fixtures/prompts/hitl_build_prompt.json",
         "HITL",
-        "src/hitl_runner.py:175",
     ),
     # Adjacent
     AuditTarget(
@@ -186,70 +215,60 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "spec_reviewer.build_spec_review_prompt",
         "tests/fixtures/prompts/spec_review.json",
         "Adjacent",
-        "src/spec_reviewer.py:64",
     ),
     AuditTarget(
         "diff_sanity",
         "diff_sanity.build_diff_sanity_prompt",
         "tests/fixtures/prompts/diff_sanity.json",
         "Adjacent",
-        "src/diff_sanity.py:13",
     ),
     AuditTarget(
         "test_adequacy",
         "test_adequacy.build_test_adequacy_prompt",
         "tests/fixtures/prompts/test_adequacy.json",
         "Adjacent",
-        "src/test_adequacy.py:13",
     ),
     AuditTarget(
         "test_adequacy_verifier",
         "test_adequacy.build_test_adequacy_verifier_prompt",
         "tests/fixtures/prompts/test_adequacy_verifier.json",
         "Adjacent",
-        "src/test_adequacy.py:166",
     ),
     AuditTarget(
         "test_adequacy_repair",
         "test_adequacy.build_test_adequacy_repair_prompt",
         "tests/fixtures/prompts/test_adequacy_repair.json",
         "Adjacent",
-        "src/test_adequacy.py:99",
     ),
     AuditTarget(
         "spec_match_requirements_gap",
         "spec_match.build_requirements_gap_prompt",
         "tests/fixtures/prompts/spec_match_requirements_gap.json",
         "Adjacent",
-        "src/spec_match.py:108",
     ),
     AuditTarget(
         "conflict_build",
         "conflict_prompt.build_conflict_prompt",
         "tests/fixtures/prompts/conflict_build.json",
         "Adjacent",
-        "src/conflict_prompt.py:19",
     ),
     AuditTarget(
         "conflict_rebuild",
         "conflict_prompt.build_rebuild_prompt",
         "tests/fixtures/prompts/conflict_rebuild.json",
         "Adjacent",
-        "src/conflict_prompt.py:71",
     ),
     AuditTarget(
         "diagnostic_runner",
         "diagnostic_runner._build_diagnosis_prompt",
         "tests/fixtures/prompts/diagnostic_runner.json",
         "Adjacent",
-        "src/diagnostic_runner.py:32",
     ),
     AuditTarget(
         "adr_reviewer",
         "adr_reviewer.ADRReviewPanel._build_orchestrator_prompt",
         "tests/fixtures/prompts/adr_reviewer.json",
         "Adjacent",
-        "src/adr_reviewer.py:273",
     ),
     # --- Backfill 2026-07-30 (ADR-0116 ratchet): gate/verification adjacents ---
     AuditTarget(
@@ -257,42 +276,36 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "scope_check.build_scope_check_prompt",
         "tests/fixtures/prompts/scope_check.json",
         "Adjacent",
-        "src/scope_check.py",
     ),
     AuditTarget(
         "plan_compliance",
         "plan_compliance.build_plan_compliance_prompt",
         "tests/fixtures/prompts/plan_compliance.json",
         "Plan",
-        "src/plan_compliance.py",
     ),
     AuditTarget(
         "ultra_review",
         "ultra_review.build_ultra_review_prompt",
         "tests/fixtures/prompts/ultra_review.json",
         "Review",
-        "src/ultra_review.py",
     ),
     AuditTarget(
         "shape_coherence",
         "shape_coherence.build_shape_coherence_prompt",
         "tests/fixtures/prompts/shape_coherence.json",
         "Adjacent",
-        "src/shape_coherence.py",
     ),
     AuditTarget(
         "discover_completeness",
         "discover_completeness.build_discover_completeness_prompt",
         "tests/fixtures/prompts/discover_completeness.json",
         "Adjacent",
-        "src/discover_completeness.py",
     ),
     AuditTarget(
         "triage_honeypot",
         "triage_honeypot.build_honeypot_prompt",
         "tests/fixtures/prompts/triage_honeypot.json",
         "Triage",
-        "src/triage_honeypot.py",
     ),
     # --- Verification judge / acceptance criteria (backfill 2026-07-30) ---
     AuditTarget(
@@ -300,42 +313,36 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "verification_judge.VerificationJudge._build_code_validation_prompt",
         "tests/fixtures/prompts/verification_judge_code_validation.json",
         "Adjacent",
-        "src/verification_judge.py:252",
     ),
     AuditTarget(
         "verification_judge_instructions_validation",
         "verification_judge.VerificationJudge._build_instructions_validation_prompt",
         "tests/fixtures/prompts/verification_judge_instructions_validation.json",
         "Adjacent",
-        "src/verification_judge.py:300",
     ),
     AuditTarget(
         "verification_judge_refinement",
         "verification_judge.VerificationJudge._build_refinement_prompt",
         "tests/fixtures/prompts/verification_judge_refinement.json",
         "Adjacent",
-        "src/verification_judge.py:330",
     ),
     AuditTarget(
         "verification_judge_precheck",
         "verification_judge.VerificationJudge._build_precheck_prompt",
         "tests/fixtures/prompts/verification_judge_precheck.json",
         "Adjacent",
-        "src/verification_judge.py:364",
     ),
     AuditTarget(
         "acceptance_criteria_build",
         "acceptance_criteria.AcceptanceCriteriaGenerator._build_prompt",
         "tests/fixtures/prompts/acceptance_criteria_build.json",
         "Adjacent",
-        "src/acceptance_criteria.py:134",
     ),
     AuditTarget(
         "acceptance_criteria_precheck",
         "acceptance_criteria.AcceptanceCriteriaGenerator._build_precheck_prompt",
         "tests/fixtures/prompts/acceptance_criteria_precheck.json",
         "Adjacent",
-        "src/acceptance_criteria.py:194",
     ),
     # --- Discover / refinement / audit adjacents (backfill 2026-07-30) ---
     AuditTarget(
@@ -343,42 +350,36 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "discover_expander.build_expander_prompt",
         "tests/fixtures/prompts/discover_expander.json",
         "Adjacent",
-        "src/discover_expander.py:57",
     ),
     AuditTarget(
         "entry_evidence",
         "entry_evidence_loop._build_prompt",
         "tests/fixtures/prompts/entry_evidence.json",
         "Adjacent",
-        "src/entry_evidence_loop.py:64",
     ),
     AuditTarget(
         "implement_spec_review",
         "implement_spec_reviewer.build_spec_review_prompt",
         "tests/fixtures/prompts/implement_spec_review.json",
         "Implement",
-        "src/implement_spec_reviewer.py:165",
     ),
     AuditTarget(
         "issue_refinement_dup",
         "issue_refinement.build_dup_judgment_prompt",
         "tests/fixtures/prompts/issue_refinement_dup.json",
         "Triage",
-        "src/issue_refinement.py:392",
     ),
     AuditTarget(
         "issue_refinement_priority",
         "issue_refinement.build_priority_prompt",
         "tests/fixtures/prompts/issue_refinement_priority.json",
         "Triage",
-        "src/issue_refinement.py:457",
     ),
     AuditTarget(
         "sampled_audit",
         "sampled_audit_loop.build_audit_prompt",
         "tests/fixtures/prompts/sampled_audit.json",
         "Review",
-        "src/sampled_audit_loop.py:183",
     ),
     # --- Shape / review-advisor / ensemble (backfill 2026-07-30) ---
     AuditTarget(
@@ -386,56 +387,48 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "shape_runner.ShapeRunner._build_turn_prompt",
         "tests/fixtures/prompts/shape_runner_turn.json",
         "Plan",
-        "src/shape_runner.py:346",
     ),
     AuditTarget(
         "shape_runner_advocate",
         "shape_runner.ShapeRunner._build_advocate_prompt",
         "tests/fixtures/prompts/shape_runner_advocate.json",
         "Plan",
-        "src/shape_runner.py:545",
     ),
     AuditTarget(
         "shape_runner_critic",
         "shape_runner.ShapeRunner._build_critic_prompt",
         "tests/fixtures/prompts/shape_runner_critic.json",
         "Plan",
-        "src/shape_runner.py:591",
     ),
     AuditTarget(
         "review_advisor_preflight",
         "review_advisor.PreFlightAdvisor._build_prompt",
         "tests/fixtures/prompts/review_advisor_preflight.json",
         "Review",
-        "src/review_advisor.py:1232",
     ),
     AuditTarget(
         "review_advisor_postverify",
         "review_advisor.PostVerifyAdvisor._build_prompt",
         "tests/fixtures/prompts/review_advisor_postverify.json",
         "Review",
-        "src/review_advisor.py:1066",
     ),
     AuditTarget(
         "review_advisor_midflight",
         "review_advisor.MidFlightAdvisor._render_prompt",
         "tests/fixtures/prompts/review_advisor_midflight.json",
         "Review",
-        "src/review_advisor.py:1335",
     ),
     AuditTarget(
         "decomposition_ensemble_direction",
         "decomposition_ensemble.DecompositionEnsemble._build_direction_prompt",
         "tests/fixtures/prompts/decomposition_ensemble_direction.json",
         "Triage",
-        "src/decomposition_ensemble.py:201",
     ),
     AuditTarget(
         "decomposition_ensemble_validation",
         "decomposition_ensemble.DecompositionEnsemble._build_validation_prompt",
         "tests/fixtures/prompts/decomposition_ensemble_validation.json",
         "Triage",
-        "src/decomposition_ensemble.py:290",
     ),
     # --- Caretaker / adjudication loops (backfill 2026-07-30) ---
     # NOTE: this builder's output is used twice — as the agent prompt AND as the
@@ -447,28 +440,24 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "disturbance_dampener_loop.DisturbanceDampenerLoop._build_prompt",
         "tests/fixtures/prompts/disturbance_dampener.json",
         "Adjacent",
-        "src/disturbance_dampener_loop.py:178",
     ),
     AuditTarget(
         "term_proposer",
         "term_proposer_llm.TermProposerLLM._build_prompt",
         "tests/fixtures/prompts/term_proposer.json",
         "Adjacent",
-        "src/term_proposer_llm.py:176",
     ),
     AuditTarget(
         "intervention_classify",
         "intervention.classify.build_classification_prompt",
         "tests/fixtures/prompts/intervention_classify.json",
         "Adjacent",
-        "src/intervention/classify.py:135",
     ),
     AuditTarget(
         "bug_reproducer",
         "bug_reproducer.BugReproducer._build_prompt",
         "tests/fixtures/prompts/bug_reproducer.json",
         "Triage",
-        "src/bug_reproducer.py:199",
     ),
     # These two render Markdown envelope files (prompts/auto_agent/*.md), not
     # Python literals, so rubric remediation for them lands in Markdown.
@@ -477,21 +466,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "pr_red_repair_loop.PrRedRepairLoop._build_dispatch_prompt",
         "tests/fixtures/prompts/pr_red_repair.json",
         "Review",
-        "src/pr_red_repair_loop.py:753",
     ),
     AuditTarget(
         "sandbox_failure_fixer",
         "sandbox_failure_fixer_loop.SandboxFailureFixerLoop._build_prompt",
         "tests/fixtures/prompts/sandbox_failure_fixer.json",
         "Review",
-        "src/sandbox_failure_fixer_loop.py:202",
     ),
     AuditTarget(
         "audit_adjudicate",
         "audit.adjudicate.build_adjudication_prompt",
         "tests/fixtures/prompts/audit_adjudicate.json",
         "Review",
-        "src/audit/adjudicate.py:60",
     ),
     # --- Final backfill 2026-07-30: GRANDFATHERED reaches zero ---
     AuditTarget(
@@ -499,35 +485,30 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "adversarial_agent_runner.SubprocessAgentRunner._compose_prompt",
         "tests/fixtures/prompts/adversarial_agent_compose.json",
         "Implement",
-        "src/adversarial_agent_runner.py",
     ),
     AuditTarget(
         "discover_runner",
         "discover_runner.DiscoverRunner._build_prompt",
         "tests/fixtures/prompts/discover_runner.json",
         "Adjacent",
-        "src/discover_runner.py",
     ),
     AuditTarget(
         "onboarding_design_ai",
         "onboarding.design_ai._build_claude_prompt",
         "tests/fixtures/prompts/onboarding_design_ai.json",
         "Adjacent",
-        "src/onboarding/design_ai.py",
     ),
     AuditTarget(
         "goal_supervisor_prompt",
         "goal_supervisor_loop.build_supervisor_prompt",
         "tests/fixtures/prompts/goal_supervisor_prompt.json",
         "Adjacent",
-        "src/goal_supervisor_loop.py:162",
     ),
     AuditTarget(
         "plan_touchpoint_expander",
         "plan_touchpoint_expander.PlanTouchpointExpander._build_prompt",
         "tests/fixtures/prompts/plan_touchpoint_expander.json",
         "Plan",
-        "src/plan_touchpoint_expander.py",
     ),
     # Renders the prompts/auto_agent/*.md envelope templates rather than a
     # Python literal, so this is the one registered entry whose remediation
@@ -538,14 +519,12 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "preflight.runner.render_prompt",
         "tests/fixtures/prompts/preflight_auto_agent.json",
         "Review",
-        "src/preflight/runner.py",
     ),
     AuditTarget(
         "research_runner",
         "research_runner.ResearchRunner._build_prompt",
         "tests/fixtures/prompts/research_runner.json",
         "Adjacent",
-        "src/research_runner.py",
     ),
     # --- Builders that module-granular coverage had hidden (2026-07-30) ---
     # Coverage counted modules, so these five sat inside already-"covered"
@@ -556,21 +535,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "agent._prompts.AgentPromptMixin._build_tdd_subagent_prompt",
         "tests/fixtures/prompts/agent_tdd_subagent.json",
         "Implement",
-        "src/agent/_prompts.py:39",
     ),
     AuditTarget(
         "reviewer_precheck",
         "reviewer._prompts.ReviewPromptMixin._build_precheck_prompt",
         "tests/fixtures/prompts/reviewer_precheck.json",
         "Review",
-        "src/reviewer.py",
     ),
     AuditTarget(
         "spec_match_self_review",
         "spec_match.build_self_review_prompt",
         "tests/fixtures/prompts/spec_match_self_review.json",
         "Adjacent",
-        "src/spec_match.py",
     ),
     # #11537: the shadow Fable director's turn. Its prompt is the whole of what
     # a director may know and may ask for, so it is scored like any other
@@ -581,7 +557,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "director_turn_runner.render_capsule_prompt",
         "tests/fixtures/prompts/director_capsule_turn.json",
         "Adjacent",
-        "src/director_turn_runner.py",
     ),
     # #11541: the brokered Plan worker's whole input. Registered for the same
     # reason the capsule is — this prompt is the entire contract between a
@@ -593,7 +568,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "plan_worker_runner.build_plan_worker_prompt",
         "tests/fixtures/prompts/plan_worker_task.json",
         "Plan",
-        "src/plan_worker_runner.py",
     ),
     # The fenced IMPLEMENT worker's whole input (#11542). Held to the same bar
     # as the Plan worker's above and for a sharper reason: this prompt is the
@@ -606,7 +580,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "implement_worker_runner.build_implement_worker_prompt",
         "tests/fixtures/prompts/implement_worker_task.json",
         "Implement",
-        "src/implement_worker_runner.py",
     ),
     # The fresh reviewer's whole input (#11543). Registered for a reason the
     # other two worker prompts do not carry: this one is also the boundary that
@@ -618,21 +591,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "review_worker_runner.build_review_worker_prompt",
         "tests/fixtures/prompts/review_worker_task.json",
         "Review",
-        "src/review_worker_runner.py",
     ),
     AuditTarget(
         "prompt_refiner_refine",
         "prompt_refiner.build_refine_prompt",
         "tests/fixtures/prompts/prompt_refiner_refine.json",
         "Adjacent",
-        "src/prompt_refiner.py:117",
     ),
     AuditTarget(
         "review_advisor_midflight_section",
         "review_advisor.build_mid_flight_prompt",
         "tests/fixtures/prompts/review_advisor_midflight_section.json",
         "Review",
-        "src/review_advisor.py:1367",
     ),
 ]
 

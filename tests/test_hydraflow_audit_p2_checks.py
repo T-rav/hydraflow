@@ -272,6 +272,49 @@ def test_ubiquitous_language_warns_on_divergence(tmp_path: Path) -> None:
     assert _run("P2.9", _ctx(tmp_path)).status is Status.WARN
 
 
+def test_ubiquitous_language_sees_leading_acronym_type_names(
+    tmp_path: Path,
+) -> None:
+    """The house naming convention the old predicate could not express.
+
+    ``\\b([A-Z][a-z]+[A-Z][A-Za-z]+)\\b`` requires a capital, a LOWERCASE
+    run, then another capital, so it matched none of these four names. The
+    check then saw fewer than three candidate terms and returned NA — a
+    CLAUDE.md naming four uncovered types read as "sample too small".
+    """
+    _write(
+        tmp_path / "CLAUDE.md",
+        "Key concepts: ADRReviewPanel, PRPort, CIMonitorLoop, LLMClient.\n",
+    )
+    _write(tmp_path / "docs" / "wiki" / "architecture.md", "Unrelated text.\n")
+    assert _run("P2.9", _ctx(tmp_path)).status is Status.WARN
+
+
+def test_ubiquitous_language_credits_covered_leading_acronym_terms(
+    tmp_path: Path,
+) -> None:
+    """The other direction: seeing them must not mean always warning."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "Key concepts: ADRReviewPanel, PRPort, CIMonitorLoop, LLMClient.\n",
+    )
+    _write(
+        tmp_path / "docs" / "wiki" / "architecture.md",
+        "ADRReviewPanel, PRPort, CIMonitorLoop and LLMClient are documented.\n",
+    )
+    assert _run("P2.9", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_ubiquitous_language_still_ignores_all_caps_prose(tmp_path: Path) -> None:
+    """Widening must not turn ``TDD``/``README``/``CI`` into vocabulary."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "Read the README. TDD is the default. CI runs on every PR. Always.\n",
+    )
+    _write(tmp_path / "docs" / "wiki" / "architecture.md", "Unrelated text.\n")
+    assert _run("P2.9", _ctx(tmp_path)).status is Status.NA
+
+
 def test_ubiquitous_language_na_when_docs_missing(tmp_path: Path) -> None:
     assert _run("P2.9", _ctx(tmp_path)).status is Status.NA
 

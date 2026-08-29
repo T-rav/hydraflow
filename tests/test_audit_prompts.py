@@ -46,14 +46,58 @@ VAGUE_PROMPT = "Think about the issue. Give me your thoughts."
 def test_audit_target_carries_metadata():
     target = AuditTarget(
         name="triage_build_prompt",
-        builder_qualname="triage.Triage._build_prompt_with_stats",
+        builder_qualname="triage.TriageRunner._build_prompt_with_stats",
         fixture_path="tests/fixtures/prompts/triage_build_prompt.json",
         category="Triage",
-        call_site="src/triage.py:194",
     )
     assert target.name == "triage_build_prompt"
     assert target.category == "Triage"
-    assert target.call_site == "src/triage.py:194"
+    # The anchor is DERIVED, not stored. What this used to assert was a
+    # round-trip -- "src/triage.py:194" in, "src/triage.py:194" out -- which
+    # is true of every string, including the 26 line anchors that pointed
+    # outside their own function and the one that pointed at a module that
+    # had since become a package.
+    assert target.call_site == "src/triage.py::TriageRunner._build_prompt_with_stats"
+
+
+# ---------------------------------------------------------------------------
+# The derivation itself, on known-positive and known-negative inputs. A sweep
+# of the live registry cannot tell a working resolver from one that returns
+# whatever it was handed; these can.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("qualname", "expected"),
+    [
+        # A flat module.
+        (
+            "triage.TriageRunner._build_prompt_with_stats",
+            "src/triage.py::TriageRunner._build_prompt_with_stats",
+        ),
+        # A module INSIDE a package -- the rot that made `src/reviewer.py`
+        # stop being a file while its stored anchor kept naming it.
+        (
+            "reviewer._prompts.ReviewPromptMixin._build_precheck_prompt",
+            "src/reviewer/_prompts.py::ReviewPromptMixin._build_precheck_prompt",
+        ),
+        # The package itself.
+        ("reviewer.Reviewer", "src/reviewer/__init__.py::Reviewer"),
+    ],
+    ids=["flat-module", "module-in-package", "package-init"],
+)
+def test_derive_call_site_resolves_each_module_shape(qualname, expected):
+    from scripts.audit_prompts import derive_call_site
+
+    assert derive_call_site(qualname) == expected
+
+
+def test_derive_call_site_refuses_a_qualname_with_no_module_behind_it():
+    """The known-negative. A resolver that never refuses proves nothing."""
+    from scripts.audit_prompts import derive_call_site
+
+    with pytest.raises(ValueError, match="no module"):
+        derive_call_site("not_a_real_module_anywhere.build_prompt")
 
 
 # ---------------------------------------------------------------------------
@@ -506,7 +550,9 @@ def test_write_markdown_includes_all_six_sections(tmp_path):
 
     results = [
         AuditResult(
-            target=AuditTarget("x", "m.f", "p.json", "Triage", "src/f.py:1"),
+            target=AuditTarget(
+                "x", "triage.TriageRunner._build_prompt_with_stats", "p.json", "Triage"
+            ),
             rendered="Classify. <issue>hi</issue><plan>p</plan><diff>d</diff> Return only JSON.",
             scorecard=Scorecard(
                 scores={
@@ -551,12 +597,16 @@ def test_write_markdown_groups_scorecards_by_category_order(tmp_path):
 
     results = [
         AuditResult(
-            target=AuditTarget("a", "m.f", "p.json", "Triage", "s:1"),
+            target=AuditTarget(
+                "a", "triage.TriageRunner._build_prompt_with_stats", "p.json", "Triage"
+            ),
             rendered="Classify.",
             scorecard=Scorecard(scores=dict.fromkeys(range(1, 9), "Pass")),
         ),
         AuditResult(
-            target=AuditTarget("b", "m.f", "p.json", "Review", "s:1"),
+            target=AuditTarget(
+                "b", "triage.TriageRunner._build_prompt_with_stats", "p.json", "Review"
+            ),
             rendered="Review.",
             scorecard=Scorecard(scores=dict.fromkeys(range(1, 9), "Pass")),
         ),
