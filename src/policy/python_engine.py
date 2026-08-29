@@ -9,9 +9,11 @@ pytest, inspects git, launches agents, touches worktrees, repairs code,
 schedules, routes models, manages PRs, or owns lifecycle state. It reads no
 file and opens no socket — every input arrives as a ``Fact``. The two
 ``adr_conformance`` imports below are an enum and a pure classifier; the
-repo-reading half of that module is deliberately not imported, and
-``tests/architecture/test_policy_engine_is_pure.py`` holds this module's import
-set to an allow-list so the seam cannot rot into a layer.
+repo-reading half of that module is deliberately not imported.
+``tests/architecture/test_policy_engine_is_pure.py`` holds that line by
+allow-list — every imported *symbol* (not merely its module) and every builtin
+this file uses is pinned there, in both directions, so the seam cannot rot
+into a layer without the pin reddening first.
 
 **Fail-closed on thin evidence.** A subject missing any fact its standard needs
 raises :class:`MissingFactError` rather than defaulting. Defaults are how a
