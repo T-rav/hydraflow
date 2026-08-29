@@ -96,6 +96,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0140 | enforced | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 | ADR-0141 | enforced | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
+| ADR-0143 | enforced | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr` |
 
 ## Check → ADRs it protects
 
@@ -120,6 +121,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_gateway_env_key_coverage.py` | ADR-0142 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
 | `pytest:tests/architecture/test_no_otel_imports.py` | ADR-0118 |
+| `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr` | ADR-0143 |
 | `pytest:tests/architecture/test_term_proposer_wiring.py` | ADR-0054 |
 | `pytest:tests/architecture/test_term_pruner_wiring.py` | ADR-0057 |
 | `pytest:tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
@@ -179,6 +181,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_base_runner_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_base_subprocess_runner_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
+| `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails` | ADR-0143 |
 | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` | ADR-0110 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |
 | `pytest:tests/test_config_repo_provider.py` | ADR-0134 |
