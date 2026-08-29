@@ -219,9 +219,9 @@ _bg_worker_defs = [
         "Tier-2 liveness supervisor: reads the read-only factory health snapshot, hands it to a Fable agent under the standing goal 'keep the factory alive & healthy', and nudges the reversible / escalates the rest. Default OFF. See ADR-0124.",
     ),
     (
-        "rails_drift_caretaker",
-        "Rails Drift Caretaker",
-        "Audits each managed repo's live state against its rails.yaml manifest (declared template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121.",
+        "charter_drift_caretaker",
+        "Charter Drift Caretaker",
+        "Audits each managed repo's live state against its charter.yaml (declared standards / required artifacts / template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121, ADR-0143.",
     ),
     (
         "ci_monitor",

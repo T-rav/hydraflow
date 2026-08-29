@@ -198,18 +198,28 @@ def _write_snapshot(path: Path, snapshot: dict[str, object]) -> None:
     )
 
 
-def _write_rails_manifest(repo_dir: Path, snapshot: dict[str, object]) -> Path:
-    """Write ``<repo_dir>/rails.yaml`` from the standards snapshot (ADR-0121).
+def _write_repo_charter(repo_dir: Path, snapshot: dict[str, object]) -> Path:
+    """Write ``<repo_dir>/charter.yaml`` from the standards snapshot.
 
-    Every stamped/onboarded repo carries a rails manifest so the
-    ``rails_drift_caretaker`` loop can audit template conformance as data
-    (#10936). Derived from the same snapshot as the standards file, so both are
-    written from one source on stamp and on format-upgrade retrofit.
+    Every stamped/onboarded repo carries a charter so the
+    ``charter_drift_caretaker`` loop can audit conformance as data (#10936,
+    #11748). Derived from the same snapshot as the standards file, so both are
+    written from one source on stamp and on format-upgrade retrofit (ADR-0121
+    Ruling 2).
+
+    ``articles.standards`` declares the standard ids the repo **actually
+    carries** rather than the ids HydraFlow ships: the retrofit writes a
+    declaration, not an aspiration, so a charter is true the day it lands and
+    a later removal is real drift rather than a day-one false positive.
     """
-    from rails_manifest import manifest_from_snapshot, write_manifest  # noqa: PLC0415
+    from charter import (  # noqa: PLC0415
+        charter_from_snapshot,
+        standard_ids_under,
+        write_charter,
+    )
 
-    manifest = manifest_from_snapshot(snapshot)
-    return write_manifest(repo_dir, manifest)
+    carried = tuple(sorted(standard_ids_under(repo_dir)))
+    return write_charter(repo_dir, charter_from_snapshot(snapshot, standards=carried))
 
 
 async def _run_checked(
@@ -328,19 +338,19 @@ async def _open_format_upgrade_pr(
         timeout=30,
     )
     _write_snapshot(snapshot_path, snapshot)
-    rails_path = _write_rails_manifest(repo_dir, snapshot)
+    charter_path = _write_repo_charter(repo_dir, snapshot)
     await _run_checked(
         ["git", "add", str(snapshot_path.relative_to(repo_dir))], cwd=repo_dir
     )
     await _run_checked(
-        ["git", "add", str(rails_path.relative_to(repo_dir))], cwd=repo_dir
+        ["git", "add", str(charter_path.relative_to(repo_dir))], cwd=repo_dir
     )
     await _run_checked(
         [
             "git",
             "commit",
             "-m",
-            "Update HydraFlow format standards snapshot + rails manifest",
+            "Update HydraFlow format standards snapshot + charter",
         ],
         cwd=repo_dir,
         timeout=60,

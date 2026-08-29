@@ -16,6 +16,7 @@ New terms added 2026-08-28 (ADR-0143, the PAAA governance model):
 - [`Articles`](terms/articles.md) — layer 2: what must remain true (standards, ADR constraints, security and compliance rules, local policy)
 - [`Actors`](terms/actors.md) — layer 3: who or what may act, and with what delegated authority; declared by the `agents/` tree
 - [`Artifacts`](terms/artifacts.md) — layer 4: the software plus ADRs, tests, evidence, manifests, ledgers, decisions
+- [`Charter`](terms/charter.md) — the `charter.yaml` declaration carrying all four layers, plus ADR-0121's `rails:` block (#11748)
 
 New terms added 2026-06-30 (ADR-0093, `FitnessScorecardLoop`):
 - [`LoopFitness`](terms/loop-fitness.md) — value object returned by every loop's `loop_fitness()` call; carries kind, optional score, components, sample_count, confidence
@@ -298,6 +299,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Never use git commit --no-verify or --no-hooks
 - StaleIssueLoop vs StaleIssueGCLoop — distinct scopes, zero business-logic overlap
 - Runtime `...` stubs in a mixin shadow sibling mixins via the MRO
+- `charter.yaml` `actors` is a pointer; a role list is rejected at load
 
 ## Patterns (33)
 

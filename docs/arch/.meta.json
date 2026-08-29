@@ -10,22 +10,22 @@
       "content_sha": "b2c2c8e82d5224ed76c3ce8ffe2295af9f96522e30f8d65969f111e31b7dcbe9"
     },
     "adr-falsifiability.md": {
-      "content_sha": "565a507784f55a07422f8456db17d27d99e62b1e14dfe2a0c678bbff55bad481"
+      "content_sha": "af510eb9344b4fe1bb368744a8c1a11c0f975389f5a0e022327bbc8b528f8299"
     },
     "adr_xref.md": {
-      "content_sha": "9df6b0f8b93abbd2d5567fa253ed1391d76c9967a73c2e66e4f0c95d3f649c98"
+      "content_sha": "e0ffac1a9105b71a2ffc464e21c9c79e0879889b2aaf77389c2bfac67aab599b"
     },
     "ai_system_inventory.md": {
-      "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
+      "content_sha": "b3314e1a59f0e89bf2ffee3208c256f2535cdd3a96165a7022774eeac5dea907"
     },
     "coverage_matrix.md": {
-      "content_sha": "78fe779bf1d90a6c7dca7538f22c1557b468d24eff1a4f96b610bc98514d3b81"
+      "content_sha": "23e877c39cdd3e7a489a6f7c6e86a5ba556af357ee7d7ee95c0f7b234a090f68"
     },
     "events.md": {
       "content_sha": "b7fff31d940305ba7ae0b4da94f077dc63cce097efec10707b97936df10b69a2"
     },
     "functional_areas.md": {
-      "content_sha": "3c3b9de0704a206621a37309d6cc30aa51be09918a03171c5db1ab16ee0783e4"
+      "content_sha": "635d339b35b7a7b5848dcc16c2455c3c7b4f7e524a45d18984d9649a1ba27b3d"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -34,26 +34,26 @@
       "content_sha": "3a9f46c2a2264d70cfa9fc9ad00212cfb2c0fe358af60acc3c7a7f09aa0126de"
     },
     "loops.md": {
-      "content_sha": "6a7c9b65ad80e93896ecd8343b52e4d1b75e7c67443f36857449ded15a42eecc"
+      "content_sha": "92f12fd28f25d7f06b092109ac7e82fbcc680cbb342e726e46befebda10607ee"
     },
     "mockworld.md": {
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "c5a5cf100e42f3f12bfaf2a0b5bc8ddc908baf1196b4121b1a772ee0d2b0ea22"
+      "content_sha": "4e8526a126630435520c7c90875bba9332325a85fec16fe795a7f656ba709a1d"
     },
     "ports.md": {
       "content_sha": "67fc7b123d0d9952a7dcfd7e0ba0eb2979fd95b97d27e950655b05a71147689f"
     },
     "ubiquitous-language-context-map.md": {
-      "content_sha": "09d535efaf79a46c8efdee57953885e9e9a3d346a2e0b0fa8986f7776c763b5c"
+      "content_sha": "774a37e13fc77d3fad5a9f8ac773188f07304e5546fa38fea128c6fc8718689e"
     },
     "ubiquitous-language.md": {
-      "content_sha": "80ee9f54ce96361812e8370701609a2a2c2801732490ad8ddbfa28c7d3b1d7f8"
+      "content_sha": "247a39b6dbce96eb81ebf9f68af5d0d34eb14155eff3f1a8b69584ebf87f28c3"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "af5a1b7675a6035f1880006b552e55f98710a7b8222f92dbfbc79819211516a2"
+  "content_sha": "0e80de62885902c4eddcf4ee5c3c955dd2629b3b225d9b44c03bc6d0d14ccade"
 }

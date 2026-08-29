@@ -1,0 +1,77 @@
+# HydraFlow charter (charter.yaml) — this repo's governing declaration.
+#
+# The Articles surface of the PAAA model (ADR-0143), carrying the ADR-0121
+# rails fields under `rails:` with their semantics unchanged. Schema and drift
+# rules live in `src/charter.py`; `charter_drift_caretaker` (ADR-0029) audits
+# live state against what is declared here.
+#
+# Editing this file is an ENACT, not a RATIFY (ADR-0143 Ruling 6, guard 4):
+# it changes the mandate rather than executing against it, so it is the
+# operator's act. Nothing in the factory automates an edit to `articles`.
+
+schema_version: 1
+
+# Purpose is the one layer nothing checks (ADR-0143 Ruling 3). It is declared
+# so the repo states its intent in one place; no drift check reads it.
+purpose:
+  product: "Intent in. Software out. Multi-agent orchestration that automates the full GitHub issue lifecycle."
+  goals:
+    - reduce_the_cost_of_improving_itself
+    - lights_off_operation
+    - every_claim_backed_by_a_check
+
+articles:
+  # Ids resolve to `docs/standards/<id>/`. Declared-and-absent is fatal
+  # (`missing-standard`); an id neither carried nor shipped is tolerated
+  # (`unknown-standard`), per the ADR-0121 forward-compat rule.
+  standards:
+    - adr_enforcement
+    - branch_protection
+    - factory_autonomy
+    - factory_operation
+    - parametrised_guards
+    - ports-and-loops
+    - testing
+    - vitals_conformance
+  # The `repo_store.RepoRecord.data_class` vocabulary, not a second scale.
+  assurance: internal
+  # Building standards are one class of Articles, not all of them
+  # (ADR-0143 Ruling 6, guard 2). These are the rest, as prose with citations.
+  local:
+    - id: staging_only_prs
+      statement: "PRs target staging; main advances only via rc/ promotion (ADR-0042)."
+    - id: ratchets_shrink_only
+      statement: "A ratchet baseline may shrink, never grow; regenerating one to go green is a defect (ADR-0100)."
+    - id: three_layer_test_pyramid
+      statement: "A load-bearing feature ships unit + MockWorld scenario + sandbox e2e (docs/standards/testing/)."
+    - id: enforcement_before_acceptance
+      statement: "An Accepted ADR carries an Enforced-by block or a justified exemption (ADR-0136)."
+    - id: no_conformance_claim_needs_a_service
+      statement: "Every conformance verdict is reproducible offline from a clean checkout (#11687, ADR-0143 Ruling 6, guard 5)."
+
+# A POINTER, never a role list. The agents/ tree — role contracts and the
+# Council's chamber charters — is *the* Actors declaration (house standard
+# 2026-08-25, #11741). A role list here is rejected at load: two declarations
+# of who may act is one too many, and the copy rots.
+actors: agents/
+
+artifacts:
+  required:
+    - docs/adr
+    - docs/arch/generated
+    - docs/wiki/terms
+    - docs/standards
+    - control/principles.yaml
+    - tests/architecture/adr_enforcement_baseline.json
+    - agents
+
+# ADR-0121, unchanged semantics: which template layers this repo carries.
+rails:
+  schema_version: 1
+  template_version: "1"
+  layers:
+    - universal
+    - language_pack
+    - domain_rails
+  coverage_floor: 70
+  domain_gate_scripts: []

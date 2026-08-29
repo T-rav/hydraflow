@@ -44,13 +44,13 @@ flowchart LR
     subgraph governance["Governance & Audit"]
         governance_AdrConformanceLoop([AdrConformanceLoop])
         governance_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
+        governance_CharterDriftCaretakerLoop([CharterDriftCaretakerLoop])
         governance_ContractRefreshLoop([ContractRefreshLoop])
         governance_DiagramLoop([DiagramLoop])
         governance_FitnessScorecardLoop([FitnessScorecardLoop])
         governance_GateActivatorLoop([GateActivatorLoop])
         governance_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
         governance_PrinciplesAuditLoop([PrinciplesAuditLoop])
-        governance_RailsDriftCaretakerLoop([RailsDriftCaretakerLoop])
         governance_WikiRotDetectorLoop([WikiRotDetectorLoop])
     end
     subgraph release["Release"]
@@ -172,13 +172,13 @@ Audit, compliance, and drift workers that hold the factory to its own declared r
 
 - `AdrConformanceLoop` — `src.adr_conformance_loop`
 - `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
+- `CharterDriftCaretakerLoop` — `src.charter_drift_caretaker_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `DiagramLoop` — `src.diagram_loop`
 - `FitnessScorecardLoop` — `src.fitness_scorecard_loop`
 - `GateActivatorLoop` — `src.gate_activator_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
 - `PrinciplesAuditLoop` — `src.principles_audit_loop`
-- `RailsDriftCaretakerLoop` — `src.rails_drift_caretaker_loop`
 - `WikiRotDetectorLoop` — `src.wiki_rot_detector_loop`
 
 **Related ADRs:** `ADR-0045`, `ADR-0082`, `ADR-0100`, `ADR-0101`, `ADR-0121`

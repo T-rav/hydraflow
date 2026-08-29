@@ -202,8 +202,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("goal_supervisor_interval", "HYDRAFLOW_GOAL_SUPERVISOR_INTERVAL", 600),
     (
-        "rails_drift_caretaker_interval",
-        "HYDRAFLOW_RAILS_DRIFT_CARETAKER_INTERVAL",
+        "charter_drift_caretaker_interval",
+        "HYDRAFLOW_CHARTER_DRIFT_CARETAKER_INTERVAL",
         86400,
     ),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
@@ -949,8 +949,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         False,  # ADR-0124: Tier-2 goal supervisor ships default OFF.
     ),
     (
-        "rails_drift_caretaker_loop_enabled",
-        "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED",
+        "charter_drift_caretaker_loop_enabled",
+        "HYDRAFLOW_CHARTER_DRIFT_CARETAKER_LOOP_ENABLED",
         False,
     ),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
@@ -2604,13 +2604,14 @@ class HydraFlowConfig(BaseModel):
             "activating planned gates whose protected surface now exists (ADR-0082)"
         ),
     )
-    rails_drift_caretaker_interval: int = Field(
+    charter_drift_caretaker_interval: int = Field(
         default=86400,
         ge=3600,
         le=2592000,
         description=(
-            "RailsDriftCaretakerLoop interval in seconds (default 1 day); audits "
-            "each managed repo's live state against its rails.yaml manifest (ADR-0121)"
+            "CharterDriftCaretakerLoop interval in seconds (default 1 day); audits "
+            "each managed repo's live state against its charter.yaml (ADR-0121, "
+            "ADR-0143)"
         ),
     )
     collaborator_check_enabled: bool = Field(
@@ -6211,15 +6212,15 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for GateActivatorLoop.",
     )
-    rails_drift_caretaker_loop_enabled: bool = Field(
+    charter_drift_caretaker_loop_enabled: bool = Field(
         default=False,
         description=(
-            "Deploy-time kill-switch for RailsDriftCaretakerLoop (ADR-0121). "
-            "Defaults OFF: the loop's live-observation layer (rails.yaml manifest "
-            "vs marker-based layer detection) is v1 and the manifest-writer "
-            "retrofit is still rolling out across managed repos; set "
-            "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED=true to enable once "
-            "every managed repo carries a manifest."
+            "Deploy-time kill-switch for CharterDriftCaretakerLoop (ADR-0121, "
+            "ADR-0143). Defaults OFF: the loop's live-observation layer "
+            "(charter.yaml vs marker-based layer detection) is v1 and the "
+            "charter-writer retrofit is still rolling out across managed repos; "
+            "set HYDRAFLOW_CHARTER_DRIFT_CARETAKER_LOOP_ENABLED=true to enable "
+            "once every managed repo carries a charter."
         ),
     )
     contract_refresh_loop_enabled: bool = Field(
