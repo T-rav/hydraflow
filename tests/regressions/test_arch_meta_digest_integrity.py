@@ -28,6 +28,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from arch.runner import _DRIFT_EXEMPT, _META_NAME, _sha256
 
 REPO = Path(__file__).resolve().parents[2]
@@ -36,8 +38,36 @@ GENERATED_DIR = ARCH_DIR / "generated"
 META_PATH = ARCH_DIR / _META_NAME
 
 
-def _meta() -> dict:
-    return json.loads(META_PATH.read_text(encoding="utf-8"))
+def _meta(path: Path = META_PATH) -> dict:
+    """Load ``.meta.json``, failing LOUDLY on every degenerate input.
+
+    A guard that skips when its input goes missing is the exact class this
+    file exists to catch, so absent / empty / unparseable / artifact-less are
+    all hard failures with a diagnostic, never a silent pass and never a bare
+    traceback. The ``artifacts`` check matters most: an empty map would make
+    the per-artifact comparison below iterate nothing and go green over a file
+    that attests to nothing at all.
+    """
+    assert path.is_file(), (
+        f"{path} is missing. The digest guard has no input, which is a failure "
+        "and not a reason to skip — run `make arch-regen`."
+    )
+    raw = path.read_text(encoding="utf-8").strip()
+    assert raw, f"{path} is empty. Run `make arch-regen`."
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = f"{path} is not valid JSON ({exc}). Run `make arch-regen`."
+        raise AssertionError(msg) from exc
+    assert isinstance(data, dict), (
+        f"{path} is not a JSON object. Run `make arch-regen`."
+    )
+    assert data.get("artifacts"), (
+        f"{path} records no artifacts. An empty map would make the per-artifact "
+        "check iterate nothing and pass over a file attesting to nothing."
+    )
+    assert data.get("content_sha"), f"{path} records no rollup content_sha."
+    return data
 
 
 def test_every_recorded_artifact_digest_matches_the_file_on_disk() -> None:
@@ -111,3 +141,38 @@ def test_recorded_artifacts_are_exactly_the_digested_set() -> None:
         f"{sorted(recorded - expected)}. Run `make arch-regen`."
     )
     assert recorded, "no artifacts recorded — the guard would pass over nothing"
+
+
+# ---------------------------------------------------------------------------
+# The gate's own failure mode
+# ---------------------------------------------------------------------------
+
+
+def test_a_missing_meta_file_fails_rather_than_skipping(tmp_path: Path) -> None:
+    with pytest.raises(AssertionError, match="is missing"):
+        _meta(tmp_path / "absent.json")
+
+
+def test_an_empty_meta_file_fails_rather_than_skipping(tmp_path: Path) -> None:
+    path = tmp_path / "empty.json"
+    path.write_text("")
+
+    with pytest.raises(AssertionError, match="is empty"):
+        _meta(path)
+
+
+def test_an_unparseable_meta_file_fails_rather_than_skipping(tmp_path: Path) -> None:
+    path = tmp_path / "torn.json"
+    path.write_text('{"artifacts": {')
+
+    with pytest.raises(AssertionError, match="not valid JSON"):
+        _meta(path)
+
+
+def test_a_meta_file_recording_no_artifacts_fails(tmp_path: Path) -> None:
+    """The vacuity case: an empty map would let the per-artifact check pass."""
+    path = tmp_path / "hollow.json"
+    path.write_text(json.dumps({"content_sha": "x" * 64, "artifacts": {}}))
+
+    with pytest.raises(AssertionError, match="records no artifacts"):
+        _meta(path)
