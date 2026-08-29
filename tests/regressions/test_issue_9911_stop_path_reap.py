@@ -234,6 +234,20 @@ class TestRunSimpleChildrenAreStopReapable:
             grandchild = int(pidfile.read_text().strip())
             assert _pid_alive(grandchild)
 
+            # The grandchild writes the pidfile as soon as the child execs,
+            # which happens BEFORE run_simple resumes from its
+            # create_subprocess_exec await and calls track(). Synchronising on
+            # the pidfile alone races that window: under host load the runner
+            # task can stay unscheduled long enough for the reap below to find
+            # an empty registry and return 0. Wait for the state this test
+            # actually asserts on, not a signal that merely precedes it.
+            deadline = time.monotonic() + _POLL_DEADLINE_S
+            while not process_group._TRACKED and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert process_group._TRACKED, (
+                "run_simple child was never registered with the reap registry"
+            )
+
             reaped = reap_all_tracked_processes()
 
             assert reaped >= 1
