@@ -235,15 +235,32 @@ the policy and not the system will always favour the policy language.
    marshalling, none of it decision logic, all of it load-bearing and all of it new surface.
 2. **The break-even is ~22 cross-standard rules; the repo has 8 standards.** The composition win
    is real per rule and does not accumulate fast enough to pay the fixed cost.
-3. **Rego's default is fail-open, and `opa check --strict` does not catch it.** Verified
-   empirically: a rule referencing `obs.governance_tier` — a fact no collector emits — passes
-   `opa check --strict`, evaluates without error, and returns the **un-probed** verdict
-   (`grandfathered` where the rule intended `violated`). Nothing reddens. The equivalent Python
-   (`by_key["governance_tier"]`) raises `KeyError` and crashes loudly. The pilot's Rego mitigates
-   this with an explicit `missing_facts` rule and a `required_facts` set — but only for facts
-   someone remembered to list, and forgetting is silent. In a repo whose dominant defect class is
-   **the guard that stopped observing its subject**, adopting a language whose default is "the
-   rule quietly does not fire" is the wrong direction.
+3. **Rego's default is fail-open, and the tooling that is supposed to catch it cannot see the
+   shape a normalized fact ledger produces.** Verified empirically. A rule referencing
+   `obs.governance_tier` — a fact no collector emits — passes `opa check --strict`, evaluates
+   without error, and returns the **un-probed** verdict (`grandfathered` where the rule intended
+   `violated`). Nothing reddens. The equivalent Python (`by_key["governance_tier"]`) raises
+   `KeyError` and crashes loudly.
+
+   OPA has a real mitigation for this — METADATA `schemas:` annotations plus
+   `opa check --schema <dir>`, which type-checks `input` references against a JSON schema — and
+   the pilot tested it rather than assuming. It works on **statically-known paths**:
+
+   | reference | `opa check --strict --schema` |
+   |---|---|
+   | `input.nonexistent_toplevel` | **error** — `undefined ref`, lists the valid keys |
+   | `input.charter.nonexistent_nested` | **error** — same |
+   | `some _, obs in input.subjects; obs.governance_tier` | **silent** |
+   | `input.subjects[subject].governance_tier` | **silent** |
+
+   The two silent forms are the only ones a fact ledger can use, because subjects are ADR ids —
+   the document is keyed dynamically by construction, and a dynamic key defeats the checker.
+   **The exact shape the `Fact` model produces is the shape OPA cannot type-check.** The pilot's
+   policy falls back to a hand-written `required_facts` set and a `missing_facts` rule, which
+   covers only the facts someone remembered to list; forgetting one is silent. In a repo whose
+   dominant defect class is **the guard that stopped observing its subject**, adopting a language
+   whose default is "the rule quietly does not fire" — with its type checker blind to the one
+   document shape in use — is the wrong direction.
 4. **The argument for OPA assumes an alternative HydraFlow does not have.** The issue's case was
    that "once standards compose, a homegrown YAML DSL becomes an accidental programming language."
    #11749 already settled that: the decision layer is a typed Python protocol, not a YAML DSL. The
@@ -276,8 +293,15 @@ Stated so the ruling is falsifiable rather than final:
 * **Decisions must be portable outside HydraFlow's runtime** — evaluated by a different service,
   in a different language, over the same facts. That is what OPA is actually for, and none of it
   is true today.
-* **Rego gains a fail-closed mode** in which referencing an undeclared input key is an error at
-  `opa check` time. That would remove finding 3, the strongest safety objection.
+* **OPA's schema type-checking learns to descend through dynamically-keyed objects** (an
+  `additionalProperties` schema applied to values reached by iteration). That alone would remove
+  finding 3, the strongest safety objection — the feature already exists and already works on
+  static paths; it simply cannot see the shape a fact ledger has. Re-test with the table in
+  finding 3 before assuming otherwise.
+* **The fact document is restructured so every reference is static** — e.g. one `opa eval` per
+  subject with the subject's facts at the document root. That trades the silence for ~88 process
+  spawns per run (≈ 1.5 s at the measured ~17 ms floor), which is a different bad trade, but it is
+  a real option and it was not measured here.
 
 None of these hold today.
 
@@ -302,14 +326,38 @@ comparison. But it means the seam does **not** take over the ratchet; it takes o
 slice, and the ratchet's population and referential-integrity rules stay where they are. Worth
 knowing before a future issue assumes otherwise.
 
-**Two `Charter` classes, resolved deliberately.** `charter.Charter` (`src/charter.py`) is the full
-ADR-0143 loader and reads the filesystem; `policy.models.Charter` is the pure slice the engine may
-hold, and its `articles.standards` carries standard **ids** while the loader's carries the same ids
-from `charter.yaml`. The probe needed `articles.assurance`, which lived only on the loader. The
-engine cannot import the loader without breaking its import pin, so `assurance` was added to the
-seam's `CharterArticles` and `policy.facts.seam_charter()` became the **one** bridge — in the
-collector, because crossing it is a repo read. The default is pinned to `charter.DEFAULT_ASSURANCE`
-by a test in the one place allowed to see both, so the copy cannot rot.
+**Two `Charter` classes, and the bridge between them is a translation, not a copy — this is a
+live trap.** `charter.Charter` (`src/charter.py`) is the full ADR-0143 loader and reads the
+filesystem; `policy.models.Charter` is the pure slice the engine may hold. The probe needed
+`articles.assurance`, which existed only on the loader, and the engine cannot import the loader
+without breaking its import pin — so `assurance` was added to the seam's `CharterArticles` and
+`policy.facts.seam_charter()` became the one bridge, in the collector, because crossing it is a
+repo read. The default was pinned to `charter.DEFAULT_ASSURANCE` by a test in the one place
+allowed to see both, so that copy cannot rot.
+
+**The `standards` field, however, does not survive the crossing, and the pilot's bridge got it
+wrong.** The two lists are different vocabularies that overlap on exactly one id:
+
+| | vocabulary | members today |
+|---|---|---|
+| `charter.Articles.standards` | directories under `docs/standards/<id>/` | `adr_enforcement`, `branch_protection`, `factory_autonomy`, `factory_operation`, `parametrised_guards`, `ports-and-loops`, `testing`, `vitals_conformance` |
+| `policy.models.CharterArticles.standards` | standards a `DecisionEngine` can decide | `adr_enforcement`, `adr_conformance` |
+
+`adr_conformance` is a seam standard with no `docs/standards/` directory; the other seven charter
+ids are standards no engine decides. So `seam_charter()` — which copied the loader's list straight
+across — would have produced a charter under which `Charter.governs("adr_conformance")` is
+**False**, and `PythonDecisionEngine.decide` would have silently dropped every `adr_conformance`
+fact, turning `AdrConformanceLoop`'s remediation decisions into an empty list. Fail-closed by
+design, silent in effect: no decisions reads exactly like no problems.
+
+Nothing caught it because nothing consumed `seam_charter()` — the probe's tests built their
+charters by hand. It is reverted with the rest of the pilot, and it is recorded here because the
+next person to bridge these two types will reach for the same one-line copy. **The bridge must
+translate the id vocabulary (or carry only `assurance` and leave `standards` to the seam's own
+default), and it needs a test asserting that a charter built from `charter.yaml` still governs
+`adr_conformance`.** A second, cheaper reading: the seam's `standards` field and the charter's are
+different enough that they should not share a field name at all — which is ADR-0053's own rule,
+applied to the layer whose job is vocabulary.
 
 **One acceptance criterion is unsatisfiable as written.** "MockWorld scenario: the engine selection
 (OPA present vs absent) is observable in the loop's evidence record" — no loop decides
