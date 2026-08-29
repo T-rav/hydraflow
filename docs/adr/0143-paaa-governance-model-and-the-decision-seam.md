@@ -6,6 +6,7 @@
 **Enforced by:**
 - pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails
 - pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr
+- pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet
 **Binds:** factory
 **Supersedes:** none
 **Superseded by:** none
@@ -182,8 +183,15 @@ ADR classifies `REAL` rather than adding unenforced-decision debt. Path 2 was no
 ontology is not process-only, and an exemption asserting no machine-checkable invariant was
 feasible would have been false on its face.
 
-One nominated check is **not yet cited**: the prose-to-artifact bindings (#11751, PR #11758) were
-still open at ratification. `REAL` requires only that at least one typed check resolves, and two do,
-so the block is honest as it stands rather than citing a test that does not yet exist — which would
-have classified `WEAK` and created the very debt this section exists to avoid. Add
-`pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet` when #11758 lands.
+All three nominated checks are now cited. The prose-to-artifact bindings (#11751, PR #11758) were
+still open at ratification, so their check was deliberately left out: `REAL` requires only that at
+least one typed check resolves, and two did, so citing a test that did not yet exist would have
+classified `WEAK` and created the very debt this section exists to avoid. #11758 landed as
+`1fa145afa` and the citation was added.
+
+It cites the **class** `TestReadmeAndYamlAreOneSet` rather than a single test, on the implementer's
+advice. The class holds two tests, and the load-bearing pair is
+`test_the_readme_block_cites_exactly_what_standard_yaml_declares` (the agreement) together with
+`test_every_readme_carries_an_enforced_by_block` — the second is what stops an absent block and an
+empty list from agreeing with each other vacuously. Citing one test would have pinned the agreement
+and left the vacuity path unpinned.

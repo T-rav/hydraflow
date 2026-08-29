@@ -1,19 +1,19 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "5ba80c20a3e4903a8d8480d3da62a3eddeebf14bdaa7d78f22db134a9a88f2f2"
+      "content_sha": "bcf9d565dd604becf65910f627b703949a642a41d0e35cbe02a5ec34b271252b"
     },
     "adr-conformance.md": {
-      "content_sha": "f9f5e7ca214849b4b361aa5604ef8212b843193c242eb39ff427586890e092b1"
+      "content_sha": "e6a1866597bbae7570a7f68614081a19556d660d13fa915e73f15c37128373d4"
     },
     "adr-enforcement.md": {
-      "content_sha": "0bcf6160ea82d0e40ade16575d59f7f354b1d05faffeecc9f65b7afd7ae32107"
+      "content_sha": "32acc241156f3a114718f25a6c8c102b4aa3742711043484fd06d3e15adaa84f"
     },
     "adr-falsifiability.md": {
-      "content_sha": "50994a6ce4ff9baaa35be73ae59827bdfc649dc8d2c48ca7bb1f1175e51eb81a"
+      "content_sha": "3c5086557e197af279c7acd4bf508ae4e51c06bacac469a3dc76c7486bb313a8"
     },
     "adr_xref.md": {
-      "content_sha": "2881ab9ea3ca09684e3a143d9929c1e3c3ee76ca2d402e9ed17266d8ef429880"
+      "content_sha": "f7d3e90fbb4adcb0cb660435d5ab7676e8efc39fa8c310cad345b5563e7a84d8"
     },
     "ai_system_inventory.md": {
       "content_sha": "28148e64f3bbb2641adc500bd781ad4ae5ec3ecd6fe2f73f9c61f359365d3931"
@@ -55,5 +55,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "3810d9d1d7faf623e9f1d6c3bdd2772e0af89c9f541550cbf028b766e4ee0cf2"
+  "content_sha": "22462eacf1b12d138664cf2cca694e89c55e9a1d72886e89986b3870813217e5"
 }
