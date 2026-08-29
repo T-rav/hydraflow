@@ -154,7 +154,22 @@ This standard lives at three load-bearing surfaces in any HydraFlow-format repo:
 - [`docs/wiki/testing.md`](../../wiki/testing.md) — operator wiki entry pointing here
 - `CLAUDE.md` Quick Rules — one-line directive that all features ship with the full pyramid
 
-Drift detection: a future audit (extension of `principles_audit_loop`) should check that every PR landing on the integration branch adds at least one test in `tests/test_*.py`, one in `tests/scenarios/test_*.py`, and one in `tests/sandbox_scenarios/scenarios/sNN_*.py` — exempting docs-only and pure-refactor PRs.
+Drift detection: the **scenario** layer of the "New loop or runner" row is now
+enforced, not aspirational —
+[`tests/architecture/test_mockworld_loop_scenario_ratchet.py`](../../../tests/architecture/test_mockworld_loop_scenario_ratchet.py)
+holds every `BaseBackgroundLoop` subclass in `src/` to having at least one
+scenario that actually drives it (a docstring naming the loop is not
+coverage; the scan reads the AST). It is a shrink-only ratchet whose
+grandfather snapshot landed **empty** — all 64 loops were already covered — so
+its job is to stop the 65th landing without one.
+
+Still aspirational: the same check for the *unit* and *sandbox* layers, and for
+subjects that are not loops. A future audit (extension of
+`principles_audit_loop`) should check that every PR landing on the integration
+branch adds at least one test in `tests/test_*.py`, one in
+`tests/scenarios/test_*.py`, and one in
+`tests/sandbox_scenarios/scenarios/sNN_*.py` — exempting docs-only and
+pure-refactor PRs.
 
 ## Review enforcement
 
@@ -176,5 +191,6 @@ also checks that every cited path is still **collected by pytest** — a
 gate that exists but never runs is a citation to nothing.
 
 <!-- standard:enforced-by -->
+- `tests/architecture/test_mockworld_loop_scenario_ratchet.py`
 - `tests/architecture/test_testing_standard_drift.py`
 <!-- /standard:enforced-by -->
