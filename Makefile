@@ -36,7 +36,20 @@ DEPS_STAMP := $(VENV)/.deps-synced
 # while seven idled, and nothing reported which test it was. CI had the guard;
 # the local lane did not, so the failure only ever appeared here.
 HF_PYTEST_DEADLINE_FLAGS ?= --timeout=300 --durations=25
-PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(HF_PYTEST_DEADLINE_FLAGS)
+
+# The watchdog is complementary to --timeout, not a duplicate of it.
+# --timeout ENDS a hang but kills the stack with it, and its signal only
+# lands between bytecodes so it cannot name a test wedged in one long C
+# call. tests/hf_spin_watch dumps every thread's traceback from a separate
+# thread WITHOUT interrupting anything, so the wedged test is named while
+# it is still wedged. See tests/test_hf_spin_watch.py.
+# Lanes loading this MUST also carry $(PROJECT_ROOT) on PYTHONPATH: the
+# Makefile drives pytest through `uv run pytest`, a console script, which
+# does NOT put cwd on sys.path — so `-p tests.hf_spin_watch` fails with
+# `No module named 'tests'` under exactly the invocation CI and quality use,
+# while working fine under `python -m pytest`.
+HF_PYTEST_WATCHDOG ?= -p tests.hf_spin_watch
+PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG)
 
 # Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
 # process-global state that collides across workers).
@@ -303,7 +316,7 @@ endif
 
 coverage: deps
 	@echo "$(BLUE)Running HydraFlow unit tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) --cov=src --cov-append --cov-fail-under=$(TEST_COVERAGE_EFFECTIVE) --cov-report=term-missing --cov-report=xml:coverage.xml
 	@echo "$(GREEN)All tests passed$(RESET)"
 
@@ -406,7 +419,7 @@ test-fast: deps
 
 test-cov: deps
 	@echo "$(BLUE)Running HydraFlow tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -v --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov
 	@echo "$(GREEN)All tests passed with coverage$(RESET)"
 
@@ -631,8 +644,8 @@ quality-unlocked:
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
-		PYTHONPATH=src $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(HF_PYTEST_DEADLINE_FLAGS) && echo "[serial-tests OK]" & \
+		PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG) && echo "[serial-tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
