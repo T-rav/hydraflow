@@ -6,8 +6,8 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 - **Population:** Accepted (89 ADRs)
 - **Mean density** (per-ADR, unweighted): 97%
-- **Executable fraction** (check-weighted): 99% (218 of 221 cited checks)
-- **Check kinds:** pytest 217, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 99% (219 of 222 cited checks)
+- **Check kinds:** pytest 218, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.58
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -105,7 +105,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0140 | Revision-safe policy workspace and the operator write boundary | 100% | 6 | 0 |
 | ADR-0141 | Bounded, reversible routing enforcement — the resolve-and-mint canary | 100% | 6 | 0 |
 | ADR-0142 | Multi-account pools and bounded fallback | 100% | 9 | 0 |
-| ADR-0143 | PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam | 100% | 2 | 0 |
+| ADR-0143 | PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam | 100% | 3 | 0 |
 
 
 <!-- arch:generated -->
