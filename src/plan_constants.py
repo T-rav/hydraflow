@@ -92,3 +92,15 @@ LITE_BODY_THRESHOLD = 500
 SMALL_FIX_WORDS: frozenset[str] = frozenset(
     {"fix", "typo", "correct", "patch", "update", "rename", "bump", "tweak"}
 )
+
+
+# The heading that marks the planner's plan inside an issue comment. Owned here
+# rather than spelled at each reader, because #11543 gave the plan a SECOND
+# reader: a Fable reviewer's canonical evidence carries the plan's outcome, and
+# "the Fable reviewer judges the same artefact a Classic reviewer would" is only
+# true while both find it by the same rule. Two copies of the literal are two
+# rules that agree until one is edited, and the failure is silent in exactly the
+# wrong direction — the Fable reviewer would find no plan, say so in a finding,
+# and read as a reviewer that could not be bothered rather than as a broken
+# extractor.
+PLAN_COMMENT_HEADING = "## Implementation Plan"

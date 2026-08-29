@@ -542,6 +542,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_canary_family_conformance as canary_sweep
     from tests.architecture import test_director_no_authority as director
     from tests.architecture import test_fatal_exception_set_centralized as fatal
+    from tests.architecture import test_mockworld_loop_scenario_ratchet as mockworld
     from tests.architecture import test_path_membership_registry as membership
     from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_ratchet_baseline_keys_resolve as baselines
@@ -574,6 +575,15 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     # a test is a rule with no falsifying example. Two objects that must
     # agree, which is the only arrangement in which a drop reddens.
     selected_shell_rules = shell_lint.selected_shell_spawn_rules()
+    # The loop classes named by a HAND-WRITTEN catalog builder in
+    # tests/scenarios/catalog/loop_registrations.py — NOT re-derived from
+    # extract_loops, which is where LOOP_CLASS_NAMES comes from. Two sets
+    # derived from one source agree by construction and detect nothing; this
+    # one is maintained by hand and kept honest against
+    # orchestrator.bg_loop_registry by test_catalog_completeness, so "does
+    # this loop still have a builder?" is a real question with a real answer.
+    loop_builder_classes = mockworld.builder_reachable_classes()
+
     # The .py files actually on disk under src/policy/, read by rglob — NOT
     # re-derived from _PURE_SOURCES. Dropping a source from the pin leaves its
     # file unclassified, which the live _delta reports; two objects that must
@@ -608,6 +618,22 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "src/policy/ looking guarded. The drop is caught by "
                 "test_every_policy_module_is_classified, which compares the "
                 "pin against the files actually on disk."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_mockworld_loop_scenario_ratchet.LOOP_CLASS_NAMES",
+            members=mockworld.LOOP_CLASS_NAMES,
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=lambda member: member in loop_builder_classes,
+            why=(
+                "docs/standards/testing/README.md requires a MockWorld "
+                "scenario per load-bearing feature and, until this ratchet, "
+                "nothing enforced it. Every loop in this tuple is asked "
+                "whether a scenario actually drives it; a dropped member "
+                "stops being asked, and the loop keeps sitting in src/ "
+                "looking covered. The drop is caught against the hand-written "
+                "catalog builders, which name the same 64 classes from a "
+                "different, independently maintained object."
             ),
         ),
         GuardedEnumeration(

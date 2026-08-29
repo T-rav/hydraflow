@@ -13,11 +13,14 @@ the file tree rather than only in a docstring. It is also what the mass sensor
 asked for when the host class crossed its threshold: extract a cohesive cluster,
 do not grandfather the size.
 
-Two canaries live here, one per phase, each with its own dial, its own bound and
-its own actuator — ``plan_broker`` / ``plan_worker_runner`` for ``PLAN`` and
-``implement_broker`` / ``implement_worker_runner`` for ``IMPLEMENT``. They are
-asked in order rather than merged: a single predicate covering both would be the
-widening that "widen one role boundary at a time" forbids.
+Three canaries live here, one per phase, each with its own dial, its own bound
+and its own actuator — ``plan_broker`` / ``plan_worker_runner`` for ``PLAN``,
+``implement_broker`` / ``implement_worker_runner`` for ``IMPLEMENT``, and
+``review_broker`` / ``review_worker_runner`` for ``REVIEW`` (#11543). They are
+asked in order rather than merged: a single predicate covering any two of them
+would be the widening that "widen one role boundary at a time" forbids, and the
+REVIEW arm is the one where that matters most — its roles are read-only, and a
+merged predicate is how arming a reviewer would come to arm a writer.
 
 **This module holds no state of its own.** Every attribute it touches is the
 host's, declared below as bare annotations — an annotation creates no class
@@ -54,6 +57,7 @@ from driver_contracts import (
 from implement_broker import hibernation_reason, hibernation_refusal, writer_lease_for
 from issue_driver_policy import phase_for_state
 from plan_broker import CANARY_PHASE
+from review_evidence import snapshot_is_unreadable
 
 if TYPE_CHECKING:
     import asyncio
@@ -72,6 +76,7 @@ if TYPE_CHECKING:
     from models import Task
     from plan_broker import PlanCanaryLatch
     from plan_worker_runner import PlanWorkerRunner
+    from review_worker_runner import ReviewWorkerRunner
 
 logger = logging.getLogger("fable_director")
 
@@ -105,6 +110,8 @@ class CanaryDispatchMixin:
     _latch: PlanCanaryLatch | None
     _implement_dispatcher: ImplementWorkerRunner | None
     _implement_is_covered: Callable[[DriverPhase | None], bool] | None
+    _review_dispatcher: ReviewWorkerRunner | None
+    _review_is_covered: Callable[[DriverPhase | None], bool] | None
     _receipts: dict[int, tuple[WorkerReceipt, ...]]
     _implementer_spawns: dict[int, frozenset[str]]
     _stage_labels: dict[str, str]
@@ -131,13 +138,14 @@ class CanaryDispatchMixin:
     ) -> tuple[WorkerReceipt, ...]:
         """Run what the broker admitted, if this boundary is inside a canary.
 
-        Two canaries now, one per phase, and they are asked in order rather
+        Three canaries now, one per phase, and they are asked in order rather
         than merged: each has its own dial, its own bound and its own actuator,
-        and a single predicate covering both would be the widening that
+        and a single predicate covering any two would be the widening that
         "widen one role boundary at a time" forbids. The bounds are mutually
-        exclusive by construction — ``plan_broker.CANARY_PHASE`` is ``PLAN`` and
-        ``implement_broker.CANARY_PHASE`` is ``IMPLEMENT`` — so the order below
-        is readability rather than precedence.
+        exclusive by construction — ``plan_broker.CANARY_PHASE`` is ``PLAN``,
+        ``implement_broker.CANARY_PHASE`` is ``IMPLEMENT`` and
+        ``review_broker.CANARY_PHASE`` is ``REVIEW`` — so the order below is
+        readability rather than precedence.
 
         The gates, in this order, and each for its own reason:
 
@@ -172,6 +180,12 @@ class CanaryDispatchMixin:
         ):
             return await self._dispatch_implement(
                 task, driver, lease, admitted, phase, live_label, measured
+            )
+        if self._review_dispatcher is not None and self._covers(
+            self._review_is_covered, phase
+        ):
+            return await self._dispatch_review(
+                task, driver, lease, admitted, phase, live_label
             )
         return ()
 
@@ -280,22 +294,96 @@ class CanaryDispatchMixin:
         self._remember_implementer_spawns(task, receipts)
         return receipts
 
+    async def _dispatch_review(
+        self,
+        task: Task,
+        driver: IssueDriver,
+        lease: DriverLease,
+        admitted: tuple[WorkerDispatchRequest, ...],
+        phase: DriverPhase,
+        live_label: str,
+    ) -> tuple[WorkerReceipt, ...]:
+        """The Review canary's actuator (#11543): fresh evidence, no authority.
+
+        One refusal happens here rather than inside the runner, because it is a
+        fact only this step holds: evidence whose snapshot could not be read.
+        ADR-0137 S4's rule applies unchanged at a third boundary — a boundary
+        that cannot be proven is refused, never assumed — and the specific harm
+        is precise. The prompt tells a reviewer its judgement is about *one
+        exact snapshot*; evidence that names no branch, base or HEAD states no
+        snapshot, and every proposal that came back would be adjudicated
+        against a head sha that never existed.
+
+        **The evidence is gathered here and nothing else about this boundary
+        travels with it.** ``dispatch`` takes the evidence value and the issue's
+        labels; it takes no task, no driver, no command and no prior receipt. So
+        the reviewer's independence is a property of the call's *shape* rather
+        than of this method remembering to withhold something — which is the
+        only form of it that survives the next parameter somebody adds.
+
+        The fence is built **without** ``hibernates=True``, deliberately, and
+        this is the widening ``_pre_spawn_fence`` invited #11543 to consider.
+        It is declined. That refusal exists because a hibernating driver has no
+        business holding a *worktree*, and every role this dial can arm has
+        ``WriteScope.NONE`` — the menu is filtered to exactly that by
+        ``review_broker.review_roles_for_review_phase``. A read-only reviewer
+        parked behind CI takes nothing that a human or a diagnostic could want
+        back, and refusing it would make the canary blind at precisely the
+        boundary where a driver waits longest.
+        """
+        dispatcher = self._review_dispatcher
+        if dispatcher is None:  # pragma: no cover - narrowed by the caller
+            return ()
+        evidence = await dispatcher.gather(task)
+        if snapshot_is_unreadable(evidence):
+            logger.info(
+                "fable_director: #%d has no readable snapshot; no reviewer is "
+                "dispatched",
+                task.id,
+            )
+            return dispatcher.refuse(admitted, RejectionReason.WORKTREE_UNMEASURED)
+        receipts = await dispatcher.dispatch(
+            admitted,
+            evidence=evidence,
+            issue_labels=task.tags,
+            lease=lease,
+            phase=phase,
+            fence=self._pre_spawn_fence(
+                driver, lease, phase, live_label, self._review_is_covered
+            ),
+            # The self-review fence's input, from the one component that has
+            # seen every boundary for this issue. An empty set is not "no
+            # constraint" — ``reviewer_independence_refusal`` refuses a request
+            # that states no lineage at all — so a reviewer requested by a
+            # spawn this director never dispatched is still fenced.
+            implementer_spawn_ids=self._implementer_spawns.get(task.id, frozenset()),
+        )
+        self._remember(task, receipts)
+        return receipts
+
     def _decision_ids(self, phase: DriverPhase) -> Mapping[str, str] | None:
         """The tier decisions behind this boundary's receipts, from the actuator
         that made them.
 
         Keyed on the phase rather than reading the Plan actuator unconditionally.
-        Both actuators now always exist (#11657 removed the conditional
+        All three actuators always exist (#11657 removed the conditional
         construction that made arming need a restart), so "whichever one is not
         None" stopped being a valid way to ask which one ran — an IMPLEMENT
         boundary would have joined its receipts against the Plan runner's map
         and found nothing, silently emptying the very join the content-addressed
-        decision id exists for.
+        decision id exists for. #11543 added a third arm for exactly the same
+        reason and not as a precaution: a REVIEW boundary reaching the Plan
+        fallback would empty the join for the one phase whose receipts carry a
+        reviewer's proposal.
         """
         if self._implement_dispatcher is not None and self._covers(
             self._implement_is_covered, phase
         ):
             return self._implement_dispatcher.last_decision_ids
+        if self._review_dispatcher is not None and self._covers(
+            self._review_is_covered, phase
+        ):
+            return self._review_dispatcher.last_decision_ids
         if self._dispatcher is not None:
             return self._dispatcher.last_decision_ids
         return None
@@ -483,7 +571,12 @@ class CanaryDispatchMixin:
                 # worker takes nothing, and refusing one here would have
                 # changed #11541's behaviour for an operator who never armed
                 # this phase's dial - the exact thing the second dial exists
-                # to prevent. #11543 may widen it, deliberately.
+                # to prevent. #11543 considered widening it and DECLINED: every
+                # role the Review dial can arm has ``WriteScope.NONE``, so a
+                # read-only judge parked behind CI takes nothing a human or a
+                # diagnostic could want back, and refusing it would blind the
+                # canary at the boundary where a driver waits longest. See
+                # ``_dispatch_review``, which passes no ``hibernates``.
                 (
                     hibernates and hibernation_reason(driver.driver_state) is not None,
                     RejectionReason.HIBERNATING,

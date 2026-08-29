@@ -99,6 +99,7 @@ if TYPE_CHECKING:
     from models import Task
     from plan_broker import PlanCanaryLatch
     from plan_worker_runner import PlanWorkerRunner
+    from review_worker_runner import ReviewWorkerRunner
 
 logger = logging.getLogger("fable_director")
 
@@ -166,6 +167,8 @@ class FableDirector(CanaryDispatchMixin):
         latch: PlanCanaryLatch | None = None,
         implement_dispatcher: ImplementWorkerRunner | None = None,
         implement_is_covered: Callable[[DriverPhase | None], bool] | None = None,
+        review_dispatcher: ReviewWorkerRunner | None = None,
+        review_is_covered: Callable[[DriverPhase | None], bool] | None = None,
     ) -> None:
         self._runner = runner
         self._broker = broker
@@ -210,6 +213,19 @@ class FableDirector(CanaryDispatchMixin):
         self._implement_dispatcher = implement_dispatcher
         self._implement_is_covered = implement_is_covered
         self._implementer_spawns: dict[int, frozenset[str]] = {}
+        # The Review canary (#11543). Both are ``None`` under shadow mode and
+        # under a Plan-only or Implement-only canary, so an operator who has
+        # armed one dial runs exactly the object graph the phase before this
+        # one shipped. ``review_is_covered`` is a callable for the reason its
+        # two siblings are: the dial is live, and clearing it must stop the
+        # NEXT dispatch rather than the next restart.
+        #
+        # This is the boundary where independence binds, and the reason it gets
+        # a third pair rather than joining either existing one: a merged
+        # predicate is how arming a read-only reviewer would come to arm the
+        # writer the REVIEW phase also catalogues.
+        self._review_dispatcher = review_dispatcher
+        self._review_is_covered = review_is_covered
 
     @property
     def shadow_log(self) -> ShadowObservationLog:

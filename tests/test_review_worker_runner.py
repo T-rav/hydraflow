@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
 REPO = "acme/widgets"
 REVIEW_LABEL = "hydraflow-review"
+BASE_REF = "origin/staging"
 ROUTE_REVISION = "route-v1"
 BRANCH = "agent/issue-7"
 BASE = "a" * 40
@@ -217,6 +218,7 @@ def _runner(
         config=_config(tmp_path, **config_overrides),
         route_policy_revision=ROUTE_REVISION,
         runner=_NoRunner(),  # type: ignore[arg-type]
+        base_ref=BASE_REF,
         spawn=spawn,
     )
 
@@ -661,6 +663,30 @@ class TestThePromptIsBuiltFromEvidenceAndNothingElse:
         )
         assert opening.endswith('">')
         assert opening.count('"') == 4
+
+    def test_a_quoted_branch_cannot_break_the_diff_block(self) -> None:
+        """The same delimiter property, on the tag that names the snapshot.
+
+        ``branch`` was interpolated RAW into ``<diff branch="...">`` while its
+        neighbour ``issue_title`` went through ``_attr``, and
+        ``git check-ref-format`` does not forbid a double quote in a branch
+        name. The escaping was added without a test, which in this repo is a
+        guard nothing could kill — the sibling above pins exactly this property
+        for ``<issue ...>`` and had no counterpart here.
+
+        All three attributes are asserted, not just the one with a live vector:
+        base and head are hex shas today, and "today" is what a guard is for.
+        """
+        prompt = build_review_worker_prompt(
+            role="reviewer",
+            evidence=_evidence(branch='agent/"fast"\npath'),
+        )
+
+        opening = next(
+            line for line in prompt.splitlines() if line.startswith("<diff ")
+        )
+        assert opening.endswith('">')
+        assert opening.count('"') == 6
 
     def test_missing_criteria_read_as_missing_not_as_none_required(self) -> None:
         prompt = build_review_worker_prompt(
@@ -1162,6 +1188,7 @@ class TestTheReceiptIsTheEvidence:
             config=_config(tmp_path),
             route_policy_revision=ROUTE_REVISION,
             runner=object(),  # type: ignore[arg-type]
+            base_ref=BASE_REF,
         )
 
         assert runner.spawn is review_worker_runner._spawn_review_worker

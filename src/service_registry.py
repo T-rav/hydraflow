@@ -169,6 +169,7 @@ if TYPE_CHECKING:
     from implement_worker_runner import ImplementWorkerRunner
     from metrics_manager import MetricsManager
     from plan_worker_runner import PlanWorkerRunner
+    from review_worker_runner import ReviewWorkerRunner
 
 logger = logging.getLogger("hydraflow.service_registry")
 
@@ -638,6 +639,7 @@ def _build_fable_director(
         PlanCanaryLatch,
         plan_canary_covers,
     )
+    from review_broker import review_canary_covers
     from route_enforcement import enforce_director_route
     from runner_utils import resolve_harness_env
 
@@ -755,6 +757,25 @@ def _build_fable_director(
         # no restart in either direction. This predicate, not the dispatcher's
         # existence, is what lets a writer run.
         implement_is_covered=lambda phase: implement_canary_covers(config, phase=phase),
+        # --- the Review canary (#11543) -----------------------------------
+        # Built whenever a director is selected, and gated only by the live
+        # predicate below — #11657's correction inherited rather than
+        # relearned for a third time. This is the phase that turns
+        # ``fable_review_canary_repo`` from a bound into a capability: until
+        # this argument existed, nothing constructed a ``ReviewWorkerRunner``
+        # and arming the dial dispatched nothing at all.
+        #
+        # It arms NO writer. ``review_broker.review_roles_for_review_phase``
+        # filters the menu to catalogued REVIEW roles whose write scope is
+        # NONE, so the debugger the catalogue also legalises at REVIEW stays
+        # ``fable_implement_canary_repo``'s decision to make.
+        review_dispatcher=_build_review_worker_runner(
+            config=config, subprocess_runner=subprocess_runner
+        ),
+        # Live, so arming reaches the NEXT boundary and clearing stops it, with
+        # no restart in either direction. This predicate, not the dispatcher's
+        # existence, is what lets a reviewer run.
+        review_is_covered=lambda phase: review_canary_covers(config, phase=phase),
     )
 
 
@@ -814,6 +835,29 @@ def _build_implement_worker_runner(
         # two-tier model means an agent branch is cut from ``staging`` on this
         # fleet and a merge-base against the wrong ref would move every time
         # the other branch did.
+        base_ref=f"origin/{config.base_branch()}",
+    )
+
+
+def _build_review_worker_runner(
+    *, config: HydraFlowConfig, subprocess_runner: SubprocessRunner
+) -> ReviewWorkerRunner:
+    """The Review canary's actuator, assembled at the composition root (#11543)."""
+    from review_worker_runner import ReviewWorkerRunner
+
+    return ReviewWorkerRunner(
+        config=config,
+        # The same routing view the director's dispatches are judged against,
+        # so a reviewer cannot be spawned under a revision the broker refused.
+        route_policy_revision=_route_policy_revision(config),
+        # Injected, never built inside a method (#11602/#11615). It carries
+        # both subprocess paths: the evidence's git reads and, through the
+        # seam, the child.
+        runner=subprocess_runner,
+        # What the reviewed snapshot's base is measured against — the same
+        # ``origin/<base_branch>`` the writer actuator uses, because a reviewer
+        # judging a diff against a different merge-base from the one the
+        # implementer wrote against is not reviewing the same change.
         base_ref=f"origin/{config.base_branch()}",
     )
 
