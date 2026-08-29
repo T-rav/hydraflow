@@ -116,7 +116,7 @@ _bg_worker_defs = [
     (
         "adr_reviewer",
         "ADR Reviewer",
-        "Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.",
+        "Reviews proposed ADRs via a 3-judge panel and routes to accept, reject, or escalate.",
     ),
     # --- Trust fleet (ADR-0045) ---
     (
