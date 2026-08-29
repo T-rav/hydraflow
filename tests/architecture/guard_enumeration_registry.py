@@ -543,6 +543,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_director_no_authority as director
     from tests.architecture import test_fatal_exception_set_centralized as fatal
     from tests.architecture import test_path_membership_registry as membership
+    from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_ratchet_baseline_keys_resolve as baselines
     from tests.architecture import test_runtime_caches_not_tracked as caches
     from tests.architecture import test_shell_spawn_lint_rules as shell_lint
@@ -573,9 +574,42 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     # a test is a rule with no falsifying example. Two objects that must
     # agree, which is the only arrangement in which a drop reddens.
     selected_shell_rules = shell_lint.selected_shell_spawn_rules()
+    # The .py files actually on disk under src/policy/, read by rglob — NOT
+    # re-derived from _PURE_SOURCES. Dropping a source from the pin leaves its
+    # file unclassified, which the live _delta reports; two objects that must
+    # agree, so a drop reddens.
+    policy_modules_on_disk = {
+        path.relative_to(policy_purity.REPO).as_posix()
+        for path in (policy_purity.REPO / policy_purity._POLICY_PACKAGE).rglob("*.py")  # noqa: SLF001
+    }
+
+    def _policy_purity_drop_is_caught(member: str) -> bool:
+        classified = (
+            set(policy_purity._PURE_SOURCES) | set(policy_purity._IO_SOURCES)  # noqa: SLF001
+        ) - {member}
+        unclassified, _missing = policy_purity._delta(  # noqa: SLF001
+            policy_modules_on_disk, classified
+        )
+        return member in unclassified
 
     return (
         # --- SUBJECTS, derived ------------------------------------------
+        GuardedEnumeration(
+            name="test_policy_engine_is_pure._PURE_SOURCES",
+            members=tuple(policy_purity._PURE_SOURCES),  # noqa: SLF001
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_policy_purity_drop_is_caught,
+            why=(
+                "Epic #11752's decision-engine seam. Every rule in that file "
+                "iterates this tuple, so a dropped entry stops being checked "
+                "for impure imports, import-free world reads (open, "
+                "__import__, __file__), builtin shadowing and eval-able "
+                "annotations all at once — while the module keeps sitting in "
+                "src/policy/ looking guarded. The drop is caught by "
+                "test_every_policy_module_is_classified, which compares the "
+                "pin against the files actually on disk."
+            ),
+        ),
         GuardedEnumeration(
             name="test_shell_spawn_lint_rules._RULES",
             members=tuple(rule for rule, _spawn in shell_lint._RULES),  # noqa: SLF001

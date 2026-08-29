@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
+import charter_drift_caretaker_loop
 from charter import (
     CHARTER_FILENAME,
     FINDING_MISSING_ARTIFACT,
@@ -16,7 +17,9 @@ from charter import (
     FINDING_MISSING_STANDARD,
     FINDING_UNCHECKABLE_CHARTER,
     FINDING_UNKNOWN_LAYER,
+    FINDING_UNKNOWN_STANDARD,
     LEGACY_RAILS_FILENAME,
+    UNCHECKABLE_REGISTRY_UNAVAILABLE,
     Articles,
     Artifacts,
     Charter,
@@ -24,6 +27,7 @@ from charter import (
     CharterError,
     CharterFinding,
     RailsBlock,
+    compute_charter_drift,
     load_charter,
     write_charter,
 )
@@ -267,6 +271,103 @@ def test_shipped_standard_ids_enumerates_this_checkout() -> None:
     assert ids == frozenset(
         p.name for p in (REPO_ROOT / "docs" / "standards").iterdir() if p.is_dir()
     )
+
+
+def test_shipped_standard_ids_is_none_without_a_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No source checkout means the registry is unknowable, not empty.
+
+    Live, not hypothetical: :func:`package_resources.checkout_root` returns
+    ``None`` from a wheel, and the shipped GHCR image runs the orchestrator
+    with no checkout mounted at all.
+    """
+    consulted: list[str] = []
+
+    def _no_checkout() -> Path | None:
+        consulted.append("checkout_root")
+        return None
+
+    monkeypatch.setattr(charter_drift_caretaker_loop, "checkout_root", _no_checkout)
+
+    assert shipped_standard_ids() is None
+    assert consulted == ["checkout_root"], (
+        "checkout_root was never consulted, so this test proves nothing about "
+        "the branch it claims to cover — the patch targeted the wrong name."
+    )
+
+
+@pytest.mark.parametrize(
+    ("dirs", "files"),
+    [
+        pytest.param((), (), id="no-standards-dir"),
+        pytest.param(("docs/standards",), (), id="standards-dir-empty"),
+        pytest.param(
+            ("docs/standards",),
+            ("docs/standards/testing.md",),
+            id="standards-dir-holds-only-files",
+        ),
+    ],
+)
+def test_shipped_standard_ids_converts_an_empty_registry_to_none(
+    dirs: tuple[str, ...],
+    files: tuple[str, ...],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``frozenset()`` must become ``None``; the conversion *is* the guard.
+
+    Every consumer branches on ``None``, so an empty set that stays a set is
+    invisible to all of them: see the end-to-end test below for what it costs.
+    The three shapes are the three ways ``standard_ids_under`` legitimately
+    returns empty — a standard is a *directory*, so loose files count for
+    nothing.
+    """
+    for rel in dirs:
+        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
+    for rel in files:
+        (tmp_path / rel).write_text("not a directory")
+    monkeypatch.setattr(charter_drift_caretaker_loop, "checkout_root", lambda: tmp_path)
+
+    result = shipped_standard_ids()
+
+    assert result is None, (
+        f"an empty registry leaked out as {result!r}. An empty set is not the "
+        "same answer as 'unknowable': it silently downgrades every "
+        "missing-standard to a tolerated unknown-standard."
+    )
+
+
+def test_unknowable_registry_is_fatal_rather_than_quietly_tolerated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The consequence the conversion exists to prevent, pinned end to end.
+
+    With ``None``, a declared standard the factory cannot verify raises a
+    fatal ``uncheckable-charter``. Were the registry to arrive as an empty
+    set, the same input would produce only a tolerated ``unknown-standard``
+    and :attr:`CharterDriftReport.fatal_findings` would come back empty — a
+    report that reads as coverage while checking nothing.
+    """
+    _tree(tmp_path)
+    monkeypatch.setattr(charter_drift_caretaker_loop, "checkout_root", lambda: tmp_path)
+    charter = Charter(articles=Articles(standards=("testing",)))
+
+    observed = observe_repo(tmp_path, charter)
+    report = compute_charter_drift(charter, observed, repo="o/r")
+
+    assert observed.known_standards is None
+    assert report.fatal_findings, (
+        "the drift report came back with nothing fatal even though the "
+        "standards registry could not be enumerated — this is the silent "
+        "pass the uncheckable-charter finding exists to prevent"
+    )
+    assert [f.check_id for f in report.fatal_findings] == [
+        f"{FINDING_UNCHECKABLE_CHARTER}:{UNCHECKABLE_REGISTRY_UNAVAILABLE}"
+    ]
+    assert FINDING_UNKNOWN_STANDARD in {
+        f.finding_class for f in report.tolerated_findings
+    }
 
 
 def test_audit_repo_charter_ungoverned_when_no_charter(tmp_path: Path) -> None:
