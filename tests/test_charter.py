@@ -421,3 +421,57 @@ def test_charter_from_snapshot_declares_only_the_standards_it_is_given() -> None
 
 def test_charter_from_snapshot_declares_no_standards_by_default() -> None:
     assert charter_from_snapshot({}).articles.standards == ()
+
+
+# --------------------------------------------------------------------------- #
+# Malformed input: a declaration that cannot be read is not "no declaration"   #
+# --------------------------------------------------------------------------- #
+
+
+def test_a_charter_file_that_is_a_list_is_rejected(tmp_path: Path) -> None:
+    (tmp_path / CHARTER_FILENAME).write_text("- one\n- two\n")
+    with pytest.raises(CharterError, match="must be a YAML mapping"):
+        load_charter(tmp_path)
+
+
+def test_a_charter_file_that_is_unparseable_is_rejected(tmp_path: Path) -> None:
+    (tmp_path / CHARTER_FILENAME).write_text("purpose: [unclosed\n")
+    with pytest.raises(CharterError, match="not valid YAML"):
+        load_charter(tmp_path)
+
+
+def test_a_malformed_charter_is_not_reported_as_an_absent_one(tmp_path: Path) -> None:
+    (tmp_path / CHARTER_FILENAME).write_text("just a string\n")
+    with pytest.raises(CharterError):
+        load_charter(tmp_path)
+
+
+def test_a_malformed_legacy_rails_file_is_rejected(tmp_path: Path) -> None:
+    (tmp_path / LEGACY_RAILS_FILENAME).write_text("- one\n")
+    with pytest.raises(CharterError, match="must be a YAML mapping"):
+        load_charter(tmp_path)
+
+
+def test_standards_given_as_a_mapping_is_rejected() -> None:
+    with pytest.raises(CharterError, match="must be a list"):
+        Charter.from_dict({"articles": {"standards": {"testing": True}}})
+
+
+def test_standards_given_as_a_bare_string_is_rejected() -> None:
+    with pytest.raises(CharterError, match="must be a list"):
+        Charter.from_dict({"articles": {"standards": "testing"}})
+
+
+def test_a_local_article_that_is_not_a_mapping_is_rejected() -> None:
+    with pytest.raises(CharterError, match="must be a mapping"):
+        Charter.from_dict({"articles": {"local": ["staging_only_prs"]}})
+
+
+def test_an_absolute_required_artifact_is_rejected() -> None:
+    with pytest.raises(CharterError, match="relative to the repo root"):
+        Charter.from_dict({"artifacts": {"required": ["/etc/passwd"]}})
+
+
+def test_a_required_artifact_escaping_the_repo_is_rejected() -> None:
+    with pytest.raises(CharterError, match="relative to the repo root"):
+        Charter.from_dict({"artifacts": {"required": ["../other-repo/docs"]}})

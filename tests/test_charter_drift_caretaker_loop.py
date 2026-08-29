@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 import yaml
 
 from charter import (
@@ -20,6 +21,7 @@ from charter import (
     Artifacts,
     Charter,
     CharterDriftReport,
+    CharterError,
     CharterFinding,
     RailsBlock,
     load_charter,
@@ -380,3 +382,18 @@ def test_emptying_the_declaration_reddens_rather_than_passing(tmp_path: Path) ->
     assert {f.finding_class for f in report.fatal_findings} == {
         FINDING_UNCHECKABLE_CHARTER
     }
+
+
+async def test_a_malformed_charter_is_not_swallowed(tmp_path: Path) -> None:
+    """A corrupt declaration must surface, not read as a clean tick.
+
+    ``CharterError`` is a ``ValueError``, which ``reraise_on_credit_or_bug``
+    classifies as a likely bug — so it escapes ``_do_work`` and the loop
+    publishes an error status. That is deliberate: swallowing it would file
+    nothing and report ``clean``.
+    """
+    loop, pr, _dedup, _auditor = _build(tmp_path, reports=[_CLEAN])
+    loop._auditor = AsyncMock(side_effect=CharterError("charter.yaml is not a mapping"))
+    with pytest.raises(CharterError):
+        await loop._do_work()
+    pr.create_issue.assert_not_awaited()

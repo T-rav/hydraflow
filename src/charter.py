@@ -79,7 +79,7 @@ resolution happens in the observation step; that is why
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -154,11 +154,17 @@ class CharterError(ValueError):
     """
 
 
-def _as_str_tuple(value: Any) -> tuple[str, ...]:
+def _as_str_tuple(field: str, value: Any) -> tuple[str, ...]:
+    """Coerce a YAML sequence to a tuple of strings, or reject it.
+
+    A scalar and a mapping both iterate in Python — a string yields its
+    characters and a dict yields its keys — so both would be *silently*
+    accepted in the wrong shape. Reject them by name instead.
+    """
     if value is None:
         return ()
-    if isinstance(value, str | bytes):
-        msg = f"expected a list, got a scalar: {value!r}"
+    if isinstance(value, str | bytes | dict):
+        msg = f"charter `{field}` must be a list, got {type(value).__name__}: {value!r}"
         raise CharterError(msg)
     return tuple(str(v) for v in value)
 
@@ -181,7 +187,7 @@ class Purpose:
         raw = data or {}
         return cls(
             product=str(raw.get("product", "") or ""),
-            goals=_as_str_tuple(raw.get("goals")),
+            goals=_as_str_tuple("purpose.goals", raw.get("goals")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -240,10 +246,19 @@ class Articles:
                 f"entries, got {type(local_raw).__name__}"
             )
             raise CharterError(msg)
+        local: list[LocalArticle] = []
+        for item in local_raw:
+            if not isinstance(item, dict):
+                msg = (
+                    "each charter `articles.local` entry must be a mapping with "
+                    f"`id` and `statement`, got {type(item).__name__}: {item!r}"
+                )
+                raise CharterError(msg)
+            local.append(LocalArticle.from_dict(item))
         return cls(
-            standards=_as_str_tuple(raw.get("standards")),
+            standards=_as_str_tuple("articles.standards", raw.get("standards")),
             assurance=assurance,
-            local=tuple(LocalArticle.from_dict(dict(item)) for item in local_raw),
+            local=tuple(local),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -263,7 +278,17 @@ class Artifacts:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Artifacts:
         raw = data or {}
-        return cls(required=_as_str_tuple(raw.get("required")))
+        required = _as_str_tuple("artifacts.required", raw.get("required"))
+        for path in required:
+            if PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
+                msg = (
+                    f"charter `artifacts.required` entry {path!r} must be a path "
+                    "relative to the repo root, with no `..` segments. A charter "
+                    "that satisfies itself with a path outside its own repo "
+                    "declares nothing about that repo."
+                )
+                raise CharterError(msg)
+        return cls(required=required)
 
     def to_dict(self) -> dict[str, Any]:
         return {"required": list(self.required)}
@@ -289,9 +314,11 @@ class RailsBlock:
         raw = data or {}
         return cls(
             template_version=str(raw.get("template_version", "")),
-            layers=_as_str_tuple(raw.get("layers")),
+            layers=_as_str_tuple("rails.layers", raw.get("layers")),
             coverage_floor=float(raw.get("coverage_floor", 0.0) or 0.0),
-            domain_gate_scripts=_as_str_tuple(raw.get("domain_gate_scripts")),
+            domain_gate_scripts=_as_str_tuple(
+                "rails.domain_gate_scripts", raw.get("domain_gate_scripts")
+            ),
             schema_version=int(raw.get("schema_version", RAILS_SCHEMA_VERSION)),
         )
 
@@ -685,11 +712,27 @@ def standard_ids_under(root: Path) -> frozenset[str]:
 
 
 def _read_mapping(path: Path) -> dict[str, Any] | None:
+    """Parse *path* as a YAML mapping; ``None`` only when the file is absent.
+
+    A present-but-unparseable declaration raises rather than returning
+    ``None``. Returning ``None`` would make a broken charter indistinguishable
+    from *no* charter, and the caretaker skips repos with no charter — so a
+    corrupt governing declaration would read as "ungoverned", silently.
+    """
     if not path.exists():
         return None
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        msg = f"{path.name} is not valid YAML: {exc}"
+        raise CharterError(msg) from exc
     if not isinstance(raw, dict):
-        return None
+        msg = (
+            f"{path.name} must be a YAML mapping, got {type(raw).__name__}. A "
+            "declaration that cannot be read must not be mistaken for the "
+            "absence of one."
+        )
+        raise CharterError(msg)
     return raw
 
 
@@ -754,7 +797,9 @@ def charter_from_snapshot(
     layers: list[str] = ["universal", "language_pack"]
     if snapshot.get("domain_rails") or snapshot.get("domain"):
         layers.append("domain_rails")
-    scripts = _as_str_tuple(snapshot.get("domain_gate_scripts"))
+    scripts = _as_str_tuple(
+        "rails.domain_gate_scripts", snapshot.get("domain_gate_scripts")
+    )
     description = str(snapshot.get("description", "") or "")
     return Charter(
         purpose=Purpose(product=description),
