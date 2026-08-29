@@ -38,6 +38,8 @@ import fnmatch
 import re
 from pathlib import Path
 
+import pytest
+
 from pytest_collection import collected_test_globs, is_collected_test_file
 from tests.regressions.regression_issue_6435 import optional_dependency_roots
 
@@ -450,6 +452,87 @@ def test_scan_set_matches_pytests_own_collection_config() -> None:
         f"pytest now collects {globs}; the guard follows automatically, but "
         "confirm the grandfather set still covers what widened."
     )
+
+
+#: (name, source, expected labels) — the spellings detection must resolve.
+#:
+#: Parametrised over the alias forms themselves rather than asserted once for
+#: the plain spelling: the defect being fixed was a detector that recognised
+#: ONE spelling of each construct, so a table of one is how it happens again.
+#: The last two cases are the other direction — text that merely mentions a
+#: marker is not a marker, which the previous line-regex could not tell apart.
+_DETECTION_CASES: tuple[tuple[str, str, list[str]], ...] = (
+    (
+        "module-level pytestmark",
+        "import pytest\npytestmark = [pytest.mark.skip(reason='x')]\n",
+        ["skip marker"],
+    ),
+    (
+        "aliased module import",
+        "import pytest as _p\n@_p.mark.xfail\ndef test_b(): pass\n",
+        ["xfail marker"],
+    ),
+    (
+        "from-import alias",
+        "from pytest import mark as m\n@m.skipif(True, reason='x')\ndef test_c(): pass\n",
+        ["skip marker"],
+    ),
+    (
+        "unittest skip decorator",
+        "from unittest import skip\n@skip('x')\ndef test_d(): pass\n",
+        ["unittest skip"],
+    ),
+    (
+        "unittest expectedFailure",
+        "import unittest\n@unittest.expectedFailure\ndef test_e(): pass\n",
+        ["unittest expected failure"],
+    ),
+    (
+        "runtime skip call",
+        "import pytest\ndef test_f():\n    pytest.skip('later')\n",
+        ["runtime skip"],
+    ),
+    (
+        "marker text inside a string is not a marker",
+        "S = '@pytest.mark.skip(reason=1)'\ndef test_g(): pass\n",
+        [],
+    ),
+    (
+        "marker named in a docstring is not a marker",
+        '"we used to pytest.mark.skip this"\ndef test_h(): pass\n',
+        [],
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [(src, exp) for _, src, exp in _DETECTION_CASES],
+    ids=[name for name, _, _ in _DETECTION_CASES],
+)
+def test_detection_resolves_every_spelling(
+    source: str, expected: list[str], tmp_path: Path
+) -> None:
+    probe = tmp_path / "test_probe.py"
+    probe.write_text(source, encoding="utf-8")
+
+    labels = [label for _, label, _ in _offenders_in(probe, frozenset())]
+
+    assert labels == expected
+
+
+def test_offender_scope_is_the_test_name_not_a_line_number(tmp_path: Path) -> None:
+    """DEFERRED_XFAILS keys on this, so it must survive edits above the marker."""
+    probe = tmp_path / "test_probe.py"
+    probe.write_text(
+        "import pytest\n\n\nclass TestOuter:\n"
+        "    @pytest.mark.xfail\n    def test_inner(self): pass\n",
+        encoding="utf-8",
+    )
+
+    scopes = [scope for scope, _, _ in _offenders_in(probe, frozenset())]
+
+    assert scopes == ["TestOuter.test_inner"]
 
 
 def test_grandfather_set_is_populated() -> None:
