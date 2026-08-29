@@ -155,6 +155,17 @@ def _all_cited_paths(standards: Sequence[Standard]) -> tuple[str, ...]:
     return tuple(seen)
 
 
+def _collection_subject() -> tuple[str, ...]:
+    """Every path the collection properties ask about, in one tuple.
+
+    The control rides in the same tuple as the cited gates so both properties
+    hit one cached spawn instead of two. Nesting a pytest inside the suite is
+    not free, and under ``-n auto`` a second one is a second worker's worth of
+    CPU competing with the duration ratchet's budgets.
+    """
+    return (*_all_cited_paths(registered_standards()), _UNCOLLECTED_CONTROL)
+
+
 class TestIdsResolve:
     def test_every_standard_directory_declares_a_standard_yaml(self) -> None:
         # registered_standards() raises StandardsRegistryError on a directory
@@ -240,7 +251,7 @@ class TestCitedGatesActuallyRun:
         cited = _all_cited_paths(standards)
         if not cited:  # pragma: no cover - only before the first binding lands
             return
-        collection = _collect(cited)
+        collection = _collect(_collection_subject())
         uncollected = {
             standard.directory: [
                 path for path in standard.enforced_by if not collection.collects(path)
@@ -316,5 +327,5 @@ class TestCitedGatesActuallyRun:
         """
         control = Path(_UNCOLLECTED_CONTROL)
         assert (repo_root() / control).is_file()
-        collection = _collect((_UNCOLLECTED_CONTROL,))
+        collection = _collect(_collection_subject())
         assert not collection.collects(_UNCOLLECTED_CONTROL)
