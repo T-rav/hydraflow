@@ -167,6 +167,24 @@ class TestReadmeAndYamlAreOneSet:
 
 
 class TestCitedGatesActuallyRun:
+    def test_every_standard_cites_at_least_one_enforcer(self) -> None:
+        """A standard with no gate is a document, not an Article.
+
+        This is the property the whole issue closes on, and it is what stops
+        the ones above from being satisfiable by an empty list agreeing with
+        an empty block. Adding a standard now means adding its gate.
+        """
+        unbound = [
+            standard.directory
+            for standard in registered_standards()
+            if not standard.enforced_by
+        ]
+        assert not unbound, (
+            f"standard(s) with an empty `enforced_by`: {unbound} — bind the "
+            "prose to a machine-readable artifact and cite the test, or the "
+            "standard is a document nothing checks"
+        )
+
     def test_every_cited_enforcer_path_exists(self) -> None:
         missing = {
             standard.directory: [

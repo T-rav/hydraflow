@@ -1,4 +1,5 @@
 # See docs/standards/adr_enforcement/standard.yaml for what these keys mean.
 # Properties: tests/architecture/test_standards_registry.py
 id: ports-and-loops
-enforced_by: []
+enforced_by:
+  - tests/architecture/test_ports_and_loops_standard_drift.py

@@ -11,57 +11,57 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | Loop | ADR | Wiki | Generated | Standard | Unit | Scenario | Sandbox |
 |---|---|---|---|---|---|---|---|
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
-| `AdrConformanceLoop` | ✅ [0100, 0104, 0136] | ✅ [adr-index.md] | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
+| `AdrConformanceLoop` | ✅ [0100, 0104, 0136] | ✅ [adr-index.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
-| `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
-| `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
+| `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
+| `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
 | `ContractRefreshLoop` | ✅ [0045, 0047] | ✅ [contract-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ✅ `s30_contract_refresh_clean.py` |
-| `ConvergenceOscillationLoop` | ✅ [0096, 0097, 0098] | ❌ | ✅ loops.md | ❌ | ✅ `test_convergence_oscillation_loop.py` | ✅ in catalog | ❌ |
+| `ConvergenceOscillationLoop` | ✅ [0096, 0097, 0098] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_convergence_oscillation_loop.py` | ✅ in catalog | ❌ |
 | `CorpusLearningLoop` | ✅ [0045] | ✅ [corpus-learning-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ✅ `s22_corpus_learning_no_escape_issues.py` |
 | `CostBudgetWatcherLoop` | ✅ [0054, 0120] | ✅ [architecture.md, dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_cost_budget_watcher_loop.py` | ✅ in catalog | ✅ `s26_cost_budget_watcher_unlimited.py` |
 | `DependabotMergeLoop` | ✅ [0054, 0057, 0058] | ✅ [dependabot-merge-loop.md, git-hub-data-cache.md, review-verdict.md] | ✅ loops.md | ✅ README.md | ✅ `test_dependabot_merge_loop.py` | ✅ in catalog | ✅ `s09_dependabot_auto_merge.py` |
-| `DetectorCalibrationLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_detector_calibration_loop.py` | ✅ in catalog | ❌ |
+| `DetectorCalibrationLoop` | ❌ | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_detector_calibration_loop.py` | ✅ in catalog | ❌ |
 | `DiagnosticLoop` | ✅ [0050] | ✅ [diagnostic-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
 | `DiagramLoop` | ✅ [0001, 0093] | ✅ [diagram-loop.md, gotchas.md, patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagram_loop.py` | ✅ in catalog | ✅ `s34_diagram_loop_no_changes.py` |
-| `DisturbanceDampenerLoop` | ✅ [0101, 0120] | ✅ [dimension-baseline.md, disturbance-dampener-loop.md] | ❌ | ❌ | ✅ `test_disturbance_dampener_loop.py` | ✅ in catalog | ✅ `s90_disturbance_dampener_idle_poll.py` |
+| `DisturbanceDampenerLoop` | ✅ [0101, 0120] | ✅ [dimension-baseline.md, disturbance-dampener-loop.md] | ❌ | ✅ README.md | ✅ `test_disturbance_dampener_loop.py` | ✅ in catalog | ✅ `s90_disturbance_dampener_idle_poll.py` |
 | `EdgeProposerLoop` | ✅ [0058, 0060, 0062, 0126] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ✅ `s28_edge_proposer_no_proposals.py` |
 | `EntryEvidenceLoop` | ✅ [0062, 0078, 0126] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
 | `EpicSweeperLoop` | ✅ [0080, 0081, 0091, 0105] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
-| `ErosionMetricsLoop` | ✅ [0120, 0122, 0126] | ✅ [dark-factory.md, erosion.md, patterns.md] | ✅ loops.md | ❌ | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
-| `EscapeLedgerLoop` | ✅ [0115] | ❌ | ✅ loops.md | ❌ | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
-| `FailOpenMonitorLoop` | ✅ [0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_fail_open_monitor_loop.py` | ✅ in catalog | ✅ `s84_fail_open_monitor_idle_poll.py` |
+| `ErosionMetricsLoop` | ✅ [0120, 0122, 0126] | ✅ [dark-factory.md, erosion.md, patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
+| `EscapeLedgerLoop` | ✅ [0115] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
+| `FailOpenMonitorLoop` | ✅ [0120] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_fail_open_monitor_loop.py` | ✅ in catalog | ✅ `s84_fail_open_monitor_idle_poll.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
-| `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, loop-fitness.md] | ✅ loops.md | ❌ | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
+| `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, loop-fitness.md] | ✅ loops.md | ✅ README.md | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099, 0120] | ✅ [flake-tracker-loop.md, git-hub-data-cache.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
-| `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
-| `GateHealthLoop` | ✅ [0120] | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md, testing.md] | ✅ loops.md | ❌ | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
-| `GatewayCoverageLoop` | ✅ [0110] | ✅ [architecture.md] | ✅ loops.md | ❌ | ✅ `test_gateway_coverage_loop.py` | ✅ in catalog | ✅ `s91_gateway_session_tap.py` |
+| `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
+| `GateHealthLoop` | ✅ [0120] | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
+| `GatewayCoverageLoop` | ✅ [0110] | ✅ [architecture.md] | ✅ loops.md | ✅ README.md | ✅ `test_gateway_coverage_loop.py` | ✅ in catalog | ✅ `s91_gateway_session_tap.py` |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, git-hub-data-cache.md, hitl-item.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
-| `GoalSupervisorLoop` | ✅ [0124] | ✅ [goal-supervisor-loop.md] | ✅ loops.md | ❌ | ✅ `test_goal_supervisor_loop.py` | ✅ in catalog | ❌ |
+| `GoalSupervisorLoop` | ✅ [0124] | ✅ [goal-supervisor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_goal_supervisor_loop.py` | ✅ in catalog | ❌ |
 | `HealthMonitorLoop` | ✅ [0045, 0046, 0093, 0106, 0124] | ✅ [goal-supervisor-loop.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
-| `HumanSteeringLoop` | ✅ [0103] | ✅ [human-steering-loop.md, steering-channel.md, steering-state.md] | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ✅ in catalog | ✅ `s52_human_steering_directive.py` |
-| `InterventionTallyLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_intervention_tally_loop.py` | ✅ in catalog | ✅ `s85_intervention_tally_idle_poll.py` |
-| `IssueRefinementLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_issue_refinement_loop.py` | ✅ in catalog | ✅ `s57_issue_refinement_digest.py` |
+| `HumanSteeringLoop` | ✅ [0103] | ✅ [human-steering-loop.md, steering-channel.md, steering-state.md] | ❌ | ✅ README.md | ✅ `test_human_steering_loop.py` | ✅ in catalog | ✅ `s52_human_steering_directive.py` |
+| `InterventionTallyLoop` | ❌ | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_intervention_tally_loop.py` | ✅ in catalog | ✅ `s85_intervention_tally_idle_poll.py` |
+| `IssueRefinementLoop` | ❌ | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_issue_refinement_loop.py` | ✅ in catalog | ✅ `s57_issue_refinement_digest.py` |
 | `LabelDriftWatcherLoop` | ✅ [0088] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_label_drift_watcher_loop.py` | ✅ in catalog | ✅ `s81_label_drift_watcher_reconciles_pr_ahead.py` |
 | `LiveCorpusReplayLoop` | ✅ [0086] | ✅ [live-corpus-replay-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_live_corpus_replay_loop.py` | ✅ in catalog | ✅ `s43_live_corpus_replay_idle.py` |
-| `LogIngestLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_log_ingest_loop.py` | ✅ in catalog | ❌ |
+| `LogIngestLoop` | ❌ | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_log_ingest_loop.py` | ✅ in catalog | ❌ |
 | `MemoryBacklogLoop` | ✅ [0089, 0120] | ✅ [README.md] | ✅ loops.md | ✅ README.md | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
 | `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ✅ `s49_merge_state_watcher_idle_poll.py` |
 | `PRUnstickerLoop` | ✅ [0075, 0077] | ✅ [hitl-item.md, pr-unsticker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_unsticker_loop.py` | ✅ in catalog | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |
-| `PrRedRepairLoop` | ❌ | ✅ [feedback-workstream-fixes-over-loops.md] | ✅ loops.md | ❌ | ✅ `test_pr_red_repair_loop.py` | ✅ in catalog | ✅ `s74_pr_red_repair_idle_poll.py` |
+| `PrRedRepairLoop` | ❌ | ✅ [feedback-workstream-fixes-over-loops.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_red_repair_loop.py` | ✅ in catalog | ✅ `s74_pr_red_repair_idle_poll.py` |
 | `PricingRefreshLoop` | ✅ [0078, 0093] | ✅ [pricing-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pricing_refresh_loop_scenario.py` | ✅ in catalog | ❌ |
 | `PrinciplesAuditLoop` | ✅ [0045, 0056, 0120] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_principles_audit_loop.py` | ✅ in catalog | ❌ |
 | `RCBudgetLoop` | ✅ [0045, 0120] | ✅ [git-hub-data-cache.md, rc-budget-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_rc_budget_loop.py` | ✅ in catalog | ✅ `s20_rc_budget_no_regression.py` |
-| `RailsDriftCaretakerLoop` | ✅ [0121] | ✅ [rails-drift-caretaker-loop.md] | ✅ loops.md | ❌ | ✅ `test_rails_drift_caretaker_loop.py` | ✅ in catalog | ❌ |
+| `RailsDriftCaretakerLoop` | ✅ [0121] | ✅ [rails-drift-caretaker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_rails_drift_caretaker_loop.py` | ✅ in catalog | ❌ |
 | `RepoWikiLoop` | ✅ [0032, 0053, 0061, 0062, 0064] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_repo_wiki_loop.py` | ✅ in catalog | ❌ |
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028, 0045, 0120] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074, 0093, 0120] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
 | `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md, gotchas.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
-| `SampledAuditLoop` | ✅ [0115, 0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_sampled_audit_loop.py` | ✅ in catalog | ✅ `s86_sampled_audit_idle_poll.py` |
+| `SampledAuditLoop` | ✅ [0115, 0120] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_sampled_audit_loop.py` | ✅ in catalog | ✅ `s86_sampled_audit_idle_poll.py` |
 | `SandboxFailureFixerLoop` | ✅ [0052, 0063, 0097, 0101] | ✅ [dark-factory.md, disturbance-dampener-loop.md, feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
-| `SecondOrderVitalsLoop` | ✅ [0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_second_order_vitals_loop.py` | ✅ in catalog | ✅ `s87_second_order_vitals_idle_poll.py` |
+| `SecondOrderVitalsLoop` | ✅ [0120] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_second_order_vitals_loop.py` | ✅ in catalog | ✅ `s87_second_order_vitals_idle_poll.py` |
 | `SecurityPatchLoop` | ✅ [0029, 0065] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_security_patch_loop.py` | ✅ in catalog | ✅ `s21_security_patch_no_alerts.py` |
 | `SkillPromptEvalLoop` | ✅ [0045] | ✅ [skill-prompt-eval-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ✅ `s17_skill_prompt_eval_clean_corpus.py` |
 | `StagingBisectLoop` | ✅ [0045, 0048, 0063] | ✅ [architecture.md] | ✅ loops.md | ✅ README.md | ✅ `test_staging_bisect_loop.py` | ✅ in catalog | ❌ |
@@ -83,7 +83,7 @@ per-adapter, not per-port).
 |---|---|---|---|---|---|---|---|
 | `AgentPort` | ✅ [0066] | ✅ [agent-port.md, architecture-layers.md] | ✅ ports.md | ✅ README.md | ✅ `FakeAgent` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `BotPRPort` | ✅ [0068] | ✅ [bot-pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeBotPR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `ConformanceRunnerPort` | ❌ | ❌ | ✅ ports.md | ❌ | ✅ `FakeConformanceRunner` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `ConformanceRunnerPort` | ❌ | ❌ | ✅ ports.md | ✅ README.md | ✅ `FakeConformanceRunner` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueFetcherPort` | ✅ [0067, 0081] | ✅ [architecture-async-control.md, issue-fetcher-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ObservabilityPort` | ✅ [0072] | ✅ [observability-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeObservability` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
