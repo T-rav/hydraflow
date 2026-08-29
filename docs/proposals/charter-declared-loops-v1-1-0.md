@@ -152,6 +152,54 @@ Sketch of the tick:
 
 Steps 1–3 are new. Steps 4–5 already exist and are the reason this is worth doing.
 
+## "Why not make HydraFlow itself charter-driven?" — measured
+
+The obvious next question, and the answer is a number rather than an opinion.
+
+HydraFlow's core pipeline, measured on `origin/staging` at `0975fba2a`:
+
+| phase | files | lines |
+|---|---|---|
+| `triage_phase` | 1 | 780 |
+| `plan_phase` | 10 | 3,270 |
+| `implement_phase` | 10 | 2,922 |
+| `review_phase` | 14 | 5,669 |
+| **total** | **35** | **12,641** |
+
+The temptation is to read that as 12,641 lines of workflow waiting to become a YAML
+file. It is not. Look at what `plan_phase` decomposed into:
+
+```
+_flow  _disposition  _epic  _records  _tiering  _prepass  _adversarial  _wiki_ingest  _common
+```
+
+One or two of those dispatch an agent. **The rest is the governance *of* the agent's
+work** — which label, which transition, how epic cohorts group and hold an atomic
+reservation, how results are recorded, what happens on cancellation. And the prompt half
+is already externalised: `src/hydraflow_resources/prompts/auto_agent/*.md`.
+
+So the 12,641 lines are not HydraFlow's *implementation* of a workflow. **They are the
+outer loop.** GNAA's `bin/convene` is a single file precisely because GNAA has none of
+it — its entire governance is "open a PR, a human merges."
+
+**The conclusion this forces is one level up from where the idea starts:** HydraFlow does
+not become a charter-driven repo. It becomes **the runtime that executes other repos'
+charters.** Its phase logic is the product, not the thing to be replaced.
+
+What *is* available, and is the realistic v1.1.0 shape, is narrower and much cheaper:
+**parameterise the phases by charter for the agent-facing decisions** — which prompt,
+which model, what "done" means, which gates apply — while the orchestration stays code.
+That is what lets one factory serve many repos without a rewrite.
+
+The asymmetry is the whole argument for doing this at all:
+
+| | GNAA | HydraFlow |
+|---|---|---|
+| actors + loops declared | **yes** | hardcoded |
+| outer loop | a human merging a PR | **12,641 lines** |
+
+Each has exactly what the other lacks.
+
 ## Migration
 
 - `schema_version: 1` charters keep working; `loops` absent means "no charter-declared
