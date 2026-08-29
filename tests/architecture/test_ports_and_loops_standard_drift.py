@@ -31,10 +31,15 @@ from arch.generators.ports_and_loops_standard import (
     LOOP_REGISTRY_BLOCK,
     PORT_REGISTRY_BLOCK,
 )
-from arch.runner import check_inline_blocks, substitute_blocks
+from arch.runner import (
+    check_inline_blocks,
+    emit_inline_blocks,
+    substitute_blocks,
+)
 from tests.architecture.standards_registry import repo_root
 
 _README = Path("docs") / "standards" / "ports-and-loops" / "README.md"
+_DECLARATION = Path("docs") / "standards" / "ports-and-loops" / "standard.yaml"
 
 #: Every registry row opens with the class name in backticks.
 _ROW_NAME_RE = re.compile(r"^\|\s*`([A-Za-z0-9_]+)`\s*\|")
@@ -104,14 +109,72 @@ class TestTheGeneratorRefusesToWriteNowhere:
                 {PORT_REGISTRY_BLOCK: "| Port |\n|---|\n"},
             )
 
-    def test_a_missing_host_document_is_drift_not_a_skip(self, tmp_path: Path) -> None:
-        """Fail-closed: deleting the README must not retire its own gate.
+    def test_a_declared_standard_with_no_block_is_drift_not_a_skip(
+        self, tmp_path: Path
+    ) -> None:
+        """Fail-closed where the standard IS declared.
 
-        ``emit`` skips a document that is not there (synthetic trees, partial
-        stamps); ``check`` must not, or the staleness gate stops having a
-        subject the moment somebody removes the file it watches.
+        Deleting the README, or just its markers, must not retire its own gate.
+        The declaration is what makes this the enforced case; without it the
+        check cannot tell a broken tree from one that never shipped the
+        standard.
         """
-        assert check_inline_blocks(repo_root=tmp_path) == 1
+        declaration = tmp_path / _DECLARATION
+        declaration.parent.mkdir(parents=True)
+        declaration.write_text("id: ports-and-loops\n", encoding="utf-8")
+
+        assert check_inline_blocks(repo_root=tmp_path) == 1, (
+            "a tree that declares the standard but has no host document is stale"
+        )
+
+        (tmp_path / _README).write_text("prose, no markers\n", encoding="utf-8")
+        assert check_inline_blocks(repo_root=tmp_path) == 1, (
+            "a declared standard whose markers were deleted is stale too — "
+            "otherwise deleting the markers silently retires the generator"
+        )
+
+    def test_an_undeclared_standard_with_no_block_is_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """A tree that never shipped the standard has nothing to be stale about.
+
+        This is the s34 condition: ``DiagramLoop`` regenerates inside an
+        ephemeral worktree branched off the BASE commit, which predates the
+        block. Same shape for a child repo stamped before the block existed.
+        Writing a block there would invent a standard the tree has not adopted;
+        erroring would fail every such regen.
+        """
+        readme = tmp_path / _README
+        readme.parent.mkdir(parents=True)
+        readme.write_text("prose, no markers\n", encoding="utf-8")
+
+        assert check_inline_blocks(repo_root=tmp_path) == 0
+        assert emit_inline_blocks(repo_root=tmp_path) == []
+        assert readme.read_text(encoding="utf-8") == "prose, no markers\n", (
+            "an undeclared standard must be left alone, not written into"
+        )
+
+    def test_emit_raises_when_a_declared_standard_lost_its_markers(
+        self, tmp_path: Path
+    ) -> None:
+        declaration = tmp_path / _DECLARATION
+        declaration.parent.mkdir(parents=True)
+        declaration.write_text("id: ports-and-loops\n", encoding="utf-8")
+        (tmp_path / _README).write_text("prose, no markers\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="missing"):
+            emit_inline_blocks(repo_root=tmp_path)
+
+    def test_this_repo_declares_the_standard_so_the_guard_is_live_here(
+        self,
+    ) -> None:
+        """The skip path must not be silently covering this repo.
+
+        Without this, deleting ``standard.yaml`` would leave every property
+        above passing while the generator quietly stopped enforcing anything —
+        the defect class this branch exists to close.
+        """
+        assert (repo_root() / _DECLARATION).is_file()
 
     def test_a_document_with_the_markers_receives_the_body(self) -> None:
         begin, end = PORT_REGISTRY_BLOCK
@@ -157,3 +220,20 @@ class TestRegenConvergesInOnePass:
             "is computed — the matrix reads the registry, so the reverse order "
             "needs two regens to converge and leaves arch-check red after one"
         )
+
+    def test_transposed_markers_raise_instead_of_duplicating_the_document(
+        self,
+    ) -> None:
+        """END before BEGIN passes both `in` checks and used to corrupt.
+
+        The slice arithmetic ran with ``stop < start`` and DUPLICATED the
+        document rather than replacing a region, so `--emit` wrote the
+        corruption, each later regen grew it, and `--check` could never
+        converge. The absent-marker guard cannot see this shape — both markers
+        are present.
+        """
+        begin, end = PORT_REGISTRY_BLOCK
+        transposed = f"{end}\nmiddle\n{begin}\ntail"
+
+        with pytest.raises(ValueError, match="transposed"):
+            substitute_blocks("x.md", transposed, {PORT_REGISTRY_BLOCK: "body"})

@@ -29,6 +29,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -443,20 +444,56 @@ def check(*, repo_root: Path, generated_dir: Path) -> int:
 # ---------------------------------------------------------------------------
 
 _PORTS_AND_LOOPS_STANDARD = "docs/standards/ports-and-loops/README.md"
+_PORTS_AND_LOOPS_DECLARATION = "docs/standards/ports-and-loops/standard.yaml"
 
 
-def _compute_inline_blocks(
-    repo_root: Path,
-) -> dict[str, dict[tuple[str, str], str]]:
-    """``{repo-relative file: {(begin, end): rendered body}}``."""
+@dataclass(frozen=True)
+class InlineBlockTarget:
+    """A hand-written document that carries generated blocks.
+
+    ``declaration`` is what tells "absent because broken" apart from "absent
+    because this tree does not ship this standard" — two conditions that look
+    identical at the host file and need opposite answers.
+
+    A tree that DECLARES the standard (its ``standard.yaml`` is present) and
+    has no block is broken: the generator would silently no-op and the registry
+    would rot, which is the whole failure this machinery exists to catch. A
+    tree that does not declare it never had the block, and writing one would be
+    inventing a standard it has not adopted — an ephemeral worktree branched
+    off a base commit that predates the block, a child repo stamped before it
+    existed, a synthetic tree in a test.
+
+    Keyed on ``standard.yaml`` rather than on ``charter.yaml``: the per-standard
+    declaration ships inside the standard's own directory, so it travels with
+    the thing it describes and answers the question for a stamped child repo
+    that carries no repo-level manifest.
+    """
+
+    host: str
+    declaration: str
+    blocks: dict[tuple[str, str], str]
+
+
+def _compute_inline_blocks(repo_root: Path) -> list[InlineBlockTarget]:
+    """Every document carrying generated blocks, with its rendered bodies."""
     src_dir = repo_root / "src"
     loops = extract_loops(src_dir)
     ports = extract_ports(src_dir=src_dir, fakes_dir=repo_root / "src/mockworld/fakes")
-    return {
-        _PORTS_AND_LOOPS_STANDARD: render_ports_and_loops_blocks(
-            loops, ports, repo_root=repo_root
-        ),
-    }
+    return [
+        InlineBlockTarget(
+            host=_PORTS_AND_LOOPS_STANDARD,
+            declaration=_PORTS_AND_LOOPS_DECLARATION,
+            blocks=render_ports_and_loops_blocks(loops, ports, repo_root=repo_root),
+        )
+    ]
+
+
+def _declares_standard(repo_root: Path, target: InlineBlockTarget) -> bool:
+    return (repo_root / target.declaration).exists()
+
+
+def _carries_blocks(text: str, blocks: dict[tuple[str, str], str]) -> bool:
+    return all(begin in text and end in text for begin, end in blocks)
 
 
 def substitute_blocks(
@@ -471,6 +508,17 @@ def substitute_blocks(
             )
         start = current.index(begin)
         stop = current.index(end) + len(end)
+        if stop <= start:
+            # Transposed pair: END appears before BEGIN. Both `in` checks pass,
+            # so the vacuity guard above does not see it, and the slice
+            # arithmetic then DUPLICATES the document instead of replacing a
+            # region — `--emit` writes the corruption, every later regen grows
+            # it, and `--check` never converges. A merge resolution or a hand
+            # edit that inverts the markers is all it takes.
+            raise ValueError(
+                f"{rel} has {end} before {begin}; the block markers are "
+                "transposed and the region cannot be located"
+            )
         current = current[:start] + f"{begin}\n{body}\n{end}" + current[stop:]
     return current
 
@@ -487,15 +535,21 @@ def emit_inline_blocks(*, repo_root: Path) -> list[str]:
     """
     repo_root = Path(repo_root).resolve()
     written: list[str] = []
-    for rel, blocks in _compute_inline_blocks(repo_root).items():
-        path = repo_root / rel
+    for target in _compute_inline_blocks(repo_root):
+        path = repo_root / target.host
         if not path.exists():
             continue
         current = path.read_text()
-        updated = substitute_blocks(rel, current, blocks)
+        if not _carries_blocks(current, target.blocks):
+            if _declares_standard(repo_root, target):
+                # Declared here, so the block is supposed to exist. Raising is
+                # the point: a silent no-op is how the registry rots.
+                substitute_blocks(target.host, current, target.blocks)
+            continue
+        updated = substitute_blocks(target.host, current, target.blocks)
         if updated != current:
             path.write_text(updated)
-            written.append(rel)
+            written.append(target.host)
     return written
 
 
@@ -508,14 +562,23 @@ def check_inline_blocks(*, repo_root: Path) -> int:
     """
     repo_root = Path(repo_root).resolve()
     rc = 0
-    for rel, blocks in _compute_inline_blocks(repo_root).items():
+    for target in _compute_inline_blocks(repo_root):
+        rel = target.host
         path = repo_root / rel
-        if not path.exists():
-            print(f"[arch-check] missing: {rel} (carries generated blocks)")
+        declared = _declares_standard(repo_root, target)
+        if not path.exists() or not _carries_blocks(path.read_text(), target.blocks):
+            if not declared:
+                # This tree does not ship the standard; there is nothing to be
+                # stale about. Skipping is the correct answer, not a loosening.
+                continue
+            print(
+                f"[arch-check] missing block(s) in {rel} (declared by "
+                f"{target.declaration}); run `make arch-regen`"
+            )
             rc = 1
             continue
         current = path.read_text()
-        expected = substitute_blocks(rel, current, blocks)
+        expected = substitute_blocks(rel, current, blocks=target.blocks)
         if expected == current:
             continue
         rc = 1
