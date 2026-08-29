@@ -77,9 +77,9 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
 
             self._decomposer = IssueDecomposer(pr_manager, epic_manager, state, config)
         if runner is not None:
-            from decomposition_council import DecompositionCouncil  # noqa: PLC0415
+            from decomposition_ensemble import DecompositionEnsemble  # noqa: PLC0415
 
-            self._council = DecompositionCouncil(runner, config)
+            self._council = DecompositionEnsemble(runner, config)
 
     def _get_default_interval(self) -> int:
         return self._config.auto_agent_preflight_interval
@@ -607,7 +607,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
                     ctx=ctx,
                     config=self._config,
                     decomposer=self._decomposer,
-                    council=self._council,
+                    ensemble=self._council,
                     state=self._state,
                     prs=self._prs,
                 )
@@ -707,7 +707,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             self._state.refund_auto_agent_attempt(issue_number)
             raise
 
-        # Apply decision. ADR-0105: decomposer/council may be None (not
+        # Apply decision. ADR-0105: decomposer/ensemble may be None (not
         # wired for this caller) — apply_decision degrades to today's
         # behavior in that case.
         decision = await apply_decision(
@@ -718,7 +718,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             state=self._state,
             max_attempts=self._config.auto_agent_max_attempts,
             decomposer=self._decomposer,
-            council=self._council,
+            ensemble=self._council,
             config=self._config,
             ctx=ctx,
             hitl_widened=widened,

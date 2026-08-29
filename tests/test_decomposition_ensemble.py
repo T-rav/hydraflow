@@ -1,6 +1,6 @@
-"""Tests for DecompositionCouncil (ADR-0105 decompose-to-converge, Task 3 refine).
+"""Tests for DecompositionEnsemble (ADR-0105 decompose-to-converge, Task 3 refine).
 
-The council is a GENUINE two-pass design: a direction call proposes a
+The ensemble is a GENUINE two-pass design: a direction call proposes a
 candidate split, and a SEPARATE, independent validation call adversarially
 critiques it and owns ``should_decompose``/``confidence``. These tests mock
 the seam (``run_lightweight_agent``) to return one reply per call, in order,
@@ -10,7 +10,7 @@ overturn a direction pass that proposed a split), not one completion
 rationalizing itself.
 
 The LLM seam is always mocked here -- these tests never call a real model.
-``DecompositionCouncil._execute_council`` does a deferred
+``DecompositionEnsemble._execute_ensemble`` does a deferred
 ``from runner_utils import run_lightweight_agent`` (matching every other
 lightweight caller in the codebase, e.g. ``adr_reviewer.py``,
 ``term_proposer_runtime.py``), so the seam is patched at its definition site,
@@ -25,15 +25,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from decomposition_council import DecompositionCouncil
+from decomposition_ensemble import DecompositionEnsemble
 from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory
 
 
 def _council(monkeypatch, *, results):
-    """Wire a DecompositionCouncil whose seam call returns each of *results*
+    """Wire a DecompositionEnsemble whose seam call returns each of *results*
     in turn (as ``SimpleResult(stdout=..., returncode=0)``), and return the
-    council plus a list that records every prompt the seam was called with
+    ensemble plus a list that records every prompt the seam was called with
     (in call order -- so ``calls[0]`` is always the first direction call,
     ``calls[1]`` the first validation call, ``calls[2]`` a retried direction
     call, etc).
@@ -49,8 +49,8 @@ def _council(monkeypatch, *, results):
         return SimpleResult(stdout=stdout, stderr="", returncode=0)
 
     monkeypatch.setattr("runner_utils.run_lightweight_agent", _fake_seam)
-    council = DecompositionCouncil(runner=AsyncMock(), config=ConfigFactory.create())
-    return council, calls
+    ensemble = DecompositionEnsemble(runner=AsyncMock(), config=ConfigFactory.create())
+    return ensemble, calls
 
 
 def _direction_reply(**fields) -> str:
@@ -74,7 +74,7 @@ def _validation_reply(**fields) -> str:
     return json.dumps(fields)
 
 
-class TestDecompositionCouncilAccept:
+class TestDecompositionEnsembleAccept:
     """A sound split: direction proposes, validation APPROVEs -- no retry."""
 
     @pytest.mark.asyncio
@@ -87,10 +87,10 @@ class TestDecompositionCouncilAccept:
             confidence="high",
             reasoning="Two independently shippable layers, no overlap.",
         )
-        council, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _council(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=101, title="Fix the frobnicator")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task, stall_context="stalled after 3 attempts", doc_context="", depth=0
         )
 
@@ -114,7 +114,7 @@ class TestDecompositionCouncilAccept:
         assert "Epic: split the frobnicator" in calls[1]
 
 
-class TestDecompositionCouncilValidationOverturnsDirection:
+class TestDecompositionEnsembleValidationOverturnsDirection:
     """Validation is independent: it can REJECT a split direction proposed.
 
     This is the crux of the two-pass design -- a single completion that
@@ -141,10 +141,10 @@ class TestDecompositionCouncilValidationOverturnsDirection:
             reasoning="Children are near-duplicate clones of the same fix -- no "
             "independent value.",
         )
-        council, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _council(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=102, title="Fix off-by-one in parser")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task, stall_context="stalled after 3 attempts", doc_context="", depth=0
         )
 
@@ -163,7 +163,7 @@ class TestDecompositionCouncilValidationOverturnsDirection:
         )
 
 
-class TestDecompositionCouncilDeclineLowConfidence:
+class TestDecompositionEnsembleDeclineLowConfidence:
     """A low-confidence or garbled decline is retried once (whole pair), then final."""
 
     @pytest.mark.asyncio
@@ -182,13 +182,13 @@ class TestDecompositionCouncilDeclineLowConfidence:
             confidence="medium",
             reasoning="Still unclear on second look; declining.",
         )
-        council, calls = _council(
+        ensemble, calls = _council(
             monkeypatch,
             results=[direction_1, validation_1, direction_2, validation_2],
         )
         task = TaskFactory.create(id=103, title="Untangle the legacy importer")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task, stall_context="stalled after 3 attempts", doc_context="", depth=1
         )
 
@@ -212,12 +212,12 @@ class TestDecompositionCouncilDeclineLowConfidence:
             confidence="high",
             reasoning="Confirmed atomic on retry.",
         )
-        council, calls = _council(
+        ensemble, calls = _council(
             monkeypatch, results=[garbled_direction, direction_2, validation_2]
         )
         task = TaskFactory.create(id=104, title="Some stalled task")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task, stall_context="stalled", doc_context="", depth=0
         )
 
@@ -244,12 +244,12 @@ class TestDecompositionCouncilDeclineLowConfidence:
             confidence="high",
             reasoning="Actually atomic.",
         )
-        council, calls = _council(
+        ensemble, calls = _council(
             monkeypatch, results=[malformed_direction, direction_2, validation_2]
         )
         task = TaskFactory.create(id=105, title="Some stalled task")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task, stall_context="stalled", doc_context="", depth=0
         )
 
@@ -268,13 +268,13 @@ class TestDecompositionCouncilDeclineLowConfidence:
             confidence="high",
             reasoning="Sound split confirmed on retry.",
         )
-        council, calls = _council(
+        ensemble, calls = _council(
             monkeypatch,
             results=[direction_1, garbled_validation, direction_2, validation_2],
         )
         task = TaskFactory.create(id=108, title="Some stalled task")
 
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task, stall_context="stalled", doc_context="", depth=0
         )
 
@@ -285,7 +285,7 @@ class TestDecompositionCouncilDeclineLowConfidence:
         assert result.confidence == "high"
 
 
-class TestDecompositionCouncilPromptContext:
+class TestDecompositionEnsemblePromptContext:
     """doc_context and stall_context are injected verbatim into the direction prompt."""
 
     @pytest.mark.asyncio
@@ -294,10 +294,10 @@ class TestDecompositionCouncilPromptContext:
     ) -> None:
         direction = _direction_reply()
         validation = _validation_reply(decision="reject", confidence="high")
-        council, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _council(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=106, title="Some stalled task")
 
-        await council.decide(
+        await ensemble.decide(
             task=task,
             stall_context="STALL_MARKER: three preflight attempts failed",
             doc_context="DOC_MARKER: relevant ADR excerpt",
@@ -312,7 +312,7 @@ class TestDecompositionCouncilPromptContext:
         assert "DOC_MARKER: relevant ADR excerpt" in calls[1]
 
 
-class TestDecompositionCouncilCreditExhaustion:
+class TestDecompositionEnsembleCreditExhaustion:
     """A credit-exhaustion signal from the seam must propagate, not be swallowed."""
 
     @pytest.mark.asyncio
@@ -323,13 +323,13 @@ class TestDecompositionCouncilCreditExhaustion:
             raise CreditExhaustedError("out of credits")
 
         monkeypatch.setattr("runner_utils.run_lightweight_agent", _raising_seam)
-        council = DecompositionCouncil(
+        ensemble = DecompositionEnsemble(
             runner=AsyncMock(), config=ConfigFactory.create()
         )
         task = TaskFactory.create(id=107, title="Some stalled task")
 
         with pytest.raises(CreditExhaustedError):
-            await council.decide(
+            await ensemble.decide(
                 task=task, stall_context="stalled", doc_context="", depth=0
             )
 
@@ -350,16 +350,16 @@ class TestDecompositionCouncilCreditExhaustion:
             call_count += 1
             if call_count == 1:
                 return SimpleResult(stdout=_direction_reply(), stderr="", returncode=0)
-            raise CreditExhaustedError("out of credits mid-council")
+            raise CreditExhaustedError("out of credits mid-ensemble")
 
         monkeypatch.setattr("runner_utils.run_lightweight_agent", _seam)
-        council = DecompositionCouncil(
+        ensemble = DecompositionEnsemble(
             runner=AsyncMock(), config=ConfigFactory.create()
         )
         task = TaskFactory.create(id=109, title="Some stalled task")
 
         with pytest.raises(CreditExhaustedError):
-            await council.decide(
+            await ensemble.decide(
                 task=task, stall_context="stalled", doc_context="", depth=0
             )
         assert call_count == 2

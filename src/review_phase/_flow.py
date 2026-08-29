@@ -67,7 +67,7 @@ logger = logging.getLogger("hydraflow.review_phase")
 # * ``pre-flight``   — ``_run_pre_flight_advisor`` (the PreFlightAdvisor plan).
 # * ``review``       — the adversarial-review node: the sole primary reviewer
 #   actuator (``_run_and_post_review`` → ``ReviewRunner.review`` + the
-#   ``_check_adversarial_threshold`` council). Records ``result``.
+#   ``_check_adversarial_threshold`` gate). Records ``result``.
 # * ``post-review``  — ultra-tier fold + the REQUEST_CHANGES/COMMENT re-review
 #   fix loop + visual validation + outcome recording + the product-track
 #   pre-merge spec check. The head of the former ``_run_post_review_actions``.
@@ -391,7 +391,7 @@ class ReviewFlowMixin:
         """The adversarial-review node: the sole primary reviewer actuator.
 
         Delegates to ``_run_and_post_review`` (``ReviewRunner.review`` + the
-        ``_check_adversarial_threshold`` council). Records ``result``.
+        ``_check_adversarial_threshold`` gate). Records ``result``.
         """
         pr = state["pr"]
         task = state["task"]

@@ -33,7 +33,7 @@ when it lives inside a prompt (the root cause of #10659 / #10616).
 | Shape | Build it as | Why |
 |---|---|---|
 | Multi-step **with verification** (decompose → act → verify → gate) | **`Flow`** | Stop/route logic becomes deterministic gated edges, not prompt prose |
-| Already a gate/loop/council | **Reuse the shared node** | e.g. adversarial-review, convergence-gate, touchpoint-expand |
+| Already a gate/loop/ensemble | **Reuse the shared node** | e.g. adversarial-review, convergence-gate, touchpoint-expand |
 | One-shot transform (reason once, emit) | **Keep the prompt** | transcript-summary, term-proposer, adr-review, triage-honeypot — a flow buys nothing |
 
 If in doubt, ask: *does this worker ever loop, retry, or route based on the
@@ -183,12 +183,12 @@ there is a single source of truth for the screen → verify → gate branches.
 | Worker | Builder | Graph (abbreviated) |
 |---|---|---|
 | **implement** (canonical) | `_build_implement_flow` | `decompose → no-progress-abort → build → screen → (spec-verify \| open-pr) → gate → done` |
-| **plan** | `_build_plan_flow` | `prepass → surface → draft → council → route → write-records → gate → ready → done` |
+| **plan** | `_build_plan_flow` | `prepass → surface → draft → ensemble → route → write-records → gate → ready → done` |
 | **review** | `_build_review_flow` | `guards → pre-review → pre-flight → review → post-review → gate → (route →) cleanup → done` |
 | **triage** | `_build_triage_flow` | `classify → route → record → reproduce → swap → done` |
 | **wiki-compilation** (P1) | `_build_compile_flow` | `extract → verify → synthesize → validate → done` |
 
-Start from the row whose shape matches yours. The council (`loop`) and
+Start from the row whose shape matches yours. The ensemble (`loop`) and
 convergence-gate (`gate`) nodes are shared across phases — reuse them rather
 than building a bespoke copy.
 

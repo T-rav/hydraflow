@@ -5,7 +5,7 @@ Extracted VERBATIM from ``plan_phase.py`` (god-class decomposition, Refs
 
 One cohesive concern: the explicit ``flows.Flow`` state machine that replaced
 the straight-line ``_plan_one`` body, its edge wiring, and every node body —
-prepass, surface, draft (the sole LLM actuator), council, route,
+prepass, surface, draft (the sole LLM actuator), ensemble, route,
 write-records, gate, ready, done. The node bodies delegate to the tiering,
 prepass, records and disposition mixins; the sequencing lives here.
 """
@@ -48,7 +48,7 @@ logger = logging.getLogger("hydraflow.plan_phase")
 #
 # The per-issue plan pipeline runs as an explicit ``src.flows.Flow``:
 #
-#     prepass -> surface -> draft -> council -> route
+#     prepass -> surface -> draft -> ensemble -> route
 #         route         --(close / escalate / plain-failure)--> done
 #         route         --> write-records -> gate
 #         gate          --(design-decision concerns >= K)-----> done  (human-required)
@@ -62,7 +62,7 @@ logger = logging.getLogger("hydraflow.plan_phase")
 # * ``surface``       — AssumptionSurfacer (adversarial stage 1); fetches the
 #   ``AdversarialState`` the whole pipeline threads.
 # * ``draft``         — the sole LLM actuator: ``PlannerRunner.plan``.
-# * ``council``       — PlanCouncil tight-loop (the shared adversarial-review
+# * ``ensemble``       — PlanEnsemble tight-loop (the shared adversarial-review
 #   node, ``AdversarialRetryLoop``-wrapped).
 # * ``route``         — already-satisfied handling + success/failure disposition;
 #   sets ``ts_status`` and either stops (close/escalate/failure) or continues.
@@ -92,7 +92,7 @@ class PlanFlowMixin:
     # one in the host's MRO (#11629).
     # ------------------------------------------------------------------
     _config: HydraFlowConfig
-    _council_agents: dict[str, AgentLike] | None
+    _ensemble_agents: dict[str, AgentLike] | None
     _escalator: PipelineEscalator
     _planners: PlannerRunner
     _prs: PRPort
@@ -143,7 +143,7 @@ class PlanFlowMixin:
             self, issue: Task, *, guidance: str
         ) -> DiscoverResult | None: ...  # provided by PlanPrepassMixin
 
-        async def _run_plan_council(
+        async def _run_plan_ensemble(
             self, issue: Task, adv: AdversarialState, plan_text: str
         ) -> None: ...  # provided by PlanAdversarialMixin
 
@@ -184,7 +184,7 @@ class PlanFlowMixin:
         """Plan a single issue (shared by standalone and epic flows).
 
         Runs the per-issue plan pipeline as an explicit ``src.flows.Flow`` (P3a
-        of #10682, ADR-0111): ``prepass -> surface -> draft -> council -> route
+        of #10682, ADR-0111): ``prepass -> surface -> draft -> ensemble -> route
         -> (write-records -> gate -> ready) -> done``. Signature and
         ``PlanResult`` return contract are unchanged; the outer scaffolding
         (stop-event checks, planner semaphore, sentry span, store lifecycle)
@@ -238,7 +238,7 @@ class PlanFlowMixin:
                 Node("prepass", self._flow_prepass, kind="gate"),
                 Node("surface", self._flow_surface),
                 Node("draft", self._flow_draft),
-                Node("council", self._flow_council, kind="loop"),
+                Node("ensemble", self._flow_ensemble, kind="loop"),
                 Node("route", self._flow_route, kind="gate"),
                 Node("write-records", self._flow_write_records),
                 Node("gate", self._flow_gate, kind="gate"),
@@ -250,8 +250,8 @@ class PlanFlowMixin:
                 Edge("prepass", "done", when=_flow_stopped),
                 Edge("prepass", "surface"),
                 Edge("surface", "draft"),
-                Edge("draft", "council"),
-                Edge("council", "route"),
+                Edge("draft", "ensemble"),
+                Edge("ensemble", "route"),
                 Edge("route", "done", when=_flow_stopped),
                 Edge("route", "write-records"),
                 Edge("write-records", "gate"),
@@ -548,19 +548,19 @@ class PlanFlowMixin:
         state["result"] = result
         return state
 
-    async def _flow_council(self, state: FlowState) -> FlowState:
-        """Adversarial stage 3: PlanCouncil tight-loop over the drafted plan.
+    async def _flow_ensemble(self, state: FlowState) -> FlowState:
+        """Adversarial stage 3: PlanEnsemble tight-loop over the drafted plan.
 
         The shared adversarial-review node (``AdversarialRetryLoop``-wrapped);
-        no-op when council agents are not configured or the draft failed. The
-        same delegation seam (``_run_plan_council``) P3b/P3c reuse.
+        no-op when ensemble agents are not configured or the draft failed. The
+        same delegation seam (``_run_plan_ensemble``) P3b/P3c reuse.
         """
         issue = state["issue"]
         adv = state["adv"]
         result = state["result"]
         skip, complexity = self._skip_plan_review(issue)
         if skip:
-            # #11298 light tier skips the council too: the council critiques
+            # #11298 light tier skips the ensemble too: the ensemble critiques
             # a deliberately-short LITE plan against full-scale expectations,
             # raising design-decision concerns that no reviewer stage will
             # resolve — observed live 2026-08-16 as a mass HITL cascade
@@ -569,23 +569,23 @@ class PlanFlowMixin:
             # raised by earlier stages still route genuinely ambiguous
             # issues to HITL, and cycled issues get the full stack again.
             logger.info(
-                "PlanCouncil skipped for issue #%d — light-tier "
+                "PlanEnsemble skipped for issue #%d — light-tier "
                 "(complexity %d; #11298)",
                 issue.id,
                 complexity,
             )
             state["result"] = result
             return state
-        if self._council_agents is not None and result.success and result.plan:
+        if self._ensemble_agents is not None and result.success and result.plan:
             try:
-                await self._run_plan_council(issue, adv, result.plan)
+                await self._run_plan_ensemble(issue, adv, result.plan)
             except Exception as exc:  # noqa: BLE001
                 # Dark-factory contract: a voter that exhausted credit MUST
                 # surface so the loop pauses on the billing signal instead of
                 # forwarding a half-empty tally toward 'ready'.
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
-                    "PlanCouncil failed for issue #%d — forwarding concerns unchanged",
+                    "PlanEnsemble failed for issue #%d — forwarding concerns unchanged",
                     issue.id,
                     exc_info=True,
                 )

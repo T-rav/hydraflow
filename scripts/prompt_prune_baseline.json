@@ -398,14 +398,14 @@
 8
 ]
 },
-"decomposition_council_direction": {
+"decomposition_ensemble_direction": {
 "chars": 8447,
 "fails": [
 3,
 8
 ]
 },
-"decomposition_council_validation": {
+"decomposition_ensemble_validation": {
 "chars": 10884,
 "fails": [
 1,

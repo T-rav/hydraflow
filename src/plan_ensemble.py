@@ -1,8 +1,8 @@
-"""PlanCouncil — three-voter adversarial review of a plan.
+"""PlanEnsemble — three-voter adversarial review of a plan.
 
 Runs Builder / Tester / Risk-Skeptic voters concurrently. Each voter
 encodes a distinct prior (ship / paranoid / kill-or-shrink) in its system
-prompt. The council aggregates findings into a CouncilTally that decides
+prompt. The ensemble aggregates findings into a EnsembleTally that decides
 whether the planner should retry.
 
 Tally rule:
@@ -15,7 +15,7 @@ Tally rule:
   - Convergence = no CRITICAL AND no overlapping HIGH.
 
 A voter that crashes is logged and treated as contributing zero findings —
-the council does not propagate the exception.
+the ensemble does not propagate the exception.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from difflib import SequenceMatcher
 
 from adversarial_agents import AgentLike, extract_json
 from pending_concerns import Concern
-from plan_council_prompts import (
+from plan_ensemble_prompts import (
     BUILDER_PROMPT,
     RISK_SKEPTIC_PROMPT,
     TESTER_PROMPT,
@@ -48,14 +48,14 @@ _PROMPTS: dict[str, str] = {
 
 
 @dataclass
-class CouncilTally:
+class EnsembleTally:
     findings: list[Concern]
     should_retry: bool
     raw_per_voter: dict[str, list[Concern]] = field(default_factory=dict)
 
 
 @dataclass
-class PlanCouncil:
+class PlanEnsemble:
     """Three-voter adversarial review of a plan.
 
     `agents` must contain keys "builder", "tester", "risk_skeptic". Each
@@ -67,7 +67,7 @@ class PlanCouncil:
 
     async def deliberate(
         self, plan_text: str, pending_concerns: list[Concern]
-    ) -> CouncilTally:
+    ) -> EnsembleTally:
         user_msg = _build_user_message(plan_text, pending_concerns)
         results = await asyncio.gather(
             *(self._run_voter(role, user_msg) for role in _ROLES),
@@ -77,7 +77,7 @@ class PlanCouncil:
         # Dark-factory contract: a voter that exhausts credit (or hits an
         # auth failure) must NOT be silently treated as "contributed zero
         # findings". Re-raise the fatal billing/auth signal out of the
-        # council so plan_phase's caller can pause the loop instead of
+        # ensemble so plan_phase's caller can pause the loop instead of
         # marching the issue toward 'ready' on a half-empty tally.
         for result in results:
             if isinstance(result, AuthenticationError | CreditExhaustedError):
@@ -87,7 +87,7 @@ class PlanCouncil:
         all_findings: list[tuple[str, Concern]] = []
         for role, result in zip(_ROLES, results, strict=True):
             if isinstance(result, BaseException):
-                logger.warning("PlanCouncil voter %s crashed: %s", role, result)
+                logger.warning("PlanEnsemble voter %s crashed: %s", role, result)
                 per_voter[role] = []
                 continue
             per_voter[role] = result
@@ -101,14 +101,14 @@ class PlanCouncil:
         try:
             data = extract_json(raw)
         except json.JSONDecodeError:
-            logger.warning("PlanCouncil voter %s returned non-JSON", role)
+            logger.warning("PlanEnsemble voter %s returned non-JSON", role)
             return []
         now = datetime.now(UTC)
         return [
             Concern(
                 id=f"PLAN-{role.upper()}-{i:03d}",
                 raised_in_phase="plan",
-                raised_in_stage=f"plan_council_{role}",
+                raised_in_stage=f"plan_ensemble_{role}",
                 severity=f["severity"],
                 concern=f["concern"],
                 raised_at=now,
@@ -137,7 +137,7 @@ def _build_user_message(plan_text: str, pending: list[Concern]) -> str:
 def _tally(
     all_findings: list[tuple[str, Concern]],
     per_voter: dict[str, list[Concern]],
-) -> CouncilTally:
+) -> EnsembleTally:
     has_critical = any(c.severity == "CRITICAL" for _, c in all_findings)
 
     high_findings = [(role, c) for role, c in all_findings if c.severity == "HIGH"]
@@ -164,7 +164,7 @@ def _tally(
             if c.severity in {"MEDIUM", "LOW"}:
                 merged_findings.append(c)
 
-    return CouncilTally(
+    return EnsembleTally(
         findings=merged_findings,
         should_retry=should_retry,
         raw_per_voter=per_voter,

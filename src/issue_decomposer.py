@@ -22,10 +22,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.issue_decomposer")
 
-# Marker the DecompositionCouncil's direction pass uses to scope one child as
-# "land the already-working slice" (see decomposition_council.py's direction
+# Marker the DecompositionEnsemble's direction pass uses to scope one child as
+# "land the already-working slice" (see decomposition_ensemble.py's direction
 # prompt). Either a "salvage" label or a "[salvage]" title prefix counts --
-# the council emits the former via NewIssueSpec.labels, but the title-prefix
+# the ensemble emits the former via NewIssueSpec.labels, but the title-prefix
 # form is accepted too so a differently-shaped LLM reply still orders
 # correctly instead of silently losing the safe-slice-first guarantee.
 _SALVAGE_LABEL = "salvage"
@@ -171,8 +171,8 @@ class IssueDecomposer:
             return None
 
         # Create child issues. Salvage-marked children (the "land the
-        # already-working slice" child a council may scope, see
-        # DecompositionCouncil's direction prompt) go first so the safe
+        # already-working slice" child a ensemble may scope, see
+        # DecompositionEnsemble's direction prompt) go first so the safe
         # slice ships before the riskier follow-on children -- a stable
         # sort preserves relative order within each group.
         child_numbers: list[int] = []
@@ -250,7 +250,7 @@ class IssueDecomposer:
         # This is the terminal's idempotency marker (decompose_or_escalate skips
         # an already-"decomposed" issue); writing it last meant a post_comment or
         # close_issue failure left the source un-marked and open, so the next
-        # tick re-ran the council and created a DUPLICATE epic + children.
+        # tick re-ran the ensemble and created a DUPLICATE epic + children.
         self._state.mark_issue(source_task.id, "decomposed")
 
         # Close the original issue with a link to the epic (cosmetic cleanup —

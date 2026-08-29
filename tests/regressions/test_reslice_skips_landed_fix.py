@@ -69,9 +69,9 @@ def _world(tmp_path: Path, *, check_state: str):
     for _ in range(config.auto_agent_max_attempts):
         state.bump_auto_agent_attempts(ISSUE)
 
-    council = AsyncMock()
-    council.decide = AsyncMock(
-        side_effect=AssertionError("the council must not be asked about landed work")
+    ensemble = AsyncMock()
+    ensemble.decide = AsyncMock(
+        side_effect=AssertionError("the ensemble must not be asked about landed work")
     )
     audit = MagicMock()
     audit.daily_spend = MagicMock(return_value=0.0)
@@ -88,7 +88,7 @@ def _world(tmp_path: Path, *, check_state: str):
     epic_manager = MagicMock()
     epic_manager.register_epic = AsyncMock()
     loop._decomposer = IssueDecomposer(gh, epic_manager, state, config)
-    loop._council = council
+    loop._council = ensemble
     return loop, gh
 
 

@@ -109,7 +109,7 @@ SANDBOX_SEAMS: dict[str, str] = {
     # ``runners=fake_llm``; every other build_services BaseRunner gets the
     # injected FakeSubprocessRunner via ``runner=subprocess_runner``.
     "base_runner": "fake_llm_runner",
-    # The adversarial planning councils share one SubprocessAgentRunner built
+    # The adversarial planning ensembles share one SubprocessAgentRunner built
     # with ``subprocess_runner`` from this composition root. Sandbox main passes
     # FakeSubprocessRunner, so its centralized ``run_lightweight_agent`` call
     # never constructs or reaches a real CLI process.
@@ -139,7 +139,7 @@ SANDBOX_SEAMS: dict[str, str] = {
     #   ``config_disabled`` before it ever builds a runner.
     #
     # The ADR-0063 runners this entry named before #11602 (discover /
-    # plan-review / spec-review / diagnostic / decompose-council) are
+    # plan-review / spec-review / diagnostic / decompose-ensemble) are
     # ``BaseRunner`` subclasses, not ``BaseSubprocessRunner`` ones — their
     # sentinel consults live in their own dispatch methods and are declared by
     # the ``base_runner`` entry above. This entry never covered them.
@@ -543,10 +543,10 @@ def _load_phase_script(
                 verdict=entry["verdict"],
                 gaps=list(entry.get("gaps", []) or []),
             )
-    elif phase_name == "shape_council":
+    elif phase_name == "shape_ensemble":
         assert isinstance(payload, dict)
         # Inner keys are round numbers; from_json coerces them to int.
-        fake_llm.script_shape_council(issue_number, payload)
+        fake_llm.script_shape_ensemble(issue_number, payload)
     elif phase_name == "implement_spec_review":
         assert isinstance(payload, list)
         for entry in payload:
@@ -1193,7 +1193,7 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
       fake_llm`` ``svc.reviewers`` IS the fake runner, whose ``__dict__``
       carries the assignment cleanly.
     - ADR-0063/ADR-0107 engines (discover/shape/plan-review/spec-review/
-      diagnostic/decompose-council) each consult ``getattr(self,
+      diagnostic/decompose-ensemble) each consult ``getattr(self,
       "_mockworld_fake_llm", None)`` in their subprocess-dispatch method before
       the real ``claude`` spawn (#9796).
     - ``AutoAgentPreflightLoop._build_spawn_fn`` (#11298 light lane) builds
@@ -1234,9 +1234,9 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
     diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
     if diagnostic_runner is not None:
         diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
-    if decompose_council is not None:
-        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    decompose_ensemble = getattr(svc.auto_agent_preflight_loop, "_council", None)
+    if decompose_ensemble is not None:
+        decompose_ensemble._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
     # vars() assignment: instance-level seam (same idiom as the skill-prompt
     # ``_run_corpus`` seam in main()) — shadows the method for this loop only.
     preflight_loop = svc.auto_agent_preflight_loop

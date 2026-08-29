@@ -4,7 +4,7 @@ Verifies the wiring contract from Task 7 of the earlier-adversarial
 pipeline implementation plan:
 
   1. AssumptionSurfacer runs before Planner.
-  2. PlanCouncil runs after Planner, before the existing PlanReviewer.
+  2. PlanEnsemble runs after Planner, before the existing PlanReviewer.
   3. The existing PlanReviewer runs unchanged.
   4. SpecACGenerator + SpecJudge run after PlanReviewer.
   5. Each new stage is wrapped in AdversarialRetryLoop (budget=3).
@@ -78,7 +78,7 @@ class TestAdversarialStateSchemaEvolution:
         state_file = tmp_path / "state.json"
         tracker = StateTracker(state_file)
 
-        adv = AdversarialState(phase="plan", current_stage="plan_council")
+        adv = AdversarialState(phase="plan", current_stage="plan_ensemble")
         tracker.set_adversarial_state(42, adv)
 
         # Reload from disk.
@@ -86,7 +86,7 @@ class TestAdversarialStateSchemaEvolution:
         loaded = tracker2.get_adversarial_state(42)
         assert loaded is not None
         assert loaded.phase == "plan"
-        assert loaded.current_stage == "plan_council"
+        assert loaded.current_stage == "plan_ensemble"
 
     def test_state_data_field_default_empty_dict(self) -> None:
         """``StateData.adversarial_states`` defaults to an empty dict."""
@@ -124,12 +124,12 @@ def _make_recording_agents() -> tuple[_Recorder, dict[str, AsyncMock]]:
         rec.calls.append("assumption_surfacer")
         return '{"assumptions": [], "concerns": []}'
 
-    async def _council_voter_run(_system: str, _user: str) -> str:
-        # PlanCouncil runs three voters concurrently. We only need to
-        # record the council ran once (per attempt), so use a sentinel
+    async def _ensemble_voter_run(_system: str, _user: str) -> str:
+        # PlanEnsemble runs three voters concurrently. We only need to
+        # record the ensemble ran once (per attempt), so use a sentinel
         # the first voter records and the others ignore.
-        if "plan_council" not in rec.calls:
-            rec.calls.append("plan_council")
+        if "plan_ensemble" not in rec.calls:
+            rec.calls.append("plan_ensemble")
         return '{"findings": []}'
 
     async def _ac_run(_system: str, _user: str) -> str:
@@ -144,11 +144,11 @@ def _make_recording_agents() -> tuple[_Recorder, dict[str, AsyncMock]]:
     surfacer_agent.run = _surfacer_run
 
     builder_agent = AsyncMock()
-    builder_agent.run = _council_voter_run
+    builder_agent.run = _ensemble_voter_run
     tester_agent = AsyncMock()
-    tester_agent.run = _council_voter_run
+    tester_agent.run = _ensemble_voter_run
     risk_agent = AsyncMock()
-    risk_agent.run = _council_voter_run
+    risk_agent.run = _ensemble_voter_run
 
     ac_agent = AsyncMock()
     ac_agent.run = _ac_run
@@ -157,9 +157,9 @@ def _make_recording_agents() -> tuple[_Recorder, dict[str, AsyncMock]]:
 
     agents = {
         "surfacer": surfacer_agent,
-        "council_builder": builder_agent,
-        "council_tester": tester_agent,
-        "council_risk_skeptic": risk_agent,
+        "ensemble_builder": builder_agent,
+        "ensemble_tester": tester_agent,
+        "ensemble_risk_skeptic": risk_agent,
         "spec_ac": ac_agent,
         "spec_judge": judge_agent,
     }
@@ -171,7 +171,7 @@ class TestPlanPhaseAdversarialWiring:
     async def test_stages_run_in_spec_order_when_agents_configured(
         self, config: HydraFlowConfig
     ) -> None:
-        """Surfacer → Planner → Council → Reviewer → AC → Judge → label swap.
+        """Surfacer → Planner → Ensemble → Reviewer → AC → Judge → label swap.
 
         With the adversarial agents wired in, the new stages must
         execute around the existing planner+reviewer call in the order
@@ -186,17 +186,17 @@ class TestPlanPhaseAdversarialWiring:
         # factory's loop-up of LLM models.
         phase.attach_adversarial_agents(
             surfacer_agent=agents["surfacer"],
-            council_agents={
-                "builder": agents["council_builder"],
-                "tester": agents["council_tester"],
-                "risk_skeptic": agents["council_risk_skeptic"],
+            ensemble_agents={
+                "builder": agents["ensemble_builder"],
+                "tester": agents["ensemble_tester"],
+                "risk_skeptic": agents["ensemble_risk_skeptic"],
             },
             spec_ac_agent=agents["spec_ac"],
             spec_judge_agent=agents["spec_judge"],
         )
 
         # Existing planner shim records its own call so we can verify
-        # surfacer ran BEFORE it and council ran AFTER it.
+        # surfacer ran BEFORE it and ensemble ran AFTER it.
         async def _planner_plan(*_args, **_kwargs):
             rec.calls.append("planner")
             return PlanResultFactory.create(
@@ -212,7 +212,7 @@ class TestPlanPhaseAdversarialWiring:
 
         await phase.plan_issues()
 
-        # Filter to known markers (drops noise like duplicate council voters)
+        # Filter to known markers (drops noise like duplicate ensemble voters)
         known = [
             c
             for c in rec.calls
@@ -220,7 +220,7 @@ class TestPlanPhaseAdversarialWiring:
             in {
                 "assumption_surfacer",
                 "planner",
-                "plan_council",
+                "plan_ensemble",
                 "spec_ac_generator",
                 "spec_judge",
             }
@@ -228,7 +228,7 @@ class TestPlanPhaseAdversarialWiring:
         assert known == [
             "assumption_surfacer",
             "planner",
-            "plan_council",
+            "plan_ensemble",
             "spec_ac_generator",
             "spec_judge",
         ], f"Adversarial stages out of order: {known}"
@@ -246,10 +246,10 @@ class TestPlanPhaseAdversarialWiring:
         phase, state, planners, _prs, store, _stop = make_plan_phase(config)
         phase.attach_adversarial_agents(
             surfacer_agent=agents["surfacer"],
-            council_agents={
-                "builder": agents["council_builder"],
-                "tester": agents["council_tester"],
-                "risk_skeptic": agents["council_risk_skeptic"],
+            ensemble_agents={
+                "builder": agents["ensemble_builder"],
+                "tester": agents["ensemble_tester"],
+                "risk_skeptic": agents["ensemble_risk_skeptic"],
             },
             spec_ac_agent=agents["spec_ac"],
             spec_judge_agent=agents["spec_judge"],
@@ -333,7 +333,7 @@ class TestImplementPhaseReadsAdversarialState:
                 Concern(
                     id="PLAN-COUNCIL-001",
                     raised_in_phase="plan",
-                    raised_in_stage="plan_council_tester",
+                    raised_in_stage="plan_ensemble_tester",
                     severity="HIGH",
                     concern="Test for X is missing.",
                     raised_at=datetime.now(UTC),
@@ -521,10 +521,10 @@ class TestPlanPhaseCreditExhaustionPropagates:
         phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
         phase.attach_adversarial_agents(
             surfacer_agent=agents["surfacer"],
-            council_agents={
-                "builder": agents["council_builder"],
-                "tester": agents["council_tester"],
-                "risk_skeptic": agents["council_risk_skeptic"],
+            ensemble_agents={
+                "builder": agents["ensemble_builder"],
+                "tester": agents["ensemble_tester"],
+                "risk_skeptic": agents["ensemble_risk_skeptic"],
             },
             spec_ac_agent=agents["spec_ac"],
             spec_judge_agent=agents["spec_judge"],
@@ -549,7 +549,7 @@ class TestPlanPhaseCreditExhaustionPropagates:
     async def test_council_voter_credit_exhaustion_propagates(
         self, config: HydraFlowConfig
     ) -> None:
-        """A CreditExhaustedError from a PlanCouncil voter must propagate."""
+        """A CreditExhaustedError from a PlanEnsemble voter must propagate."""
         from subprocess_util import CreditExhaustedError
 
         _rec, agents = _make_recording_agents()
@@ -557,15 +557,15 @@ class TestPlanPhaseCreditExhaustionPropagates:
         async def _voter_credit_out(_system: str, _user: str) -> str:
             raise CreditExhaustedError("usage limit reached", resume_at=None)
 
-        agents["council_tester"].run = _voter_credit_out
+        agents["ensemble_tester"].run = _voter_credit_out
 
         phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
         phase.attach_adversarial_agents(
             surfacer_agent=agents["surfacer"],
-            council_agents={
-                "builder": agents["council_builder"],
-                "tester": agents["council_tester"],
-                "risk_skeptic": agents["council_risk_skeptic"],
+            ensemble_agents={
+                "builder": agents["ensemble_builder"],
+                "tester": agents["ensemble_tester"],
+                "risk_skeptic": agents["ensemble_risk_skeptic"],
             },
             spec_ac_agent=agents["spec_ac"],
             spec_judge_agent=agents["spec_judge"],

@@ -151,8 +151,8 @@ def test_seed_round_trips_phase_scripts_through_json() -> None:
     """JSON round-trip preserves the ADR-0063 phase_scripts shape.
 
     Inner keys are issue numbers (string on the wire, int after parse).
-    The ``shape_council`` inner-inner keys are round numbers and also need
-    string→int coercion so ``shape_council_verdict_for_round(issue, 1)``
+    The ``shape_ensemble`` inner-inner keys are round numbers and also need
+    string→int coercion so ``shape_ensemble_verdict_for_round(issue, 1)``
     sees an int round number after a sandbox boot.
     """
     original = MockWorldSeed(
@@ -163,7 +163,7 @@ def test_seed_round_trips_phase_scripts_through_json() -> None:
             "plan_review": {
                 2: [{"verdict": "reject", "gaps": ["g1"]}],
             },
-            "shape_council": {
+            "shape_ensemble": {
                 3: {1: "split", 2: "consensus"},
             },
             "implement_spec_review": {
@@ -180,14 +180,14 @@ def test_seed_round_trips_phase_scripts_through_json() -> None:
     assert parsed.phase_scripts["plan_review"][2] == [
         {"verdict": "reject", "gaps": ["g1"]}
     ]
-    assert parsed.phase_scripts["shape_council"][3] == {1: "split", 2: "consensus"}
+    assert parsed.phase_scripts["shape_ensemble"][3] == {1: "split", 2: "consensus"}
     assert parsed.phase_scripts["implement_spec_review"][4] == [
         {"compliant": False, "gaps": ["missing X"]}
     ]
     # Issue keys must be ints (not the JSON string they were on the wire).
     assert all(isinstance(k, int) for k in parsed.phase_scripts["discover"])
-    # shape_council round keys must also be ints (used for direct lookup).
-    assert all(isinstance(rk, int) for rk in parsed.phase_scripts["shape_council"][3])
+    # shape_ensemble round keys must also be ints (used for direct lookup).
+    assert all(isinstance(rk, int) for rk in parsed.phase_scripts["shape_ensemble"][3])
 
 
 def test_default_seed_has_empty_issue_refinement_seam() -> None:

@@ -1,5 +1,5 @@
 {
-  "builder": "decomposition_council.DecompositionCouncil._build_direction_prompt",
+  "builder": "decomposition_ensemble.DecompositionEnsemble._build_validation_prompt",
   "args": {
     "task": {
       "id": 9812,
@@ -18,5 +18,7 @@
     "doc_context": "## ADR-0029 \u2014 Caretaker loop pattern (Accepted)\n\nCaretaker loops are read-only sensors. A caretaker never edits code, opens a fix\nPR, or gates a merge. Its output is an append-only record other components may\nread. **Consequence relevant here:** any change inside a caretaker tick body\nthat can raise will stop that tick from recording, and a caretaker that stops\nrecording fails silently \u2014 there is no consumer to notice.\n\n## ADR-0021 \u2014 Persistence architecture and data layout (Accepted)\n\nAppend-only JSONL under the repo-scoped data root. Rows are never rewritten in\nplace. **Consequence relevant here:** there is no migration mechanism for\nexisting rows. Changing the meaning of a field on new rows leaves old rows\ncarrying the old meaning forever, so a reader must either tolerate both or the\ncut-over must be recorded.\n\n## ADR-0115 \u2014 Sampled-audit adjudication (Accepted)\n\n`SampledAuditLoop` re-audits a governed sample of merged PRs with fresh context\nand no sight of the original gauntlet verdicts. Upheld disagreements are\ncross-linked into the escape ledger with `detection_source: sampled-audit`. The\ndisagreement rate is an independent bound on escaped defects. **Consequence\nrelevant here:** the loop is the factory's only independent quality sensor, so\nits blast radius is higher than its line count suggests.\n\n## Wiki \u2014 `docs/wiki/architecture-layers.md`, \"Pure aggregation modules\"\n\nAggregation helpers under `src/<area>/` stay pure: no I/O, no config\nconstruction, no framework imports. The route layer owns reading and validation.\nMixing them is the single most common cause of an aggregation helper that cannot\nbe unit-tested.\n\n## Wiki \u2014 `docs/wiki/patterns.md`, \"Dashboard empty states\"\n\nEvery dashboard panel distinguishes three states: a real zero, no data at all,\nand a failed fetch. An empty table that could be any of the three has twice been\nmistaken for an outage (#9540, #9702).\n",
     "depth": 1
   },
-  "faked_deps": {}
+  "faked_deps": {
+    "proposal": "escape_digest_split"
+  }
 }

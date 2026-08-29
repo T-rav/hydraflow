@@ -455,12 +455,12 @@ class _FakePhaseScripts:
         # Per-issue queues for each phase script type.
         self.discover: dict[int, deque[ScriptedDiscoverEval]] = {}
         self.plan_review: dict[int, deque[ScriptedPlanReview]] = {}
-        # Council scripts are keyed by issue → {round_num: verdict}. The
+        # Ensemble scripts are keyed by issue → {round_num: verdict}. The
         # round map persists across consume calls (unlike a deque) because
         # the same scenario may ask "what does round 2 look like?" twice
         # if the phase code re-runs the predicate. The map is read-only;
-        # ``script_shape_council`` replaces it wholesale per issue.
-        self.shape_council: dict[int, dict[int, Literal["consensus", "split"]]] = {}
+        # ``script_shape_ensemble`` replaces it wholesale per issue.
+        self.shape_ensemble: dict[int, dict[int, Literal["consensus", "split"]]] = {}
         self.implement_spec_review: dict[int, deque[ScriptedSpecReview]] = {}
 
 
@@ -485,8 +485,8 @@ class FakeLLM:
         # that need a sustained, real wall-clock "active" window (see
         # MockWorldSeed.plan_hold_seconds docstring for why).
         self.plan_hold_seconds: float = 0.0
-        # DecompositionCouncil replies, keyed by issue → FIFO of raw transcript
-        # strings. The council makes two seam calls per attempt (direction then
+        # DecompositionEnsemble replies, keyed by issue → FIFO of raw transcript
+        # strings. The ensemble makes two seam calls per attempt (direction then
         # validation), so a scenario scripts them in that order (and doubles the
         # list for a retry). Popped in call order by ``next_decomposition_reply``.
         self.decomposition: dict[int, deque[str]] = {}
@@ -502,7 +502,7 @@ class FakeLLM:
         self.auto_agent_calls: list[int] = []
 
     def script_decomposition(self, issue_number: int, replies: list[str]) -> None:
-        """Script the raw transcript strings the DecompositionCouncil's seam
+        """Script the raw transcript strings the DecompositionEnsemble's seam
         returns, in call order: [direction, validation, (retry: direction,
         validation), ...].
 
@@ -513,8 +513,8 @@ class FakeLLM:
         self.decomposition.setdefault(issue_number, deque()).extend(replies)
 
     def next_decomposition_reply(self, issue_number: int) -> str | None:
-        """Pop the next scripted council transcript for *issue_number*, or
-        ``None`` when the queue is empty (the council treats ``None`` as a
+        """Pop the next scripted ensemble transcript for *issue_number*, or
+        ``None`` when the queue is empty (the ensemble treats ``None`` as a
         garbled/retryable pass)."""
         queue = self.decomposition.get(issue_number)
         if not queue:
@@ -632,7 +632,7 @@ class FakeLLM:
     # MockWorld harness). The hooks let sandbox scenarios script the
     # exact failure-path branches the recovery workstreams were built to
     # exercise: coherence-failure → discover-expander dispatch,
-    # plan-reviewer reject → touchpoint-expander dispatch, council split →
+    # plan-reviewer reject → touchpoint-expander dispatch, ensemble split →
     # round-3 diversified panel, and zero-diff implement → spec-compliance
     # reviewer two-stage feedback.
     # ------------------------------------------------------------------
@@ -702,36 +702,36 @@ class FakeLLM:
             return None
         return q.popleft()
 
-    def script_shape_council(
+    def script_shape_ensemble(
         self,
         issue_number: int,
         round_to_verdict: dict[int, Literal["consensus", "split"]],
     ) -> None:
-        """Set the per-round council vote verdict map for *issue_number*.
+        """Set the per-round ensemble vote verdict map for *issue_number*.
 
-        Used by ``ExpertCouncil.vote`` / ``vote_diversified`` to synthesize
+        Used by ``ExpertEnsemble.vote`` / ``vote_diversified`` to synthesize
         a CouncilResult matching the scripted convergence pattern. The map
-        is read-only — successive ``shape_council_verdict_for_round`` reads
-        are idempotent so the council can be queried more than once per
+        is read-only — successive ``shape_ensemble_verdict_for_round`` reads
+        are idempotent so the ensemble can be queried more than once per
         round without consuming state.
 
         Example::
 
-            llm.script_shape_council(3, {1: "split", 2: "split", 3: "consensus"})
+            llm.script_shape_ensemble(3, {1: "split", 2: "split", 3: "consensus"})
 
         exercises the W4 round-3 diversified-persona panel.
         """
-        self._phase_scripts.shape_council[issue_number] = dict(round_to_verdict)
+        self._phase_scripts.shape_ensemble[issue_number] = dict(round_to_verdict)
 
-    def shape_council_verdict_for_round(
+    def shape_ensemble_verdict_for_round(
         self, issue_number: int, round_num: int
     ) -> Literal["consensus", "split"] | None:
         """Return the scripted verdict for *issue_number*/*round_num*.
 
-        Returns ``None`` when no script is set so the production council
+        Returns ``None`` when no script is set so the production ensemble
         falls through to its default subprocess-driven behavior.
         """
-        by_round = self._phase_scripts.shape_council.get(issue_number)
+        by_round = self._phase_scripts.shape_ensemble.get(issue_number)
         if not by_round:
             return None
         return by_round.get(round_num)

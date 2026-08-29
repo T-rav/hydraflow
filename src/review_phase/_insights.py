@@ -9,7 +9,7 @@ lands.
 One concern: what the phase *reports* once a review is decided — recording the
 insight record (and the stale-proposal / persistent-finding follow-ups it can
 spawn), publishing review status, escalating to HITL, and the adversarial
-council threshold that decides whether a summary warrants a second reviewer.
+threshold that decides whether a summary warrants a second reviewer.
 
 ``CATEGORY_DESCRIPTIONS`` / ``verify_proposals`` / ``_PROPOSAL_STALE_DAYS``
 are read by ``_record_review_insight`` and so are imported here; tests that
