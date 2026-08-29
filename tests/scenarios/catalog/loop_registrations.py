@@ -1662,7 +1662,7 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
     can override via the ``auto_agent_state`` port to use a real StateTracker.
 
     ADR-0105 decompose-to-converge: ``AutoAgentPreflightLoop`` only builds its
-    internal ``IssueDecomposer``/``DecompositionCouncil`` (and therefore only
+    internal ``IssueDecomposer``/``DecompositionEnsemble`` (and therefore only
     calls ``decompose_or_escalate`` instead of going straight to
     ``human-required``) when ``epic_manager``/``runner`` are passed at
     construction. Both default to ``None`` here — unseeded scenarios keep
@@ -1670,9 +1670,9 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
     path seed ``auto_agent_epic_manager`` (typically a real ``EpicManager``
     wired against the scenario's real ``StateTracker``, so the epic it
     registers is visible to ``epic_sweeper``) and
-    ``auto_agent_decompose_runner`` (any placeholder — the council's LLM
+    ``auto_agent_decompose_runner`` (any placeholder — the ensemble's LLM
     seam is scripted by monkeypatching ``runner_utils.run_lightweight_agent``
-    directly, mirroring ``tests/test_decomposition_council.py``, so the
+    directly, mirroring ``tests/test_decomposition_ensemble.py``, so the
     runner object itself is never actually invoked). Distinct port keys from
     ``_build_epic_monitor``'s ``epic_manager`` (a differently-shaped mock)
     avoid a collision if a scenario ever runs both loops in one MockWorld.

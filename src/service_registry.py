@@ -44,7 +44,7 @@ from contract_refresh_loop import ContractRefreshLoop
 from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
-from decomposition_council import DecompositionCouncil
+from decomposition_ensemble import DecompositionEnsemble
 from dependabot_merge_loop import DependabotMergeLoop
 from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
@@ -1260,11 +1260,11 @@ def build_services(
     plan_retry_window: GiveUpWindow | None = None
     plan_retry_self_solver: PlanRetrySelfSolver | None = None
     if config.giveup_window_enabled:
-        # Reuse the shared epic_manager + subprocess_runner so the council's
+        # Reuse the shared epic_manager + subprocess_runner so the ensemble's
         # LLM calls route through the same docker/host dial as every other
-        # loop (mirrors AutoAgentPreflightLoop's own decomposer/council build).
+        # loop (mirrors AutoAgentPreflightLoop's own decomposer/ensemble build).
         giveup_decomposer = IssueDecomposer(prs, epic_manager, state, config)
-        giveup_council = DecompositionCouncil(subprocess_runner, config)
+        giveup_ensemble = DecompositionEnsemble(subprocess_runner, config)
         give_up_tracker = GiveUpTracker(state)
         plan_retry_window = resolve_window(config, GiveUpClass.PLAN_RETRY)
         plan_retry_self_solver = PlanRetrySelfSolver(
@@ -1272,7 +1272,7 @@ def build_services(
             state=state,
             prs=prs,
             decomposer=giveup_decomposer,
-            council=giveup_council,
+            ensemble=giveup_ensemble,
             diagnose_label=config.diagnose_label[0],
         )
     route_back_coordinator = RouteBackCoordinator(
@@ -1380,7 +1380,7 @@ def build_services(
     #
     # Attach a ``SubprocessAgentRunner`` adapter to every adversarial-stage
     # slot on the plan phase. The adapter is stateless (the per-call
-    # ``system_prompt`` differentiates a surfacer from a council voter), so a
+    # ``system_prompt`` differentiates a surfacer from a ensemble voter), so a
     # single instance is shared across all slots.
     #
     # Why one shared instance: the AgentLike contract is
@@ -1400,7 +1400,7 @@ def build_services(
 
     planner_phase.attach_adversarial_agents(
         surfacer_agent=adversarial_agent,
-        council_agents={
+        ensemble_agents={
             "builder": adversarial_agent,
             "tester": adversarial_agent,
             "risk_skeptic": adversarial_agent,
@@ -2153,7 +2153,7 @@ def build_services(
         # ADR-0105 decompose-to-converge: reuse the shared epic_manager
         # (register_epic writes through the same persisted state + event bus
         # as the rest of the system) and the shared subprocess_runner (so
-        # the council's LLM calls route through the same docker/host dial
+        # the ensemble's LLM calls route through the same docker/host dial
         # as every other loop) rather than constructing loop-local copies.
         epic_manager=epic_manager,
         runner=subprocess_runner,

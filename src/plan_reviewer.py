@@ -311,7 +311,7 @@ class PlanReviewer(BaseRunner):
         Read-only against the repo root using the standard read-only
         tool set (``disallowed_tools="Write,Edit,NotebookEdit"``),
         matching every other read-only runner in this codebase
-        (``research_runner``, ``expert_council``, ``acceptance_criteria``,
+        (``research_runner``, ``expert_ensemble``, ``acceptance_criteria``,
         ``verification_judge``, ``shape_runner``, ``discover_runner``).
         Bash IS allowed so the reviewer can grep, run a single test
         file, or inspect file structure when evaluating the plan's

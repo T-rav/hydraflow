@@ -423,7 +423,7 @@ class EpicDecompResult(BaseModel):
         default="",
         description=(
             "Self-reported confidence ('high'/'medium'/'low') from the "
-            "decomposition council's decision. Empty for callers that don't "
+            "decomposition ensemble's decision. Empty for callers that don't "
             "produce a confidence signal (e.g. the legacy single-shot "
             "intake-triage path)."
         ),
@@ -3405,8 +3405,8 @@ class TriageUpdatePayload(TypedDict, total=False):
 # --- Earlier-adversarial pipeline event payloads (ADR pending) -----------
 #
 # These power dashboard observability for the new adversarial stages
-# (DiscoveryCouncil, PlanCouncil, SpecJudge, ShapeChallenger,
-# ShapeExpertCouncil, AssumptionSurfacer). Emitted by
+# (DiscoveryEnsemble, PlanEnsemble, SpecJudge, ShapeChallenger,
+# ShapeExpertEnsemble, AssumptionSurfacer). Emitted by
 # ``AdversarialRetryLoop`` and by post-merge wiki carryover.
 
 

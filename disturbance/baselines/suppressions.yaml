@@ -13,10 +13,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ now routes the drafter through run_lightweight_agent (one seam import replaces\
   \ build_lightweight_command+raise_if_credit_exhausted), making it dial-able + gated\
   \ + telemetried (dropped from both CH-6 grandfather lists). re-snapshot 2026-07-12:\
-  \ +decompose-to-converge PLC0415 lazy imports (decomposition_council/issue_decomposer/decompose_terminal/decomposition_docs\
+  \ +decompose-to-converge PLC0415 lazy imports (decomposition_ensemble/issue_decomposer/decompose_terminal/decomposition_docs\
   \ deferred run_lightweight_agent + models imports \u2014 circular-safe convention).\
   \ re-snapshot 2026-07-12: +1 sandbox_main type-ignore[attr-defined] (6\u21927) for\
-  \ the s54 DecompositionCouncil fake-LLM sentinel attach \u2014 same dynamic-attach\
+  \ the s54 DecompositionEnsemble fake-LLM sentinel attach \u2014 same dynamic-attach\
   \ idiom as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
   \ decompose_terminal imports no longer need the noqa after the b8ed6d8f cast fix).\
   \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) \u2014 _apply_sandbox_config_overrides\
@@ -137,7 +137,7 @@ entries:
   src/dashboard_routes/_ws_stream.py::noqa:BLE001: 1
   "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
   "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
-  src/decomposition_council.py::noqa:PLC0415: 1
+  src/decomposition_ensemble.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
   src/diagnostic_loop.py::noqa:UP007: 1
   src/diagram_loop.py::noqa:PLC0415: 6

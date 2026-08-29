@@ -396,7 +396,7 @@ class TestPluginDirFlags:
 
 class TestContractAgentIsolation:
     """``isolate_user_settings`` shields strict-JSON contract agents (triage,
-    judges, councils) from host user-level plugins/hooks.
+    judges, ensembles) from host user-level plugins/hooks.
 
     A user-installed superpowers plugin registers a ``SessionStart`` hook that
     injects "invoke a skill BEFORE any response, explore first" guidance into

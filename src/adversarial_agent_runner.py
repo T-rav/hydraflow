@@ -1,7 +1,7 @@
 """Subprocess-CLI adapter that satisfies the AgentLike Protocol.
 
-The earlier-adversarial pipeline (AssumptionSurfacer, PlanCouncil,
-DiscoveryCouncil, ShapeChallenger, ShapeExpertCouncil, SpecACGenerator,
+The earlier-adversarial pipeline (AssumptionSurfacer, PlanEnsemble,
+DiscoveryEnsemble, ShapeChallenger, ShapeExpertEnsemble, SpecACGenerator,
 SpecJudge) each take an agent satisfying the two-string-in,
 JSON-string-out contract in :mod:`src.adversarial_agents`. This adapter
 wraps the centralized one-shot execution seam
@@ -54,7 +54,7 @@ class SubprocessAgentRunner:
     Spawns a one-shot CLI process per ``run`` call. Stateless — a
     single instance is safe to share across all adversarial-stage
     agents (the per-call ``system_prompt`` is what differentiates a
-    surfacer from a council voter).
+    surfacer from a ensemble voter).
 
     Attributes
     ----------
@@ -122,7 +122,7 @@ class SubprocessAgentRunner:
             source="adversarial_planner",
             timeout=self.timeout,
             gh_token=gh_token,
-            # Adversarial judges (SpecJudge, PlanCouncil, …) emit strict JSON.
+            # Adversarial judges (SpecJudge, PlanEnsemble, …) emit strict JSON.
             # Isolate from host user plugins/hooks that would derail the
             # machine-readable response contract.
             isolate_user_settings=True,

@@ -143,7 +143,7 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         shared with MockWorld's wired orchestrator), so in production this is a
         single ``getattr`` returning ``False`` — the same seam idiom the
         ADR-0063 ``BaseRunner`` subclasses use (``discover_runner``,
-        ``plan_reviewer``, ``diagnostic_runner``, ``decomposition_council``).
+        ``plan_reviewer``, ``diagnostic_runner``, ``decomposition_ensemble``).
 
         The consult lives on the BASE, not on each subclass, because that is
         where the spawn lives: every subclass reaches ``stream_claude_process``

@@ -380,7 +380,7 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Review",
         "src/sampled_audit_loop.py:183",
     ),
-    # --- Shape / review-advisor / council (backfill 2026-07-30) ---
+    # --- Shape / review-advisor / ensemble (backfill 2026-07-30) ---
     AuditTarget(
         "shape_runner_turn",
         "shape_runner.ShapeRunner._build_turn_prompt",
@@ -424,18 +424,18 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "src/review_advisor.py:1335",
     ),
     AuditTarget(
-        "decomposition_council_direction",
-        "decomposition_council.DecompositionCouncil._build_direction_prompt",
-        "tests/fixtures/prompts/decomposition_council_direction.json",
+        "decomposition_ensemble_direction",
+        "decomposition_ensemble.DecompositionEnsemble._build_direction_prompt",
+        "tests/fixtures/prompts/decomposition_ensemble_direction.json",
         "Triage",
-        "src/decomposition_council.py:201",
+        "src/decomposition_ensemble.py:201",
     ),
     AuditTarget(
-        "decomposition_council_validation",
-        "decomposition_council.DecompositionCouncil._build_validation_prompt",
-        "tests/fixtures/prompts/decomposition_council_validation.json",
+        "decomposition_ensemble_validation",
+        "decomposition_ensemble.DecompositionEnsemble._build_validation_prompt",
+        "tests/fixtures/prompts/decomposition_ensemble_validation.json",
         "Triage",
-        "src/decomposition_council.py:290",
+        "src/decomposition_ensemble.py:290",
     ),
     # --- Caretaker / adjudication loops (backfill 2026-07-30) ---
     # NOTE: this builder's output is used twice — as the agent prompt AND as the

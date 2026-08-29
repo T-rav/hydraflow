@@ -340,7 +340,7 @@ Code anchors:
 The adversarial pipeline can burn up to ~30 LLM calls per issue (3 retries × ~2 calls/stage × 5 stages). Running that on every doc-fix and dependency bump would make the factory operationally expensive. `src/complexity_gate.py:ComplexityGate` classifies each issue before the adversarial stages fire:
 
 - `trivial` → bypass all five adversarial stages, route directly to planner / implementer.
-- `load_bearing` → run the full pipeline (AssumptionSurfacer → DiscoveryCouncil → PlanCouncil → SpecJudge → Shape Challenger/ExpertCouncil).
+- `load_bearing` → run the full pipeline (AssumptionSurfacer → DiscoveryEnsemble → PlanEnsemble → SpecJudge → Shape Challenger/ExpertEnsemble).
 
 The classification is a separate component (not buried in `plan_phase`) so its decisions are:
 

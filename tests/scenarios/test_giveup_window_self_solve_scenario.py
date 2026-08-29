@@ -5,7 +5,7 @@ adversarial review keeps flagging blocking findings is routed back to PLAN by
 the READY-stage precondition gate, cycle after cycle. This wires the REAL
 ``PreconditionGate`` → ``RouteBackCoordinator`` → ``GiveUpTracker`` →
 ``PlanRetrySelfSolver`` chain against a real ``StateTracker``, ``IssueCache``,
-``EpicManager`` and ``IssueDecomposer`` — only the decomposition council's LLM
+``EpicManager`` and ``IssueDecomposer`` — only the decomposition ensemble's LLM
 seam is scripted (mirroring test_decompose_to_converge_scenario.py).
 
 Proves the corrected escalation (ADR-0105, epic #10733 child 2):
@@ -15,7 +15,7 @@ Proves the corrected escalation (ADR-0105, epic #10733 child 2):
       does NOT get parked to ``human-required``. Give-up state is visible.
   (b) a plan that DOES converge (clean review) passes the gate untouched — the
       window never fires for a convergent issue.
-  (c) when the self-solve path itself is exhausted (council declines AND no
+  (c) when the self-solve path itself is exhausted (ensemble declines AND no
       diagnose stage), ``human-required`` IS applied — the genuine last resort.
 """
 
@@ -42,7 +42,7 @@ pytestmark = pytest.mark.scenario
 
 
 # ---------------------------------------------------------------------------
-# Council scripting (mirrors test_decompose_to_converge_scenario.py)
+# Ensemble scripting (mirrors test_decompose_to_converge_scenario.py)
 # ---------------------------------------------------------------------------
 
 
@@ -69,7 +69,7 @@ def _validation_reply(**fields: object) -> str:
     return json.dumps(fields)
 
 
-def _script_council(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None:
+def _script_ensemble(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None:
     from execution import SimpleResult  # noqa: PLC0415
 
     remaining = list(replies)
@@ -89,7 +89,7 @@ def _script_council(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None
 def _wire_chain(
     world: MockWorld, cache: IssueCache, *, diagnose_label: str | None = None
 ) -> tuple[PreconditionGate, RouteBackCoordinator]:
-    from decomposition_council import DecompositionCouncil  # noqa: PLC0415
+    from decomposition_ensemble import DecompositionEnsemble  # noqa: PLC0415
     from epic import EpicManager  # noqa: PLC0415
     from events import EventBus  # noqa: PLC0415
     from giveup_self_solve import PlanRetrySelfSolver  # noqa: PLC0415
@@ -107,14 +107,14 @@ def _wire_chain(
         event_bus=EventBus(),
     )
     decomposer = IssueDecomposer(github, epic_manager, state, cfg)
-    council = DecompositionCouncil(AsyncMock(), cfg)
+    ensemble = DecompositionEnsemble(AsyncMock(), cfg)
     diag = cfg.diagnose_label[0] if diagnose_label is None else diagnose_label
     self_solver = PlanRetrySelfSolver(
         config=cfg,
         state=state,
         prs=github,
         decomposer=decomposer,
-        council=council,
+        ensemble=ensemble,
         diagnose_label=diag,
     )
     coordinator = RouteBackCoordinator(
@@ -169,7 +169,7 @@ class TestThrashSelfSolvesViaDecompose:
         cache = IssueCache(tmp_path / "cache", enabled=True)
         _seed_blocking_plan(cache, issue_number)
         gate, _coordinator = _wire_chain(world, cache)
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [_direction_reply(), _validation_reply(decision="approve")],
         )
@@ -235,7 +235,7 @@ class TestConvergentPlanUntouched:
             issue_number, review_text="looks good", has_blocking=False
         )
         gate, _coordinator = _wire_chain(world, cache)
-        _script_council(monkeypatch, [_direction_reply(), _validation_reply()])
+        _script_ensemble(monkeypatch, [_direction_reply(), _validation_reply()])
 
         task = Task(id=issue_number, title="A plan that converges", body="ok")
 
@@ -271,10 +271,10 @@ class TestHumanRequiredOnlyAsLastResort:
         )
         cache = IssueCache(tmp_path / "cache", enabled=True)
         _seed_blocking_plan(cache, issue_number)
-        # No diagnose stage AND the council declines high-confidence → the
+        # No diagnose stage AND the ensemble declines high-confidence → the
         # self-solve ladder is fully exhausted, so human-required is correct.
         gate, _coordinator = _wire_chain(world, cache, diagnose_label="")
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [
                 _direction_reply(),
