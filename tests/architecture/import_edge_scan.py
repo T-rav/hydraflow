@@ -50,6 +50,7 @@ Declared limits, stated rather than patched around:
 from __future__ import annotations
 
 import ast
+import dataclasses
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -67,6 +68,10 @@ __all__ = [
     "reaches",
     "resolves_to_module",
 ]
+
+
+#: Longest rendered statement a failure message will carry.
+_STATEMENT_LIMIT: Final = 160
 
 
 class EdgeKind(StrEnum):
@@ -119,8 +124,25 @@ class ImportEdge:
     at all" does not.
     """
 
-    statement: str
-    """``ast.unparse`` of the statement, for the failure message."""
+    node: ast.AST = dataclasses.field(repr=False, compare=False)
+    """The statement or call this edge came from.
+
+    Kept as the node rather than as rendered text because ``ast.unparse`` is
+    60% of the cost of a whole-``src`` sweep and every edge but the handful
+    that fail is thrown away. :attr:`statement` renders it on demand.
+    """
+
+    @property
+    def statement(self) -> str:
+        """``ast.unparse`` of the statement, for the failure message."""
+        try:
+            rendered = ast.unparse(self.node)
+        except (AttributeError, ValueError):  # pragma: no cover - defensive
+            return "<unparseable>"
+        rendered = rendered.replace("\n", " ")
+        if len(rendered) > _STATEMENT_LIMIT:
+            return rendered[:_STATEMENT_LIMIT] + "…"
+        return rendered
 
 
 # ---------------------------------------------------------------------------
@@ -316,38 +338,25 @@ def _absolute(node: ast.ImportFrom, package: str) -> str:
 # The collector
 # ---------------------------------------------------------------------------
 
-_STATEMENT_LIMIT: Final = 160
-
-
-def _text(node: ast.AST) -> str:
-    try:
-        rendered = ast.unparse(node)
-    except (AttributeError, ValueError):  # pragma: no cover - defensive
-        return "<unparseable>"
-    rendered = rendered.replace("\n", " ")
-    if len(rendered) > _STATEMENT_LIMIT:
-        return rendered[:_STATEMENT_LIMIT] + "…"
-    return rendered
-
 
 def _collect(node: ast.AST, *, boot: bool, package: str, out: list[ImportEdge]) -> None:
     if isinstance(node, ast.Import):
         out.extend(
-            ImportEdge(alias.name, EdgeKind.IMPORT, node.lineno, boot, _text(node))
+            ImportEdge(alias.name, EdgeKind.IMPORT, node.lineno, boot, node)
             for alias in node.names
         )
         return
     if isinstance(node, ast.ImportFrom):
         base = _absolute(node, package)
         if base:
-            out.append(ImportEdge(base, EdgeKind.FROM, node.lineno, boot, _text(node)))
+            out.append(ImportEdge(base, EdgeKind.FROM, node.lineno, boot, node))
             out.extend(
                 ImportEdge(
                     f"{base}.{alias.name}",
                     EdgeKind.MEMBER,
                     node.lineno,
                     boot,
-                    _text(node),
+                    node,
                 )
                 for alias in node.names
                 if alias.name != "*"
@@ -355,7 +364,7 @@ def _collect(node: ast.AST, *, boot: bool, package: str, out: list[ImportEdge]) 
         return
     if isinstance(node, ast.Call):
         out.extend(
-            ImportEdge(named, EdgeKind.DYNAMIC, node.lineno, boot, _text(node))
+            ImportEdge(named, EdgeKind.DYNAMIC, node.lineno, boot, node)
             for named in _named_modules(node)
         )
     for child, child_boot in _children(node, boot):
