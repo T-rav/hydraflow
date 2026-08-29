@@ -30,6 +30,7 @@ graph LR
     src_mockworld_fakes_fake_github["src.mockworld.fakes.fake_github"]
     src_observability["src.observability"]
     src_onboarding["src.onboarding"]
+    src_policy["src.policy"]
     src_pr_unsticker["src.pr_unsticker"]
     src_preflight["src.preflight"]
     src_preflight_playbooks["src.preflight.playbooks"]
@@ -58,6 +59,7 @@ graph LR
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
+    src -- "2" --> src_policy
     src -- "2" --> src_pr_unsticker
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase

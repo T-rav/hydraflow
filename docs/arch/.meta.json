@@ -10,10 +10,10 @@
       "content_sha": "b2c2c8e82d5224ed76c3ce8ffe2295af9f96522e30f8d65969f111e31b7dcbe9"
     },
     "adr-falsifiability.md": {
-      "content_sha": "af510eb9344b4fe1bb368744a8c1a11c0f975389f5a0e022327bbc8b528f8299"
+      "content_sha": "565a507784f55a07422f8456db17d27d99e62b1e14dfe2a0c678bbff55bad481"
     },
     "adr_xref.md": {
-      "content_sha": "e0ffac1a9105b71a2ffc464e21c9c79e0879889b2aaf77389c2bfac67aab599b"
+      "content_sha": "ebc05ae3468ea15c551b19272e11a9f6dff831fb8920daef27f67607766d963c"
     },
     "ai_system_inventory.md": {
       "content_sha": "b3314e1a59f0e89bf2ffee3208c256f2535cdd3a96165a7022774eeac5dea907"
@@ -40,7 +40,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "4e8526a126630435520c7c90875bba9332325a85fec16fe795a7f656ba709a1d"
+      "content_sha": "c5a5cf100e42f3f12bfaf2a0b5bc8ddc908baf1196b4121b1a772ee0d2b0ea22"
     },
     "ports.md": {
       "content_sha": "67fc7b123d0d9952a7dcfd7e0ba0eb2979fd95b97d27e950655b05a71147689f"
@@ -55,5 +55,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "0e80de62885902c4eddcf4ee5c3c955dd2629b3b225d9b44c03bc6d0d14ccade"
+  "content_sha": "7207d86b9f637dcdf21eb89e92c133995e3d774bd9f17678f4bfd25812f4fae4"
 }
