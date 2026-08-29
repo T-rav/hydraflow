@@ -50,6 +50,15 @@ class _FakeSuppressionsDetector:
     def detect(self, repo_root: Path) -> list[Finding]:  # noqa: ARG002
         return self._findings
 
+    def reachable_ceilings(self) -> dict[str, int]:
+        """Unbounded, like the real detectors this stands in for.
+
+        Part of ``ViolationDetector`` since the dead-arm precondition landed;
+        a fake missing it would AttributeError the moment this loop is wired
+        through ``run_gate``.
+        """
+        return {}
+
 
 def _two_file_findings() -> list[Finding]:
     return [

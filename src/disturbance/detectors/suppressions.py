@@ -5,8 +5,12 @@ from __future__ import annotations
 import re
 import tokenize
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from disturbance.models import Finding
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Mapping
 
 _SUPPRESSION_RE = re.compile(
     r"#\s*(?P<kind>type:\s*ignore|noqa)(?P<detail>\[[^\]]*\]|:\s*[^#]+)?"
@@ -60,3 +64,13 @@ class SuppressionsDetector:
                 )
             )
         return out
+
+    def reachable_ceilings(self) -> Mapping[str, int]:
+        """No signature is capped: one file may hold arbitrarily many suppressions.
+
+        Every signature is ``<file>::<code>`` and its count is the number of
+        occurrences of that code in that file, which nothing bounds. There is
+        always a reachable count above any baseline, so every block-new arm
+        here is live by construction.
+        """
+        return {}

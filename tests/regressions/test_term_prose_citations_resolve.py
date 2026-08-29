@@ -27,6 +27,8 @@ import ast
 import re
 from pathlib import Path
 
+from ubiquitous_language import is_class_like_name
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
 TERMS = REPO_ROOT / "docs" / "wiki" / "terms"
@@ -53,19 +55,13 @@ def _cited_symbols(text: str) -> set[str]:
     return found
 
 
-def _is_class_like(name: str) -> bool:
-    """Two or more capitals AND at least one lowercase.
-
-    Deliberately NOT "capital, then a lowercase run" -- that pattern cannot
-    match a LEADING ACRONYM, so it silently skips ``ADRCouncilReviewer``,
-    ``ADRReviewPanel``, ``HTTPClient``. The first draft of this guard used
-    it and passed the very mutation it was written to catch. The two-capital
-    rule keeps ALL-CAPS prose words (``OK``, ``SIGKILL``, ``README``) and
-    ordinary capitalised words (``Proposed``) out, without that blind spot.
-    """
-    return sum(1 for c in name if c.isupper()) >= 2 and any(
-        c.islower() for c in name
-    )
+#: The house's ONE spelling of "this token is a multi-word type name".
+#: It lived here first; the audit's P2.9 ubiquitous-language check had a
+#: SECOND, narrower spelling (``[A-Z][a-z]+[A-Z][A-Za-z]+``) that could not
+#: express a leading acronym and so could not see 71 of this repo's public
+#: classes. Both now import this one — a rule stated twice is a rule that
+#: drifts, and the drift lands on whichever copy nobody mutation-tested.
+_is_class_like = is_class_like_name
 
 _NAME_FIELD = re.compile(r'^name:\s*"?([^"\n]+)"?\s*$', re.MULTILINE)
 
@@ -85,9 +81,7 @@ def _symbols_defined_in_src() -> set[str]:
         except (SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
-            if isinstance(
-                node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-            ):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 names.add(node.name)
     return names
 
@@ -139,11 +133,66 @@ def test_the_predicate_matches_leading_acronym_class_names() -> None:
     ``ADRCouncilReviewer`` -- the symbol the regression is about -- begins
     with an acronym. A predicate anchored on "capital then lowercase" skips
     it entirely and the guard passes while blind.
+
+    The names below are the ones the audit's SECOND, narrower spelling of
+    this rule could not see; they are real public classes in ``src/``.
     """
-    for name in ("ADRCouncilReviewer", "ADRReviewPanel", "HTTPClient", "IOError"):
+    for name in (
+        "ADRCouncilReviewer",
+        "ADRReviewPanel",
+        "PRPort",
+        "CIMonitorLoop",
+        "LLMClient",
+        "HITLRunner",
+        "BGWorkerManager",
+        "JSONFormatter",
+        "HTTPClient",
+        "IOError",
+    ):
         assert _is_class_like(name), f"{name} must be treated as a citation"
-    for name in ("OK", "SIGKILL", "README", "Proposed", "HOUSEKEEPING"):
+    for name in ("OK", "SIGKILL", "README", "Proposed", "HOUSEKEEPING", "TDD"):
         assert not _is_class_like(name), f"{name} must not be treated as a citation"
+
+
+#: The spelling this repo reached for at BOTH sites and that neither
+#: mutation-tested: a capital, a lowercase run, then another capital.
+_SUPERSEDED_CAMEL = re.compile(r"\b([A-Z][a-z]+[A-Z][A-Za-z]+)\b")
+
+
+def test_the_predicate_recovers_the_classes_the_superseded_spelling_missed() -> None:
+    """Measured against ``src/``, not asserted from a list.
+
+    A hand-written list of examples goes stale the moment one is renamed.
+    This asks the corpus: how many public multi-word class names does the
+    shared predicate see that the superseded one could not? It was 71 when
+    P2.9 was reporting ``PASS | 6/11 ToC terms covered`` over a vocabulary
+    that structurally excluded every one of them.
+    """
+    public_classes: set[str] = set()
+    for py in SRC.rglob("*.py"):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        public_classes.update(
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and not node.name.startswith("_")
+        )
+
+    assert len(public_classes) > 1000, "src/ class scan came back tiny"
+    recovered = {
+        name
+        for name in public_classes
+        if _is_class_like(name) and not _SUPERSEDED_CAMEL.fullmatch(name)
+    }
+
+    assert len(recovered) >= 60, (
+        f"only {len(recovered)} leading-acronym class names recovered; the "
+        "shared predicate has narrowed back towards the spelling it replaced"
+    )
+    for name in ("ADRReviewPanel", "PRPort", "CIMonitorLoop", "LLMClient"):
+        assert name in recovered, f"{name} is not being recovered"
 
 
 def test_the_regex_sees_both_halves_of_a_dotted_citation() -> None:
