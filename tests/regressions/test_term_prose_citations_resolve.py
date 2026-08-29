@@ -31,9 +31,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
 TERMS = REPO_ROOT / "docs" / "wiki" / "terms"
 
-# Any backticked identifier; an optional trailing ``.method`` /
-# ``.method()`` is stripped, since the class is what must resolve.
-_CITATION = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z_]\w*(?:\(\))?)?`")
+# A backticked dotted identifier, captured WHOLE. The first draft captured
+# only the head and treated ``.Tail`` as a strippable method suffix, so a
+# citation like ``adr_reviewer_loop.ADRCouncilReviewer`` was checked as the
+# lowercase module name alone -- which ``_is_class_like`` then skipped, so
+# NEITHER half was ever verified. Six dotted citations live in the corpus.
+_CITATION = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_]\w*)*)(?:\(\))?`")
+
+
+def _cited_symbols(text: str) -> set[str]:
+    """Every class-like segment of every backticked citation.
+
+    Dotted citations contribute each of their segments independently, so
+    ``module.Class`` is checked on ``Class`` rather than on ``module``.
+    """
+    found: set[str] = set()
+    for token in _CITATION.findall(text):
+        for segment in token.split("."):
+            if _is_class_like(segment):
+                found.add(segment)
+    return found
 
 
 def _is_class_like(name: str) -> bool:
@@ -95,10 +112,7 @@ def test_the_guard_is_looking_at_real_files() -> None:
     term_files = list(TERMS.glob("*.md"))
     assert len(term_files) > 50, f"expected the term corpus, found {len(term_files)}"
     assert len(_symbols_defined_in_src()) > 500, "src/ symbol scan came back tiny"
-    cited = sum(
-        len({s for s in _CITATION.findall(_body_of(md)) if _is_class_like(s)})
-        for md in term_files
-    )
+    cited = sum(len(_cited_symbols(_body_of(md))) for md in term_files)
     assert cited > 20, f"only {cited} prose citations found; the regex stopped matching"
 
 
@@ -106,8 +120,7 @@ def test_every_prose_citation_in_a_term_file_resolves() -> None:
     resolvable = _symbols_defined_in_src() | _declared_term_names()
     unresolved: dict[str, list[str]] = {}
     for md in sorted(TERMS.glob("*.md")):
-        cited = {s for s in _CITATION.findall(_body_of(md)) if _is_class_like(s)}
-        for symbol in sorted(cited):
+        for symbol in sorted(_cited_symbols(_body_of(md))):
             if symbol in resolvable or symbol in _ALLOWED_UNRESOLVED:
                 continue
             unresolved.setdefault(symbol, []).append(md.name)
@@ -131,3 +144,23 @@ def test_the_predicate_matches_leading_acronym_class_names() -> None:
         assert _is_class_like(name), f"{name} must be treated as a citation"
     for name in ("OK", "SIGKILL", "README", "Proposed", "HOUSEKEEPING"):
         assert not _is_class_like(name), f"{name} must not be treated as a citation"
+
+
+def test_the_regex_sees_both_halves_of_a_dotted_citation() -> None:
+    """The blind spot that let a dotted citation through entirely.
+
+    ``adr_reviewer_loop.ADRCouncilReviewer`` was captured as the module name
+    alone, which ``_is_class_like`` skips -- so the class half was never
+    checked and the module half never either. Six dotted citations are live
+    in the corpus today.
+    """
+    assert _cited_symbols("`adr_reviewer_loop.ADRCouncilReviewer`") == {
+        "ADRCouncilReviewer"
+    }
+    assert _cited_symbols("`base_runner.BaseRunner`") == {"BaseRunner"}
+    assert _cited_symbols("`ADRReviewPanel.review_proposed_adrs()`") == {
+        "ADRReviewPanel"
+    }
+    # A lone lowercase module name is not a class citation and must not be
+    # reported as an unresolved symbol.
+    assert _cited_symbols("`config.adr_review_interval`") == set()

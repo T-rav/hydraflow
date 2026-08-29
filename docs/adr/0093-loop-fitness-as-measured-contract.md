@@ -67,7 +67,7 @@ Slow loops (e.g., daily) accumulate ~30 samples in a 30-day window; fast loops (
 
 1. Builds one `FitnessContext` per registered loop (batched event history + a single issue snapshot + optional cost).
 2. Calls every registered loop's `loop_fitness(ctx)`.
-3. Persists results to `.hydraflow/metrics/{repo_slug}/fitness.jsonl`.
+3. Persists results to `.hydraflow/{repo_slug}/metrics/fitness.jsonl`.
 4. Regenerates `docs/arch/generated/loop-fitness.md`.
 5. Emits a `LOOP_FITNESS_UPDATE` event for the dashboard panel.
 

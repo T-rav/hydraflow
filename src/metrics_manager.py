@@ -32,7 +32,7 @@ class MetricsManager:
     """Aggregates metrics into timestamped snapshots and persists them to a local disk cache.
 
     Snapshots are written to a local disk cache at
-    ``.hydraflow/metrics/{repo_slug}/snapshots.jsonl`` for fast dashboard access.
+    ``.hydraflow/{repo_slug}/metrics/snapshots.jsonl`` for fast dashboard access.
     Hash-based change detection avoids persisting duplicate snapshots.
     """
 

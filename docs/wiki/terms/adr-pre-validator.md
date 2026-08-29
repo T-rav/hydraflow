@@ -25,5 +25,5 @@ A service that validates ADR structure before submission to the ADRReviewPanel, 
 ## Invariants
 
 - Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
-- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the council.
+- Issues are classified as fixable or non-fixable; `has_fixable_only` lets callers auto-repair before escalating to the review panel.
 - Cross-ADR checks (number collision, supersession, cross-reference titles) are skipped when `all_adrs` is not supplied, so single-ADR validation is always safe.

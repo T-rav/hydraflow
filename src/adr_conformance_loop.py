@@ -10,7 +10,7 @@ config-disabled short circuits, dedup keyed one issue per ADR.
 Issue-only write surface (load-bearing, ADR-0100): this loop's ONLY
 repo-write side effect is filing/updating GitHub issues through
 ``PRManager`` plus appending to the **gitignored**
-``.hydraflow/metrics/{repo_slug}/adr_conformance.jsonl`` log. It never
+``.hydraflow/{repo_slug}/metrics/adr_conformance.jsonl`` log. It never
 writes any file under ``src/``, ``tests/``, or ``docs/`` — in particular it
 never edits an ADR's ``**Enforcement:**``/``## Decision`` content or its
 ``**Enforced by:**`` line, and it never rewrites the git-tracked, static
