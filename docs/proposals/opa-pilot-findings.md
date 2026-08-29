@@ -376,15 +376,38 @@ lane; none of it is a comparison against a thin wrapper.
 
 ## Reproducing this
 
+**These commands no longer exist.** They are recorded as what was *run*, not as something to
+paste — `make opa-install` and `make opa-test` were removed with the rest of the pilot, and
+running them today gives `No rule to make target`.
+
 ```bash
-make opa-install                 # pinned OPA 1.4.2, vendored per-platform sha256
+make opa-install                 # pinned OPA 1.4.2, vendored per-platform sha256 -> .opa/opa
 make opa-test                    # opa fmt --fail --list, opa check --strict, opa test, pytest -m opa
 ```
 
-The pilot code was removed on the verdict. To rebuild it: the policy is in the appendix below; the
-adapter is a `DecisionEngine` implementation that serializes facts to
-`{"charter": {"standards": [...], "assurance": "..."}, "subjects": {"<id>": {<key>: <value>}}}` and
-runs `opa eval --format=json --data=<policy> --stdin-input '[data.hydraflow.adr_enforcement.decisions, data.hydraflow.adr_enforcement.missing_facts]'`.
+**What this document actually preserves**, and what it does not. Fully reproduced: the **policy**,
+verbatim in the appendix, which is the artifact the verdict is about. Described but not
+reproduced: roughly **325 lines** of glue — the 237-line adapter, the 84-line installer, and the
+Makefile wiring. Rebuilding the pilot means writing those again from the description below, and a
+re-measurement should recount them rather than reuse the numbers above.
+
+The adapter is a `DecisionEngine` implementation with no repo reads of its own. It groups the
+facts it is given into
+`{"charter": {"standards": [...], "assurance": "..."}, "subjects": {"<adr-id>": {"<fact-key>": <value>}}}`,
+writes that to the stdin of
+
+```bash
+opa eval --format=json --data=<policy.rego> --stdin-input \
+  '[data.hydraflow.adr_enforcement.decisions, data.hydraflow.adr_enforcement.missing_facts]'
+```
+
+and parses `result[0].expressions[0].value` back into `StandardDecision` records, sorted by
+subject. A non-empty `missing_facts` is raised as `MissingFactError` and never returned as a
+partial result. Before evaluating it resolves the binary (`$HYDRAFLOW_OPA_BIN`, then `.opa/opa`,
+then `PATH`), probes it once per instance, and reports a named reason rather than raising when it
+is absent. The installer pins OPA **1.4.2** with four vendored SHA-256 sums
+(`opa_{darwin_arm64_static,darwin_amd64,linux_amd64_static,linux_arm64_static}`), refuses to
+install a version it has no vendored sum for, and verifies before `chmod +x`.
 
 ---
 
