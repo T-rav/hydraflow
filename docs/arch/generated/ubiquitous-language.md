@@ -2,9 +2,20 @@
 
 # Ubiquitous Language
 
-_83 terms across 3 bounded contexts._
+_87 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## Actors
+
+**Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/driver_contracts.py:WorkerRole` · **Confidence:** `accepted`
+
+The third layer of the PAAA governance model (ADR-0143): who or what is authorized to act on a repository, and with what delegated authority. It answers "who may change what?". The `agents/` tree — role contracts and chamber charters — *is* the Actors declaration per the 2026-08-25 house standard (#11741); a governing declaration may point at that directory but must never re-declare roles in YAML. Adjacent surfaces bound what an authorized actor may do rather than naming who it is: `WorkerRole` fixes the closed set of roles a director may request, `RepoRecord.data_class` fixes the data-governance class enforced at every model spawn, and the merge-policy autonomy classes (`act` / `ask`) fix where an agent may proceed alone and where it must ask.
+
+**Invariants:**
+- Actors are declared by the `agents/` directory layout; a manifest may point at it and must not restate roles — two declarations of who may act is one too many.
+- A role outside the declared vocabulary cannot be invented at runtime; unknown authority values fail closed.
+- Delegated authority is bounded: an actor classified `ask` cannot self-promote to `act`.
 
 ## Actuator
 
@@ -84,6 +95,28 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 - Phase name is fixed: _phase_name == 'implement'.
 - The runner commits inside the worktree but never pushes or opens a PR — that work belongs to downstream phases.
 - Self-check checklist is dynamically extended with checklist items from recurring review escalations.
+
+## Articles
+
+**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/rails_manifest.py:RailsManifest` · **Confidence:** `accepted`
+
+The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo manifest of ADR-0121 (`RailsManifest`, renamed to `charter.yaml` by #11748) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered / blocking, and HydraFlow acts on the verdict.
+
+**Invariants:**
+- Building standards are one class of Articles, not the whole of Articles — security, compliance, architecture, and local policy are Articles too.
+- The declaration is reviewable in git; a decision layer never runs tests, reads git, or writes to the repository.
+- Changing an Article is an enactment reserved to the operator (ENACT, not RATIFY); nothing automates an edit to the articles of a declaration.
+
+## Artifacts
+
+**Kind:** `aggregate` · **Context:** `shared-kernel` · **Anchor:** `src/jsonl_ledger.py:AppendOnlyJsonlLedger` · **Confidence:** `accepted`
+
+The fourth layer of the PAAA governance model (ADR-0143): everything a repository has produced and kept — the software itself, plus ADRs, tests, evidence, manifests, ledgers, and recorded decisions. It answers "what evidence and memory already exist?". This is by a wide margin the richest layer in HydraFlow: `docs/arch/generated/` is regenerated every pull request, `docs/wiki/` (including these term files) carries the repo wiki, `.hydraflow/metrics/` carries the measurement streams, the append-only ledgers carry decisions and escapes, and a stamped repository carries a kernel lock. Artifacts are what the evidence collectors read to produce the normalized facts a decision layer classifies; read as input they are evidence, but evidence is not a fifth PAAA layer.
+
+**Invariants:**
+- Evidence is Artifacts read as input, never a fifth layer — the four layers stay four.
+- Ledger records are append-only: an artifact is added or superseded, never silently rewritten.
+- A conformance claim over Artifacts must be reproducible offline from a clean checkout — no claim may depend on an external service being up.
 
 ## Authority
 
@@ -660,6 +693,17 @@ Caretaker loop that polls HITL items and delegates to `PRUnsticker` to resolve a
 - Only processes HITL issues with an associated open PR (`item.pr > 0`); issues without PRs are skipped.
 - Kill-switch is via `enabled_cb("pr_unsticker")` and `config.pr_unsticker_loop_enabled` (ADR-0049).
 - Interval is driven by `config.pr_unstick_interval`.
+
+## Purpose
+
+**Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/onboarding/kernel_writer.py:KernelSpec` · **Confidence:** `accepted`
+
+The first layer of the PAAA governance model (ADR-0143): what a repository is *for* — its direction, goals, set-points, and the intent the work serves. It answers "what is this thing trying to do?" for a system arriving at the repository cold, with no institutional memory. Purpose is the one PAAA layer with **no declaration surface today**: it lives implicitly in `README.md` prose, in the one-line description the onboarding kernel stamps into a new repository (`KernelSpec.description`), and in milestone and epic text. Nothing reads any of those as a statement of intent, and no decision is checked against them. ADR-0143 records that gap rather than inventing a surface for it; whether the governing declaration carries a purpose block is a later ruling (#11748).
+
+**Invariants:**
+- Purpose is declarative intent, never an executable check — nothing today decides anything against it.
+- Changing Purpose is an enactment reserved to the operator (ENACT, not RATIFY); the system cannot enlarge its own mandate.
+- Purpose is not Articles: a goal the repository is aiming at is not a rule that must remain true.
 
 ## RailsDriftCaretakerLoop
 
