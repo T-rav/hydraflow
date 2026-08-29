@@ -44,6 +44,7 @@ _KILL_SWITCH_ENV = "HYDRAFLOW_DISABLE_DIAGRAM_LOOP"
 _REGEN_BRANCH = "arch-regen-auto"
 _PR_TITLE_PREFIX = "chore(arch): regenerate architecture knowledge"
 _COVERAGE_ISSUE_TITLE = "chore(arch): unassigned functional area"
+_PORTS_AND_LOOPS_STANDARD = "docs/standards/ports-and-loops/README.md"
 
 # The regen PR opens only when a SUBSTANTIVE artifact changed. changelog.md and
 # traceability_matrix.md derive from a moving git-log window (drift-EXEMPT in
@@ -57,6 +58,11 @@ _SUBSTANTIVE_SPECS = [
     "docs/arch/generated",
     ":(exclude)docs/arch/generated/changelog.md",
     ":(exclude)docs/arch/generated/traceability_matrix.md",
+    # Generated blocks that live inside hand-written documents rather than in
+    # their own file (arch.runner's inline blocks). A stale registry table in
+    # docs/standards/ is real architecture drift, and it reddens the same
+    # `make arch-check` — so it both opens a PR and has to ride along in one.
+    _PORTS_AND_LOOPS_STANDARD,
 ]
 
 
@@ -129,11 +135,16 @@ class DiagramLoop(BaseBackgroundLoop):
             # Re-extract arch artifacts from the worktree's (base) source into
             # the worktree's out_dir — never the host checkout. Wrapped in a
             # thread: emit() is sync CPU/IO work.
-            from arch.runner import emit  # noqa: PLC0415
+            from arch.runner import emit, emit_inline_blocks  # noqa: PLC0415
 
             await asyncio.to_thread(
                 emit, repo_root=worktree, out_dir=worktree / "docs/arch/generated"
             )
+            # Blocks generated INTO hand-written documents are not written by
+            # emit() (which targets one out_dir). Without this the regen PR
+            # ships fresh artifacts and a stale registry table, and then fails
+            # the very `make arch-check` it exists to satisfy.
+            await asyncio.to_thread(emit_inline_blocks, repo_root=worktree)
             # Prune the ratchet baseline to the freshly emitted matrix pct so
             # a regen PR that lowers the pct ships the matching baseline —
             # otherwise the gate's `resolved` assertion fails on the next
@@ -153,6 +164,7 @@ class DiagramLoop(BaseBackgroundLoop):
                 "docs/arch/generated",
                 "docs/arch/.meta.json",
                 "disturbance/baselines/traceability.yaml",
+                _PORTS_AND_LOOPS_STANDARD,
             ],
             # Only a substantive artifact change opens a PR — volatile-only
             # churn (changelog / traceability-matrix window shift, .meta.json,

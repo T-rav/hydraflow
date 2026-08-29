@@ -48,6 +48,16 @@ _COLLECTED_RE = re.compile(r"^(\S+\.py): (\d+)$")
 #: exists" answers yes for it while "pytest collects it" answers no.
 _UNCOLLECTED_CONTROL = "tests/architecture/standards_registry.py"
 
+#: Parent-run pytest state the child must not inherit.
+_INHERITED_PYTEST_VARS = frozenset(
+    {
+        "PYTEST_ADDOPTS",
+        "PYTEST_CURRENT_TEST",
+        "PYTEST_XDIST_WORKER",
+        "PYTEST_XDIST_WORKER_COUNT",
+    }
+)
+
 #: Any backticked token, and the subset of them that reads as a repo path.
 _BACKTICKED_RE = re.compile(r"`([A-Za-z0-9_./*-]+)`")
 _REPO_PATH_RE = re.compile(
@@ -77,6 +87,17 @@ def _collect(paths: tuple[str, ...]) -> Collection:
     eventually mirror wrongly. Cached so the properties below share one spawn.
     """
     root = repo_root()
+    # The child must read the repo's own pytest config and nothing else. An
+    # inherited PYTEST_ADDOPTS (CI, a wrapper, a developer's shell) would
+    # change what the child collects or how it prints, and this test would
+    # then be answering a different question than the suite it is vouching
+    # for. The xdist/current-test vars are the parent run leaking in.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _INHERITED_PYTEST_VARS
+    }
+    env["PYTHONPATH"] = str(root / "src")
     proc = subprocess.run(
         [
             sys.executable,
@@ -90,7 +111,7 @@ def _collect(paths: tuple[str, ...]) -> Collection:
             *paths,
         ],
         cwd=root,
-        env={**os.environ, "PYTHONPATH": str(root / "src")},
+        env=env,
         capture_output=True,
         text=True,
         check=False,

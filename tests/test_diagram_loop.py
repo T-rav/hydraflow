@@ -118,6 +118,7 @@ async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
         "docs/arch/generated",
         "docs/arch/.meta.json",
         "disturbance/baselines/traceability.yaml",
+        "docs/standards/ports-and-loops/README.md",
     ]
     # Only a SUBSTANTIVE artifact change opens a PR: the git-log-derived
     # changelog / traceability-matrix (and the .meta.json digest + baseline,
@@ -127,6 +128,7 @@ async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
         "docs/arch/generated",
         ":(exclude)docs/arch/generated/changelog.md",
         ":(exclude)docs/arch/generated/traceability_matrix.md",
+        "docs/standards/ports-and-loops/README.md",
     ]
     assert callable(captured["generate"])
 
