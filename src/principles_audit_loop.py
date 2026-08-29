@@ -62,6 +62,14 @@ _STUCK_TITLE_RE = re.compile(
 
 # Inverse of `_drift_title` — recover the (check_id, slug) pair from an open
 # drift issue's title so a recovered check (FAIL→PASS) can auto-close it (#9359).
+
+#: Statuses that count as a check no longer holding. ``INERT`` belongs here with
+#: ``FAIL``: the audit reports it when a check could not observe its subject at
+#: all, which is a louder problem than a check that observed one and disliked it.
+#: Reading only ``"FAIL"`` here would have re-created, one module over, the very
+#: blind spot the INERT status was added to close — a check could go PASS→INERT
+#: and this loop would file nothing.
+_REGRESSED_STATUSES = frozenset({"FAIL", "INERT"})
 _DRIFT_TITLE_RE = re.compile(
     r"^Principles drift:\s*(?P<check_id>[\w\.\-]+)\s+regressed in\s+(?P<slug>[\w\.\-/]+)\s*$"
 )
@@ -392,13 +400,13 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
     def _diff_regressions(
         last_green: dict[str, str], current: dict[str, str]
     ) -> list[str]:
-        """Return check_ids that went PASS→FAIL vs last-green (spec §4.4)."""
+        """Return check_ids that went PASS→FAIL/INERT vs last-green (spec §4.4)."""
         if not last_green:
             return []
         return sorted(
             cid
             for cid, prev in last_green.items()
-            if prev == "PASS" and current.get(cid) == "FAIL"
+            if prev == "PASS" and current.get(cid) in _REGRESSED_STATUSES
         )
 
     @staticmethod
@@ -578,11 +586,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
 
     @staticmethod
     def _p1_p5_fails(findings: list[dict[str, Any]]) -> list[str]:
-        """check_ids whose principle is P1–P5 and whose status is FAIL."""
+        """check_ids whose principle is P1–P5 and whose status is FAIL/INERT."""
         return [
             f["check_id"]
             for f in findings
-            if f.get("status") == "FAIL"
+            if f.get("status") in _REGRESSED_STATUSES
             and f.get("principle") in {"P1", "P2", "P3", "P4", "P5"}
         ]
 

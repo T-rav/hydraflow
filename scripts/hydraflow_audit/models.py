@@ -21,10 +21,36 @@ class Severity(StrEnum):
 
 
 class Status(StrEnum):
+    """Outcome of one check.
+
+    ``NA`` and ``INERT`` are the two ways a check can decline to produce a
+    verdict, and the difference is the whole point of keeping them apart:
+
+    ``NA``
+        The check RAN, looked at its subject, and the subject legitimately
+        does not apply to this repo — no ``src/ui`` in a backend service, no
+        PR context outside CI. Not a failure. Every check allowed to reach
+        this state is enumerated, with its reason, in
+        :mod:`scripts.hydraflow_audit.na_justifications`.
+    ``INERT``
+        The check could NOT look at its subject — the artifact it measures is
+        gone, or the tool it shells out to did not complete. An absent subject
+        is not a passing subject, so this fails the gate.
+
+    ``INERT`` is the mirror of ``NOT_IMPLEMENTED``: that one is an ADR row with
+    no code behind it, this one is code with no subject in front of it. Both
+    mean the audit is advertising a check it does not perform, and both are
+    loud (#8383/#8386 — P2.3/P2.4/P2.6/P2.7 shelled out to a
+    ``scripts/check_layer_imports.py`` that was deleted less than four hours
+    after they were merged, and reported ``NA`` ever after while ``make audit``
+    stayed green).
+    """
+
     PASS = "PASS"
     WARN = "WARN"
     FAIL = "FAIL"
     NA = "NA"
+    INERT = "INERT"
     NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
 
 
