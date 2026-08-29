@@ -96,3 +96,25 @@ def test_the_bodies_directory_is_populated() -> None:
         f"only {len(found)} template bodies under {BODIES}; the two writers "
         "stamp far more documents than that, so the bodies are not all here"
     )
+
+
+def test_the_extraction_preserved_the_corrected_ownership_marker() -> None:
+    """#11780's marker correction must survive living in a template file.
+
+    The false claim -- "Re-stamping with --force may overwrite this block" --
+    shipped to every child repo until #11780, and CLAUDE.md is
+    ``Ownership.PRODUCT``: `stamp_kernel` reports it ``protected`` even under
+    ``force=True``, so the block cannot be overwritten at all.
+
+    That correction now lives in a template body rather than a Python literal.
+    A re-extraction run against a stale checkout would silently reintroduce the
+    false text, and the only other check on it renders through the same
+    template -- so it would agree with itself and stay green. This asserts
+    against the FILE, which is the artifact a re-extraction overwrites.
+    """
+    body = (BODIES / "CLAUDE.md.tmpl").read_text(encoding="utf-8").lower()
+    assert "not even with --force" in body, (
+        "the stamped CLAUDE.md template no longer states that the file is "
+        "protected under --force; #11780's correction was lost"
+    )
+    assert "may overwrite this block" not in body
