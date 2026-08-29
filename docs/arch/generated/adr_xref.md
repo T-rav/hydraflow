@@ -149,7 +149,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0140 | `src.dashboard_routes._gateway_policy_routes`, `src.driver_contracts`, `src.hydraflow_gateway.app`, `src.operator_identity`, `src.routing_matrix` | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 | ADR-0141 | `src.driver_contracts`, `src.route_enforcement` | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | — | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
-| ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.principle_register`, `src.prompt_gate`, `src.rails_manifest`, `src.repo_store` | — |
+| ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.erosion.concentration_baseline`, `src.erosion.mass_baseline`, `src.erosion.scatter_baseline`, `src.erosion.suite_hygiene_baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.principle_register`, `src.prompt_gate`, `src.rails_manifest`, `src.repo_store` | — |
 
 ## Module → ADRs
 
@@ -245,6 +245,10 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.epic_monitor_loop` | ADR-0012, ADR-0080 |
 | `src.epic_sweeper_loop` | ADR-0081 |
 | `src.erosion.baseline` | ADR-0143 |
+| `src.erosion.concentration_baseline` | ADR-0143 |
+| `src.erosion.mass_baseline` | ADR-0143 |
+| `src.erosion.scatter_baseline` | ADR-0143 |
+| `src.erosion.suite_hygiene_baseline` | ADR-0143 |
 | `src.escalation_gate` | ADR-0015 |
 | `src.escape.auto_diagnose` | ADR-0115 |
 | `src.escape.ledger` | ADR-0127, ADR-0130, ADR-0143 |
