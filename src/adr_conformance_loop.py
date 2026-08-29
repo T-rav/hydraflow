@@ -22,6 +22,18 @@ guardrail test in ``tests/test_adr_conformance_loop.py``.
 There is no reducer/aggregation step for ``ADR_CONFORMANCE_UPDATE`` (Task 9
 scope): per-ADR outcomes are packed directly into the event payload.
 
+**Decision seam (#11749).** This is the one actuator migrated onto
+``StandardDecision``. Each tick flattens its ``AdrConformance`` results into
+``policy.facts`` records, hands them to a ``DecisionEngine``
+(``PythonDecisionEngine`` today; #11750's OPA pilot implements the same
+protocol), and dispatches on ``decision.remediation`` — it no longer calls
+``classify_remediation`` itself. The engine reaches the same classifier from
+the facts, so which action fires is byte-for-byte what it was; what changed is
+that the action arrives as a typed decision another engine could equally have
+produced. The facts behind each tick are recorded to
+``.hydraflow/metrics/{repo_slug}/facts.jsonl`` (gitignored, snapshot
+semantics), so the tick's decisions replay offline from the ledger alone.
+
 ``_detect_rename`` detects high-confidence pytest-node renames (via
 ``adr_conformance.find_renamed_pytest_node``): an UNRESOLVED pytest check
 whose cited node is now defined in exactly one other file under ``tests/``
@@ -49,6 +61,7 @@ if TYPE_CHECKING:
     from adr_index import ADRIndex
     from config import HydraFlowConfig
     from dedup_store import DedupStore
+    from policy.models import Fact, StandardDecision
     from ports import ConformanceRunnerPort
     from pr_manager import PRManager
     from state import StateTracker
@@ -187,9 +200,17 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         )
         return "\n".join(lines)
 
-    async def _file_or_update_issue(self, conf: AdrConformance) -> None:
-        """File (or refresh) the dedup'd remediation issue for *conf*."""
-        rollup = self._state.get_adr_conformance_rollup(conf.adr_id)
+    async def _file_or_update_issue(
+        self, conf: AdrConformance, decision: StandardDecision
+    ) -> None:
+        """File (or refresh) the dedup'd remediation issue for *decision*.
+
+        The subject is read off the ``StandardDecision`` (#11749), not off
+        *conf*: this is the actuator that proves the seam, so what it acts on
+        is the typed decision. *conf* is still carried for the issue body,
+        which reports the per-check detail the decision's facts summarize.
+        """
+        rollup = self._state.get_adr_conformance_rollup(decision.subject)
         title = self._issue_title(conf)
         body = self._issue_body(conf)
         if rollup:
@@ -207,10 +228,12 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             logger.warning(
                 "adr_conformance: create_issue returned 0 (sentinel) for %s; "
                 "skipping record/dedup, will retry next cycle",
-                conf.adr_id,
+                decision.subject,
             )
             return
-        self._state.set_adr_conformance_rollup(conf.adr_id, issue_number=issue_number)
+        self._state.set_adr_conformance_rollup(
+            decision.subject, issue_number=issue_number
+        )
         # The state rollup above is the operative per-ADR double-file cap
         # (gates create-vs-update via get_adr_conformance_rollup); this dedup
         # write is the tracked-key set that _reconcile_closed_conformance_issues
@@ -218,7 +241,7 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         # issues and clear stale state so the loop re-files instead of
         # updating a dead issue.
         dedup = self._dedup.get()
-        dedup.add(_dedup_key(conf.adr_id))
+        dedup.add(_dedup_key(decision.subject))
         self._dedup.set_all(dedup)
 
     async def _file_repoint_issue(
@@ -397,9 +420,14 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         from datetime import UTC, datetime  # noqa: PLC0415
 
         from adr_conformance import evaluate_adrs  # noqa: PLC0415
-        from adr_conformance_remediation import (  # noqa: PLC0415
+        from policy import (  # noqa: PLC0415
+            STANDARD_ADR_CONFORMANCE,
+            Charter,
+            PythonDecisionEngine,
             RemediationAction,
-            classify_remediation,
+            append_facts,
+            conformance_facts,
+            facts_path,
         )
 
         t0 = time.perf_counter()
@@ -442,7 +470,18 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         )
         self._persist_jsonl(results)
 
+        # The decision seam (#11749): the loop collects facts, an engine
+        # judges them, and this loop acts on the typed StandardDecision. It no
+        # longer calls classify_remediation itself — the engine reaches the
+        # same classifier (``classify_remediation_over``) from the facts, so
+        # which action fires is byte-for-byte what it was; what changed is
+        # that the action now arrives as ``decision.remediation`` on a
+        # ``StandardDecision`` an OPA engine could equally have produced.
+        engine = PythonDecisionEngine()
+        charter = Charter.for_standards(STANDARD_ADR_CONFORMANCE)
+
         filed = escalated = repointed = 0
+        tick_facts: list[Fact] = []
         for conf in results:
             rename_match = self._detect_rename(conf)
             attempts = (
@@ -450,28 +489,31 @@ class AdrConformanceLoop(BaseBackgroundLoop):
                 if conf.outcome.value in ("fail", "unresolved")
                 else 0
             )
-            decision = classify_remediation(
+            facts = conformance_facts(
                 conf,
                 rename_match=rename_match,
                 attempts=attempts,
                 max_attempts=_MAX_ATTEMPTS,
+                observed_at=now,
             )
+            tick_facts.extend(facts)
+            decision = engine.decide(facts, charter)[0]
             if (
-                decision.action is RemediationAction.REPOINT
+                decision.remediation is RemediationAction.REPOINT
                 and rename_match is not None
             ):
-                # rename_match is guaranteed non-None here: classify_remediation
-                # only returns REPOINT when rename_match was truthy.
+                # rename_match is guaranteed non-None here: the REPOINT arm is
+                # only reachable when rename_match was truthy.
                 await self._file_repoint_issue(conf, rename_match)
                 repointed += 1
-            elif decision.action is RemediationAction.FILE_ISSUE:
-                await self._file_or_update_issue(conf)
+            elif decision.remediation is RemediationAction.FILE_ISSUE:
+                await self._file_or_update_issue(conf, decision)
                 filed += 1
-            elif decision.action is RemediationAction.ESCALATE:
-                # Fire exactly once at the threshold. classify_remediation
-                # returns ESCALATE for every attempts >= max_attempts, so
-                # without this guard a still-unresolved ADR would re-file a
-                # HITL issue every subsequent tick (attempts=4, 5, 6, ...).
+            elif decision.remediation is RemediationAction.ESCALATE:
+                # Fire exactly once at the threshold. The ESCALATE arm holds
+                # for every attempts >= max_attempts, so without this guard a
+                # still-unresolved ADR would re-file a HITL issue every
+                # subsequent tick (attempts=4, 5, 6, ...).
                 if attempts == _MAX_ATTEMPTS:
                     await self._escalate_to_adr_reviewer(conf, attempts)
                     escalated += 1
@@ -479,6 +521,14 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             else:
                 self._state.clear_adr_conformance_attempts(conf.adr_id)
 
+        # Record the evidence behind this tick's decisions, beside
+        # ``adr_conformance.jsonl``: ``.hydraflow/metrics/{repo_slug}/facts.jsonl``,
+        # gitignored, snapshot semantics (one row per ``standard|subject|key``,
+        # see ``policy.store``). This ledger is what makes the decisions
+        # replayable offline — same engine, same rows, same decisions, with no
+        # repo and no service up (#11687). Still issue-only as a repo-write
+        # surface: like its sibling, this file is gitignored scratch state.
+        append_facts(facts_path(self._config.repo_data_root), tick_facts)
         await self._emit_event(results)
         self._emit_trace(t0, evaluated=len(results), filed=filed)
         return {

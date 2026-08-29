@@ -9,6 +9,7 @@ architecture decisions instead of loops.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from datetime import datetime
 from enum import StrEnum
@@ -17,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from adr_index import ADR, Check
+from adr_index import ADR, Check, scan_adr_directory
 
 if TYPE_CHECKING:
     from ports import ConformanceRunnerPort
@@ -591,6 +592,107 @@ def classify_adr_enforcement(adr: ADR, repo_root: Path) -> EnforcementClass:
     if has_real_enforcement(adr, repo_root):
         return EnforcementClass.REAL
     return EnforcementClass.WEAK
+
+
+# ---------------------------------------------------------------------------
+# Enforcement-debt ratchet lane — ONE definition (#11749)
+# ---------------------------------------------------------------------------
+#
+# Before #11749 the exemption regex lived twice (byte-identical) and the
+# grandfathering set-arithmetic lived only inside
+# ``tests/architecture/test_adr_enforcement_ratchet.py``, where nothing but
+# that test could call it. Three importers now share the definitions below:
+# the ratchet test, ``arch.generators.adr_enforcement`` (the debt report), and
+# ``policy.facts`` (the fact collector feeding ``PythonDecisionEngine``).
+#
+# Consolidation rule applied here: **the surviving definition is the stricter
+# of the two it replaces.** ``parse_exemptions`` propagates ``OSError`` exactly
+# as the ratchet's copy did (a missing allow-list is a broken gate, not an
+# empty one); the report keeps its own documented fail-open wrapper around it
+# so a tmp_path fixture without the standards doc still renders. Neither
+# importer got a wider exemption lane than it had.
+
+#: The ADR corpus, relative to the repo root.
+ADR_DIR_REL = Path("docs") / "adr"
+
+#: The process-only exemption allow-list, relative to the repo root.
+EXEMPTIONS_REL = Path("docs") / "standards" / "adr_enforcement" / "exemptions.md"
+
+#: The frozen enforcement-debt baseline, relative to the repo root.
+ENFORCEMENT_BASELINE_REL = (
+    Path("tests") / "architecture" / "adr_enforcement_baseline.json"
+)
+
+#: One exemption entry line: ``- ADR-NNNN: <non-empty justification>``.
+#:
+#: Prose that merely *mentions* an ADR does not match — an entry must be a
+#: bullet + zero-padded id + colon + non-empty justification — so the
+#: allow-list can live inside a prose standards doc. Widening this pattern
+#: widens the allow-list for the ratchet, the debt report and the decision
+#: engine at once, which is the point of it having one home.
+EXEMPTION_RE = re.compile(r"^-\s+ADR-(\d{4}):\s*(\S.*?)\s*$", re.MULTILINE)
+
+
+def parse_exemptions_text(text: str) -> dict[int, str]:
+    """Return ``{adr_number: justification}`` parsed from allow-list *text*."""
+    return {int(m.group(1)): m.group(2).strip() for m in EXEMPTION_RE.finditer(text)}
+
+
+def parse_exemptions(repo_root: Path) -> dict[int, str]:
+    """Return ``{adr_number: justification}`` from the on-disk allow-list.
+
+    Deliberately **not** fail-open: an unreadable allow-list raises ``OSError``
+    rather than silently returning ``{}``. Callers that legitimately run
+    against a tree with no standards doc (the debt report under a tmp_path
+    fixture) wrap this in their own documented ``except OSError``.
+    """
+    return parse_exemptions_text(
+        (repo_root / EXEMPTIONS_REL).read_text(encoding="utf-8")
+    )
+
+
+def accepted_adrs(repo_root: Path) -> list[ADR]:
+    """Every ``Accepted`` ADR in the repo's ``docs/adr`` corpus."""
+    return [
+        a for a in scan_adr_directory(repo_root / ADR_DIR_REL) if a.status == "Accepted"
+    ]
+
+
+def enforcement_classification(repo_root: Path) -> dict[int, EnforcementClass]:
+    """REAL / WEAK / MISSING for every Accepted ADR, keyed by ADR number."""
+    return {
+        a.number: classify_adr_enforcement(a, repo_root)
+        for a in accepted_adrs(repo_root)
+    }
+
+
+def live_debt(repo_root: Path) -> set[int]:
+    """Accepted ADRs that classify WEAK or MISSING — the unenforced-decision debt."""
+    return {
+        n
+        for n, cls in enforcement_classification(repo_root).items()
+        if cls in (EnforcementClass.WEAK, EnforcementClass.MISSING)
+    }
+
+
+def load_enforcement_baseline(repo_root: Path) -> tuple[frozenset[int], frozenset[int]]:
+    """Return ``(baseline_snapshot, resolved)`` from the committed baseline JSON."""
+    data = json.loads(
+        (repo_root / ENFORCEMENT_BASELINE_REL).read_text(encoding="utf-8")
+    )
+    snapshot = frozenset(int(n) for n in data["baseline_snapshot"])
+    resolved = frozenset(int(n) for n in data.get("resolved", []))
+    return snapshot, resolved
+
+
+def live_grandfathered(repo_root: Path) -> frozenset[int]:
+    """The debt still grandfathered: ``baseline_snapshot - resolved - exempted``.
+
+    Shrink-only by construction — the snapshot is frozen, so the set can only
+    lose members (to ``resolved`` or to the exemption allow-list).
+    """
+    snapshot, resolved = load_enforcement_baseline(repo_root)
+    return snapshot - resolved - frozenset(parse_exemptions(repo_root))
 
 
 _WORST = {
