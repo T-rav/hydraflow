@@ -89,3 +89,77 @@ def test_it_redumps_on_each_doubling_so_slow_is_not_wedged(tmp_path: Path) -> No
         "expected repeated dumps on the doubling schedule, which is what "
         f"distinguishes a slow test from a wedged one; got:\n{text[:400]}"
     )
+
+
+_TWO_TESTS = """
+def test_fast_one():
+    assert True
+
+
+def test_wedged():
+    i = 0
+    while True:
+        i += 1
+"""
+
+
+@pytest.mark.timeout(240)
+def test_it_stays_silent_about_idle_processes(tmp_path: Path) -> None:
+    """Regression: it reported the xdist controller and an idle worker.
+
+    On its first live run the watchdog dumped twice against
+    `<session: import/collect>` — pid was the xdist CONTROLLER, which never
+    executes tests, so its nodeid never advanced. Guarding the controller
+    alone was not enough: with `--dist loadscope` a worker given no work sits
+    at the same sentinel and reports itself too.
+
+    An instrument that cries wolf gets ignored, which would cost more than
+    the hang it was built to find. It must speak only while a test runs.
+    """
+    target = tmp_path / "test_two_probe.py"
+    target.write_text(_TWO_TESTS, encoding="utf-8")
+    out_prefix = tmp_path / "spin"
+    subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(target),
+            "-p",
+            "tests.hf_spin_watch",
+            "-n",
+            "2",
+            "--dist",
+            "loadscope",
+            "-q",
+            "-p",
+            "no:randomly",
+            "--timeout=20",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": f"{REPO_ROOT / 'src'}:{REPO_ROOT}",
+            "HF_SPIN_TIMEOUT": "3",
+            "HF_SPIN_OUT": str(out_prefix),
+            "HOME": str(tmp_path),
+        },
+    )
+    dumps = sorted(tmp_path.glob("spin-*.txt"))
+    assert dumps, "the wedged test produced no dump at all"
+
+    blob = "\n".join(d.read_text(encoding="utf-8") for d in dumps)
+    assert "test_wedged" in blob, f"the wedged test was not named:\n{blob[:400]}"
+    assert "session: import/collect" not in blob, (
+        "the watchdog dumped a process that was not running a test — the "
+        f"controller/idle-worker false positive is back:\n{blob[:600]}"
+    )
+    assert "between tests" not in blob, (
+        f"the watchdog dumped between tests rather than during one:\n{blob[:600]}"
+    )

@@ -43,6 +43,12 @@ _state: dict[str, object] = {
     "nodeid": "<session: import/collect>",
     "started": time.monotonic(),
     "dumped": 0,
+    # False whenever no test is executing: collection, and the gaps between
+    # tests. Dumping then reports an IDLE process, which the plugin's own
+    # first live run did twice — an xdist worker that loadscope gave no work
+    # sat at the sentinel and dumped itself. An instrument that cries wolf
+    # gets ignored, so it only speaks while a test is actually running.
+    "in_test": False,
     # Guards against arming twice when pytest_configure runs more than once
     # (xdist workers, nested sessions). Kept in the locked dict rather than a
     # module global so there is exactly one piece of mutable module state.
@@ -66,6 +72,8 @@ def _watch(timeout_s: float, out_prefix: str) -> None:
     while True:
         time.sleep(_POLL_INTERVAL_S)
         with _lock:
+            if not _state["in_test"]:
+                continue
             nodeid = _state["nodeid"]
             started = float(_state["started"])  # type: ignore[arg-type]
             dumped = int(_state["dumped"])  # type: ignore[arg-type]
@@ -111,8 +119,10 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None):
         _state["nodeid"] = item.nodeid
         _state["started"] = time.monotonic()
         _state["dumped"] = 0
+        _state["in_test"] = True
     yield
     with _lock:
+        _state["in_test"] = False
         _state["nodeid"] = f"<between tests, after {item.nodeid}>"
         _state["started"] = time.monotonic()
         _state["dumped"] = 0
