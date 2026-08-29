@@ -9,7 +9,9 @@ fail-loud guard against a drift check with nothing to check.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -149,25 +151,76 @@ def test_actors_defaults_to_the_agents_tree_when_absent() -> None:
     assert Charter.from_dict({}).actors == "agents/"
 
 
-def test_actors_role_list_is_rejected() -> None:
-    with pytest.raises(CharterError) as exc:
-        Charter.from_dict({"actors": ["arch", "design", "product"]})
-    assert "agents/" in str(exc.value)
+#: Every load-time rejection, as one table. Each row is a charter mapping that
+#: must not load at all and the phrase its error has to carry — the phrase is
+#: the assertion, not the raise: a ``CharterError`` that named the wrong key
+#: would still stop the load but would be useless to the human reviewing the
+#: file in a pull request.
+_REJECTED_CHARTERS: list[tuple[str, dict[str, Any], str]] = [
+    # The Actors ruling (ADR-0143 Ruling 6, guard 3; #11741).
+    ("actors-role-list", {"actors": ["arch", "design", "product"]}, "agents/"),
+    (
+        "actors-role-records",
+        {"actors": [{"role": "arch", "may": "approve"}]},
+        "house standard",
+    ),
+    (
+        "actors-role-mapping",
+        {"actors": {"arch": "approves ADRs"}},
+        "Actors declaration",
+    ),
+    # The assurance vocabulary (no second scale).
+    ("assurance-invented", {"articles": {"assurance": "high"}}, "not a data class"),
+    ("assurance-empty-string", {"articles": {"assurance": "  "}}, "not a data class"),
+    # Wrong-shaped sequences: a mapping yields keys and a string yields
+    # characters, so both would otherwise be accepted in the wrong shape.
+    (
+        "standards-mapping",
+        {"articles": {"standards": {"testing": True}}},
+        "must be a list",
+    ),
+    ("standards-bare-string", {"articles": {"standards": "testing"}}, "must be a list"),
+    ("layers-mapping", {"rails": {"layers": {"universal": True}}}, "must be a list"),
+    (
+        "local-not-a-mapping",
+        {"articles": {"local": ["staging_only_prs"]}},
+        "must be a mapping",
+    ),
+    # A charter may not satisfy itself with a path outside its own repo.
+    (
+        "artifact-absolute",
+        {"artifacts": {"required": ["/etc/passwd"]}},
+        "relative to the repo root",
+    ),
+    (
+        "artifact-traversal",
+        {"artifacts": {"required": ["../other-repo/docs"]}},
+        "relative to the repo root",
+    ),
+    # Wrong-shaped blocks and scalars, rejected by name rather than dying as a
+    # bare AttributeError that mentions neither the file nor the key.
+    ("purpose-not-a-mapping", {"purpose": "a factory"}, "`purpose` must be a mapping"),
+    (
+        "articles-not-a-mapping",
+        {"articles": ["testing"]},
+        "`articles` must be a mapping",
+    ),
+    ("rails-not-a-mapping", {"rails": 5}, "`rails` must be a mapping"),
+    ("coverage-floor-words", {"rails": {"coverage_floor": "high"}}, "must be a number"),
+    ("schema-version-words", {"schema_version": "one"}, "must be an integer"),
+]
 
 
-def test_actors_rejection_names_the_house_standard() -> None:
-    with pytest.raises(CharterError, match="house standard"):
-        Charter.from_dict({"actors": [{"role": "arch", "may": "approve"}]})
-
-
-def test_actors_role_mapping_is_rejected_too() -> None:
-    with pytest.raises(CharterError, match="Actors declaration"):
-        Charter.from_dict({"actors": {"arch": "approves ADRs"}})
-
-
-def test_assurance_outside_the_data_class_vocabulary_fails_closed() -> None:
-    with pytest.raises(CharterError, match="not a data class"):
-        Charter.from_dict({"articles": {"assurance": "high"}})
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [(payload, expected) for _id, payload, expected in _REJECTED_CHARTERS],
+    ids=[row[0] for row in _REJECTED_CHARTERS],
+)
+def test_a_charter_that_must_not_load_is_rejected_by_name(
+    payload: dict[str, Any], expected: str
+) -> None:
+    with pytest.raises(CharterError, match=re.escape(expected)):
+        Charter.from_dict(payload)
 
 
 def test_assurance_regulated_class_is_accepted() -> None:
@@ -428,75 +481,22 @@ def test_charter_from_snapshot_declares_no_standards_by_default() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_a_charter_file_that_is_a_list_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / CHARTER_FILENAME).write_text("- one\n- two\n")
-    with pytest.raises(CharterError, match="must be a YAML mapping"):
+@pytest.mark.parametrize(
+    ("filename", "body", "expected"),
+    [
+        (CHARTER_FILENAME, "- one\n- two\n", "must be a YAML mapping"),
+        (CHARTER_FILENAME, "just a string\n", "must be a YAML mapping"),
+        (CHARTER_FILENAME, "purpose: [unclosed\n", "not valid YAML"),
+        (LEGACY_RAILS_FILENAME, "- one\n", "must be a YAML mapping"),
+    ],
+    ids=["charter-list", "charter-scalar", "charter-bad-yaml", "legacy-rails-list"],
+)
+def test_a_present_but_unreadable_declaration_is_rejected(
+    tmp_path: Path, filename: str, body: str, expected: str
+) -> None:
+    """Never ``None``: that value is reserved for a repo with no charter, and
+    the caretaker SKIPS those — so a broken file returning it would be filed
+    under "ungoverned" and look governed while nothing checked it."""
+    (tmp_path / filename).write_text(body)
+    with pytest.raises(CharterError, match=expected):
         load_charter(tmp_path)
-
-
-def test_a_charter_file_that_is_unparseable_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / CHARTER_FILENAME).write_text("purpose: [unclosed\n")
-    with pytest.raises(CharterError, match="not valid YAML"):
-        load_charter(tmp_path)
-
-
-def test_a_malformed_charter_is_not_reported_as_an_absent_one(tmp_path: Path) -> None:
-    (tmp_path / CHARTER_FILENAME).write_text("just a string\n")
-    with pytest.raises(CharterError):
-        load_charter(tmp_path)
-
-
-def test_a_malformed_legacy_rails_file_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / LEGACY_RAILS_FILENAME).write_text("- one\n")
-    with pytest.raises(CharterError, match="must be a YAML mapping"):
-        load_charter(tmp_path)
-
-
-def test_standards_given_as_a_mapping_is_rejected() -> None:
-    with pytest.raises(CharterError, match="must be a list"):
-        Charter.from_dict({"articles": {"standards": {"testing": True}}})
-
-
-def test_standards_given_as_a_bare_string_is_rejected() -> None:
-    with pytest.raises(CharterError, match="must be a list"):
-        Charter.from_dict({"articles": {"standards": "testing"}})
-
-
-def test_a_local_article_that_is_not_a_mapping_is_rejected() -> None:
-    with pytest.raises(CharterError, match="must be a mapping"):
-        Charter.from_dict({"articles": {"local": ["staging_only_prs"]}})
-
-
-def test_an_absolute_required_artifact_is_rejected() -> None:
-    with pytest.raises(CharterError, match="relative to the repo root"):
-        Charter.from_dict({"artifacts": {"required": ["/etc/passwd"]}})
-
-
-def test_a_required_artifact_escaping_the_repo_is_rejected() -> None:
-    with pytest.raises(CharterError, match="relative to the repo root"):
-        Charter.from_dict({"artifacts": {"required": ["../other-repo/docs"]}})
-
-
-def test_a_wrong_shaped_purpose_block_is_rejected_by_name() -> None:
-    with pytest.raises(CharterError, match="`purpose` must be a mapping"):
-        Charter.from_dict({"purpose": "a factory"})
-
-
-def test_a_wrong_shaped_articles_block_is_rejected_by_name() -> None:
-    with pytest.raises(CharterError, match="`articles` must be a mapping"):
-        Charter.from_dict({"articles": ["testing"]})
-
-
-def test_a_wrong_shaped_rails_block_is_rejected_by_name() -> None:
-    with pytest.raises(CharterError, match="`rails` must be a mapping"):
-        Charter.from_dict({"rails": 5})
-
-
-def test_a_non_numeric_coverage_floor_is_rejected() -> None:
-    with pytest.raises(CharterError, match="must be a number"):
-        Charter.from_dict({"rails": {"coverage_floor": "high"}})
-
-
-def test_a_non_integer_schema_version_is_rejected() -> None:
-    with pytest.raises(CharterError, match="must be an integer"):
-        Charter.from_dict({"schema_version": "one"})
