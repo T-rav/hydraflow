@@ -13,9 +13,9 @@ from pending_concerns import (
 
 def test_concern_minimal_fields_validate():
     c = Concern(
-        id="PLAN-COUNCIL-001",
+        id="PLAN-ENSEMBLE-001",
         raised_in_phase="plan",
-        raised_in_stage="plan_council",
+        raised_in_stage="plan_ensemble",
         severity="HIGH",
         concern="No test for empty input path",
         raised_at=datetime.now(UTC),
@@ -66,7 +66,7 @@ def test_adversarial_state_defaults_empty():
 
 def test_stage_run_records_oscillation_flag():
     run = StageRun(
-        stage="plan_council",
+        stage="plan_ensemble",
         phase="plan",
         retries=3,
         converged=False,

@@ -166,7 +166,7 @@ class PlanPhase(
         # leave them None and the adversarial stages are skipped. See
         # ``attach_adversarial_agents`` for the production entry point.
         self._surfacer_agent: AgentLike | None = None
-        self._council_agents: dict[str, AgentLike] | None = None
+        self._ensemble_agents: dict[str, AgentLike] | None = None
         self._spec_ac_agent: AgentLike | None = None
         self._spec_judge_agent: AgentLike | None = None
         self._adversarial_budget: int = 3
@@ -195,7 +195,7 @@ class PlanPhase(
         needs. ``plan_issues`` is a *scheduler* — it drains the plan queue and
         decides how many issues to work — so a driver calling it would hand back
         the very decision it exists to own. This runs the same per-issue
-        pipeline (``_plan_one``: prepass → surface → draft → council → route →
+        pipeline (``_plan_one``: prepass → surface → draft → ensemble → route →
         records → gate → ready) under the same semaphore, sentry span and store
         lifecycle, so the planner's contract, prompts and output markers are
         untouched and shared by both schedulers.

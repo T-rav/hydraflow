@@ -10,22 +10,22 @@
       "content_sha": "b2c2c8e82d5224ed76c3ce8ffe2295af9f96522e30f8d65969f111e31b7dcbe9"
     },
     "adr-falsifiability.md": {
-      "content_sha": "af510eb9344b4fe1bb368744a8c1a11c0f975389f5a0e022327bbc8b528f8299"
+      "content_sha": "565a507784f55a07422f8456db17d27d99e62b1e14dfe2a0c678bbff55bad481"
     },
     "adr_xref.md": {
-      "content_sha": "c999a5b04ce80f9797c7a75d2e578833012a6f2ecadb6e69db71a8f412f17553"
+      "content_sha": "ebc05ae3468ea15c551b19272e11a9f6dff831fb8920daef27f67607766d963c"
     },
     "ai_system_inventory.md": {
-      "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
+      "content_sha": "b3314e1a59f0e89bf2ffee3208c256f2535cdd3a96165a7022774eeac5dea907"
     },
     "coverage_matrix.md": {
-      "content_sha": "ecf4543f14e70209270ecc88303cbda01293d71e5f4698247d1676fc475aaeab"
+      "content_sha": "54cdb8dd47da402687bf39d910661bb33e648834ae0f42bf6765ff7c1cd5b596"
     },
     "events.md": {
       "content_sha": "b7fff31d940305ba7ae0b4da94f077dc63cce097efec10707b97936df10b69a2"
     },
     "functional_areas.md": {
-      "content_sha": "3c3b9de0704a206621a37309d6cc30aa51be09918a03171c5db1ab16ee0783e4"
+      "content_sha": "635d339b35b7a7b5848dcc16c2455c3c7b4f7e524a45d18984d9649a1ba27b3d"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -34,7 +34,7 @@
       "content_sha": "3a9f46c2a2264d70cfa9fc9ad00212cfb2c0fe358af60acc3c7a7f09aa0126de"
     },
     "loops.md": {
-      "content_sha": "6a7c9b65ad80e93896ecd8343b52e4d1b75e7c67443f36857449ded15a42eecc"
+      "content_sha": "92f12fd28f25d7f06b092109ac7e82fbcc680cbb342e726e46befebda10607ee"
     },
     "mockworld.md": {
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
@@ -46,14 +46,14 @@
       "content_sha": "67fc7b123d0d9952a7dcfd7e0ba0eb2979fd95b97d27e950655b05a71147689f"
     },
     "ubiquitous-language-context-map.md": {
-      "content_sha": "d1a3d52487b0d9437b70434b6cdf15c5ed12ffc03d83127330b5a865dfe0aac7"
+      "content_sha": "774a37e13fc77d3fad5a9f8ac773188f07304e5546fa38fea128c6fc8718689e"
     },
     "ubiquitous-language.md": {
-      "content_sha": "1aa63940c0a6f99580da3c088d87865b2e98fa7b9776680bbe2a46888926e587"
+      "content_sha": "247a39b6dbce96eb81ebf9f68af5d0d34eb14155eff3f1a8b69584ebf87f28c3"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "964fd1e8e5e5de5361526caea2176ac39b373af7af0c3d75cc1142fd9f476e17"
+  "content_sha": "788583dbeb6dbf91a14fbed8d6bef86f4b3b11c3ceab52b65fd05ab88a200336"
 }

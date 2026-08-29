@@ -138,7 +138,7 @@ cadence and files remediation issues on drift.
 | [0076](0076-github-cache-loop.md) | GitHubCacheLoop: Centralized GitHub Data Cache | Proposed |
 | [0077](0077-pr-unsticker-loop.md) | PRUnstickerLoop: Goal-Driven HITL PR Resolution | Proposed |
 | [0078](0078-pricing-refresh-loop.md) | PricingRefreshLoop: Autonomous LLM Pricing Drift Detection | Proposed |
-| [0079](0079-adr-reviewer-loop.md) | ADRReviewerLoop: Autonomous Council Review for Proposed ADRs | Proposed |
+| [0079](0079-adr-reviewer-loop.md) | ADRReviewerLoop: Autonomous Panel Review for Proposed ADRs | Proposed |
 | [0080](0080-epic-monitor-loop.md) | EpicMonitorLoop: Autonomous Stale-Epic Detection and Progress Refresh | Proposed |
 | [0081](0081-epic-sweeper-loop.md) | EpicSweeperLoop: Autonomous Completion-Based Epic Auto-Close | Proposed |
 | [0082](0082-declarative-gate-contract.md) | Declarative Gate Contract for Branch Protection | Proposed |
@@ -180,7 +180,7 @@ cadence and files remediation issues on drift.
 | [0118](0118-observability-belongs-to-the-sre-agent-not-the-loops.md) | Observability belongs to the SRE agent, not the loops | Accepted |
 | [0119](0119-credit-failover-to-glm.md) | Credit failover — reroute work to GLM instead of pausing when Claude credits are exhausted | Accepted |
 | [0120](0120-stillness-control-architecture.md) | The stillness control architecture — setpoint regulators, an optimization layer, and innovation-filtered sensing | Proposed |
-| [0121](0121-rails-manifest-and-drift-caretaker.md) | Rails manifest (rails.yaml) + drift caretaker — template conformance as data | Proposed |
+| [0121](0121-rails-manifest-and-drift-caretaker.md) | The repo charter (charter.yaml) + drift caretaker — conformance as data | Proposed |
 | [0122](0122-vocabulary-scopes-for-the-three-assurance-disciplines.md) | Vocabulary scopes for the three assurance disciplines | Proposed |
 | [0123](0123-bidirectional-enforcement.md) | Bidirectional enforcement — every rule declares which direction it binds | Proposed |
 | [0124](0124-tier-2-goal-supervisor.md) | Tier-2 goal supervisor — a Fable "mini-me" over Tier-1's liveness signals | Proposed |

@@ -395,7 +395,7 @@ class RouteBackCoordinator:
                 )
             except Exception as exc:  # noqa: BLE001
                 # The self-solver spawns subprocess work (the decompose
-                # terminal's `gh` reads and the council/decomposer runs), so
+                # terminal's `gh` reads and the ensemble/decomposer runs), so
                 # this is a subprocess-runner handler and owes the standing
                 # reraise. ``PlanRetrySelfSolver.solve`` documents that it
                 # re-raises credit-exhaustion / real-bug exceptions rather

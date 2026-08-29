@@ -1,6 +1,6 @@
 """Regression test for issue #6732.
 
-``ADRCouncilReviewer.review_proposed_adrs()`` iterates proposed ADRs and
+``ADRReviewPanel.review_proposed_adrs()`` iterates proposed ADRs and
 wraps each in ``except Exception: logger.exception(...)``.  This catches
 ``AuthenticationError`` and ``CreditExhaustedError`` (both subclass
 ``RuntimeError``) as if they were per-ADR errors, then continues to the
@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from adr_reviewer import ADRCouncilReviewer
+from adr_reviewer import ADRReviewPanel
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from tests.helpers import ConfigFactory
 
@@ -29,14 +29,14 @@ from tests.helpers import ConfigFactory
 # ---------------------------------------------------------------------------
 
 
-def _make_reviewer(tmp_path: Path) -> ADRCouncilReviewer:
-    """Build an ADRCouncilReviewer with test-friendly defaults."""
+def _make_reviewer(tmp_path: Path) -> ADRReviewPanel:
+    """Build an ADRReviewPanel with test-friendly defaults."""
     config = ConfigFactory.create(repo_root=tmp_path / "repo")
     from events import EventBus
 
     bus = EventBus()
     runner = MagicMock()
-    return ADRCouncilReviewer(config, bus, runner)
+    return ADRReviewPanel(config, bus, runner)
 
 
 def _write_proposed_adr(adr_dir: Path, number: int = 99) -> Path:
@@ -80,7 +80,7 @@ class TestReviewProposedAdrsPropagatesFatalErrors:
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         _write_proposed_adr(adr_dir)
 
-        reviewer._run_council_session = AsyncMock(
+        reviewer._run_panel_session = AsyncMock(
             side_effect=AuthenticationError("bad credentials"),
         )
 
@@ -94,7 +94,7 @@ class TestReviewProposedAdrsPropagatesFatalErrors:
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         _write_proposed_adr(adr_dir)
 
-        reviewer._run_council_session = AsyncMock(
+        reviewer._run_panel_session = AsyncMock(
             side_effect=CreditExhaustedError("usage limit reached"),
         )
 
@@ -108,7 +108,7 @@ class TestReviewProposedAdrsPropagatesFatalErrors:
         adr_dir = Path(reviewer._config.repo_root) / "docs" / "adr"
         _write_proposed_adr(adr_dir)
 
-        reviewer._run_council_session = AsyncMock(
+        reviewer._run_panel_session = AsyncMock(
             side_effect=RuntimeError("empty LLM response"),
         )
 

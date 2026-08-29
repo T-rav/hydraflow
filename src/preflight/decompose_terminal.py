@@ -8,7 +8,7 @@ caller apply today's ADR-0084 behavior unchanged; when it decomposes, the
 stuck issue is superseded by an epic + children and `human-required` is never
 added.
 
-This is the sole place `IssueDecomposer` and `DecompositionCouncil` are wired
+This is the sole place `IssueDecomposer` and `DecompositionEnsemble` are wired
 together for the stall path (both are otherwise only exercised directly by
 unit tests). Depth is resolved from any existing epic that already claims
 this issue as a child (`EpicState.decomposition_depth + 1`) so a
@@ -18,7 +18,7 @@ increments (ADR-0105 §4).
 
 #11480: the attempt cap trips on attempt *count*, never on attempt *outcome*,
 so a final attempt that produced a landing PR still arrives here on the next
-tick. Before the council is ever asked (and before any epic is created), this
+tick. Before the ensemble is ever asked (and before any epic is created), this
 module now looks for evidence that the work is already done —
 :func:`_find_landed_fix` — and returns a third outcome, ``already-satisfied``,
 which neither decomposes nor pages a human. Both call sites
@@ -44,7 +44,7 @@ from models import Task
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
-    from decomposition_council import DecompositionCouncil
+    from decomposition_ensemble import DecompositionEnsemble
     from issue_decomposer import IssueDecomposer
     from preflight.context import PreflightContext
 
@@ -54,8 +54,8 @@ DECOMPOSED = "decomposed"
 HUMAN_REQUIRED = "human-required"
 ALREADY_SATISFIED = "already-satisfied"
 
-# Bounds on how much of the stall evidence goes into the council prompt —
-# mirrors decomposition_council.py's own task-body truncation (5000 chars);
+# Bounds on how much of the stall evidence goes into the ensemble prompt —
+# mirrors decomposition_ensemble.py's own task-body truncation (5000 chars);
 # kept smaller here since this is one section among several.
 _STALL_DIFF_CHARS = 4000
 _MAX_REVIEW_COMMENTS = 5
@@ -138,7 +138,7 @@ async def decompose_or_escalate(
     ctx: PreflightContext,
     config: HydraFlowConfig,
     decomposer: IssueDecomposer | None,
-    council: DecompositionCouncil | None,
+    ensemble: DecompositionEnsemble | None,
     state: _StatePort,
     prs: _PRPort,
 ) -> str:
@@ -149,14 +149,14 @@ async def decompose_or_escalate(
     for the issue has already landed or is in flight (the caller must neither
     decompose nor page a human — the issue stays in the pipeline and closes
     with its fix), or ``"human-required"`` when decomposition is not wired,
-    the council declines, or the depth cap is already spent (the caller
+    the ensemble declines, or the depth cap is already spent (the caller
     applies today's HITL behavior unchanged).
 
     Idempotent: if a prior — possibly interrupted — tick already decomposed
     this issue, returns ``"decomposed"`` immediately without invoking the
-    council or creating a second epic (ADR-0105 §Decision(3)).
+    ensemble or creating a second epic (ADR-0105 §Decision(3)).
     """
-    if decomposer is None or council is None:
+    if decomposer is None or ensemble is None:
         # Decompose-to-converge isn't wired for this caller (e.g. a test
         # harness or a deployment that hasn't threaded epic_manager/runner
         # through yet). Graceful degradation to today's behavior — never a
@@ -171,7 +171,7 @@ async def decompose_or_escalate(
         return DECOMPOSED
 
     # #11480: the work-already-done gate. Runs BEFORE the depth cap (a landed
-    # fix must not page a human either) and before the council, so a
+    # fix must not page a human either) and before the ensemble, so a
     # spuriously-stalled issue costs neither an LLM call nor a planning cycle.
     landed = await _find_landed_fix(issue_number, config=config, prs=prs)
     if landed is not None:
@@ -187,7 +187,7 @@ async def decompose_or_escalate(
     if depth >= config.max_decomposition_depth:
         logger.info(
             "Issue #%d already at decomposition depth cap (%d >= %d) — "
-            "escalating without invoking the council",
+            "escalating without invoking the ensemble",
             issue_number,
             depth,
             config.max_decomposition_depth,
@@ -209,7 +209,7 @@ async def decompose_or_escalate(
         depth=depth,
         stall_context=stall_context,
         doc_context=doc_context,
-        council=council,
+        ensemble=ensemble,
         decomposer=decomposer,
     )
     if epic_number is None:
@@ -240,15 +240,15 @@ async def _decide_and_create(
     depth: int,
     stall_context: str,
     doc_context: str,
-    council: DecompositionCouncil,
+    ensemble: DecompositionEnsemble,
     decomposer: IssueDecomposer,
 ) -> int | None:
-    """Run the council, and on approval create the epic. ``None`` on any
-    decline (council or IssueDecomposer's own depth/fanout cap) — the
+    """Run the ensemble, and on approval create the epic. ``None`` on any
+    decline (ensemble or IssueDecomposer's own depth/fanout cap) — the
     caller treats all three the same way (fall through to human-required).
     """
     try:
-        result = await council.decide(
+        result = await ensemble.decide(
             task=task,
             stall_context=stall_context,
             doc_context=doc_context,
@@ -257,13 +257,13 @@ async def _decide_and_create(
     except Exception as exc:
         reraise_on_credit_or_bug(exc)
         logger.warning(
-            "Decomposition council failed for #%d: %s", task.id, exc, exc_info=True
+            "Decomposition ensemble failed for #%d: %s", task.id, exc, exc_info=True
         )
         return None
 
     if not result.should_decompose:
         logger.info(
-            "Decomposition council declined for #%d (confidence=%r): %s",
+            "Decomposition ensemble declined for #%d (confidence=%r): %s",
             task.id,
             result.confidence,
             result.reasoning,
@@ -279,7 +279,7 @@ async def _decide_and_create(
     if epic_number is None:
         # Declined internally by IssueDecomposer's own depth/fanout cap (a
         # race against another decompose between our pre-check above and
-        # this call, or the fanout cap) — same floor as a council decline.
+        # this call, or the fanout cap) — same floor as a ensemble decline.
         logger.info(
             "Issue #%d decomposition capped by IssueDecomposer — "
             "falling through to human-required",
@@ -344,7 +344,7 @@ async def _find_pr_number(
     #11282 defect class: the auto-agent mints its own
     ``agent/auto-agent-{N}`` branch, so a manual-only lookup is blind to the
     auto-agent's own PR — which is exactly why #11427's PR was never seen by
-    this terminal (no salvage diff for the council, no supersede close).
+    this terminal (no salvage diff for the ensemble, no supersede close).
     """
     escalation_context = ctx.escalation_context
     if escalation_context is not None and escalation_context.pr_number:
@@ -626,9 +626,9 @@ async def _touched_files(
 
 
 def _build_stall_context(issue_number: int, ctx: PreflightContext) -> str:
-    """Summarize why *issue_number* stalled for the council's direction pass.
+    """Summarize why *issue_number* stalled for the ensemble's direction pass.
 
-    Feeds ``DecompositionCouncil``'s "why the task stalled" section — the
+    Feeds ``DecompositionEnsemble``'s "why the task stalled" section — the
     diff-so-far (when present) is what lets direction scope a "salvage"
     child that lands the already-working slice instead of discarding it.
     """

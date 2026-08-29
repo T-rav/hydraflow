@@ -1,7 +1,7 @@
 """Regression pin for the 2026-08-16 light-tier HITL cascade (#11298).
 
 Live failure: the #11304 light tier skipped the adversarial plan REVIEW
-but not the plan COUNCIL. The council critiqued deliberately-short lite
+but not the plan ENSEMBLE. The ensemble critiqued deliberately-short lite
 plans against full-scale expectations and raised >= 2 design-decision
 CRITICAL concerns per issue; with no reviewer stage to resolve them, the
 ready-swap design gate (`_route_to_hitl_if_design_decision`) routed every
@@ -9,9 +9,9 @@ light-tier issue to `human-required` — 9 issues in one morning, starving
 the pipeline.
 
 Pins:
-1. A tier-eligible issue skips the council (no council spawn, no concerns
+1. A tier-eligible issue skips the ensemble (no ensemble spawn, no concerns
    raised into adversarial state).
-2. A non-eligible issue still runs the council (the #10659 protection is
+2. A non-eligible issue still runs the ensemble (the #10659 protection is
    untouched for full-tier work).
 """
 
@@ -36,8 +36,8 @@ def _phase(config: HydraFlowConfig, *, complexity: int):
     )
     phase._state = SimpleNamespace(get_route_back_count=lambda _id: 0)
     phase._has_escalation_label = lambda _issue: False
-    phase._council_agents = [object()]  # wired, so only the tier gates
-    phase._run_plan_council = AsyncMock()
+    phase._ensemble_agents = [object()]  # wired, so only the tier gates
+    phase._run_plan_ensemble = AsyncMock()
     return phase
 
 
@@ -50,18 +50,18 @@ def _state() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_light_tier_skips_council() -> None:
+async def test_light_tier_skips_ensemble() -> None:
     phase = _phase(HydraFlowConfig(), complexity=2)
-    state = await phase._flow_council(_state())
-    phase._run_plan_council.assert_not_awaited()
+    state = await phase._flow_ensemble(_state())
+    phase._run_plan_ensemble.assert_not_awaited()
     assert state["result"].success is True
 
 
 @pytest.mark.asyncio
-async def test_full_tier_still_runs_council() -> None:
+async def test_full_tier_still_runs_ensemble() -> None:
     phase = _phase(HydraFlowConfig(), complexity=8)
-    await phase._flow_council(_state())
-    phase._run_plan_council.assert_awaited()
+    await phase._flow_ensemble(_state())
+    phase._run_plan_ensemble.assert_awaited()
 
 
 class TestThresholdTenSentinelCollapse:

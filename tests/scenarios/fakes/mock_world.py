@@ -496,7 +496,7 @@ class MockWorld:
             "implement": self._llm.script_implement,
             "review": self._llm.script_review,
             # "decomposition" isn't a pipeline-phase runner: it queues the raw
-            # council transcripts the DecompositionCouncil seam returns (ADR-0105).
+            # ensemble transcripts the DecompositionEnsemble seam returns (ADR-0105).
             # Included here so a sandbox scenario's seed.scripts["decomposition"]
             # loads in-process too — matching how sandbox_main dispatches
             # seed.scripts generically via getattr(fake_llm, f"script_{phase}").

@@ -137,14 +137,14 @@ class DiagramLoop(BaseBackgroundLoop):
             # thread: emit() is sync CPU/IO work.
             from arch.runner import emit, emit_inline_blocks  # noqa: PLC0415
 
+            # Blocks first, for the same reason arch.runner._main does it in
+            # that order: coverage_matrix.py reads docs/standards/**, so
+            # emitting the artifacts first computes the matrix against the
+            # previous registry and the PR ships still-stale artifacts.
+            await asyncio.to_thread(emit_inline_blocks, repo_root=worktree)
             await asyncio.to_thread(
                 emit, repo_root=worktree, out_dir=worktree / "docs/arch/generated"
             )
-            # Blocks generated INTO hand-written documents are not written by
-            # emit() (which targets one out_dir). Without this the regen PR
-            # ships fresh artifacts and a stale registry table, and then fails
-            # the very `make arch-check` it exists to satisfy.
-            await asyncio.to_thread(emit_inline_blocks, repo_root=worktree)
             # Prune the ratchet baseline to the freshly emitted matrix pct so
             # a regen PR that lowers the pct ships the matching baseline —
             # otherwise the gate's `resolved` assertion fails on the next

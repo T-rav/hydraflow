@@ -20,6 +20,7 @@ quietly is a staleness gate with no subject.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -120,3 +121,39 @@ class TestTheGeneratorRefusesToWriteNowhere:
             {PORT_REGISTRY_BLOCK: "fresh"},
         )
         assert result == f"before\n{begin}\nfresh\n{end}\nafter\n"
+
+
+class TestRegenConvergesInOnePass:
+    """`make arch-regen` must settle the tree, not leave it half-stale.
+
+    `coverage_matrix.py` greps `docs/standards/**` for every loop and port
+    name, and the ports-and-loops registry is a generated block inside that
+    tree. So the blocks have to be written BEFORE the artifacts that read
+    them. With the order reversed the matrix is computed against the previous
+    registry, one regen leaves the tree stale, `arch-check` stays red, and the
+    bot heals that run regen once and commit would ship the staleness they
+    exist to remove. Found for real merging #11759's
+    `RailsDriftCaretakerLoop` -> `CharterDriftCaretakerLoop` rename.
+    """
+
+    def test_inline_blocks_are_emitted_before_the_artifacts_that_read_them(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from arch import runner
+
+        order: list[str] = []
+        monkeypatch.setattr(
+            runner, "emit_inline_blocks", lambda **_: (order.append("blocks"), [])[1]
+        )
+        monkeypatch.setattr(runner, "emit", lambda **_: order.append("artifacts"))
+        monkeypatch.setattr(runner, "sync_traceability_baseline", lambda _: False)
+        monkeypatch.setattr(
+            sys, "argv", ["arch.runner", "--emit", "--repo-root", str(tmp_path)]
+        )
+
+        assert runner._main() == 0
+        assert order == ["blocks", "artifacts"], (
+            "docs/standards blocks must be written before docs/arch/generated "
+            "is computed — the matrix reads the registry, so the reverse order "
+            "needs two regens to converge and leaves arch-check red after one"
+        )

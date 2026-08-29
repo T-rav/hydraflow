@@ -86,6 +86,7 @@ each is responsible for one caretaking concern.
 | `AutoTightenLoop` | `src/auto_tighten_loop.py` | 86400 | 0104 | — |
 | `BranchProtectionAuditorLoop` | `src/branch_protection_auditor_loop.py` | 604800 | 0082 | — |
 | `CIMonitorLoop` | `src/ci_monitor_loop.py` | 300 | 0029, 0065 | [ci-monitor-loop.md](../../wiki/terms/ci-monitor-loop.md) |
+| `CharterDriftCaretakerLoop` | `src/charter_drift_caretaker_loop.py` | 86400 | 0121 | [charter-drift-caretaker-loop.md](../../wiki/terms/charter-drift-caretaker-loop.md) |
 | `ContractRefreshLoop` | `src/contract_refresh_loop.py` | 604800 | 0045, 0047 | [contract-refresh-loop.md](../../wiki/terms/contract-refresh-loop.md) |
 | `ConvergenceOscillationLoop` | `src/convergence_oscillation_loop.py` | 3600 | 0096, 0097, 0098 | — |
 | `CorpusLearningLoop` | `src/corpus_learning_loop.py` | 3600 | 0045 | [corpus-learning-loop.md](../../wiki/terms/corpus-learning-loop.md) |
@@ -124,7 +125,6 @@ each is responsible for one caretaking concern.
 | `PricingRefreshLoop` | `src/pricing_refresh_loop.py` | 86400 | 0078, 0093 | [pricing-refresh-loop.md](../../wiki/terms/pricing-refresh-loop.md) |
 | `PrinciplesAuditLoop` | `src/principles_audit_loop.py` | 604800 | 0045, 0056, 0120 | — |
 | `RCBudgetLoop` | `src/rc_budget_loop.py` | 14400 | 0045, 0120 | [rc-budget-loop.md](../../wiki/terms/rc-budget-loop.md) |
-| `RailsDriftCaretakerLoop` | `src/rails_drift_caretaker_loop.py` | 86400 | 0121 | [rails-drift-caretaker-loop.md](../../wiki/terms/rails-drift-caretaker-loop.md) |
 | `RepoWikiLoop` | `src/repo_wiki_loop.py` | 3600 | 0032, 0053, 0061, 0062, 0064 | — |
 | `ReportIssueLoop` | `src/report_issue_loop.py` | 30 | 0013, 0018, 0028, 0045, 0120 | [report-issue-loop.md](../../wiki/terms/report-issue-loop.md) |
 | `RetrospectiveLoop` | `src/retrospective_loop.py` | 86400 | 0074, 0093, 0120 | — |

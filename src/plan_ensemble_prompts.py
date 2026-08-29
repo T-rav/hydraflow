@@ -1,8 +1,8 @@
-"""Voter prompts for the PlanCouncil.
+"""Voter prompts for the PlanEnsemble.
 
 These prompts encode the adversarial geometry. The priors (Builder = wants
 to ship; Tester = paranoid about untested behavior; Risk-Skeptic = wants to
-kill or shrink) are load-bearing — paraphrasing them collapses the council
+kill or shrink) are load-bearing — paraphrasing them collapses the ensemble
 into role-name swaps with the same prior, which defeats the design.
 """
 

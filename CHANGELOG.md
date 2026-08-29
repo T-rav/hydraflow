@@ -7,6 +7,28 @@ what a tag promises, and the cut recipe live in
 
 ## Unreleased
 
+- Ubiquitous language: the **adversarial planning ensemble** is renamed off "Council", so
+  "Council" now names exactly one thing in this repo — the `agents/council/` governance
+  layer (ADR-0053). `PlanCouncil`→`PlanEnsemble`, `DecompositionCouncil`→`DecompositionEnsemble`,
+  `CouncilTally`→`EnsembleTally`, `src/plan_council{,_prompts}.py`→`src/plan_ensemble{,_prompts}.py`,
+  `src/decomposition_council.py`→`src/decomposition_ensemble.py`, plan-flow node `council`→`ensemble`,
+  stage strings `plan_council_*`→`plan_ensemble_*`, ledger source `decomposition_council`→
+  `decomposition_ensemble`, prompt ids `decomposition_council_{direction,validation}`→
+  `decomposition_ensemble_*`. `Ensemble` was chosen over `Panel` (owned by the UI) and `Jury`
+  (same fiduciary-confusion class GNAA rejected "Board" for). Three pre-rename spellings keep
+  being READ but are never written: the persisted stage string `plan_council_risk_skeptic`, the
+  `hydraflow-council-review` transient label, and the MockWorld seed key `shape_council`
+  (`tests/regressions/test_plan_ensemble_rename_compat.py`). ADR-0064/0105 keep their prose;
+  only their source citations are repointed so the P2 drift gate keeps firing.
+- Ubiquitous language: the multi-model ADR review ensemble is renamed off "Council" so the
+  word names only the governance layer (ADR-0053 single-valued terms). `ADRCouncilReviewer` →
+  `ADRReviewPanel`, `ADRCouncilResult`/`CouncilVote`/`CouncilVerdict` → `ADRReviewPanelResult`/
+  `PanelVote`/`PanelVerdict`, and the term file `docs/wiki/terms/adr-council-reviewer.md` →
+  `adr-review-panel.md` (same ULID, so inbound term edges hold). Two pre-rename keys are still
+  **read**: the `## Council Amendment Notes` heading already written into ADRs on disk, and a
+  `COUNCIL_RESULT:` transcript header from a stale prompt — dropping either fails silently
+  (duplicated amendment block; verdict discarded as NO_CONSENSUS). `PlanCouncil`,
+  `DecompositionCouncil` and the rest of the adversarial pipeline are untouched (#11764).
 - Governance: the `agents/console/` layer is renamed **the Council, with chambers** per the
   2026-08-25 PAAA house standard (lineage: "console" → "Board" → Council, GNAA record
   `council/decisions/general/0009`). `agents/council/`, `make council-conformance`,

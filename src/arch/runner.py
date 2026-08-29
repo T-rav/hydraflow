@@ -556,9 +556,21 @@ def _main() -> int:
     repo_root = args.repo_root.resolve()
     generated = repo_root / "docs/arch/generated"
     if args.emit:
-        emit(repo_root=repo_root, out_dir=generated)
+        # Inline blocks FIRST. `coverage_matrix.py` greps `docs/standards/**`
+        # for every loop and port name, and the ports-and-loops registry is a
+        # generated block inside that tree — so emitting the artifacts before
+        # the blocks computes the matrix against the PREVIOUS registry. One
+        # `make arch-regen` then leaves the tree still stale and `arch-check`
+        # still red, which is a regen loop that does not converge in one pass
+        # (found merging #11759's CharterDriftCaretakerLoop rename).
+        #
+        # This order is a true fixed point: the blocks derive from `src/`,
+        # `docs/adr/` and `docs/wiki/terms/`, none of which `emit()` writes,
+        # and `emit()` writes only `docs/arch/generated/` + `.meta.json`.
+        # The dependency runs one way, so writing the blocks first settles it.
         for rel in emit_inline_blocks(repo_root=repo_root):
             print(f"[arch-regen] refreshed generated block(s) in {rel}")
+        emit(repo_root=repo_root, out_dir=generated)
         # Keep the traceability ratchet baseline in lockstep with the fresh
         # matrix (prune-only). Lives here rather than in emit() so check()'s
         # tmpdir regeneration stays a pure read of the repo.

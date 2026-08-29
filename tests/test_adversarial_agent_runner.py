@@ -110,7 +110,7 @@ class TestSubprocessAgentRunnerBasic:
     async def test_claude_spawn_isolates_user_settings(
         self, config: HydraFlowConfig
     ) -> None:
-        # Regression: adversarial judges (SpecJudge, PlanCouncil, …) emit
+        # Regression: adversarial judges (SpecJudge, PlanEnsemble, …) emit
         # strict JSON. A host user-level superpowers SessionStart hook injects
         # "invoke a skill before responding" guidance that derails the JSON
         # contract (the judge explores the repo instead of voting), so the

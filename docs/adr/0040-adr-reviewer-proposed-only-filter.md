@@ -6,10 +6,10 @@
 
 ## Context
 
-The `ADRCouncilReviewer` in `src/adr_reviewer.py` enters its review pipeline through
+The `ADRReviewPanel` in `src/adr_reviewer.py` enters its review pipeline through
 `review_proposed_adrs()`, which calls `_find_proposed_adrs()` to discover candidates.
 This finder method filters ADR files to only those with `**Status:** Proposed`,
-meaning the entire downstream review flow — duplicate detection, council voting,
+meaning the entire downstream review flow — duplicate detection, panel voting,
 acceptance, escalation — only ever processes ADRs in the Proposed state.
 
 Any status-specific logic for other states (e.g. checking `status == "superseded"`)
@@ -31,7 +31,7 @@ Accept the Proposed-only filter as the intentional design for the automated revi
 pipeline and document the following boundaries:
 
 1. **`review_proposed_adrs()` is the production entry point.** It deliberately
-   restricts processing to Proposed ADRs. This prevents the council from
+   restricts processing to Proposed ADRs. This prevents the review panel from
    re-reviewing Accepted, Superseded, or Rejected ADRs on every cycle, which would
    waste compute and risk unintended status transitions.
 
@@ -68,7 +68,7 @@ pipeline and document the following boundaries:
 ## Alternatives Considered
 
 - **Broaden the filter to all statuses:** Rejected because it would cause the
-  council to re-process every ADR on every cycle, increasing latency and risking
+  review panel to re-process every ADR on every cycle, increasing latency and risking
   accidental status changes on already-decided ADRs.
 
 - **Remove all non-Proposed status checks:** Rejected because the validator class
@@ -83,5 +83,5 @@ pipeline and document the following boundaries:
 
 - Issue #2251 — Source memory: ADR pre-review validator only processes Status: Proposed ADRs
 - Issue #2253 — This ADR task
-- `src/adr_reviewer.py` — `ADRCouncilReviewer._find_proposed_adrs`
-- `src/adr_reviewer.py` — `ADRCouncilReviewer.review_proposed_adrs`
+- `src/adr_reviewer.py` — `ADRReviewPanel._find_proposed_adrs`
+- `src/adr_reviewer.py` — `ADRReviewPanel.review_proposed_adrs`
