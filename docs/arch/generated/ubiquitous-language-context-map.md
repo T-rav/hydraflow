@@ -44,9 +44,12 @@ graph LR
     workspacegcloop["WorkspaceGCLoop<br/><i>loop</i>"]
   end
   subgraph shared-kernel
+    actors["Actors<br/><i>policy</i>"]
     actuator["Actuator<br/><i>control_role</i>"]
     adrindex["ADRIndex<br/><i>service</i>"]
     agentport["AgentPort<br/><i>port</i>"]
+    articles["Articles<br/><i>invariant</i>"]
+    artifacts["Artifacts<br/><i>aggregate</i>"]
     authority["Authority<br/><i>policy</i>"]
     basebackgroundloop["BaseBackgroundLoop<br/><i>loop</i>"]
     botprport["BotPRPort<br/><i>port</i>"]
@@ -76,6 +79,7 @@ graph LR
     plant["Plant<br/><i>control_role</i>"]
     prmanager["PRManager<br/><i>adapter</i>"]
     prport["PRPort<br/><i>port</i>"]
+    purpose["Purpose<br/><i>policy</i>"]
     repowikistore["RepoWikiStore<br/><i>service</i>"]
     reviewinsightstoreport["ReviewInsightStorePort<br/><i>port</i>"]
     routebackcounterport["RouteBackCounterPort<br/><i>port</i>"]

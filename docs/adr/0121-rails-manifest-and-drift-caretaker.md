@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-08-01
-- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0044](0044-hydraflow-principles.md) (the audited principles), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention), [ADR-0082](0082-declarative-gate-contract.md) (branch-protection-drift caretaker — the shape mirrored here)
+- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0044](0044-hydraflow-principles.md) (the audited principles), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention), [ADR-0082](0082-declarative-gate-contract.md) (branch-protection-drift caretaker — the shape mirrored here), [ADR-0143](0143-paaa-governance-model-and-the-decision-seam.md) (PAAA — this manifest is the Articles declaration surface; #11748 renames it to `charter.yaml` and folds these fields under a `rails:` key)
 - **Addresses:** #10936 (rails manifest + drift caretaker)
 
 > **This is a Proposed ADR — a design ruling for decision, not an accepted commitment.** It records the target design and, deliberately, what is *real today* versus *v1 / unbuilt* so the build order and the enable decision are made on evidence. Accept, amend, or reject.
