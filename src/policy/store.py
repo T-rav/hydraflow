@@ -1,4 +1,4 @@
-"""The fact ledger: ``.hydraflow/metrics/{repo_slug}/facts.jsonl``.
+"""The fact ledger: ``.hydraflow/{repo_slug}/metrics/facts.jsonl``.
 
 Sits next to ``adr_conformance.jsonl`` and follows the same ADR-0021 layout and
 the same **snapshot** retention: one row per ``(standard, subject, key)``,
