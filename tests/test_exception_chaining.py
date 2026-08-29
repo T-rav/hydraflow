@@ -572,23 +572,23 @@ class TestVerificationJudgeBugGates:
 
 
 class TestADRReviewerBugGates:
-    """Test is_likely_bug gate in ADRCouncilReviewer."""
+    """Test is_likely_bug gate in ADRReviewPanel."""
 
     @pytest.mark.asyncio
     async def test_triage_routing_writes_jsonl(self) -> None:
         """_route_to_triage now writes JSONL instead of creating a GitHub issue."""
-        from adr_reviewer import ADRCouncilReviewer
-        from models import ADRCouncilResult, CouncilVerdict
+        from adr_reviewer import ADRReviewPanel
+        from models import ADRReviewPanelResult, PanelVerdict
 
-        reviewer = ADRCouncilReviewer.__new__(ADRCouncilReviewer)
+        reviewer = ADRReviewPanel.__new__(ADRReviewPanel)
         reviewer._prs = AsyncMock()
         reviewer._config = MagicMock()
         reviewer._config.find_label = ["hydraflow-find"]
 
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=1,
             adr_path=Path("adr.md"),
-            final_decision=CouncilVerdict.REQUEST_CHANGES,
+            final_decision=PanelVerdict.REQUEST_CHANGES,
             votes=[],
             summary="test",
         )
@@ -603,9 +603,9 @@ class TestADRReviewerBugGates:
     async def test_pre_validation_failure_writes_jsonl(self) -> None:
         """_route_pre_validation_failure now writes JSONL instead of creating issues."""
         from adr_pre_validator import ADRValidationIssue, ADRValidationResult
-        from adr_reviewer import ADRCouncilReviewer
+        from adr_reviewer import ADRReviewPanel
 
-        reviewer = ADRCouncilReviewer.__new__(ADRCouncilReviewer)
+        reviewer = ADRReviewPanel.__new__(ADRReviewPanel)
         reviewer._prs = AsyncMock()
         reviewer._config = MagicMock()
         reviewer._config.find_label = ["hydraflow-find"]
@@ -631,18 +631,18 @@ class TestADRReviewerBugGates:
     @pytest.mark.asyncio
     async def test_handle_duplicate_writes_jsonl(self) -> None:
         """_handle_duplicate now writes JSONL instead of creating issues."""
-        from adr_reviewer import ADRCouncilReviewer
-        from models import ADRCouncilResult, CouncilVerdict
+        from adr_reviewer import ADRReviewPanel
+        from models import ADRReviewPanelResult, PanelVerdict
 
-        reviewer = ADRCouncilReviewer.__new__(ADRCouncilReviewer)
+        reviewer = ADRReviewPanel.__new__(ADRReviewPanel)
         reviewer._prs = AsyncMock()
         reviewer._config = MagicMock()
         reviewer._config.find_label = ["hydraflow-find"]
 
-        result = ADRCouncilResult(
+        result = ADRReviewPanelResult(
             adr_number=2,
             adr_path=Path("adr.md"),
-            final_decision=CouncilVerdict.REQUEST_CHANGES,
+            final_decision=PanelVerdict.REQUEST_CHANGES,
             votes=[],
             summary="dup",
             duplicate_detected=True,

@@ -1,4 +1,4 @@
-"""Pre-review validation for ADRs — catches structural defects before council."""
+"""Pre-review validation for ADRs — catches structural defects before the review panel."""
 
 from __future__ import annotations
 
@@ -137,7 +137,7 @@ def _resolve_dotted_symbol(source: str, dotted: str) -> bool | None:
 
 
 class ADRPreValidator:
-    """Validates ADR structure before sending to the council."""
+    """Validates ADR structure before sending to the review panel."""
 
     def validate(
         self,
