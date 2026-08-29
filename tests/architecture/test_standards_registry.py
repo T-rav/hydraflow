@@ -39,9 +39,16 @@ from tests.architecture.standards_registry import (
     standard_directories,
 )
 
-#: ``pytest --collect-only -q`` prints one ``<path>: <count>`` line per file
-#: that yielded collected (and not deselected) tests.
-_COLLECTED_RE = re.compile(r"^(\S+\.py): (\d+)$")
+#: ``pytest --collect-only`` prints its result in one of two shapes, and which
+#: one you get is a function of TOTAL verbosity, not of the flags this call
+#: passes: at ``-2`` and below one aggregated ``<path>: <count>`` line per
+#: file, at ``-1`` one node id per collected test. ``addopts`` already carries
+#: a ``-q`` (pyproject.toml), so the ``-q`` below stacks to ``-2`` today — but
+#: a check that silently changes what it is reading when somebody tidies
+#: ``addopts`` is the shape this whole PR is about. Both are parsed, so the
+#: answer does not depend on the coupling.
+_COLLECTED_COUNT_RE = re.compile(r"^(\S+\.py): (\d+)$")
+_COLLECTED_NODEID_RE = re.compile(r"^(\S+\.py)::")
 
 #: A file that resolves but that pytest collects nothing from. Used as the
 #: negative control: it is a real module in this very package, so "the path
@@ -63,6 +70,21 @@ _BACKTICKED_RE = re.compile(r"`([A-Za-z0-9_./*-]+)`")
 _REPO_PATH_RE = re.compile(
     r"^(src|tests|scripts|docs|disturbance|\.github)/[A-Za-z0-9_./*-]+$"
 )
+
+
+def parse_collected(stdout: str) -> dict[str, int]:
+    """``{path: collected test count}`` from either ``--collect-only`` shape."""
+    counts: dict[str, int] = {}
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        aggregated = _COLLECTED_COUNT_RE.match(stripped)
+        if aggregated:
+            counts[aggregated.group(1)] = int(aggregated.group(2))
+            continue
+        nodeid = _COLLECTED_NODEID_RE.match(stripped)
+        if nodeid:
+            counts[nodeid.group(1)] = counts.get(nodeid.group(1), 0) + 1
+    return counts
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,13 +139,8 @@ def _collect(paths: tuple[str, ...]) -> Collection:
         check=False,
         timeout=600,
     )
-    counts: dict[str, int] = {}
-    for line in proc.stdout.splitlines():
-        match = _COLLECTED_RE.match(line.strip())
-        if match:
-            counts[match.group(1)] = int(match.group(2))
     return Collection(
-        counts=counts,
+        counts=parse_collected(proc.stdout),
         returncode=proc.returncode,
         output=(proc.stdout + proc.stderr)[-4000:],
     )
@@ -265,6 +282,27 @@ class TestCitedGatesActuallyRun:
             "— a citation that names nothing reads exactly like one that is "
             "still true"
         )
+
+    def test_both_collect_only_output_shapes_are_read(self) -> None:
+        """Which shape pytest prints depends on total verbosity, not on us.
+
+        Without this the node-id branch is a branch nothing exercises, and a
+        parser half of which has never run is the failure this file exists to
+        catch, one level down.
+        """
+        aggregated = "tests/architecture/test_x.py: 3\n\n3 tests collected\n"
+        node_ids = (
+            "tests/architecture/test_x.py::TestA::test_one\n"
+            "tests/architecture/test_x.py::TestA::test_two\n"
+            "tests/architecture/test_x.py::test_three\n"
+            "\n3 tests collected\n"
+        )
+        expected = {"tests/architecture/test_x.py": 3}
+        assert parse_collected(aggregated) == expected
+        assert parse_collected(node_ids) == expected
+
+    def test_output_naming_no_tests_yields_no_count(self) -> None:
+        assert parse_collected("no tests ran\n") == {}
 
     def test_a_module_pytest_does_not_collect_is_not_reported_as_collected(
         self,
