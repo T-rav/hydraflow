@@ -26,18 +26,6 @@ The component that applies a Controller's action to the Plant: dispatches an age
 **Invariants:**
 - Every Actuator action is subject to the Governor's saturation and safety limits.
 
-## ADRCouncilReviewer
-
-**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer.py:ADRCouncilReviewer` · **Confidence:** `accepted`
-**Aliases:** `adr council reviewer`, `council reviewer`
-
-ADRCouncilReviewer is the domain service that runs multi-agent council review sessions on proposed Architecture Decision Records. It scans the ADR directory for files marked Status: Proposed, gates each candidate through ADRPreValidator, detects near-duplicate ADRs via similarity scoring, orchestrates multi-round council voting, and routes each outcome to acceptance, rejection, escalation, or duplicate-flagging. ADRReviewerLoop delegates all review logic to this service on every polling cycle.
-
-**Invariants:**
-- CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
-- Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
-- Pre-validation must pass before a council session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
-
 ## ADRIndex
 
 **Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADRIndex` · **Confidence:** `accepted`
@@ -71,6 +59,18 @@ Caretaker loop that polls for ADRs in `Proposed` status and runs council reviews
 **Invariants:**
 - The loop delegates entirely to `ADRCouncilReviewer.review_proposed_adrs()`; no review logic lives in the loop itself.
 - Kill-switch is via `enabled_cb("adr_reviewer")` and `config.adr_reviewer_loop_enabled` (ADR-0049).
+
+## ADRReviewPanel
+
+**Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer.py:ADRReviewPanel` · **Confidence:** `accepted`
+**Aliases:** `adr review panel`, `review panel`
+
+ADRReviewPanel is the domain service that runs multi-agent review-panel sessions on proposed Architecture Decision Records. It scans the ADR directory for files marked Status: Proposed, gates each candidate through ADRPreValidator, detects near-duplicate ADRs via similarity scoring, orchestrates multi-round panel voting, and routes each outcome to acceptance, rejection, escalation, or duplicate-flagging. ADRReviewerLoop delegates all review logic to this service on every polling cycle.
+
+**Invariants:**
+- CreditExhaustedError and AuthenticationError propagate out of the review batch rather than being swallowed per-item, so BaseBackgroundLoop can pause on a fatal billing signal.
+- Every ADR that reaches Accepted status is guaranteed to carry an **Enforced by:** line (injected as '(none)' if absent) before it is written back.
+- Pre-validation must pass before a review-panel session is started; a failing ADR is routed and counted separately without blocking the rest of the batch.
 
 ## AgentPort
 

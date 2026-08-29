@@ -88,8 +88,7 @@ def _drift_body(report: CharterDriftReport, finding_class: str) -> str:
             "2. If the change is intentional, update `charter.yaml` to reflect "
             "the new surface (closes this issue on the next tick).",
             "",
-            "_Filed by `charter_drift_caretaker` per ADR-0121 / ADR-0143 "
-            "(#11748)._",
+            "_Filed by `charter_drift_caretaker` per ADR-0121 / ADR-0143 (#11748)._",
             "",
             "<!-- [hydraflow-auditor: source=CharterDriftCaretakerLoop] -->",
         ]

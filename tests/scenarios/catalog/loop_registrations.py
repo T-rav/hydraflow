@@ -666,9 +666,9 @@ def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     if adr_reviewer is None:
         runner = ports.get("adr_reviewer_runner")
         if runner is not None:
-            from adr_reviewer import ADRCouncilReviewer  # noqa: PLC0415
+            from adr_reviewer import ADRReviewPanel  # noqa: PLC0415
 
-            adr_reviewer = ADRCouncilReviewer(
+            adr_reviewer = ADRReviewPanel(
                 config,
                 deps.event_bus,
                 runner,

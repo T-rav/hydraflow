@@ -10,7 +10,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 
 | Loop | ADR | Wiki | Generated | Standard | Unit | Scenario | Sandbox |
 |---|---|---|---|---|---|---|---|
-| `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
+| `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-review-panel.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
 | `AdrConformanceLoop` | ✅ [0100, 0104, 0136] | ✅ [adr-index.md] | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
@@ -68,7 +68,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `StagingPromotionLoop` | ✅ [0042, 0108] | ✅ [dependencies.md, patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ✅ `s82_full_machine_rc_promotion.py` |
 | `StaleIssueGCLoop` | ✅ [0029, 0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ✅ `s77_stale_issue_gc_skips_fresh_issue.py` |
 | `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
-| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068, 0126] | ✅ [adr-council-reviewer.md, adr-index.md, adr-pre-validator.md, bot-pr-port.md, circuit-breaker.md, credentials.md, credit-exhausted-error.md, dedup-store.md, entry-evidence-loop.md, escalation-reconciler.md, event-type.md, git-hub-data-cache.md, hitl-item.md, hydra-flow-event.md, pr-manager.md, review-verdict.md, subprocess-runner.md, task.md, term-pruner-loop.md, term-store.md, term.md, tribal-wiki-store.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
+| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068, 0126] | ✅ [adr-index.md, adr-pre-validator.md, adr-review-panel.md, bot-pr-port.md, circuit-breaker.md, credentials.md, credit-exhausted-error.md, dedup-store.md, entry-evidence-loop.md, escalation-reconciler.md, event-type.md, git-hub-data-cache.md, hitl-item.md, hydra-flow-event.md, pr-manager.md, review-verdict.md, subprocess-runner.md, task.md, term-pruner-loop.md, term-store.md, term.md, tribal-wiki-store.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
 | `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ✅ `s78_trust_fleet_sanity_tick_error_ratio_breach.py` |

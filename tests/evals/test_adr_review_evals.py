@@ -1,10 +1,10 @@
-"""Measure ADR-council decision accuracy on a curated corpus.
+"""Measure ADR review-panel decision accuracy on a curated corpus.
 
-The ADR-review role (``ADRCouncilReviewer``) role-plays a 3-judge council
+The ADR-review role (``ADRReviewPanel``) role-plays a 3-judge review panel
 (architect / pragmatist / editor) in a single completion routed through the
 ``adr_review_provider``/``adr_review_model``/``adr_review_tool`` dials
 (Settings > Model Routing). This eval is the gate before flipping that dial to
-a cheaper backend: each case pins the decision a competent council MUST reach
+a cheaper backend: each case pins the decision a competent panel MUST reach
 (ACCEPT a sound significant ADR, REQUEST_CHANGES a thin/incomplete one, flag a
 DUPLICATE), and aggregate accuracy across the corpus is a checkable proxy for
 quality that needs no subjective judge.
@@ -32,15 +32,15 @@ import pytest
 
 CORPUS_ROOT = Path(__file__).parent / "corpus" / "adr_review"
 
-# Aggregate bar: a competent council agrees with the human label on most cases.
+# Aggregate bar: a competent panel agrees with the human label on most cases.
 # Set to catch a backend that systematically mislabels, not to demand a perfect
 # score on every borderline judgment.
 _ACCURACY_BAR = 0.75
 
-# The canonical final_decision values ADRCouncilResult.final_decision can hold,
+# The canonical final_decision values ADRReviewPanelResult.final_decision can hold,
 # per src/models.py (uppercase: ACCEPT, REJECT, REQUEST_CHANGES, DUPLICATE,
 # NO_CONSENSUS). Note: "ACCEPT" is the approval value — the per-judge VERDICT
-# uses "APPROVE", but the council's final_decision uses "ACCEPT".
+# uses "APPROVE", but the panel's final_decision uses "ACCEPT".
 _VALID_DECISIONS = frozenset(
     {"ACCEPT", "REJECT", "REQUEST_CHANGES", "DUPLICATE", "NO_CONSENSUS"}
 )
@@ -79,13 +79,13 @@ def _load_cases() -> list[Case]:
 
 @pytest.fixture(scope="module")
 def adr_reviewer():
-    """Build a real ADRCouncilReviewer against the runtime config.
+    """Build a real ADRReviewPanel against the runtime config.
 
     Uses the production subprocess runner so the model under test matches what
     would ship; ``apply_provider_override`` lets you A/B a candidate backend via
     HYDRAFLOW_EVAL_PROVIDER / _MODEL (a no-op runs on the config default).
     """
-    from adr_reviewer import ADRCouncilReviewer
+    from adr_reviewer import ADRReviewPanel
     from config import HydraFlowConfig
     from events import EventBus
     from execution import get_default_runner
@@ -97,7 +97,7 @@ def adr_reviewer():
         provider_field="adr_review_provider",
         model_field="adr_review_model",
     )
-    return ADRCouncilReviewer(config, EventBus(), get_default_runner())
+    return ADRReviewPanel(config, EventBus(), get_default_runner())
 
 
 @pytest.mark.evals
@@ -112,7 +112,7 @@ async def test_adr_review_decision_accuracy(adr_reviewer) -> None:
     correct = 0
     report = ["", f"=== adr-review eval [backend: {backend_label()}] ==="]
     for case in cases:
-        result = await adr_reviewer._run_council_session(
+        result = await adr_reviewer._run_panel_session(
             adr_number=case.adr_number,
             adr_title=case.adr_title,
             adr_content=case.adr_content,

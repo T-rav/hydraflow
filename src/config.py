@@ -5040,7 +5040,7 @@ class HydraFlowConfig(BaseModel):
         "try rebuilding on a fresh branch from main before escalating to HITL",
     )
 
-    # ADR Council Review
+    # ADR Review Panel
     adr_review_interval: int = Field(
         default=86400,
         ge=28800,
@@ -5061,11 +5061,11 @@ class HydraFlowConfig(BaseModel):
     )
     adr_review_tool: Literal["claude", "codex"] = Field(
         default="claude",
-        description="CLI backend for the ADR council review orchestrator",
+        description="CLI backend for the ADR review-panel orchestrator",
     )
     adr_review_model: str = Field(
         default="sonnet",
-        description="Model for the ADR council review orchestrator",
+        description="Model for the ADR review-panel orchestrator",
     )
 
     # Session retention
