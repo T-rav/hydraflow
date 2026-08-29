@@ -135,16 +135,24 @@ def _domain_layer_purity(ctx: CheckContext) -> Finding:
     )
 
 
+def _infra_by_name(root: str, how: str = "") -> str | None:
+    """Flag a first-party module whose NAME marks it as infrastructure."""
+    if root in _INFRA_NAME_EXACT or root.endswith(_INFRA_NAME_SUFFIXES):
+        return f"first-party infrastructure/runner module{how}"
+    return None
+
+
 def _impurity(root: str, kind: str, first_party: frozenset[str]) -> str | None:
     """Why importing *root* breaks domain purity, or None if it is fine."""
     if kind == "relative":
         return None  # domain importing its own package is the point
+    if kind == "relative-outer":
+        # First-party by construction, so only the naming convention applies.
+        return _infra_by_name(root, " reached by relative import")
     if root in sys.stdlib_module_names:
         return None
     if root in first_party:
-        if root in _INFRA_NAME_EXACT or root.endswith(_INFRA_NAME_SUFFIXES):
-            return "first-party infrastructure/runner module"
-        return None
+        return _infra_by_name(root)
     if root in _DOMAIN_SAFE_THIRD_PARTY:
         return None
     return "third-party adapter SDK"
@@ -188,7 +196,21 @@ def _imported_roots(path: Path) -> list[tuple[int, str, str]]:
                 for alias in node.names
             ]
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
+            if node.level and node.level >= 2:
+                # `from ..adapters import x` leaves the domain's own package
+                # and reaches a SIBLING one — the shape a packaged-layout
+                # domain module would use to grab an infrastructure adapter.
+                # Only `level == 1` is "importing my own package".
+                if node.module:
+                    found.append(
+                        (node.lineno, node.module.split(".")[0], "relative-outer")
+                    )
+                else:
+                    found += [
+                        (node.lineno, alias.name, "relative-outer")
+                        for alias in node.names
+                    ]
+            elif node.level:
                 found.append((node.lineno, node.module or "", "relative"))
             elif node.module:
                 found.append((node.lineno, node.module.split(".")[0], "absolute"))

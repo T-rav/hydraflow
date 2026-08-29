@@ -114,12 +114,12 @@ NA_JUSTIFICATIONS: dict[str, str] = {
         "the three-layer wiki shape can only be judged where a repo_wiki/ "
         "exists; its absence is P7's own upstream check, reported there"
     ),
-    "P7.4": "no src/ tree means no source to scan for instrumentation",
-    "P7.5": "no src/ tree means no source to scan for instrumentation",
+    "P7.4": "no source tree means nothing to scan for instrumentation",
+    "P7.5": "no source tree means nothing to scan for instrumentation",
     # --- P9: persistence ------------------------------------------------
-    "P9.8": "no src/ tree means no persistence code to scan",
+    "P9.8": "no source tree means no persistence code to scan",
     # --- P10: TDD -------------------------------------------------------
-    "P10.2": "no src/ tree means no source modules whose test partners could be paired",
+    "P10.2": ("no source tree means no modules whose test partners could be paired"),
     "P10.3": (
         "the fix-commit history scan needs a git checkout; a tarball export has "
         "no history. (A git command that FAILS is INERT, not NA — see the "

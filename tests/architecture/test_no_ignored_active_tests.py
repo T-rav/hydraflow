@@ -126,8 +126,17 @@ def _alias_map(tree: ast.Module) -> dict[str, str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
-                if root in _FROM_IMPORT_ROOTS:
-                    aliases[alias.asname or alias.name] = alias.name
+                if root not in _FROM_IMPORT_ROOTS:
+                    continue
+                if alias.asname:
+                    aliases[alias.asname] = alias.name
+                else:
+                    # `import a.b` binds `a`, NOT `a.b`. Keying by the dotted
+                    # string produced an entry no `ast.Name.id` can ever match,
+                    # so `import unittest.mock` (live at tests/test_triage.py:7)
+                    # left every later `unittest.skip` unresolvable — this
+                    # guard's own F2 defect, one level down.
+                    aliases[root] = root
         elif isinstance(node, ast.ImportFrom) and node.module:
             if node.module.split(".")[0] not in _FROM_IMPORT_ROOTS:
                 continue
@@ -256,6 +265,15 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: ``strict=False`` an XPASS is not a failure, so the pair would have flipped
 #: silently back to XFAIL if the bug ever re-regressed and nothing would have
 #: reddened. Their markers were removed rather than recorded here.
+#: Ceiling on :data:`DEFERRED_XFAILS`, mirroring ``DEFERRED_MISMATCHES_MAX`` in
+#: ``aggregate_gate_registry``. SHRINK ONLY — lower it when entries leave.
+#:
+#: Without this, "nothing may join" was only a docstring: one PR could add an
+#: xfail AND its grandfather entry together and both gate tests would stay
+#: green. Growth now costs a second, obviously-named edit that a reviewer reads
+#: as what it is.
+DEFERRED_XFAILS_MAX = 109
+
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
         "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
@@ -502,6 +520,16 @@ _DETECTION_CASES: tuple[tuple[str, str, list[str]], ...] = (
         '"we used to pytest.mark.skip this"\ndef test_h(): pass\n',
         [],
     ),
+    (
+        "dotted import binds the top-level name",
+        "import unittest.mock\nclass Foo:\n    @unittest.skip('r')\n    def test_i(self): pass\n",
+        ["unittest skip"],
+    ),
+    (
+        "dotted pytest import binds the top-level name",
+        "import pytest.mark\n@pytest.mark.xfail\ndef test_j(): pass\n",
+        ["xfail marker"],
+    ),
 )
 
 
@@ -533,6 +561,23 @@ def test_offender_scope_is_the_test_name_not_a_line_number(tmp_path: Path) -> No
     scopes = [scope for scope, _, _ in _offenders_in(probe, frozenset())]
 
     assert scopes == ["TestOuter.test_inner"]
+
+
+def test_grandfather_set_stays_within_its_cap() -> None:
+    """The half that makes "nothing may join" mechanical rather than aspirational."""
+    assert len(DEFERRED_XFAILS) <= DEFERRED_XFAILS_MAX, (
+        f"DEFERRED_XFAILS holds {len(DEFERRED_XFAILS)} entries against a cap of "
+        f"{DEFERRED_XFAILS_MAX}. Fix the xfail rather than raising the cap; it "
+        "is shrink-only."
+    )
+
+
+def test_grandfather_cap_is_not_left_slack() -> None:
+    """A cap far above the real count would re-open the growth path silently."""
+    assert len(DEFERRED_XFAILS) == DEFERRED_XFAILS_MAX, (
+        f"cap {DEFERRED_XFAILS_MAX} != {len(DEFERRED_XFAILS)} live entries. When "
+        "an entry leaves, lower the cap in the same change."
+    )
 
 
 def test_grandfather_set_is_populated() -> None:

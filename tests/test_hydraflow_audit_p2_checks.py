@@ -142,6 +142,28 @@ def test_domain_purity_scans_the_domain_package_too(tmp_path: Path) -> None:
     assert "httpx" in result.message
 
 
+def test_domain_purity_flags_infrastructure_reached_across_packages(
+    tmp_path: Path,
+) -> None:
+    """`from ..x import y` leaves the domain's own package — level 1 does not."""
+    _write(tmp_path / "src" / "domain" / "order.py", "from ..github_runner import R\n")
+    result = _run("P2.7", _ctx(tmp_path))
+    assert result.status is Status.FAIL
+    assert "github_runner" in result.message
+
+
+def test_domain_purity_allows_same_package_relative_imports(tmp_path: Path) -> None:
+    _write(tmp_path / "src" / "domain" / "order.py", "from . import sibling\n")
+    assert _run("P2.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_domain_purity_allows_non_infrastructure_sibling_packages(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "src" / "domain" / "order.py", "from ..value_objects import S\n")
+    assert _run("P2.7", _ctx(tmp_path)).status is Status.PASS
+
+
 @pytest.mark.parametrize("retired", ["P2.3", "P2.4", "P2.6"])
 def test_retired_layer_check_ids_are_gone(retired: str) -> None:
     """P2.3/P2.4/P2.6 were retired with their ADR rows (#8383 deleted the subject).
