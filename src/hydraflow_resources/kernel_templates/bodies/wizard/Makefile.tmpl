@@ -1,0 +1,10 @@
+.PHONY: lint test quality
+
+lint:
+	uv run ruff check src tests scripts
+	uv run pyright src tests scripts
+
+test:
+	uv run pytest --cov=src --cov-fail-under={{coverage_floor}}
+
+quality: lint test{{safety_target}}

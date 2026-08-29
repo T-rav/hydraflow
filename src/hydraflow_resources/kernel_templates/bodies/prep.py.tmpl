@@ -1,0 +1,19 @@
+"""Preparation checks for {{name}}."""
+
+from __future__ import annotations
+
+import argparse
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Preparation checks.")
+    parser.add_argument(
+        "--decimal-purity",
+        action="store_true",
+        help="Run the decimal-purity AST guard over money paths.",
+    )
+    parser.parse_args()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,36 @@
+# {{title}}
+
+<!-- TEMPLATE-OWNED: these rules came from the HydraFlow kernel at birth. This file -->
+<!-- is product-owned, so re-stamping NEVER rewrites it -- not even with --force. When -->
+<!-- the kernel's version of these rules moves on, `make kernel-staleness` reports it -->
+<!-- as KERNEL_UPDATED and you merge the change deliberately. Markers are notes to a -->
+<!-- human reader, not an enforced boundary: ownership is enforced per FILE, and the -->
+<!-- committed record of it is hydraflow-kernel.lock. -->
+
+## Quick rules (always apply)
+
+- **Never commit to `{{main_branch}}`.** All changes go through a worktree branch and a PR.
+- **PRs target `{{staging_branch}}`, not `{{main_branch}}`.**
+- **Always run `make quality`** before declaring work complete.
+- **Always write unit tests before committing.**
+- Knowledge lives in [`docs/wiki/`](docs/wiki/index.md); decisions in [`docs/adr/`](docs/adr/README.md).
+- Cross-cutting rules live in [`docs/standards/`](docs/standards/).
+
+## Commands
+
+- `make quality` — full quality gate
+- `make test` — tests + coverage
+- `make audit DIR=.` — HydraFlow-format structural audit
+
+<!-- END TEMPLATE-OWNED -->
+
+<!-- PRODUCT-OWNED: your project's load-bearing rules and glossary. The kernel -->
+<!-- never overwrites this file at all, so anything you add here is safe. -->
+
+## Domain rules
+
+{{safety_block}}
+
+## Glossary
+
+<!-- Add ubiquitous-language terms here. -->
