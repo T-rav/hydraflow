@@ -69,11 +69,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-stamp template-owned files (product-owned files stay protected).",
     )
     parser.add_argument(
+        # `--agents-console` is the pre-2026-08-25 spelling (ARCH-0003 renamed
+        # the layer to the Council); kept as a deprecated alias for one cycle
+        # so existing stamp invocations keep working.
+        "--agents-council",
         "--agents-console",
+        dest="agents_council",
         action="store_true",
         help=(
-            "Also stamp the consoles-of-personas skeleton (#10949): agents/ "
-            "personas + console charter + decisions/ record discipline."
+            "Also stamp the councils-of-personas skeleton (#10949): agents/ "
+            "personas + council charter + decisions/ record discipline."
         ),
     )
     args = parser.parse_args(argv)
@@ -87,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         coverage_floor=args.coverage_floor,
         safety_guards=tuple(args.safety_guards),
         label_prefix=args.label_prefix,
-        agents_console=args.agents_console,
+        agents_council=args.agents_council,
     )
 
     try:

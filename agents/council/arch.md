@@ -1,4 +1,4 @@
-# Architecture Console
+# Architecture Chamber
 
 **Chair:** senior-principal · **Seats:** vp-eng (is the justification demonstrated or claimed), product-manager (sequencing + migration cost) · **Inherits:** [the general contract](README.md).
 

@@ -7,6 +7,14 @@ what a tag promises, and the cut recipe live in
 
 ## Unreleased
 
+- Governance: the `agents/console/` layer is renamed **the Council, with chambers** per the
+  2026-08-25 PAAA house standard (lineage: "console" → "Board" → Council, GNAA record
+  `council/decisions/general/0009`). `agents/council/`, `make council-conformance`,
+  `scripts/check_council_conformance.py`, the `council_ledger` CI filter, and
+  `docs/methodology/councils-of-personas.md`. `make console-conformance` and
+  `--agents-console` / `AGENTS_CONSOLE=1` remain as deprecated aliases; pre-rename
+  `hydraflow-kernel.lock` files still read. Decision records keep their era's name and
+  filenames — the rename is recorded as ARCH-0003, not applied to ARCH-0001 (#11741).
 - Packaging: the wheel now ships the flat `src/` modules and `assets/`, so
   `uv pip install git+https://github.com/T-rav/hydraflow@<tag>` yields a working `hydraflow`
   console script (`--version` / `--help`); 21 `from src.<mod>` imports in 11 modules rewritten

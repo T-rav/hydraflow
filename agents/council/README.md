@@ -1,6 +1,8 @@
-# The Consoles
+# The Council
 
-How HydraFlow's personas convene — chambers with chairs, seats, and bounded decision rights. This is the **general contract** every chamber inherits. Chambers: [design](design.md) · [architecture](arch.md). Adopted from the harvestd reference (advances #10949).
+How HydraFlow's personas convene — **chambers** with chairs, seats, and bounded decision rights. This is the **general contract** every chamber inherits. Chambers: [design](design.md) · [architecture](arch.md). Adopted from the harvestd reference (advances #10949).
+
+**Name of record:** *the Council, with chambers* — the PAAA house standard ruled 2026-08-25 (lineage: harvestd/HydraFlow "console" → GNAA "Board" → **Council**, GNAA decision record `council/decisions/general/0009`). "Console" read as a control surface rather than a deliberative structure; "Board" was fiduciary-adjacent. Recorded here as [ARCH-0003](decisions/arch/0003-council-rename.md). Records written under the old name keep it — see [decisions/](decisions/README.md).
 
 ## Convening
 
@@ -30,4 +32,4 @@ Same-substrate seats are **not** independent votes — this repo measured its ow
 
 ## Calibration (gauging the gauges)
 
-Finding-survival-rate per persona is the needle (verified from ledgers + `gh`, never asserted). Fatigue budget: a persona whose findings stop surviving review is a miscalibrated instrument — recalibrate the contract or retire the seat. Drift: behavior diverging from the persona file is itself a finding. Cadence: conformance fails on the 6th persona-run record after the latest general calibration record (`make console-conformance`).
+Finding-survival-rate per persona is the needle (verified from ledgers + `gh`, never asserted). Fatigue budget: a persona whose findings stop surviving review is a miscalibrated instrument — recalibrate the contract or retire the seat. Drift: behavior diverging from the persona file is itself a finding. Cadence: conformance fails on the 6th persona-run record after the latest general calibration record (`make council-conformance`).

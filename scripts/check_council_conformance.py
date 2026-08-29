@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Console conformance: fitness functions for chamber decision records.
+"""Council conformance: fitness functions for chamber decision records.
 
 Adopted from the harvestd reference implementation (ARCH-0001 in
-``agents/console/decisions/arch/``; advances #10949). Checks:
+``agents/council/decisions/arch/``; advances #10949). Checks:
 
   1. Record shape — Date/Seats/Verdict/Evidence/Enforcement on every record;
      ``enforced`` records must name an ``Enforced by:`` check.
@@ -78,7 +78,7 @@ def _resolve_merge_base(root: Path) -> str | None:
     Prefers the CI-supplied ``HYDRAFLOW_AUDIT_PR_BASE`` env var (trying
     ``origin/<base>`` then ``<base>``) so an explicit PR context always
     wins; falls back to a fixed candidate chain so a local
-    ``make console-conformance`` run (no env var, no PR context) still
+    ``make council-conformance`` run (no env var, no PR context) still
     scopes correctly instead of walking whole history.
     """
     env_base = os.environ.get(_PR_BASE_ENV, "").strip()
@@ -179,7 +179,7 @@ def _immutability_violations(
     merge_base = _resolve_merge_base(root)
     if merge_base is None:
         return [], (
-            "console-conformance: check #6 (ledger immutability) skipped — no "
+            "council-conformance: check #6 (ledger immutability) skipped — no "
             f"resolvable base ref (set {_PR_BASE_ENV} or run inside a full clone "
             "with an origin/staging or origin/main remote-tracking branch)"
         )
@@ -197,7 +197,7 @@ def _immutability_violations(
 def collect_errors(root: Path, check_git: bool = True) -> list[str]:
     errors: list[str] = []
     agents = root / "agents"
-    decisions = agents / "console" / "decisions"
+    decisions = agents / "council" / "decisions"
 
     records = sorted(decisions.glob("*/[0-9]*.md"))
     for rec in records:
@@ -234,8 +234,8 @@ def collect_errors(root: Path, check_git: bool = True) -> list[str]:
                 )
 
     chairs = {
-        "console/design.md": "product-manager",
-        "console/arch.md": "senior-principal",
+        "council/design.md": "product-manager",
+        "council/arch.md": "senior-principal",
     }
     for rel_path, chair in chairs.items():
         path = agents / rel_path
@@ -243,10 +243,10 @@ def collect_errors(root: Path, check_git: bool = True) -> list[str]:
             errors.append(
                 f"agents/{rel_path}: chartered chair '{chair}' missing from chair line"
             )
-    console_readme = (agents / "console" / "README.md").read_text()
-    if "| **General** | vp-eng |" not in console_readme:
+    council_readme = (agents / "council" / "README.md").read_text()
+    if "| **General** | vp-eng |" not in council_readme:
         errors.append(
-            "console/README.md: general chair (vp-eng) missing from chambers table"
+            "council/README.md: general chair (vp-eng) missing from chambers table"
         )
 
     calib = sorted((decisions / "general").glob("*calibration*.md"))
@@ -300,8 +300,8 @@ def main() -> int:
         for err in errors:
             print(f"  FAIL {err}")
         return 1
-    n_records = len(list((root / "agents/console/decisions").glob("*/[0-9]*.md")))
-    print(f"console-conformance: ok ({n_records} records, ledger immutable)")
+    n_records = len(list((root / "agents/council/decisions").glob("*/[0-9]*.md")))
+    print(f"council-conformance: ok ({n_records} records, ledger immutable)")
     return 0
 
 

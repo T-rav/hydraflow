@@ -542,7 +542,7 @@ stamp:
 		$(if $(CLI_ENTRY),--cli-entry $(CLI_ENTRY)) \
 		$(if $(COVERAGE_FLOOR),--coverage-floor $(COVERAGE_FLOOR)) \
 		$(if $(FORCE),--force) \
-		$(if $(AGENTS_CONSOLE),--agents-console) \
+		$(if $(or $(AGENTS_COUNCIL),$(AGENTS_CONSOLE)),--agents-council) \
 		$(ARGS)
 
 
@@ -976,8 +976,22 @@ post-merge-smoke:
 	@echo "$(BLUE)Running post-merge full-machine smoke (s82)...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion
 
+## council-conformance — ARCH-0001 fitness functions over the Council's
+## decision ledger: record shape, per-chamber numbering, persona contracts,
+## chair identity, calibration staleness, git-history immutability.
+## Renamed from `console-conformance` on 2026-08-25 (ARCH-0003, house
+## standard "the Council, with chambers"); the old name is a deprecated
+## alias below.
+.PHONY: council-conformance console-conformance
+council-conformance:
+	@PYTHONPATH=. $(UV) python scripts/check_council_conformance.py
+
+# Deprecated alias (ARCH-0003). Kept so external callers and ARCH-0001's own
+# immutable `Enforced by: make console-conformance` line keep resolving.
+# Retiring it requires a superseding decision record, not a cleanup PR.
 console-conformance:
-	@PYTHONPATH=. $(UV) python scripts/check_console_conformance.py
+	@printf '$(YELLOW)console-conformance is DEPRECATED — use `make council-conformance` (ARCH-0003, 2026-08-25).$(RESET)\n' >&2
+	@$(MAKE) --no-print-directory council-conformance
 
 # --------------------------------------------------------------------------
 # mutation-gauntlet — gate-sensitivity instrument (#10835, ADR-0125). On-demand
