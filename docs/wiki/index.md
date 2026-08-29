@@ -12,7 +12,7 @@ the context map at
 See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 
 New terms added 2026-08-28 (ADR-0143, the PAAA governance model):
-- [`Purpose`](terms/purpose.md) — layer 1: what a repository is for; the one layer with no declaration surface today
+- [`Purpose`](terms/purpose.md) — layer 1: what a repository is for; declared in `charter.yaml`, the one layer nothing checks
 - [`Articles`](terms/articles.md) — layer 2: what must remain true (standards, ADR constraints, security and compliance rules, local policy)
 - [`Actors`](terms/actors.md) — layer 3: who or what may act, and with what delegated authority; declared by the `agents/` tree
 - [`Artifacts`](terms/artifacts.md) — layer 4: the software plus ADRs, tests, evidence, manifests, ledgers, decisions

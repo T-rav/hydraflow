@@ -30,7 +30,7 @@ code, schedules, routes models, manages PRs, or owns lifecycle state. It takes
 normalized facts in and returns a typed decision out. If a decision needs a
 file read to be made, the read belongs in a collector, not in the engine — and
 because the engine only ever sees ``Fact`` records, a decision is reproducible
-offline from ``.hydraflow/metrics/{repo_slug}/facts.jsonl`` on a clean
+offline from ``.hydraflow/{repo_slug}/metrics/facts.jsonl`` on a clean
 checkout, with no external service up (#11687).
 
 :mod:`policy.store` is the JSONL round-trip for that ledger.
