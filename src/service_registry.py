@@ -16,7 +16,7 @@ from acceptance_criteria import AcceptanceCriteriaGenerator
 from adr_conformance_loop import AdrConformanceLoop
 from adr_conformance_runner import SubprocessConformanceRunner
 from adr_index import ADRIndex
-from adr_reviewer import ADRCouncilReviewer
+from adr_reviewer import ADRReviewPanel
 from adr_reviewer_loop import ADRReviewerLoop
 from agent import AgentRunner
 from auto_agent_preflight_loop import AutoAgentPreflightLoop
@@ -1612,7 +1612,7 @@ def build_services(
         credentials=credentials,
     )
     runs_gc_loop = RunsGCLoop(config=config, run_recorder=run_recorder, deps=loop_deps)
-    adr_reviewer = ADRCouncilReviewer(
+    adr_reviewer = ADRReviewPanel(
         config, event_bus, subprocess_runner, credentials=credentials
     )
     adr_reviewer_loop = ADRReviewerLoop(

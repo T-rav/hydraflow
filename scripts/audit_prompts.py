@@ -246,7 +246,7 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     ),
     AuditTarget(
         "adr_reviewer",
-        "adr_reviewer.ADRCouncilReviewer._build_orchestrator_prompt",
+        "adr_reviewer.ADRReviewPanel._build_orchestrator_prompt",
         "tests/fixtures/prompts/adr_reviewer.json",
         "Adjacent",
         "src/adr_reviewer.py:273",
