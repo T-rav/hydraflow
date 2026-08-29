@@ -220,6 +220,80 @@ Each has exactly what the other lacks.
    contract is unparseable?** Suggest: refuse the run, file nothing, alert — never
    degrade to a default prompt.
 
+4. **How does re-hydration treat a `loops:` block?** This is the one that needs
+   deciding before implementation, because the existing mechanism does not reach it.
+
+   The kernel writer already separates template from product with a four-state action
+   model (`written | rewritten | skipped | protected`) and an **in-file boundary
+   marker**:
+
+   ```
+   <!-- writer never overwrites anything below this marker. -->
+   ```
+
+   That works for markdown. **YAML has no equivalent convention here**, so a
+   `loops:` block in `charter.yaml` currently has no way to say "the kernel owns this
+   half, the repo owns that half." Two options, and they are genuinely different:
+
+   - **`loops:` is wholly product.** The kernel stamps it once at greenfield hydration
+     and never again; re-stamping skips the file entirely, as `charter_init.py` already
+     does (it "refuses to overwrite an existing charter, and is never wired into a
+     loop"). Simple, and consistent with today's behaviour — but a repo never receives
+     schema improvements to its loops block.
+   - **YAML gains a boundary convention** — a `# hydraflow:managed` / `# hydraflow:end`
+     pair, or a nested `managed:` key. Lets the kernel keep a scaffold current while the
+     repo owns the entries. More capable, and one more parser that can drift from its
+     subject.
+
+   **Recommended: the charter declares its own hydration boundary.** Neither option
+   above is right, because both put the rule somewhere other than the file it governs —
+   a comment convention the kernel has to parse, or an implicit "never touch this"
+   nobody can read. The charter is the repo's *governing declaration*; it should
+   therefore declare who governs which part of it:
+
+   ```yaml
+   hydration:
+     managed:                      # the kernel may refresh these on re-stamp
+       - loops.scaffold            #   structure only — keys, never `enabled`
+       - artifacts.required
+     owned:                        # the kernel never writes these, ever
+       - purpose
+       - articles.local
+       - loops.entries
+   ```
+
+   This is better than a marker for three reasons, each drawn from something that has
+   already gone wrong here:
+
+   - **It is readable by the repo owner**, not just by the writer. A
+     `<!-- do not edit below -->` marker states the rule in the kernel's voice; a
+     `hydration:` block states it in the repo's.
+   - **It is checkable in both directions.** `charter_drift_caretaker` can assert that
+     everything the kernel wrote is under `managed`, and that nothing under `owned` was
+     modified by a stamp. A comment marker can only be honoured, never verified — and
+     an unverifiable boundary is the shape of every guard this repo found watching
+     nothing.
+   - **It makes the ENACT/RATIFY line explicit rather than implicit.** Today the rule
+     that a kernel may not enable a loop lives in an ADR and in `charter_init.py`'s
+     docstring. Under this scheme it is a fact in the repo's own file, and a stamp that
+     violates it is a drift finding rather than a code review someone has to catch.
+
+   The cost is honest: `hydration` is one more declaration that can drift from what the
+   kernel actually does. That is precisely why it must be enforced by the drift caretaker
+   from the first commit, with a negative control proving the check can fail — not
+   documented and trusted.
+
+   Whichever is chosen, **one rule is already settled by ADR-0143 Ruling 6 guard 4** and
+   is not open for redesign: the kernel may stamp the *structure* — a `loops:` block with
+   every actor `dormant` — but it may **never enable a loop**. Enabling one is the system
+   enlarging its own mandate, which is an ENACT and belongs to a human. That is also why
+   `charter_init.py` leaves `purpose` and `articles.local` blank rather than guessing:
+   "guessing them would put words in the repo's mouth."
+
+   The same reasoning explains why the `agents/` councils skeleton is off by default —
+   "chartering review chambers is a deliberate project choice, not kernel plumbing." A
+   loops block is the same kind of choice.
+
 ## What this is not
 
 Not a scheduler rewrite, and not a new engine. The OPA pilot (#11750) already measured
