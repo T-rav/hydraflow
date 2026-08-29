@@ -113,6 +113,17 @@ AGGREGATE_GATES: tuple[AggregateGate, ...] = (
         evidence='_dead_test_local_classes(real_repo_root / "tests")',
     ),
     AggregateGate(
+        test_path="tests/architecture/test_mockworld_loop_scenario_ratchet.py",
+        subject=(
+            "every BaseBackgroundLoop subclass anywhere under src/ must be "
+            "driven by at least one scenario anywhere under tests/scenarios/, "
+            "vs the shrink-only grandfather snapshot in "
+            "tests/architecture/mockworld_loop_scenario_baseline.json"
+        ),
+        subject_roots=("src", "tests/scenarios"),
+        evidence="uncovered_loops()",
+    ),
+    AggregateGate(
         test_path="tests/architecture/test_duration_ratchet.py",
         subject=(
             "every entry of the shrink-only _SLOW_TEST_GRANDFATHER set must "
