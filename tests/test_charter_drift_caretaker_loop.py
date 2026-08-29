@@ -397,3 +397,32 @@ async def test_a_malformed_charter_is_not_swallowed(tmp_path: Path) -> None:
     with pytest.raises(CharterError):
         await loop._do_work()
     pr.create_issue.assert_not_awaited()
+
+
+def test_a_non_mapping_charter_file_does_not_read_as_ungoverned(
+    tmp_path: Path,
+) -> None:
+    """The failure the whole design is against: a broken charter reading clean.
+
+    ``load_charter`` returns ``None`` only for a repo with no charter, and the
+    caretaker SKIPS those. If a present-but-unparseable ``charter.yaml`` also
+    returned ``None`` it would be filed under "ungoverned" — no finding, no
+    log, no issue — and the repo would look governed while nothing checked it.
+    """
+    _tree(tmp_path)
+    (tmp_path / CHARTER_FILENAME).write_text("- not\n- a mapping\n")
+    with pytest.raises(CharterError):
+        audit_repo_charter("o/r", tmp_path)
+
+
+def test_a_charter_with_a_bad_actors_block_does_not_read_as_ungoverned(
+    tmp_path: Path,
+) -> None:
+    _tree(tmp_path)
+    (tmp_path / CHARTER_FILENAME).write_text(
+        yaml.safe_dump(
+            {"actors": ["arch", "design"], "rails": {"layers": ["universal"]}}
+        )
+    )
+    with pytest.raises(CharterError, match="Actors declaration"):
+        audit_repo_charter("o/r", tmp_path)

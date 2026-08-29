@@ -169,6 +169,47 @@ def _as_str_tuple(field: str, value: Any) -> tuple[str, ...]:
     return tuple(str(v) for v in value)
 
 
+def _as_mapping(field: str, value: Any) -> dict[str, Any]:
+    """Coerce a YAML block to a mapping, or reject it by name.
+
+    Without this, a wrong-shaped block (``purpose: "a string"``) reaches
+    ``raw.get(...)`` and dies as a bare ``AttributeError`` naming neither the
+    file nor the key. The charter is hand-edited and reviewed in a pull
+    request, so the diagnostic has to name what to fix.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        msg = (
+            f"charter `{field}` must be a mapping, got "
+            f"{type(value).__name__}: {value!r}"
+        )
+        raise CharterError(msg)
+    return value
+
+
+def _as_int(field: str, value: Any, default: int) -> int:
+    """Coerce a YAML scalar to an int, or reject it by name."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        msg = f"charter `{field}` must be an integer, got {value!r}"
+        raise CharterError(msg) from exc
+
+
+def _as_float(field: str, value: Any) -> float:
+    """Coerce a YAML scalar to a float, or reject it by name."""
+    if not value:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        msg = f"charter `{field}` must be a number, got {value!r}"
+        raise CharterError(msg) from exc
+
+
 @dataclass(frozen=True)
 class Purpose:
     """The Purpose layer: what the repo is trying to do.
@@ -183,8 +224,8 @@ class Purpose:
     goals: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> Purpose:
-        raw = data or {}
+    def from_dict(cls, data: Any) -> Purpose:
+        raw = _as_mapping("purpose", data)
         return cls(
             product=str(raw.get("product", "") or ""),
             goals=_as_str_tuple("purpose.goals", raw.get("goals")),
@@ -226,8 +267,8 @@ class Articles:
     local: tuple[LocalArticle, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> Articles:
-        raw = data or {}
+    def from_dict(cls, data: Any) -> Articles:
+        raw = _as_mapping("articles", data)
         assurance = str(raw.get("assurance", DEFAULT_ASSURANCE) or DEFAULT_ASSURANCE)
         if not is_valid_data_class(assurance):
             msg = (
@@ -276,8 +317,8 @@ class Artifacts:
     required: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> Artifacts:
-        raw = data or {}
+    def from_dict(cls, data: Any) -> Artifacts:
+        raw = _as_mapping("artifacts", data)
         required = _as_str_tuple("artifacts.required", raw.get("required"))
         for path in required:
             if PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
@@ -310,16 +351,18 @@ class RailsBlock:
     schema_version: int = RAILS_SCHEMA_VERSION
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> RailsBlock:
-        raw = data or {}
+    def from_dict(cls, data: Any) -> RailsBlock:
+        raw = _as_mapping("rails", data)
         return cls(
             template_version=str(raw.get("template_version", "")),
             layers=_as_str_tuple("rails.layers", raw.get("layers")),
-            coverage_floor=float(raw.get("coverage_floor", 0.0) or 0.0),
+            coverage_floor=_as_float("rails.coverage_floor", raw.get("coverage_floor")),
             domain_gate_scripts=_as_str_tuple(
                 "rails.domain_gate_scripts", raw.get("domain_gate_scripts")
             ),
-            schema_version=int(raw.get("schema_version", RAILS_SCHEMA_VERSION)),
+            schema_version=_as_int(
+                "rails.schema_version", raw.get("schema_version"), RAILS_SCHEMA_VERSION
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -400,7 +443,9 @@ class Charter:
             actors=_parse_actors(data.get("actors")),
             artifacts=Artifacts.from_dict(data.get("artifacts")),
             rails=RailsBlock.from_dict(data.get("rails")),
-            schema_version=int(data.get("schema_version", CHARTER_SCHEMA_VERSION)),
+            schema_version=_as_int(
+                "schema_version", data.get("schema_version"), CHARTER_SCHEMA_VERSION
+            ),
         )
 
     @classmethod

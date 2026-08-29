@@ -475,3 +475,28 @@ def test_an_absolute_required_artifact_is_rejected() -> None:
 def test_a_required_artifact_escaping_the_repo_is_rejected() -> None:
     with pytest.raises(CharterError, match="relative to the repo root"):
         Charter.from_dict({"artifacts": {"required": ["../other-repo/docs"]}})
+
+
+def test_a_wrong_shaped_purpose_block_is_rejected_by_name() -> None:
+    with pytest.raises(CharterError, match="`purpose` must be a mapping"):
+        Charter.from_dict({"purpose": "a factory"})
+
+
+def test_a_wrong_shaped_articles_block_is_rejected_by_name() -> None:
+    with pytest.raises(CharterError, match="`articles` must be a mapping"):
+        Charter.from_dict({"articles": ["testing"]})
+
+
+def test_a_wrong_shaped_rails_block_is_rejected_by_name() -> None:
+    with pytest.raises(CharterError, match="`rails` must be a mapping"):
+        Charter.from_dict({"rails": 5})
+
+
+def test_a_non_numeric_coverage_floor_is_rejected() -> None:
+    with pytest.raises(CharterError, match="must be a number"):
+        Charter.from_dict({"rails": {"coverage_floor": "high"}})
+
+
+def test_a_non_integer_schema_version_is_rejected() -> None:
+    with pytest.raises(CharterError, match="must be an integer"):
+        Charter.from_dict({"schema_version": "one"})
