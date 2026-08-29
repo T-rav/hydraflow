@@ -19,6 +19,7 @@ from models import (
     PRInfo,
     Task,
 )
+from plan_constants import PLAN_COMMENT_HEADING
 from precheck import run_precheck_context
 from prompt_builder import PromptBuilder
 
@@ -44,13 +45,19 @@ class ReviewContextMixin(BaseRunner):
     def _load_plan_for_review(self, issue: Task) -> str:
         """Load the implementation plan for scope comparison during review.
 
-        Checks issue comments for ``## Implementation Plan``, then falls
-        back to the saved plan file at ``.hydraflow/plans/issue-N.md``.
-        Returns the plan text or empty string if not found.
+        Checks issue comments for :data:`plan_constants.PLAN_COMMENT_HEADING`,
+        then falls back to the saved plan file at
+        ``.hydraflow/plans/issue-N.md``. Returns the plan text or empty string
+        if not found.
+
+        The heading is the shared constant rather than a literal spelled here,
+        because #11543 gave the plan a second reader — a Fable reviewer's
+        canonical evidence — and "both presets judge the same artefact" holds
+        only while both find it by the same rule.
         """
         # Check issue comments first
         for comment in issue.comments or []:
-            if "## Implementation Plan" in comment:
+            if PLAN_COMMENT_HEADING in comment:
                 return comment
 
         # Fallback to saved plan file

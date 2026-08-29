@@ -7,7 +7,7 @@
 **Supersedes:** none
 **Superseded by:** none
 **Amends:** ADR-0094 (Two-level convergence: Gate + ConvergenceLedger) — narrows its blocking-shepherd rejection to the convergence *outer loop*, leaving every other decision in ADR-0094 intact.
-**Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (the concurrency model a driver must not break), [ADR-0002](0002-labels-as-state-machine.md) (labels as the sole durable stage truth), [ADR-0099](0099-orchestration-as-a-control-system.md) (the servo/supervisory-controller vocabulary this realizes), [ADR-0107](0107-collapse-discover-shape-into-plan.md) (the live Triage → Plan → Implement → Review → HITL topology), [ADR-0110](0110-provider-harness-backend-split.md) and [ADR-0134](0134-per-repo-model-harness-selection.md) (per-repo provider routing the broker must resolve per child), [ADR-0124](0124-tier-2-goal-supervisor.md) (the default-off Fable goal supervisor this is deliberately *not* built on). Issues: #11533 (this phase), #11532 (the epic), #10038 / #10055 (the conflict), #11535 / #11537 / #11541 / #11542 (the phases this unblocks).
+**Related:** [ADR-0001](0001-five-concurrent-async-loops.md) (the concurrency model a driver must not break), [ADR-0002](0002-labels-as-state-machine.md) (labels as the sole durable stage truth), [ADR-0099](0099-orchestration-as-a-control-system.md) (the servo/supervisory-controller vocabulary this realizes), [ADR-0107](0107-collapse-discover-shape-into-plan.md) (the live Triage → Plan → Implement → Review → HITL topology), [ADR-0110](0110-provider-harness-backend-split.md) and [ADR-0134](0134-per-repo-model-harness-selection.md) (per-repo provider routing the broker must resolve per child), [ADR-0124](0124-tier-2-goal-supervisor.md) (the default-off Fable goal supervisor this is deliberately *not* built on). Issues: #11533 (this phase), #11532 (the epic), #10038 / #10055 (the conflict), #11535 / #11537 / #11541 / #11542 / #11543 (the phases this unblocks).
 
 **Enforced by:**
 pytest:tests/test_driver_contracts.py
@@ -37,6 +37,14 @@ pytest:tests/test_implement_worker_runner.py
 pytest:tests/test_implement_canary_default_off.py
 pytest:tests/regressions/test_issue_11542_outside_the_slice.py
 pytest:tests/scenarios/test_fable_implement_canary_scenario.py
+pytest:tests/test_review_broker.py
+pytest:tests/test_review_evidence.py
+pytest:tests/test_review_authority.py
+pytest:tests/test_review_worker_runner.py
+pytest:tests/test_review_canary_default_off.py
+pytest:tests/regressions/test_issue_11543_p5_review_seams.py
+pytest:tests/regressions/test_issue_11543_outside_the_slice.py
+pytest:tests/scenarios/test_fable_review_canary_scenario.py
 
 **Precedent:** Fenced leases over a durable log — the epoch/fencing-token discipline for a single-writer owner whose liveness cannot be trusted (Chubby, Burrows 2006; Kafka's producer epoch; Lamport's "the lease holder may already be dead").
 **Divergence:** classical fencing assumes the shared store enforces the token, but HydraFlow's durable store is the GitHub label set, which has no compare-and-swap and whose swap primitive is add-first-then-best-effort-remove (`src/pr_manager.py:PRManager.swap_pipeline_labels`), so the fence is enforced at the *admission* boundary instead and multi-label crash states are reconciled against a transition intent recorded before the swap rather than prevented — priority-based reconciliation alone silently reverts backward transitions (receipt: #11533, and the adversarial panel on #10038).

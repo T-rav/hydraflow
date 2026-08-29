@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
 REPO = "acme/widgets"
 REVIEW_LABEL = "hydraflow-review"
+BASE_REF = "origin/staging"
 ROUTE_REVISION = "route-v1"
 BRANCH = "agent/issue-7"
 BASE = "a" * 40
@@ -217,6 +218,7 @@ def _runner(
         config=_config(tmp_path, **config_overrides),
         route_policy_revision=ROUTE_REVISION,
         runner=_NoRunner(),  # type: ignore[arg-type]
+        base_ref=BASE_REF,
         spawn=spawn,
     )
 
@@ -1162,6 +1164,7 @@ class TestTheReceiptIsTheEvidence:
             config=_config(tmp_path),
             route_policy_revision=ROUTE_REVISION,
             runner=object(),  # type: ignore[arg-type]
+            base_ref=BASE_REF,
         )
 
         assert runner.spawn is review_worker_runner._spawn_review_worker
