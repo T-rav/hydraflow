@@ -13,7 +13,7 @@ from pending_concerns import (
 
 def test_concern_minimal_fields_validate():
     c = Concern(
-        id="PLAN-COUNCIL-001",
+        id="PLAN-ENSEMBLE-001",
         raised_in_phase="plan",
         raised_in_stage="plan_ensemble",
         severity="HIGH",

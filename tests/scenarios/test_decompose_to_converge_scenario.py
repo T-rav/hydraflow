@@ -100,7 +100,7 @@ def _validation_reply(**fields: object) -> str:
 def _script_ensemble(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None:
     """Monkeypatch the ensemble's LLM seam to return *replies* in call order.
 
-    Mirrors ``tests/test_decomposition_ensemble.py``'s ``_council`` helper:
+    Mirrors ``tests/test_decomposition_ensemble.py``'s ``_ensemble`` helper:
     ``DecompositionEnsemble._execute_ensemble`` does a deferred
     ``from runner_utils import run_lightweight_agent`` every call, so
     patching the module attribute intercepts every direction/validation
@@ -232,7 +232,7 @@ def _exhaust_attempts(world: MockWorld, issue_number: int) -> None:
 
 
 class TestExhaustedIssueDecomposesThenParentConverges:
-    async def test_council_approve_creates_epic_no_human_required_then_sweeps_closed(
+    async def test_ensemble_approve_creates_epic_no_human_required_then_sweeps_closed(
         self, tmp_path, monkeypatch
     ) -> None:
         world = MockWorld(tmp_path)

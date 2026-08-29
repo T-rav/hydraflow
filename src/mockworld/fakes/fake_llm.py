@@ -710,7 +710,7 @@ class FakeLLM:
         """Set the per-round ensemble vote verdict map for *issue_number*.
 
         Used by ``ExpertEnsemble.vote`` / ``vote_diversified`` to synthesize
-        a CouncilResult matching the scripted convergence pattern. The map
+        a EnsembleResult matching the scripted convergence pattern. The map
         is read-only — successive ``shape_ensemble_verdict_for_round`` reads
         are idempotent so the ensemble can be queried more than once per
         round without consuming state.

@@ -71,7 +71,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         # terminal) for callers that haven't threaded epic_manager/runner
         # through yet — e.g. existing test fixtures predating this feature.
         self._decomposer: Any | None = None
-        self._council: Any | None = None
+        self._ensemble: Any | None = None
         if epic_manager is not None:
             from issue_decomposer import IssueDecomposer  # noqa: PLC0415
 
@@ -79,7 +79,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         if runner is not None:
             from decomposition_ensemble import DecompositionEnsemble  # noqa: PLC0415
 
-            self._council = DecompositionEnsemble(runner, config)
+            self._ensemble = DecompositionEnsemble(runner, config)
 
     def _get_default_interval(self) -> int:
         return self._config.auto_agent_preflight_interval
@@ -589,7 +589,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         attempts = self._state.get_auto_agent_attempts(issue_number)
         if attempts >= self._config.auto_agent_max_attempts:
             outcome = "human-required"
-            if self._decomposer is not None and self._council is not None:
+            if self._decomposer is not None and self._ensemble is not None:
                 ctx = await gather_context(
                     issue_number=issue_number,
                     issue_body=issue_body,
@@ -607,7 +607,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
                     ctx=ctx,
                     config=self._config,
                     decomposer=self._decomposer,
-                    ensemble=self._council,
+                    ensemble=self._ensemble,
                     state=self._state,
                     prs=self._prs,
                 )
@@ -718,7 +718,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             state=self._state,
             max_attempts=self._config.auto_agent_max_attempts,
             decomposer=self._decomposer,
-            ensemble=self._council,
+            ensemble=self._ensemble,
             config=self._config,
             ctx=ctx,
             hitl_widened=widened,

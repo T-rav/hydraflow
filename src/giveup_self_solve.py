@@ -68,7 +68,7 @@ class PlanRetrySelfSolver:
         self._state = state
         self._prs = prs
         self._decomposer = decomposer
-        self._council = ensemble
+        self._ensemble = ensemble
         self._diagnose_label = diagnose_label
 
     async def solve(
@@ -102,7 +102,7 @@ class PlanRetrySelfSolver:
                 ctx=ctx,
                 config=self._config,
                 decomposer=self._decomposer,
-                ensemble=self._council,
+                ensemble=self._ensemble,
                 state=self._state,
                 # decompose_or_escalate's private _PRPort duck-types close_pr as
                 # `-> None`; PRPort returns bool (benign here — the return is

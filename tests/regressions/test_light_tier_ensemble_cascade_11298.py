@@ -1,7 +1,7 @@
 """Regression pin for the 2026-08-16 light-tier HITL cascade (#11298).
 
 Live failure: the #11304 light tier skipped the adversarial plan REVIEW
-but not the plan COUNCIL. The ensemble critiqued deliberately-short lite
+but not the plan ENSEMBLE. The ensemble critiqued deliberately-short lite
 plans against full-scale expectations and raised >= 2 design-decision
 CRITICAL concerns per issue; with no reviewer stage to resolve them, the
 ready-swap design gate (`_route_to_hitl_if_design_decision`) routed every
@@ -50,7 +50,7 @@ def _state() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_light_tier_skips_council() -> None:
+async def test_light_tier_skips_ensemble() -> None:
     phase = _phase(HydraFlowConfig(), complexity=2)
     state = await phase._flow_ensemble(_state())
     phase._run_plan_ensemble.assert_not_awaited()
@@ -58,7 +58,7 @@ async def test_light_tier_skips_council() -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_tier_still_runs_council() -> None:
+async def test_full_tier_still_runs_ensemble() -> None:
     phase = _phase(HydraFlowConfig(), complexity=8)
     await phase._flow_ensemble(_state())
     phase._run_plan_ensemble.assert_awaited()

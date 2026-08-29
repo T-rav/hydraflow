@@ -30,7 +30,7 @@ from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory
 
 
-def _council(monkeypatch, *, results):
+def _ensemble(monkeypatch, *, results):
     """Wire a DecompositionEnsemble whose seam call returns each of *results*
     in turn (as ``SimpleResult(stdout=..., returncode=0)``), and return the
     ensemble plus a list that records every prompt the seam was called with
@@ -87,7 +87,7 @@ class TestDecompositionEnsembleAccept:
             confidence="high",
             reasoning="Two independently shippable layers, no overlap.",
         )
-        ensemble, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=101, title="Fix the frobnicator")
 
         result = await ensemble.decide(
@@ -141,7 +141,7 @@ class TestDecompositionEnsembleValidationOverturnsDirection:
             reasoning="Children are near-duplicate clones of the same fix -- no "
             "independent value.",
         )
-        ensemble, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=102, title="Fix off-by-one in parser")
 
         result = await ensemble.decide(
@@ -182,7 +182,7 @@ class TestDecompositionEnsembleDeclineLowConfidence:
             confidence="medium",
             reasoning="Still unclear on second look; declining.",
         )
-        ensemble, calls = _council(
+        ensemble, calls = _ensemble(
             monkeypatch,
             results=[direction_1, validation_1, direction_2, validation_2],
         )
@@ -212,7 +212,7 @@ class TestDecompositionEnsembleDeclineLowConfidence:
             confidence="high",
             reasoning="Confirmed atomic on retry.",
         )
-        ensemble, calls = _council(
+        ensemble, calls = _ensemble(
             monkeypatch, results=[garbled_direction, direction_2, validation_2]
         )
         task = TaskFactory.create(id=104, title="Some stalled task")
@@ -244,7 +244,7 @@ class TestDecompositionEnsembleDeclineLowConfidence:
             confidence="high",
             reasoning="Actually atomic.",
         )
-        ensemble, calls = _council(
+        ensemble, calls = _ensemble(
             monkeypatch, results=[malformed_direction, direction_2, validation_2]
         )
         task = TaskFactory.create(id=105, title="Some stalled task")
@@ -268,7 +268,7 @@ class TestDecompositionEnsembleDeclineLowConfidence:
             confidence="high",
             reasoning="Sound split confirmed on retry.",
         )
-        ensemble, calls = _council(
+        ensemble, calls = _ensemble(
             monkeypatch,
             results=[direction_1, garbled_validation, direction_2, validation_2],
         )
@@ -294,7 +294,7 @@ class TestDecompositionEnsemblePromptContext:
     ) -> None:
         direction = _direction_reply()
         validation = _validation_reply(decision="reject", confidence="high")
-        ensemble, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=106, title="Some stalled task")
 
         await ensemble.decide(

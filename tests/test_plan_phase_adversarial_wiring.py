@@ -331,7 +331,7 @@ class TestImplementPhaseReadsAdversarialState:
             phase="plan",
             pending_concerns=[
                 Concern(
-                    id="PLAN-COUNCIL-001",
+                    id="PLAN-ENSEMBLE-001",
                     raised_in_phase="plan",
                     raised_in_stage="plan_ensemble_tester",
                     severity="HIGH",
@@ -349,7 +349,7 @@ class TestImplementPhaseReadsAdversarialState:
             phase._log_adversarial_carryover(issue)
 
         assert any(
-            "PLAN-COUNCIL-001" in r.message or "carryover" in r.message.lower()
+            "PLAN-ENSEMBLE-001" in r.message or "carryover" in r.message.lower()
             for r in caplog.records
         ), f"carryover not logged: {[r.message for r in caplog.records]}"
 
@@ -546,7 +546,7 @@ class TestPlanPhaseCreditExhaustionPropagates:
             await phase.plan_issues()
 
     @pytest.mark.asyncio
-    async def test_council_voter_credit_exhaustion_propagates(
+    async def test_ensemble_voter_credit_exhaustion_propagates(
         self, config: HydraFlowConfig
     ) -> None:
         """A CreditExhaustedError from a PlanEnsemble voter must propagate."""

@@ -49,7 +49,7 @@ class TestFakeLLMDecompositionQueue:
 
 
 @pytest.mark.asyncio
-class TestExecuteCouncilSentinel:
+class TestExecuteEnsembleSentinel:
     async def test_sentinel_short_circuits_to_scripted_reply(self, monkeypatch):
         # If the sentinel path leaks to a real spawn, this raises.
         def _boom(*_a, **_k):

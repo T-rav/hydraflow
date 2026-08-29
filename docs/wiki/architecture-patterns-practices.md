@@ -337,7 +337,7 @@ _Source: #6334 (plan)_
 
 ## Distinguish local from cross-group wiring at architecture boundary
 
-Post-construction mutations fall into two categories: local (both objects in same sub-factory, e.g., `shape_phase._council = ExpertEnsemble(...)`) and cross-group (objects from different sub-factories, e.g., `agents._insights = review_insights`). Local wiring stays in sub-factory; cross-group moves to orchestrator.
+Post-construction mutations fall into two categories: local (both objects in same sub-factory, e.g., `shape_phase._ensemble = ExpertEnsemble(...)`) and cross-group (objects from different sub-factories, e.g., `agents._insights = review_insights`). Local wiring stays in sub-factory; cross-group moves to orchestrator.
 
 **Why:** This boundary clarifies dependency coupling and prevents wiring logic from drifting into wrong layers. See also: Sub-factory coordination via frozen dataclass.
 

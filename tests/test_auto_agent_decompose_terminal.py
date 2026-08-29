@@ -148,7 +148,7 @@ def _seed_open_pr(
 
 class TestDecomposeOrEscalate:
     @pytest.mark.asyncio
-    async def test_council_approves_creates_epic_no_human_required(
+    async def test_ensemble_approves_creates_epic_no_human_required(
         self, tmp_path: Path
     ) -> None:
         config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
@@ -180,7 +180,7 @@ class TestDecomposeOrEscalate:
         state.reset_review_attempts.assert_called_once_with(7)
 
     @pytest.mark.asyncio
-    async def test_council_declines_returns_human_required(
+    async def test_ensemble_declines_returns_human_required(
         self, tmp_path: Path
     ) -> None:
         config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
@@ -227,7 +227,7 @@ class TestDecomposeOrEscalate:
         state.clear_auto_agent_attempts.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_depth_capped_skips_council_entirely(self, tmp_path: Path) -> None:
+    async def test_depth_capped_skips_ensemble_entirely(self, tmp_path: Path) -> None:
         """Issue #7 is itself an auto-decomposed child one split below the
         cap -- resolved depth == max_decomposition_depth. Must escalate
         WITHOUT spending an LLM call to find that out."""
@@ -350,7 +350,7 @@ class TestDecomposeOrEscalate:
         ensemble.decide.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_missing_council_falls_back_to_human_required(
+    async def test_missing_ensemble_falls_back_to_human_required(
         self, tmp_path: Path
     ) -> None:
         config, state, prs, decomposer, ensemble = _make_deps(tmp_path)
@@ -944,7 +944,7 @@ class TestPRResolutionCoversBothAgentBranches:
 
 
 class TestConstructorWiring:
-    def test_epic_manager_and_runner_build_decomposer_and_council(
+    def test_epic_manager_and_runner_build_decomposer_and_ensemble(
         self, tmp_path: Path
     ) -> None:
         from decomposition_ensemble import DecompositionEnsemble
@@ -964,7 +964,7 @@ class TestConstructorWiring:
             runner=MagicMock(),
         )
         assert isinstance(loop._decomposer, IssueDecomposer)
-        assert isinstance(loop._council, DecompositionEnsemble)
+        assert isinstance(loop._ensemble, DecompositionEnsemble)
 
     def test_without_epic_manager_or_runner_stays_none(self, tmp_path: Path) -> None:
         """Matches every existing fixture in test_auto_agent_preflight_loop.py
@@ -981,7 +981,7 @@ class TestConstructorWiring:
             deps=deps.loop_deps,
         )
         assert loop._decomposer is None
-        assert loop._council is None
+        assert loop._ensemble is None
 
 
 # ---------------------------------------------------------------------------
@@ -1026,7 +1026,7 @@ def _make_wired_loop(tmp_path: Path, *, decomposer, ensemble):
     # gates the label", not the terminal's own internals or the
     # constructor's epic_manager/runner build path (covered above).
     loop._decomposer = decomposer
-    loop._council = ensemble
+    loop._ensemble = ensemble
     return loop, state, pr
 
 

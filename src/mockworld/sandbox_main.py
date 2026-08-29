@@ -1234,7 +1234,7 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
     diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
     if diagnostic_runner is not None:
         diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    decompose_ensemble = getattr(svc.auto_agent_preflight_loop, "_council", None)
+    decompose_ensemble = getattr(svc.auto_agent_preflight_loop, "_ensemble", None)
     if decompose_ensemble is not None:
         decompose_ensemble._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
     # vars() assignment: instance-level seam (same idiom as the skill-prompt

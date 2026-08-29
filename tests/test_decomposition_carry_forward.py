@@ -202,7 +202,7 @@ class TestSalvageOrdering:
         assert prs.issue(epic_number + 2).title == "Child 2"
 
 
-def _council(monkeypatch, *, results):
+def _ensemble(monkeypatch, *, results):
     """Wire a DecompositionEnsemble whose seam call returns each of *results*
     in turn (as ``SimpleResult(stdout=..., returncode=0)``). Mirrors
     ``tests/test_decomposition_ensemble.py``'s helper -- the LLM seam is
@@ -223,7 +223,7 @@ def _council(monkeypatch, *, results):
     return ensemble, calls
 
 
-class TestCouncilSalvageIntegration:
+class TestEnsembleSalvageIntegration:
     """The direction prompt is given the diff-so-far (packed into
     stall_context by the caller) and salvage instructions; a salvage-tagged
     child the ensemble proposes survives parsing and lands first through
@@ -248,7 +248,7 @@ class TestCouncilSalvageIntegration:
         validation = json.dumps(
             {"decision": "reject", "confidence": "high", "reasoning": "n/a"}
         )
-        ensemble, calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=7, title="Stalled task")
 
         await ensemble.decide(
@@ -268,7 +268,7 @@ class TestCouncilSalvageIntegration:
         assert "salvage" in calls[0].lower()
 
     @pytest.mark.asyncio
-    async def test_council_output_with_salvage_child_lands_first_via_issue_decomposer(
+    async def test_ensemble_output_with_salvage_child_lands_first_via_issue_decomposer(
         self, monkeypatch, tmp_path: Path
     ) -> None:
         direction = json.dumps(
@@ -293,7 +293,7 @@ class TestCouncilSalvageIntegration:
         validation = json.dumps(
             {"decision": "approve", "confidence": "high", "reasoning": "Sound split"}
         )
-        ensemble, _calls = _council(monkeypatch, results=[direction, validation])
+        ensemble, _calls = _ensemble(monkeypatch, results=[direction, validation])
         task = TaskFactory.create(id=7, title="Stalled task")
 
         result = await ensemble.decide(
