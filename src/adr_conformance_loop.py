@@ -31,7 +31,7 @@ protocol), and dispatches on ``decision.remediation`` — it no longer calls
 the facts, so which action fires is byte-for-byte what it was; what changed is
 that the action arrives as a typed decision another engine could equally have
 produced. The facts behind each tick are recorded to
-``.hydraflow/metrics/{repo_slug}/facts.jsonl`` (gitignored, snapshot
+``.hydraflow/{repo_slug}/metrics/facts.jsonl`` (gitignored, snapshot
 semantics), so the tick's decisions replay offline from the ledger alone.
 
 ``_detect_rename`` detects high-confidence pytest-node renames (via
@@ -522,7 +522,7 @@ class AdrConformanceLoop(BaseBackgroundLoop):
                 self._state.clear_adr_conformance_attempts(conf.adr_id)
 
         # Record the evidence behind this tick's decisions, beside
-        # ``adr_conformance.jsonl``: ``.hydraflow/metrics/{repo_slug}/facts.jsonl``,
+        # ``adr_conformance.jsonl``: ``.hydraflow/{repo_slug}/metrics/facts.jsonl``,
         # gitignored, snapshot semantics (one row per ``standard|subject|key``,
         # see ``policy.store``). This ledger is what makes the decisions
         # replayable offline — same engine, same rows, same decisions, with no
