@@ -45,8 +45,8 @@ HydraFlow-format repo gets the full set; together they describe how the
 factory takes a spec from intent to production.
 
 The table is not a reading list — it is bound to `STANDARDS_DIRS` in
-[`src/onboarding/kernel_writer.py`](../../../src/onboarding/kernel_writer.py),
-which is what the stamper actually copies into a new repo, by
+`src/onboarding/kernel_writer.py`, which is what the stamper actually copies
+into a new repo, by
 `tests/architecture/test_factory_operation_standard_drift.py`. A standard the
 table names that the stamper does not ship, or a standard the stamper ships
 that the table does not name, reddens there. Both directions, because a
