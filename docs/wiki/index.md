@@ -11,6 +11,12 @@ the context map at
 [`../arch/generated/ubiquitous-language-context-map.md`](../arch/generated/ubiquitous-language-context-map.md).
 See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 
+New terms added 2026-08-28 (ADR-0143, the PAAA governance model):
+- [`Purpose`](terms/purpose.md) — layer 1: what a repository is for; the one layer with no declaration surface today
+- [`Articles`](terms/articles.md) — layer 2: what must remain true (standards, ADR constraints, security and compliance rules, local policy)
+- [`Actors`](terms/actors.md) — layer 3: who or what may act, and with what delegated authority; declared by the `agents/` tree
+- [`Artifacts`](terms/artifacts.md) — layer 4: the software plus ADRs, tests, evidence, manifests, ledgers, decisions
+
 New terms added 2026-06-30 (ADR-0093, `FitnessScorecardLoop`):
 - [`LoopFitness`](terms/loop-fitness.md) — value object returned by every loop's `loop_fitness()` call; carries kind, optional score, components, sample_count, confidence
 - [`FitnessScorecardLoop`](terms/fitness-scorecard-loop.md) — read-only caretaker loop that produces the per-loop `LoopFitness` scorecard

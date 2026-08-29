@@ -13,13 +13,13 @@
       "content_sha": "af510eb9344b4fe1bb368744a8c1a11c0f975389f5a0e022327bbc8b528f8299"
     },
     "adr_xref.md": {
-      "content_sha": "5a3e0c7eb998cfd46e7eee05b1dfcdfbf6a67a4c4ff97ce67b9019cd08c5cc48"
+      "content_sha": "c999a5b04ce80f9797c7a75d2e578833012a6f2ecadb6e69db71a8f412f17553"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "coverage_matrix.md": {
-      "content_sha": "ecf4543f14e70209270ecc88303cbda01293d71e5f4698247d1676fc475aaeab"
+      "content_sha": "a2f313db50a91f02f177d1a6c61824439da8050dd53ff8f42c9f4412dc43eaeb"
     },
     "events.md": {
       "content_sha": "b7fff31d940305ba7ae0b4da94f077dc63cce097efec10707b97936df10b69a2"
@@ -40,20 +40,20 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "13f20083875c4f28a35b6fe8b5977a27f9572b377ee668325b4649ec8eca232b"
+      "content_sha": "4e8526a126630435520c7c90875bba9332325a85fec16fe795a7f656ba709a1d"
     },
     "ports.md": {
       "content_sha": "67fc7b123d0d9952a7dcfd7e0ba0eb2979fd95b97d27e950655b05a71147689f"
     },
     "ubiquitous-language-context-map.md": {
-      "content_sha": "bec384b2a00e8dd2ff7216babcfd67d509285117ccd1b800fd7ff7f8a11edcba"
+      "content_sha": "d1a3d52487b0d9437b70434b6cdf15c5ed12ffc03d83127330b5a865dfe0aac7"
     },
     "ubiquitous-language.md": {
-      "content_sha": "407b87b99c45e2ef3b783c5477d0d879ef84b5ace2b06399c143476d281ac84f"
+      "content_sha": "1aa63940c0a6f99580da3c088d87865b2e98fa7b9776680bbe2a46888926e587"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "f2b9bf43537a80b1487ab5fcd1c7cb3cca9fb66c439f062182e3a28ab6ae5b2c"
+  "content_sha": "7d89a01c753a236f4d7617897c359e5fba6874836f32148e09f046894b6d00bb"
 }
