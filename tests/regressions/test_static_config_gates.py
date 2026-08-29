@@ -340,11 +340,11 @@ def _skill_prompt_eval_loop(tmp_path: Path):
     )
 
 
-def _rails_drift_caretaker_loop(tmp_path: Path):
-    from rails_drift_caretaker_loop import RailsDriftCaretakerLoop
+def _charter_drift_caretaker_loop(tmp_path: Path):
+    from charter_drift_caretaker_loop import CharterDriftCaretakerLoop
 
-    d = _deps(tmp_path, "rails_drift_caretaker_loop_enabled")
-    return RailsDriftCaretakerLoop(
+    d = _deps(tmp_path, "charter_drift_caretaker_loop_enabled")
+    return CharterDriftCaretakerLoop(
         config=d.config,
         pr_manager=MagicMock(),
         dedup=MagicMock(),
@@ -464,7 +464,7 @@ _LOOP_FACTORIES = [
     ("RepoWikiLoop", _repo_wiki_loop),
     ("ReportIssueLoop", _report_issue_loop),
     ("RetrospectiveLoop", _retrospective_loop),
-    ("RailsDriftCaretakerLoop", _rails_drift_caretaker_loop),
+    ("CharterDriftCaretakerLoop", _charter_drift_caretaker_loop),
     ("GateHealthLoop", _gate_health_loop),
     ("IssueRefinementLoop", _issue_refinement_loop),
     ("RunsGCLoop", _runs_gc_loop),

@@ -14,6 +14,7 @@ graph LR
     adrprevalidator["ADRPreValidator<br/><i>service</i>"]
     adrreviewerloop["ADRReviewerLoop<br/><i>loop</i>"]
     adrreviewpanel["ADRReviewPanel<br/><i>service</i>"]
+    charterdriftcaretakerloop["CharterDriftCaretakerLoop<br/><i>loop</i>"]
     cimonitorloop["CIMonitorLoop<br/><i>loop</i>"]
     contractrefreshloop["ContractRefreshLoop<br/><i>loop</i>"]
     corpuslearningloop["CorpusLearningLoop<br/><i>loop</i>"]
@@ -35,7 +36,6 @@ graph LR
     mergestatewatcherloop["MergeStateWatcherLoop<br/><i>loop</i>"]
     pricingrefreshloop["PricingRefreshLoop<br/><i>loop</i>"]
     prunstickerloop["PRUnstickerLoop<br/><i>loop</i>"]
-    railsdriftcaretakerloop["RailsDriftCaretakerLoop<br/><i>loop</i>"]
     rcbudgetloop["RCBudgetLoop<br/><i>loop</i>"]
     skillpromptevalloop["SkillPromptEvalLoop<br/><i>loop</i>"]
     staleissuegcloop["StaleIssueGCLoop<br/><i>loop</i>"]
@@ -53,6 +53,7 @@ graph LR
     authority["Authority<br/><i>policy</i>"]
     basebackgroundloop["BaseBackgroundLoop<br/><i>loop</i>"]
     botprport["BotPRPort<br/><i>port</i>"]
+    charter["Charter<br/><i>value_object</i>"]
     circuitbreaker["CircuitBreaker<br/><i>control_role</i>"]
     controller["Controller<br/><i>control_role</i>"]
     credentials["Credentials<br/><i>value_object</i>"]
@@ -152,6 +153,14 @@ graph LR
   botprport -->|depends_on| creditexhaustederror
   botprport -->|depends_on| term
   botprport -->|depends_on| termstore
+  charterdriftcaretakerloop -->|depends_on| loopfitness
+  charterdriftcaretakerloop -->|depends_on| prport
+  charterdriftcaretakerloop -->|depends_on| dedupstore
+  charterdriftcaretakerloop -->|depends_on| hydraflowconfig
+  charterdriftcaretakerloop -->|depends_on| basebackgroundloop
+  charterdriftcaretakerloop -->|depends_on| fitnesscontext
+  charterdriftcaretakerloop -->|depends_on| governor
+  charterdriftcaretakerloop -->|implements| basebackgroundloop
   cimonitorloop -->|depends_on| hydraflowconfig
   cimonitorloop -->|depends_on| basebackgroundloop
   cimonitorloop -->|depends_on| prport
@@ -378,14 +387,6 @@ graph LR
   prunstickerloop -->|depends_on| prport
   prunstickerloop -->|implements| basebackgroundloop
   prunstickerloop -->|depends_on| governor
-  railsdriftcaretakerloop -->|depends_on| loopfitness
-  railsdriftcaretakerloop -->|depends_on| prport
-  railsdriftcaretakerloop -->|depends_on| dedupstore
-  railsdriftcaretakerloop -->|depends_on| hydraflowconfig
-  railsdriftcaretakerloop -->|depends_on| basebackgroundloop
-  railsdriftcaretakerloop -->|depends_on| fitnesscontext
-  railsdriftcaretakerloop -->|depends_on| governor
-  railsdriftcaretakerloop -->|implements| basebackgroundloop
   rcbudgetloop -->|depends_on| basebackgroundloop
   rcbudgetloop -->|depends_on| hydraflowconfig
   rcbudgetloop -->|depends_on| statetracker

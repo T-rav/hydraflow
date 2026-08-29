@@ -66,9 +66,9 @@ fake_coverage_auditor:
   class: error_driven
   pv: "fake coverage vs cassette corpus"
   notes: "judgment"
-rails_drift_caretaker:
+charter_drift_caretaker:
   class: error_driven
-  pv: "workflow files vs rails prescription"
+  pv: "live repo state vs charter declaration"
   notes: "judgment"
 trust_fleet_sanity:
   class: error_driven

@@ -127,7 +127,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0118 | — | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | `src.credit_failover` | `pytest:tests/test_credit_failover.py` |
 | ADR-0120 | `src.control_register` | — |
-| ADR-0121 | `src.rails_drift_caretaker_loop`, `src.rails_manifest` | — |
+| ADR-0121 | `src.charter`, `src.charter_drift_caretaker_loop`, `src.dashboard_routes._onboarding_routes`, `src.onboarding.templating` | — |
 | ADR-0122 | — | — |
 | ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
 | ADR-0124 | `src.goal_supervisor_loop`, `src.supervisor_observation` | — |
@@ -149,7 +149,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0140 | `src.dashboard_routes._gateway_policy_routes`, `src.driver_contracts`, `src.hydraflow_gateway.app`, `src.operator_identity`, `src.routing_matrix` | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 | ADR-0141 | `src.driver_contracts`, `src.route_enforcement` | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | — | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
-| ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.erosion.concentration_baseline`, `src.erosion.mass_baseline`, `src.erosion.scatter_baseline`, `src.erosion.suite_hygiene_baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.principle_register`, `src.prompt_gate`, `src.rails_manifest`, `src.repo_store` | — |
+| ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.charter`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.erosion.concentration_baseline`, `src.erosion.mass_baseline`, `src.erosion.scatter_baseline`, `src.erosion.suite_hygiene_baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.principle_register`, `src.prompt_gate`, `src.repo_store` | — |
 
 ## Module → ADRs
 
@@ -187,6 +187,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.branch_protection_audit` | ADR-0082 |
 | `src.branch_protection_auditor_loop` | ADR-0082 |
 | `src.caching_issue_store` | ADR-0041 |
+| `src.charter` | ADR-0121, ADR-0143 |
+| `src.charter_drift_caretaker_loop` | ADR-0121 |
 | `src.code_grooming_loop` | ADR-0065 |
 | `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094, ADR-0102, ADR-0103, ADR-0106, ADR-0112, ADR-0137 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
@@ -206,6 +208,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.dashboard_routes._diagnostics_routes` | ADR-0050 |
 | `src.dashboard_routes._epic_routes` | ADR-0019 |
 | `src.dashboard_routes._gateway_policy_routes` | ADR-0140 |
+| `src.dashboard_routes._onboarding_routes` | ADR-0121 |
 | `src.dashboard_routes._reports_routes` | ADR-0013 |
 | `src.dashboard_routes._routes` | ADR-0007, ADR-0008, ADR-0030, ADR-0038 |
 | `src.dashboard_routes._scheduling_routes` | ADR-0137 |
@@ -320,6 +323,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mutation_gauntlet` | ADR-0125 |
 | `src.onboarding.kernel_lock` | ADR-0143 |
 | `src.onboarding.kernel_writer` | ADR-0143 |
+| `src.onboarding.templating` | ADR-0121 |
 | `src.operator_identity` | ADR-0140 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0044, ADR-0045, ADR-0106 |
 | `src.orchestrator_hitl` | ADR-0103 |
@@ -364,8 +368,6 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.prompt_outcome_pairing` | ADR-0130 |
 | `src.prompt_template` | ADR-0087 |
 | `src.queue_strategy` | ADR-0137 |
-| `src.rails_drift_caretaker_loop` | ADR-0121 |
-| `src.rails_manifest` | ADR-0121, ADR-0143 |
 | `src.rc_budget_loop` | ADR-0045 |
 | `src.repo_runtime` | ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0038 |
 | `src.repo_store` | ADR-0143 |

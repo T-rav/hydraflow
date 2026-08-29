@@ -944,3 +944,21 @@ _Source: #11629 (manual)_
 ```json:entry
 {"id":"01M0M7JNV07P5TTBS5TH4ER2M6","title":"Runtime `...` stubs in a mixin shadow sibling mixins via the MRO","topic":null,"source_type":"manual","source_issue":11629,"source_repo":null,"created_at":"2026-08-22T00:00:00+00:00","updated_at":"2026-08-22T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## `charter.yaml` `actors` is a pointer; a role list is rejected at load
+
+The repo charter declares Actors by pointing at the `agents/` tree (`actors: agents/`), never by listing roles. A list or mapping under `actors` raises `charter.CharterError` at load. This is not style: the `agents/` directory layout *is* the Actors declaration (house standard 2026-08-25, #11741; ADR-0143 Ruling 6, guard 3), and a second declaration in YAML rots against the first.
+
+Two other charter rules fail closed in the same place. `articles.assurance` must be a `RepoRecord.data_class` value (`public-code` / `internal` / `regulated-<name>`) — anything else raises rather than defaulting, because an assurance level nothing can honour must not load as if it could. And a charter that declares nothing checkable — no standards, no required artifacts, no layers, no gate scripts, no coverage floor — is a FATAL `uncheckable-charter` finding rather than a clean report: a drift check with an empty subject list passes silently and reads as coverage.
+
+Unknown standard ids and unknown layer names go the other way: tolerated and reported, never fatal (the ADR-0121 forward-compat rule).
+
+**Why:** the two authority fields (`actors`, `assurance`) and the emptiness case are exactly where a permissive default would be invisible — nothing reddens, and the file reads as governance while governing nothing.
+
+_Source: #11748 (manual)_
+
+
+```json:entry
+{"id":"01M15ZNNP35TN5FRW5093MN2Z1","title":"`charter.yaml` `actors` is a pointer; a role list is rejected at load","topic":null,"source_type":"manual","source_issue":11748,"source_repo":null,"created_at":"2026-08-28T00:00:00+00:00","updated_at":"2026-08-28T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

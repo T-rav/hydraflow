@@ -63,6 +63,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `auto_agent_preflight` | `AutoAgentPreflightLoop` | Autonomy | `adr_review_model`, `model` | — | HITL escalation | Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050). |
 | `auto_tighten` | `AutoTightenLoop` | Repo Health | — | — | — | Locks in coverage-floor gains |
 | `branch_protection_auditor` | `BranchProtectionAuditorLoop` | Governance & Audit | — | — | — | Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082. |
+| `charter_drift_caretaker` | `CharterDriftCaretakerLoop` | Governance & Audit | — | — | — | Audits each managed repo's live state against its charter.yaml (declared standards / required artifacts / template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121, ADR-0143. |
 | `ci_monitor` | `CIMonitorLoop` | Repo Health | — | — | — | Detects failing CI on main and files/auto-closes issues. |
 | `contract_refresh` | `ContractRefreshLoop` | Governance & Audit | — | — | HITL escalation; PR review + merge gate | Re-records fake-adapter cassettes and opens refresh PRs when committed cassettes drift from live behavior. |
 | `convergence_oscillation` | `ConvergenceOscillationLoop` | Autonomy | — | — | HITL escalation | Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098. |
@@ -101,7 +102,6 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `pr_unsticker` | `PRUnstickerLoop` | Operations | `background_model` | — | HITL escalation | Requeues stalled HITL PRs by validating requirements and reopening flow. |
 | `pricing_refresh` | `PricingRefreshLoop` | Learning & Insights | — | — | PR review + merge gate | Daily upstream-pricing refresh caretaker — fetches LiteLLM JSON, opens PR on drift; bounds-guarded, always human-reviewed. |
 | `principles_audit` | `PrinciplesAuditLoop` | Governance & Audit | — | — | HITL escalation | Weekly ADR-0044 audit of HydraFlow-self plus managed repos; blocks onboarding on P1–P5 fails. |
-| `rails_drift_caretaker` | `RailsDriftCaretakerLoop` | Governance & Audit | — | — | — | Audits each managed repo's live state against its rails.yaml manifest (declared template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121. |
 | `rc_budget` | `RCBudgetLoop` | Repo Health | — | — | HITL escalation | Detects RC wall-clock bloat via rolling-median + spike signals across recent runs. |
 | `repo_wiki` | `RepoWikiLoop` | Learning & Insights | `wiki_compilation_model` | — | HITL escalation; PR review + merge gate | Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles. |
 | `report_issue` | `ReportIssueLoop` | Intake | `report_issue_model` | ✅ | HITL escalation | Processes queued bug reports into GitHub issues via the configured agent. |
