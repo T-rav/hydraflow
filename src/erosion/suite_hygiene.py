@@ -31,9 +31,6 @@ from pathlib import Path
 from erosion.models import CrossFileDuplicate, ParametrizeGroup, SuiteHygieneFinding
 from pytest_collection import collected_test_globs
 
-#: This repo's root — ``src/erosion/suite_hygiene.py`` -> up three.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
 #: Minimum identical tests in one file before they are reported as a parametrize group.
 DEFAULT_MIN_GROUP = 3
 
@@ -163,16 +160,23 @@ def collect_tests(
     so this sensor and the anti-skip guard cannot disagree about what a test
     file is — they read the same key of the same file.
 
-    *globs* defaults to what THIS repo declares, resolved from its own
-    ``pyproject.toml``. Deliberately not resolved from ``tests_dir.parent``: a
-    directory with no pyproject beside it — a tmp fixture, an export — would
-    fall back to pytest's bare defaults and drop every ``regression_*.py`` from
-    the count without saying so. Silently measuring less than you claim to is
-    the failure this module exists to detect, not to commit. Callers auditing a
-    different repo pass that repo's globs explicitly.
+    *globs* defaults to what the repo CONTAINING *tests_dir* declares, which is
+    the same thing pytest would decide from that rootdir — including pytest's
+    own defaults when the repo declares nothing, so a repo with no
+    ``python_files`` key is measured exactly as pytest would collect it.
+
+    That fallback narrows the set (no ``regression_*.py``), so it must never be
+    reached silently for a repo that DOES configure the key. It cannot be:
+    the globs come from the pyproject sitting beside ``tests_dir``, and the
+    only way to miss it is to point this at a directory that is not a repo
+    root's ``tests/``. Callers auditing a tree laid out differently pass that
+    repo's globs explicitly rather than relying on the walk-up.
+
+    Deliberately NOT resolved by walking up from ``__file__``: that lands
+    inside site-packages in a wheel install (#11589).
     """
     if globs is None:
-        globs = collected_test_globs(_REPO_ROOT)
+        globs = collected_test_globs(tests_dir.parent)
     out: dict[str, str] = {}
     for glob in globs:
         for path in tests_dir.rglob(glob):

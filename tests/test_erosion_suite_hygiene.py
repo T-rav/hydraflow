@@ -129,7 +129,13 @@ def test_unparseable_file_is_skipped_not_raised() -> None:
 # --- collect_tests -----------------------------------------------------------
 
 
+_PYPROJECT_WITH_REGRESSION_GLOB = (
+    '[tool.pytest.ini_options]\npython_files = ["test_*.py", "regression_*.py"]\n'
+)
+
+
 def test_collect_tests_matches_pytest_globs_recursively(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT_WITH_REGRESSION_GLOB)
     tests = tmp_path / "tests"
     (tests / "regressions").mkdir(parents=True)
     (tests / "test_a.py").write_text("def test_a(): pass\n")
@@ -144,3 +150,34 @@ def test_collect_tests_matches_pytest_globs_recursively(tmp_path: Path) -> None:
         "tests/regressions/regression_issue_1.py",
         "tests/test_a.py",
     ]
+
+
+def test_collect_tests_follows_pytest_defaults_when_repo_declares_none(
+    tmp_path: Path,
+) -> None:
+    """No ``python_files`` key means pytest's own defaults — and so does this.
+
+    Pinned rather than left implicit: the fallback DOES narrow the set (no
+    ``regression_*.py``), so if it ever starts being reached for a repo that
+    configures the key, the count drops silently. This is the shape of that
+    fallback, stated once, where a change to it is visible.
+    """
+    tests = tmp_path / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_a.py").write_text("def test_a(): pass\n")
+    (tests / "regression_issue_1.py").write_text("def test_r(): pass\n")
+    (tests / "b_test.py").write_text("def test_b(): pass\n")
+
+    collected = collect_tests(tests)
+
+    assert sorted(collected) == ["tests/b_test.py", "tests/test_a.py"]
+
+
+def test_collect_tests_accepts_explicit_globs(tmp_path: Path) -> None:
+    tests = tmp_path / "tests"
+    tests.mkdir(parents=True)
+    (tests / "regression_issue_1.py").write_text("def test_r(): pass\n")
+
+    collected = collect_tests(tests, globs=("regression_*.py",))
+
+    assert sorted(collected) == ["tests/regression_issue_1.py"]
