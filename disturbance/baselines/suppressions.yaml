@@ -92,6 +92,9 @@ entries:
   src/caching_issue_store.py::noqa:BLE001: 3
   src/caching_issue_store.py::noqa:PLC0415: 1
   src/changelog.py::noqa:BLE001: 2
+  src/charter_drift_caretaker_loop.py::noqa:PLC0415: 1
+  src/charter_drift_caretaker_loop.py::noqa:PLR0911: 1
+  src/charter_drift_caretaker_loop.py::noqa:TCH001: 1
   src/ci_monitor_loop.py::noqa:PLR0911: 1
   src/ci_scaffold.py::noqa:F401-re-exportforcompatibilitytests: 1
   src/config.py::noqa:PLC0415: 2
@@ -270,9 +273,6 @@ entries:
   "src/pricing_refresh_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
   src/pricing_refresh_loop.py::noqa:S101: 1
   src/principles_audit_loop.py::noqa:BLE001: 4
-  src/rails_drift_caretaker_loop.py::noqa:PLC0415: 1
-  src/rails_drift_caretaker_loop.py::noqa:PLR0911: 1
-  src/rails_drift_caretaker_loop.py::noqa:TCH001: 1
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3

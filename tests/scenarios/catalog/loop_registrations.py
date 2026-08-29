@@ -1353,37 +1353,39 @@ def _build_goal_supervisor(ports: dict[str, Any], config: Any, deps: Any) -> Any
     return loop
 
 
-def _build_rails_drift_caretaker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build RailsDriftCaretakerLoop for scenarios (ADR-0121, #10936).
+def _build_charter_drift_caretaker(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build CharterDriftCaretakerLoop for scenarios (ADR-0121, ADR-0143).
 
     Tests pre-seed:
-    * ``rails_drift_audit`` → an async auditor returning a
-      ``list[RailsDriftReport]`` (replaces the checkout-observing auditor).
+    * ``charter_drift_audit`` → an async auditor returning a
+      ``list[CharterDriftReport]`` (replaces the checkout-observing auditor).
       Defaults to ``[]`` (no managed repos ⇒ nothing to audit).
 
     ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
-    ``rails_drift_caretaker_dedup``.
+    ``charter_drift_caretaker_dedup``.
     """
-    from rails_drift_caretaker_loop import (  # noqa: PLC0415
-        RailsDriftCaretakerLoop,
+    from charter_drift_caretaker_loop import (  # noqa: PLC0415
+        CharterDriftCaretakerLoop,
     )
 
     dedup = _scenario_dedup(
         ports,
         config,
-        "rails_drift_caretaker_dedup",
-        "rails_drift_caretaker",
-        "rails_drift_caretaker.json",
+        "charter_drift_caretaker_dedup",
+        "charter_drift_caretaker",
+        "charter_drift_caretaker.json",
     )
 
-    auditor = ports.get("rails_drift_audit")
+    auditor = ports.get("charter_drift_audit")
     if auditor is None:
         auditor = AsyncMock(return_value=[])
-        ports["rails_drift_audit"] = auditor
+        ports["charter_drift_audit"] = auditor
 
     pr_manager = ports.get("pr_manager") or ports["github"]
 
-    return RailsDriftCaretakerLoop(
+    return CharterDriftCaretakerLoop(
         config=config,
         pr_manager=pr_manager,
         dedup=dedup,
@@ -2306,7 +2308,7 @@ _BUILDERS: dict[str, Any] = {
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
     "goal_supervisor": _build_goal_supervisor,
-    "rails_drift_caretaker": _build_rails_drift_caretaker,
+    "charter_drift_caretaker": _build_charter_drift_caretaker,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,

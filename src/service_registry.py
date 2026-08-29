@@ -38,6 +38,10 @@ from branch_protection_audit import (
 from branch_protection_auditor_loop import BranchProtectionAuditorLoop  # noqa: TCH001
 from bug_reproducer import BugReproducer
 from caching_issue_store import CachingIssueStore
+from charter_drift_caretaker_loop import (  # noqa: TCH001
+    CharterDriftCaretakerLoop,
+    build_charter_auditor,
+)
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
@@ -120,10 +124,6 @@ from precondition_gate import PreconditionGate
 from preflight.audit import PreflightAuditStore
 from pricing_refresh_loop import PricingRefreshLoop  # noqa: TCH001
 from principles_audit_loop import PrinciplesAuditLoop
-from rails_drift_caretaker_loop import (  # noqa: TCH001
-    RailsDriftCaretakerLoop,
-    build_rails_auditor,
-)
 from rc_budget_loop import RCBudgetLoop
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
@@ -322,7 +322,7 @@ class ServiceRegistry:
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
     goal_supervisor_loop: GoalSupervisorLoop
-    rails_drift_caretaker_loop: RailsDriftCaretakerLoop
+    charter_drift_caretaker_loop: CharterDriftCaretakerLoop
     gate_activator_loop: GateActivatorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
@@ -1974,16 +1974,16 @@ def build_services(
         state=state,
     )
 
-    rails_drift_caretaker_dedup = DedupStore(
-        "rails_drift_caretaker",
-        config.data_root / "dedup" / "rails_drift_caretaker.json",
+    charter_drift_caretaker_dedup = DedupStore(
+        "charter_drift_caretaker",
+        config.data_root / "dedup" / "charter_drift_caretaker.json",
     )
-    rails_drift_caretaker_loop = RailsDriftCaretakerLoop(  # noqa: F841
+    charter_drift_caretaker_loop = CharterDriftCaretakerLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
-        dedup=rails_drift_caretaker_dedup,
+        dedup=charter_drift_caretaker_dedup,
         deps=loop_deps,
-        auditor=build_rails_auditor(config),
+        auditor=build_charter_auditor(config),
     )
 
     gate_activator_dedup = DedupStore(
@@ -2394,7 +2394,7 @@ def build_services(
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
         goal_supervisor_loop=goal_supervisor_loop,
-        rails_drift_caretaker_loop=rails_drift_caretaker_loop,
+        charter_drift_caretaker_loop=charter_drift_caretaker_loop,
         gate_activator_loop=gate_activator_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,

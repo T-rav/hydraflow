@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_87 terms across 3 bounded contexts._
+_88 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -98,9 +98,9 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 
 ## Articles
 
-**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/rails_manifest.py:RailsManifest` · **Confidence:** `accepted`
+**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/charter.py:Articles` · **Confidence:** `accepted`
 
-The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo manifest of ADR-0121 (`RailsManifest`, renamed to `charter.yaml` by #11748) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered / blocking, and HydraFlow acts on the verdict.
+The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo charter of ADR-0121 as amended by #11748 (`charter.yaml`, whose `articles:` block is `charter.Articles`) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered / blocking, and HydraFlow acts on the verdict.
 
 **Invariants:**
 - Building standards are one class of Articles, not the whole of Articles — security, compliance, architecture, and local policy are Articles too.
@@ -150,6 +150,34 @@ Hexagonal port used by caretaker loops (TermProposerLoop, others) to open auto-m
 **Invariants:**
 - Pure Protocol — no implementation; tests use a fake; production uses a thin adapter.
 - open_bot_pr is the only method; one PR per call; success returns the PR number.
+
+## Charter
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/charter.py:Charter` · **Confidence:** `accepted`
+
+The governing declaration a HydraFlow-governed repository carries at its root, in the file named by `charter.CHARTER_FILENAME` (`charter.yaml`). It states the repository's Purpose, its Articles (adopted standards by id, an assurance class, and local articles), a pointer to where its Actors are declared, and the Artifacts it commits to carrying — the four layers of ADR-0143 — plus a `rails:` block holding the ADR-0121 template-conformance fields with their semantics unchanged. It supersedes `rails.yaml`, which loads for one cycle as a rails-only charter with a non-fatal `legacy-rails-manifest` finding. It is HydraFlow's implementation surface for the PAAA ontology, never a schema anyone outside HydraFlow is asked to conform to.
+
+**Invariants:**
+- `actors` is a path pointer and never a role list; a list or mapping is rejected at load, because the `agents/` tree is the Actors declaration (#11741) and a second copy rots.
+- `articles.assurance` reuses the `RepoRecord.data_class` vocabulary and fails closed on anything outside it — there is no second assurance scale.
+- Unknown standard ids and unknown template-layer names are tolerated and reported, never fatal (the ADR-0121 forward-compat rule).
+- A charter that declares nothing checkable is fatal rather than clean: a drift check with an empty subject list reads as coverage.
+- Editing `purpose` or `articles` is an ENACT reserved to the operator, not something the factory automates (ADR-0143 Ruling 6, guard 4).
+
+## CharterDriftCaretakerLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/charter_drift_caretaker_loop.py:CharterDriftCaretakerLoop` · **Confidence:** `accepted`
+**Aliases:** `charter drift caretaker loop`, `charter drift caretaker`, `charter drift loop`
+
+Caretaker loop (ADR-0121 as amended by #11748, ADR-0143) that audits each managed repo's live state against its charter (`charter.yaml`) and files deduped `hydraflow-find` drift issues. Mirrors the ADR-drift (ADR-0056) and branch-protection-drift (ADR-0082) caretakers: periodic, contract-diffing, one deduped issue per finding class. Per tick it loads the repo's charter, observes live state, and computes drift — a declared standard whose `docs/standards/<id>/` directory is gone, a declared required artifact that is absent, a missing template layer, a coverage-floor breach, or a missing declared domain gate script. Unknown layer names and unknown standard ids are reported but never file an issue (tolerated, forward-compat), and so is a legacy `rails.yaml` read through the one-cycle fallback. Dedup key is `charter_drift_caretaker:<repo>:<finding_class>`; when a finding class resolves, its open issue is closed and the key cleared so a recurrence re-files.
+
+**Invariants:**
+- One deduped drift issue per (repo, finding class); never one issue per individual failing check.
+- A declared standard or artifact that is absent is drift; an undeclared extra of either is fine; an unknown standard id or layer name is reported but never fatal.
+- A charter that declares nothing checkable, or whose standard ids cannot be resolved against any registry, is FATAL rather than silently clean — a drift check with an empty subject list reads as coverage.
+- The coverage floor is evaluated only when observed coverage is known (fail-open: no drift on an unmeasured value).
+- Kill-switch is via `enabled_cb("charter_drift_caretaker")` (ADR-0049), then the static `charter_drift_caretaker_loop_enabled` config gate (default OFF).
+- Cadence is config-driven via `charter_drift_caretaker_interval` (default 1 day).
 
 ## CIMonitorLoop
 
@@ -704,20 +732,6 @@ The first layer of the PAAA governance model (ADR-0143): what a repository is *f
 - Purpose is declarative intent, never an executable check — nothing today decides anything against it.
 - Changing Purpose is an enactment reserved to the operator (ENACT, not RATIFY); the system cannot enlarge its own mandate.
 - Purpose is not Articles: a goal the repository is aiming at is not a rule that must remain true.
-
-## RailsDriftCaretakerLoop
-
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/rails_drift_caretaker_loop.py:RailsDriftCaretakerLoop` · **Confidence:** `accepted`
-**Aliases:** `rails drift caretaker loop`, `rails drift caretaker`, `rails manifest drift loop`
-
-Caretaker loop (ADR-0121, #10936) that audits each managed repo's live state against its rails manifest (`rails.yaml`) and files deduped `hydraflow-find` drift issues. Mirrors the ADR-drift (ADR-0056) and branch-protection-drift (ADR-0082) caretakers: periodic, contract-diffing, one deduped issue per finding class. Per tick it loads the repo's manifest, observes live state, and computes drift — a missing declared layer, a coverage-floor breach, or a missing declared domain gate script. Unknown/future layer names are reported but never file an issue (tolerated, forward-compat with the Book-3 operator-agent pack). Dedup key is `rails_drift_caretaker:<repo>:<finding_class>`; when a finding class resolves, its open issue is closed and the key cleared so a recurrence re-files.
-
-**Invariants:**
-- One deduped drift issue per (repo, finding class); never one issue per individual failing check.
-- A missing declared layer is drift; an undeclared extra rail is fine; an unknown/future layer name is reported but never fatal.
-- The coverage floor is evaluated only when observed coverage is known (fail-open: no drift on an unmeasured value).
-- Kill-switch is via `enabled_cb("rails_drift_caretaker")` (ADR-0049), then the static `rails_drift_caretaker_loop_enabled` config gate (default OFF).
-- Cadence is config-driven via `rails_drift_caretaker_interval` (default 1 day).
 
 ## RCBudgetLoop
 
