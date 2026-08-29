@@ -5,7 +5,7 @@ the ADR-0063 recovery-path branches:
 
 - ``script_discover`` — DiscoverRunner coherence verdict + expander queries
 - ``script_plan_review`` — PlanReviewer verdict + gaps
-- ``script_shape_council`` — ExpertCouncil per-round consensus/split
+- ``script_shape_ensemble`` — ExpertEnsemble per-round consensus/split
 - ``script_implement_spec_review`` — SpecComplianceReviewer compliant + gaps
 
 Each is consumed FIFO via a dedicated ``pop_*`` (or ``*_for_round``) method
@@ -81,41 +81,41 @@ def test_script_plan_review_returns_none_when_exhausted() -> None:
     assert llm.pop_plan_review_script(1) is None
 
 
-def test_script_shape_council_is_idempotent_per_round() -> None:
-    """The council verdict map is queried multiple times per round.
+def test_script_shape_ensemble_is_idempotent_per_round() -> None:
+    """The ensemble verdict map is queried multiple times per round.
 
     A scenario that scripts ``{1: "split", 2: "consensus"}`` may need to
     answer "what's the verdict for round 1?" more than once if the phase
     code re-runs a predicate. The map is read-only — production code
-    advances rounds explicitly via :meth:`ExpertCouncil.vote` /
+    advances rounds explicitly via :meth:`ExpertEnsemble.vote` /
     ``vote_diversified``.
     """
     from mockworld.fakes.fake_llm import FakeLLM
 
     llm = FakeLLM()
-    llm.script_shape_council(3, {1: "split", 2: "split", 3: "consensus"})
+    llm.script_shape_ensemble(3, {1: "split", 2: "split", 3: "consensus"})
 
     # Idempotent reads.
-    assert llm.shape_council_verdict_for_round(3, 1) == "split"
-    assert llm.shape_council_verdict_for_round(3, 1) == "split"
-    assert llm.shape_council_verdict_for_round(3, 2) == "split"
-    assert llm.shape_council_verdict_for_round(3, 3) == "consensus"
+    assert llm.shape_ensemble_verdict_for_round(3, 1) == "split"
+    assert llm.shape_ensemble_verdict_for_round(3, 1) == "split"
+    assert llm.shape_ensemble_verdict_for_round(3, 2) == "split"
+    assert llm.shape_ensemble_verdict_for_round(3, 3) == "consensus"
 
 
-def test_script_shape_council_returns_none_for_unknown_round() -> None:
+def test_script_shape_ensemble_returns_none_for_unknown_round() -> None:
     from mockworld.fakes.fake_llm import FakeLLM
 
     llm = FakeLLM()
-    llm.script_shape_council(1, {1: "consensus"})
+    llm.script_shape_ensemble(1, {1: "consensus"})
     # Round 2 not scripted — None signals fall-through.
-    assert llm.shape_council_verdict_for_round(1, 2) is None
+    assert llm.shape_ensemble_verdict_for_round(1, 2) is None
 
 
-def test_script_shape_council_returns_none_for_unknown_issue() -> None:
+def test_script_shape_ensemble_returns_none_for_unknown_issue() -> None:
     from mockworld.fakes.fake_llm import FakeLLM
 
     llm = FakeLLM()
-    assert llm.shape_council_verdict_for_round(999, 1) is None
+    assert llm.shape_ensemble_verdict_for_round(999, 1) is None
 
 
 def test_script_implement_spec_review_pops_in_fifo_order() -> None:

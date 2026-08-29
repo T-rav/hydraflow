@@ -33,7 +33,7 @@ def _solver(
         state=StateTracker(tmp_path / "state.json"),
         prs=prs,
         decomposer=object(),  # not reached — decompose_or_escalate is scripted
-        council=object(),
+        ensemble=object(),
         diagnose_label=diagnose_label,
     )
 
@@ -65,7 +65,7 @@ async def test_decline_falls_back_to_diagnose(tmp_path: Path, monkeypatch) -> No
     prs.swap_pipeline_labels = AsyncMock()
 
     async def _fake_decompose(**_kwargs: object) -> str:
-        return "human-required"  # council declined / not wired / depth-capped
+        return "human-required"  # ensemble declined / not wired / depth-capped
 
     monkeypatch.setattr(giveup_self_solve, "decompose_or_escalate", _fake_decompose)
 
@@ -118,7 +118,7 @@ async def test_decompose_raise_falls_back_to_diagnose(
     prs.swap_pipeline_labels = AsyncMock()
 
     async def _fake_decompose(**_kwargs: object) -> str:
-        raise RuntimeError("council transport error")
+        raise RuntimeError("ensemble transport error")
 
     monkeypatch.setattr(giveup_self_solve, "decompose_or_escalate", _fake_decompose)
 

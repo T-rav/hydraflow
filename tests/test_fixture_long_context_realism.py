@@ -43,7 +43,7 @@ from scripts.audit_prompts import LONG_CONTEXT_THRESHOLD, PROMPT_REGISTRY
 _LONG_CONTEXT_FIXTURES = frozenset(
     {
         "agent_build_prompt_with_prior_failure",
-        "decomposition_council_validation",
+        "decomposition_ensemble_validation",
         "planner_build_prompt_first_attempt",
         "preflight_auto_agent",
         "review_advisor_postverify",

@@ -1,10 +1,10 @@
-"""DecompositionCouncil — LLM decision-maker for decompose-to-converge (ADR-0105).
+"""DecompositionEnsemble — LLM decision-maker for decompose-to-converge (ADR-0105).
 
 Genuinely two-pass, per ADR-0105 §Decision(2): two SEPARATE
 :func:`runner_utils.run_lightweight_agent` calls, not one completion
 role-playing both phases. A single completion that both proposes a split and
 "validates" it just rationalizes its own proposal -- that defeats the point
-of a council, which is an *independent* second look:
+of a ensemble, which is an *independent* second look:
 
 1. **Direction** (:meth:`_run_direction`) -- proposes ONE candidate split
    (epic + children) from distinct lenses (architectural/layer boundaries;
@@ -23,7 +23,7 @@ of a council, which is an *independent* second look:
 
 Both calls route through the shared :func:`runner_utils.run_lightweight_agent`
 seam (CH-6 gated + telemetried) using the same ADR-review provider dial and
-``source="decomposition_council"`` (P1: reuse, no new knobs).
+``source="decomposition_ensemble"`` (P1: reuse, no new knobs).
 
 Confidence-gated retry (mirrors ``preflight/agent.py``'s ``_derive_status``
 retry semantics, ADR-0084): a *decline* (``should_decompose=False``) at
@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from execution import SubprocessRunner
     from models import Task
 
-logger = logging.getLogger("hydraflow.decomposition_council")
+logger = logging.getLogger("hydraflow.decomposition_ensemble")
 
 # Only an exact "high" self-report short-circuits the retry-on-decline rule;
 # "medium"/"low"/garbled/missing all count as not-yet-confident.
@@ -74,8 +74,8 @@ class _DirectionProposal:
     rationale: str
 
 
-class DecompositionCouncil:
-    """Two-pass (direction -> validation) council deciding whether to split a stalled task."""
+class DecompositionEnsemble:
+    """Two-pass (direction -> validation) ensemble deciding whether to split a stalled task."""
 
     def __init__(self, runner: SubprocessRunner, config: HydraFlowConfig) -> None:
         self._runner = runner
@@ -98,23 +98,23 @@ class DecompositionCouncil:
         accepted as final -- no unbounded retries). An accept, or a
         high-confidence decline, returns immediately after the first pass.
         """
-        result = await self._run_council_once(
+        result = await self._run_ensemble_once(
             task=task, stall_context=stall_context, doc_context=doc_context, depth=depth
         )
         if result.should_decompose or result.confidence == _HIGH_CONFIDENCE:
             return result
 
         logger.info(
-            "Decomposition council: low-confidence decline for #%d "
+            "Decomposition ensemble: low-confidence decline for #%d "
             "(confidence=%r) -- retrying once",
             task.id,
             result.confidence,
         )
-        return await self._run_council_once(
+        return await self._run_ensemble_once(
             task=task, stall_context=stall_context, doc_context=doc_context, depth=depth
         )
 
-    async def _run_council_once(
+    async def _run_ensemble_once(
         self,
         *,
         task: Task,
@@ -159,10 +159,10 @@ class DecompositionCouncil:
         prompt = self._build_direction_prompt(
             task, stall_context=stall_context, doc_context=doc_context, depth=depth
         )
-        transcript = await self._execute_council(prompt, issue_number=task.id)
+        transcript = await self._execute_ensemble(prompt, issue_number=task.id)
         if transcript is None:
             logger.warning(
-                "Decomposition council: direction pass produced no output for #%d",
+                "Decomposition ensemble: direction pass produced no output for #%d",
                 task.id,
             )
             return None
@@ -185,10 +185,10 @@ class DecompositionCouncil:
             doc_context=doc_context,
             depth=depth,
         )
-        transcript = await self._execute_council(prompt, issue_number=task.id)
+        transcript = await self._execute_ensemble(prompt, issue_number=task.id)
         if transcript is None:
             logger.warning(
-                "Decomposition council: validation pass produced no output for #%d",
+                "Decomposition ensemble: validation pass produced no output for #%d",
                 task.id,
             )
             return EpicDecompResult(
@@ -213,14 +213,14 @@ class DecompositionCouncil:
         summary of it into this same string, so direction sees whatever work
         already exists without a dedicated parameter; *doc_context* is an
         opaque string a later task fills with relevant repo docs/ADR excerpts
-        -- this council only needs to inject it, not interpret it.
+        -- this ensemble only needs to inject it, not interpret it.
         """
         body = (task.body or "")[:5000]
         max_depth = self._config.max_decomposition_depth
         return f"""Propose ONE candidate split of the stalled task below \
 (a prior autonomous implementation attempt did not converge) into an epic + \
 independently implementable child issues. You are the Direction phase of the \
-Decomposition Council; a separate, independent Validation phase will critique \
+Decomposition Ensemble; a separate, independent Validation phase will critique \
 your proposal -- do not pre-judge acceptance.
 
 ## Task #{task.id}
@@ -305,7 +305,7 @@ Return ONLY a JSON object in this exact format (no other text):
         )
         return f"""Decide whether the candidate split below is sound: \
 ADVERSARIALLY critique it, independently of whatever reasoning produced it. \
-You are the Validation phase of the Decomposition Council; a separate \
+You are the Validation phase of the Decomposition Ensemble; a separate \
 Direction phase (whose reasoning you cannot see) proposed it -- do not assume \
 it is sound just because it was proposed.
 
@@ -375,8 +375,8 @@ or
 }}
 ```"""
 
-    async def _execute_council(self, prompt: str, *, issue_number: int) -> str | None:
-        """Call the configured LLM backend for one council pass (direction
+    async def _execute_ensemble(self, prompt: str, *, issue_number: int) -> str | None:
+        """Call the configured LLM backend for one ensemble pass (direction
         or validation).
 
         Reuses the ADR-review provider dial (P1: avoid a new config knob).
@@ -389,7 +389,7 @@ or
         MockWorld bypass: when a ``_mockworld_fake_llm`` sentinel is attached
         (by sandbox_main), the pass is short-circuited to the next scripted
         transcript for *issue_number* — no subprocess — so a sandbox scenario
-        can drive the council deterministically. Mirrors ``expert_council``.
+        can drive the ensemble deterministically. Mirrors ``expert_ensemble``.
         """
         fake_llm = getattr(self, "_mockworld_fake_llm", None)
         if fake_llm is not None and getattr(fake_llm, "_is_fake_adapter", False):
@@ -405,10 +405,10 @@ or
                 model=self._config.adr_review_model,
                 provider=self._config.adr_review_provider,
                 prompt=prompt,
-                source="decomposition_council",
+                source="decomposition_ensemble",
                 timeout=self._config.agent_timeout,
                 # A stalled change being decomposed has no single issue in
-                # scope (the council reasons over the change, not a labelled
+                # scope (the ensemble reasons over the change, not a labelled
                 # issue), so only the repo-declared data class gates it — same
                 # as adr_reviewer. The CH-6 completeness guard requires the
                 # kwarg be present.
@@ -416,11 +416,11 @@ or
             )
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
-            logger.warning("Decomposition council seam call failed: %s", exc)
+            logger.warning("Decomposition ensemble seam call failed: %s", exc)
             return None
         if result.returncode != 0:
             logger.warning(
-                "Decomposition council seam call failed (rc=%d): %s",
+                "Decomposition ensemble seam call failed (rc=%d): %s",
                 result.returncode,
                 result.stderr[:200],
             )
@@ -438,7 +438,7 @@ or
         data = _extract_json_object(transcript, required_key="children")
         if data is None:
             logger.warning(
-                "Decomposition council: no parseable JSON candidate in direction transcript"
+                "Decomposition ensemble: no parseable JSON candidate in direction transcript"
             )
             return None
 
@@ -463,7 +463,7 @@ or
 
         if len(children) < 2:
             logger.warning(
-                "Decomposition council: direction candidate has <2 parsed children -- "
+                "Decomposition ensemble: direction candidate has <2 parsed children -- "
                 "treating as garbled"
             )
             return None
@@ -492,7 +492,7 @@ or
         data = _extract_json_object(transcript, required_key="decision")
         if data is None:
             logger.warning(
-                "Decomposition council: no parseable JSON verdict in validation transcript"
+                "Decomposition ensemble: no parseable JSON verdict in validation transcript"
             )
             return EpicDecompResult(
                 should_decompose=False,

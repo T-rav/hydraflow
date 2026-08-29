@@ -5,19 +5,19 @@ Proves the auto-agent's decompose-before-HITL terminal
 ``AutoAgentPreflightLoop`` at the attempt-cap pre-check per Task 7) end to
 end against MockWorld fakes: FakeGitHub, a real ``StateTracker`` (via
 ``MockWorld.harness.state``), and a real ``EpicManager``/``IssueDecomposer``
-pair. Only the council's LLM seam
-(``DecompositionCouncil`` -> ``runner_utils.run_lightweight_agent``) is
+pair. Only the ensemble's LLM seam
+(``DecompositionEnsemble`` -> ``runner_utils.run_lightweight_agent``) is
 scripted — no real model is ever invoked, mirroring
-``tests/test_decomposition_council.py``'s own seam-patching convention.
+``tests/test_decomposition_ensemble.py``'s own seam-patching convention.
 
 Four cases (per ``.superpowers/sdd/task-8-brief.md``):
 
-(a) An exhausted stuck issue + council APPROVE -> an epic + children are
+(a) An exhausted stuck issue + ensemble APPROVE -> an epic + children are
     created, the parent epic is registered ``auto_decomposed``, children are
     scoped narrower than the parent, and NO ``human-required`` is added.
     Then the children close/merge and ``epic_sweeper`` auto-closes the
     parent for free (rollup).
-(b) An undecomposable stuck issue + council DECLINE at high confidence ->
+(b) An undecomposable stuck issue + ensemble DECLINE at high confidence ->
     the issue DOES reach ``human-required`` (the genuine dead end still
     escalates to a human).
 (c) Nested: a child from (a) itself later stalls and decomposes a SECOND
@@ -36,7 +36,7 @@ Four cases (per ``.superpowers/sdd/task-8-brief.md``):
 (e) #11480: an exhausted stuck issue whose fix is already in flight on the
     auto-agent's own branch is NOT re-sliced — no epic is registered with
     ``EpicManager``, no children are filed, the in-flight PR is not closed as
-    superseded, and the issue is not paged out to a human either. The council
+    superseded, and the issue is not paged out to a human either. The ensemble
     is scripted to APPROVE a split here too, so the assertion is non-vacuous.
 
 The former (d) — the Task-5 intake-vector skip guard — is gone with the
@@ -64,7 +64,7 @@ pytestmark = pytest.mark.scenario
 
 
 def _direction_reply(**fields: object) -> str:
-    """A council direction-pass reply proposing 2 narrower, independent children."""
+    """A ensemble direction-pass reply proposing 2 narrower, independent children."""
     fields.setdefault("epic_title", "Epic: split the stalled issue")
     fields.setdefault(
         "epic_body",
@@ -97,15 +97,15 @@ def _validation_reply(**fields: object) -> str:
     return json.dumps(fields)
 
 
-def _script_council(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None:
-    """Monkeypatch the council's LLM seam to return *replies* in call order.
+def _script_ensemble(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None:
+    """Monkeypatch the ensemble's LLM seam to return *replies* in call order.
 
-    Mirrors ``tests/test_decomposition_council.py``'s ``_council`` helper:
-    ``DecompositionCouncil._execute_council`` does a deferred
+    Mirrors ``tests/test_decomposition_ensemble.py``'s ``_ensemble`` helper:
+    ``DecompositionEnsemble._execute_ensemble`` does a deferred
     ``from runner_utils import run_lightweight_agent`` every call, so
     patching the module attribute intercepts every direction/validation
     pass. No real model is ever invoked. Supply exactly as many replies as
-    the test expects seam calls (2 per council decision: direction +
+    the test expects seam calls (2 per ensemble decision: direction +
     validation) — once exhausted, the last reply repeats rather than
     raising, so an unexpected extra call fails on an assertion instead of
     an opaque IndexError.
@@ -192,8 +192,8 @@ def _wire_decompose(world: MockWorld, epic_manager: object) -> None:
 
     ``auto_agent_state`` is the world's real ``StateTracker`` (so attempts/
     escalation-context/epic-state reads are all backed by real persistence).
-    ``auto_agent_decompose_runner`` is a placeholder — the council's LLM
-    seam is scripted via :func:`_script_council`, so the runner object
+    ``auto_agent_decompose_runner`` is a placeholder — the ensemble's LLM
+    seam is scripted via :func:`_script_ensemble`, so the runner object
     itself is never actually invoked (see ``_build_auto_agent_preflight``'s
     updated docstring in ``tests/scenarios/catalog/loop_registrations.py``).
     """
@@ -232,7 +232,7 @@ def _exhaust_attempts(world: MockWorld, issue_number: int) -> None:
 
 
 class TestExhaustedIssueDecomposesThenParentConverges:
-    async def test_council_approve_creates_epic_no_human_required_then_sweeps_closed(
+    async def test_ensemble_approve_creates_epic_no_human_required_then_sweeps_closed(
         self, tmp_path, monkeypatch
     ) -> None:
         world = MockWorld(tmp_path)
@@ -252,7 +252,7 @@ class TestExhaustedIssueDecomposesThenParentConverges:
 
         epic_manager = _make_epic_manager(world)
         _wire_decompose(world, epic_manager)
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [
                 _direction_reply(),
@@ -333,7 +333,7 @@ class TestUndecomposableIssueStillEscalatesToHuman:
 
         epic_manager = _make_epic_manager(world)
         _wire_decompose(world, epic_manager)
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [
                 _direction_reply(),
@@ -396,7 +396,7 @@ class TestNestedDecompositionCascadesToRoot:
         # 4 scripted replies: [direction1, validation1(approve)] for the
         # root's split, [direction2, validation2(approve)] for the second
         # hop (the stalled child's own split).
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [
                 _direction_reply(),
@@ -506,7 +506,7 @@ class TestNestedDecompositionCascadesToRoot:
         epic_manager = _make_epic_manager(world)
         _wire_decompose(world, epic_manager)
         _wire_epic_sweeper(world)
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [
                 _direction_reply(),
@@ -593,7 +593,7 @@ class TestLandedFixIsNeverReSliced:
         # Scripted to APPROVE: if the #11480 gate is removed, this exact test
         # starts creating an epic + children, proving the assertions below
         # are non-vacuous.
-        _script_council(
+        _script_ensemble(
             monkeypatch,
             [
                 _direction_reply(),

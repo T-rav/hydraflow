@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pytest
 
 from pending_concerns import Concern
-from plan_council import CouncilTally, PlanCouncil
+from plan_ensemble import EnsembleTally, PlanEnsemble
 from subprocess_util import AuthenticationError, CreditExhaustedError
 
 
@@ -38,14 +38,14 @@ def _make_carryover_concern(cid: str, text: str) -> Concern:
         severity="HIGH",
         concern=text,
         raised_at=datetime.now(UTC),
-        must_address_by="plan_council",
+        must_address_by="plan_ensemble",
     )
 
 
 @pytest.mark.asyncio
 async def test_critical_from_any_voter_triggers_retry():
     """One voter emits CRITICAL → tally.should_retry is True, CRITICAL forwarded."""
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": _ScriptedAgent(
                 _payload(
@@ -62,9 +62,9 @@ async def test_critical_from_any_voter_triggers_retry():
         }
     )
 
-    tally = await council.deliberate(plan_text="any plan", pending_concerns=[])
+    tally = await ensemble.deliberate(plan_text="any plan", pending_concerns=[])
 
-    assert isinstance(tally, CouncilTally)
+    assert isinstance(tally, EnsembleTally)
     assert tally.should_retry is True
     assert any(c.severity == "CRITICAL" for c in tally.findings)
     assert any(
@@ -77,7 +77,7 @@ async def test_critical_from_any_voter_triggers_retry():
 @pytest.mark.asyncio
 async def test_overlapping_high_triggers_retry():
     """Two voters land on string-similar HIGH findings → retry."""
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": _ScriptedAgent(
                 _payload(
@@ -103,7 +103,7 @@ async def test_overlapping_high_triggers_retry():
         }
     )
 
-    tally = await council.deliberate(plan_text="any plan", pending_concerns=[])
+    tally = await ensemble.deliberate(plan_text="any plan", pending_concerns=[])
 
     assert tally.should_retry is True
 
@@ -111,7 +111,7 @@ async def test_overlapping_high_triggers_retry():
 @pytest.mark.asyncio
 async def test_lone_high_forwards_as_medium_no_retry():
     """A single voter's lone HIGH is downgraded to MEDIUM, no retry triggered."""
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": _ScriptedAgent(
                 _payload([{"severity": "HIGH", "concern": "task 2 is hand-wavy"}])
@@ -121,7 +121,7 @@ async def test_lone_high_forwards_as_medium_no_retry():
         }
     )
 
-    tally = await council.deliberate(plan_text="any plan", pending_concerns=[])
+    tally = await ensemble.deliberate(plan_text="any plan", pending_concerns=[])
 
     assert tally.should_retry is False
     matching = [c for c in tally.findings if "hand-wavy" in c.concern]
@@ -132,7 +132,7 @@ async def test_lone_high_forwards_as_medium_no_retry():
 @pytest.mark.asyncio
 async def test_no_findings_converges():
     """All three voters empty → no retry, no findings."""
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": _ScriptedAgent(_empty_payload()),
             "tester": _ScriptedAgent(_empty_payload()),
@@ -140,7 +140,7 @@ async def test_no_findings_converges():
         }
     )
 
-    tally = await council.deliberate(plan_text="solid plan", pending_concerns=[])
+    tally = await ensemble.deliberate(plan_text="solid plan", pending_concerns=[])
 
     assert tally.should_retry is False
     assert tally.findings == []
@@ -153,7 +153,7 @@ async def test_pending_concerns_propagate_to_voter_prompts():
     tester_agent = _ScriptedAgent(_empty_payload())
     risk_agent = _ScriptedAgent(_empty_payload())
 
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": builder_agent,
             "tester": tester_agent,
@@ -166,7 +166,7 @@ async def test_pending_concerns_propagate_to_voter_prompts():
         _make_carryover_concern("PLAN-ASSUMP-002", "runner must be async"),
     ]
 
-    await council.deliberate(plan_text="plan body", pending_concerns=pending)
+    await ensemble.deliberate(plan_text="plan body", pending_concerns=pending)
 
     for agent in (builder_agent, tester_agent, risk_agent):
         msg = agent.last_user_message
@@ -191,7 +191,7 @@ class _RaisingAgent:
 async def test_deliberate_reraises_voter_credit_exhaustion():
     """A voter's CreditExhaustedError must propagate out of deliberate, not be
     swallowed as a 'crashed voter contributing zero findings'."""
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": _ScriptedAgent(_empty_payload()),
             "tester": _RaisingAgent(
@@ -202,13 +202,13 @@ async def test_deliberate_reraises_voter_credit_exhaustion():
     )
 
     with pytest.raises(CreditExhaustedError, match="usage limit reached"):
-        await council.deliberate(plan_text="any plan", pending_concerns=[])
+        await ensemble.deliberate(plan_text="any plan", pending_concerns=[])
 
 
 @pytest.mark.asyncio
 async def test_deliberate_reraises_voter_authentication_error():
     """A voter's AuthenticationError must propagate out of deliberate too."""
-    council = PlanCouncil(
+    ensemble = PlanEnsemble(
         agents={
             "builder": _RaisingAgent(AuthenticationError("token expired")),
             "tester": _ScriptedAgent(_empty_payload()),
@@ -217,14 +217,14 @@ async def test_deliberate_reraises_voter_authentication_error():
     )
 
     with pytest.raises(AuthenticationError, match="token expired"):
-        await council.deliberate(plan_text="any plan", pending_concerns=[])
+        await ensemble.deliberate(plan_text="any plan", pending_concerns=[])
 
 
 @pytest.mark.asyncio
 async def test_deliberate_still_soft_fails_generic_voter_crash():
     """A plain RuntimeError from a voter is still swallowed (zero findings),
-    so the council does not over-correct by propagating every error."""
-    council = PlanCouncil(
+    so the ensemble does not over-correct by propagating every error."""
+    ensemble = PlanEnsemble(
         agents={
             "builder": _ScriptedAgent(_empty_payload()),
             "tester": _RaisingAgent(RuntimeError("flaky voter")),
@@ -232,7 +232,7 @@ async def test_deliberate_still_soft_fails_generic_voter_crash():
         }
     )
 
-    tally = await council.deliberate(plan_text="any plan", pending_concerns=[])
+    tally = await ensemble.deliberate(plan_text="any plan", pending_concerns=[])
 
     assert tally.should_retry is False
     assert tally.findings == []

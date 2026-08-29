@@ -25,7 +25,7 @@ _EXPECTED_NODES = {
     "prepass": "gate",
     "surface": "step",
     "draft": "step",
-    "council": "loop",
+    "ensemble": "loop",
     "route": "gate",
     "write-records": "step",
     "gate": "gate",

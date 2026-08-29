@@ -14,14 +14,14 @@ The ladder, reusing existing machinery rather than inventing an escalation:
      terminal's third verdict, ``already-satisfied`` (#11480: a fix already
      landed or is in flight), ends the ladder right here — nothing to solve,
      no relabel, no human; the issue closes with its fix.
-  2. **Diagnose.** If the decompose council declines (or decompose isn't
+  2. **Diagnose.** If the decompose ensemble declines (or decompose isn't
      wired / depth-capped), fall back to the auto-agent diagnose label so the
      diagnose path can resolve-or-dismiss with evidence — still a machine move.
   3. **Exhausted.** Only if both are unavailable does the coordinator apply
      ``human-required`` (last resort, logged as a break).
 
 This adapter owns only steps 1–2; the coordinator owns step 3. Kept out of
-``route_back`` so the coordinator stays free of the epic/decomposer/council
+``route_back`` so the coordinator stays free of the epic/decomposer/ensemble
 imports and remains a small, pure state-machine primitive.
 """
 
@@ -41,7 +41,7 @@ from preflight.decompose_terminal import (
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
-    from decomposition_council import DecompositionCouncil
+    from decomposition_ensemble import DecompositionEnsemble
     from issue_decomposer import IssueDecomposer
     from ports import PRPort
     from state import StateTracker
@@ -61,14 +61,14 @@ class PlanRetrySelfSolver:
         state: StateTracker,
         prs: PRPort,
         decomposer: IssueDecomposer | None,
-        council: DecompositionCouncil | None,
+        ensemble: DecompositionEnsemble | None,
         diagnose_label: str = "",
     ) -> None:
         self._config = config
         self._state = state
         self._prs = prs
         self._decomposer = decomposer
-        self._council = council
+        self._ensemble = ensemble
         self._diagnose_label = diagnose_label
 
     async def solve(
@@ -94,7 +94,7 @@ class PlanRetrySelfSolver:
 
         # Step 1: decompose (ADR-0105). decompose_or_escalate returns
         # "decomposed" on success, "already-satisfied" when a fix for the issue
-        # has already landed (#11480), or "human-required" when the council
+        # has already landed (#11480), or "human-required" when the ensemble
         # declines, decompose isn't wired, or the depth cap is spent.
         try:
             outcome = await decompose_or_escalate(
@@ -102,7 +102,7 @@ class PlanRetrySelfSolver:
                 ctx=ctx,
                 config=self._config,
                 decomposer=self._decomposer,
-                council=self._council,
+                ensemble=self._ensemble,
                 state=self._state,
                 # decompose_or_escalate's private _PRPort duck-types close_pr as
                 # `-> None`; PRPort returns bool (benign here — the return is

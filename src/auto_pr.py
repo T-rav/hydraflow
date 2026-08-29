@@ -955,7 +955,7 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
     - Accepts an explicit `gh_token` that's threaded through every call.
     - Accepts an independent `commit_message` for callers where the commit
       message differs from the PR title (e.g. the ADR reviewer embeds the
-      council summary in the commit).
+      ensemble summary in the commit).
     - When `raise_on_failure=False`, logs + returns an
       ``AutoPrResult(status="failed", error=...)`` instead of raising —
       matching the ADR reviewer's "log and continue" contract.

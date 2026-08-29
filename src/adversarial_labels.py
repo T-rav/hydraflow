@@ -29,20 +29,29 @@ from __future__ import annotations
 
 # Intra-stage adversarial review markers (issue-side, not PR-side).
 ADVERSARIAL_ASSUMPTION_REVIEW_LABEL = "hydraflow-assumption-review"
-ADVERSARIAL_COUNCIL_REVIEW_LABEL = "hydraflow-council-review"
+ADVERSARIAL_ENSEMBLE_REVIEW_LABEL = "hydraflow-ensemble-review"
 ADVERSARIAL_SPEC_GATE_LABEL = "hydraflow-spec-gate"
+
+# Pre-rename spelling of ``ADVERSARIAL_ENSEMBLE_REVIEW_LABEL``. Labels live on
+# GitHub issues, not in this repo, so an issue labelled before the ADR-0053
+# single-meaning rename still carries the old string. It stays recognised (see
+# contract point 3 above: ``review_phase`` must keep skipping it) but is never
+# applied — nothing writes it.
+LEGACY_ADVERSARIAL_COUNCIL_REVIEW_LABEL = "hydraflow-council-review"
 
 LABELS_ADVERSARIAL_TRANSIENT: frozenset[str] = frozenset(
     {
         ADVERSARIAL_ASSUMPTION_REVIEW_LABEL,
-        ADVERSARIAL_COUNCIL_REVIEW_LABEL,
+        ADVERSARIAL_ENSEMBLE_REVIEW_LABEL,
         ADVERSARIAL_SPEC_GATE_LABEL,
+        LEGACY_ADVERSARIAL_COUNCIL_REVIEW_LABEL,
     }
 )
 
 __all__ = [
     "ADVERSARIAL_ASSUMPTION_REVIEW_LABEL",
-    "ADVERSARIAL_COUNCIL_REVIEW_LABEL",
+    "ADVERSARIAL_ENSEMBLE_REVIEW_LABEL",
     "ADVERSARIAL_SPEC_GATE_LABEL",
     "LABELS_ADVERSARIAL_TRANSIENT",
+    "LEGACY_ADVERSARIAL_COUNCIL_REVIEW_LABEL",
 ]

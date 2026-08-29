@@ -82,7 +82,7 @@ async def apply_decision(
     state: Any,
     max_attempts: int,
     decomposer: Any | None = None,
-    council: Any | None = None,
+    ensemble: Any | None = None,
     config: Any | None = None,
     ctx: Any | None = None,
     hitl_widened: bool = False,
@@ -93,7 +93,7 @@ async def apply_decision(
 
     ADR-0105: when this attempt's label set is about to add `human-required`
     (the needs_human/fatal/pr_failed/cost_exceeded/timeout rows, or the
-    exhaustion top-up below), *decomposer*/*council*/*config*/*ctx* — when all
+    exhaustion top-up below), *decomposer*/*ensemble*/*config*/*ctx* — when all
     four are wired — first try `decompose_terminal.decompose_or_escalate`.
     A successful decompose supersedes the whole label/comment step (the
     issue is already closed + `mark_issue("decomposed")` by
@@ -160,7 +160,7 @@ async def apply_decision(
     if (
         "human-required" in add
         and decomposer is not None
-        and council is not None
+        and ensemble is not None
         and config is not None
         and ctx is not None
     ):
@@ -181,7 +181,7 @@ async def apply_decision(
             ctx=ctx,
             config=config,
             decomposer=decomposer,
-            council=council,
+            ensemble=ensemble,
             state=state,
             prs=cast(_DecomposePRPort, pr_port),
         )
