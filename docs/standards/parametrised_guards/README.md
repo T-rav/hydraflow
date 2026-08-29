@@ -277,3 +277,15 @@ rule.
   a gate and not a twelfth reviewer pass: across passes 6–11 the rate of
   finding this shape and the rate of fixing it were equal, which is a fixed
   point rather than a convergence.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+- `tests/architecture/test_guard_enumeration_gate.py`
+<!-- /standard:enforced-by -->

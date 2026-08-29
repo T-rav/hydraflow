@@ -164,3 +164,16 @@ This kernel doc lives in one place by name and is referenced from:
 A future audit (extension of `principles_audit_loop`) should check that
 every HydraFlow-format repo has all four sub-standards present and the
 kernel references resolve.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+_None yet — this standard's prose is not yet bound to a machine-readable
+artifact. Filed as #11751._
+<!-- /standard:enforced-by -->

@@ -107,3 +107,15 @@ Two consistent patterns surface in any factory-style codebase:
 
 The directive turns those two patterns into explicit policy, so agents
 don't have to re-derive the right behavior every session.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+- `tests/architecture/test_factory_autonomy_policy_drift.py`
+<!-- /standard:enforced-by -->

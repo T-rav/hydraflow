@@ -1,0 +1,15 @@
+# Machine-readable identity for this standard (#11751, epic #11752).
+#
+# `id` MUST equal the directory name — charter.yaml's `articles.standards`
+# entries resolve against it, and an id that names no directory is a
+# declaration with no subject.
+#
+# `enforced_by` lists the pytest paths that hold this standard's prose to its
+# artifact. Each path must exist AND be collected by pytest; a citation to a
+# gate that never runs is a citation to nothing. The README's `Enforced by`
+# block is the same set written a second time, and the two must agree.
+#
+# Both properties: tests/architecture/test_standards_registry.py
+id: adr_enforcement
+enforced_by:
+  - tests/architecture/test_adr_enforcement_ratchet.py

@@ -1,0 +1,4 @@
+# See docs/standards/adr_enforcement/standard.yaml for what these keys mean.
+# Properties: tests/architecture/test_standards_registry.py
+id: factory_operation
+enforced_by: []

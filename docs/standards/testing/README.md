@@ -162,3 +162,16 @@ or asserts MockWorld side effects through raw mock call counts where a stateful
 fake adapter exists. New exceptions must be tracked through the active issue
 workflow and removed from the active runnable suite until they can assert real
 behavior.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+_None yet — this standard's prose is not yet bound to a machine-readable
+artifact. Filed as #11751._
+<!-- /standard:enforced-by -->

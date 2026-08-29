@@ -295,3 +295,16 @@ of the three answering wrong is exit 3, not a warning.
   false positive. Static imports of those modules are followed as normal. **Not
   covered by either half**: it is an import-graph question, not a runtime one,
   and it stays a declared boundary.
+
+## Enforced by
+
+The gates that hold this document to its artifact. This list is the same
+set as `enforced_by` in [`standard.yaml`](standard.yaml); editing either
+side alone reddens `tests/architecture/test_standards_registry.py`, which
+also checks that every cited path is still **collected by pytest** — a
+gate that exists but never runs is a citation to nothing.
+
+<!-- standard:enforced-by -->
+- `tests/architecture/test_vitals_conformance_seam.py`
+- `tests/architecture/test_conformance_egress_lane.py`
+<!-- /standard:enforced-by -->
