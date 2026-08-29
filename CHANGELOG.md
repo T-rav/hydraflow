@@ -7,6 +7,15 @@ what a tag promises, and the cut recipe live in
 
 ## Unreleased
 
+- Ubiquitous language: the multi-model ADR review ensemble is renamed off "Council" so the
+  word names only the governance layer (ADR-0053 single-valued terms). `ADRCouncilReviewer` →
+  `ADRReviewPanel`, `ADRCouncilResult`/`CouncilVote`/`CouncilVerdict` → `ADRReviewPanelResult`/
+  `PanelVote`/`PanelVerdict`, and the term file `docs/wiki/terms/adr-council-reviewer.md` →
+  `adr-review-panel.md` (same ULID, so inbound term edges hold). Two pre-rename keys are still
+  **read**: the `## Council Amendment Notes` heading already written into ADRs on disk, and a
+  `COUNCIL_RESULT:` transcript header from a stale prompt — dropping either fails silently
+  (duplicated amendment block; verdict discarded as NO_CONSENSUS). `PlanCouncil`,
+  `DecompositionCouncil` and the rest of the adversarial pipeline are untouched (#11764).
 - Governance: the `agents/console/` layer is renamed **the Council, with chambers** per the
   2026-08-25 PAAA house standard (lineage: "console" → "Board" → Council, GNAA record
   `council/decisions/general/0009`). `agents/council/`, `make council-conformance`,
