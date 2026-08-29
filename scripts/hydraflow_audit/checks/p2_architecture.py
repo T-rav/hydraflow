@@ -8,6 +8,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The package __init__ puts this checkout's ``src`` on sys.path (same
+# bootstrap P10 uses for ``false_close``), so the house's ONE spelling of
+# "this token is a multi-word type name" is imported rather than respelled.
+from ubiquitous_language import class_like_names
+
 from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import finding
@@ -359,15 +364,17 @@ def _has_real_method(cls: ast.ClassDef) -> bool:
     return False
 
 
-_CAMEL_CASE = re.compile(r"\b([A-Z][a-z]+[A-Z][A-Za-z]+)\b")
-
-
 def _capitalised_terms(text: str) -> list[str]:
-    seen: set[str] = set()
-    terms: list[str] = []
-    for match in _CAMEL_CASE.finditer(text):
-        term = match.group(1)
-        if term not in seen:
-            seen.add(term)
-            terms.append(term)
-    return terms
+    """Candidate ubiquitous-language terms in *text*.
+
+    This used to be ``\\b([A-Z][a-z]+[A-Z][A-Za-z]+)\\b`` — a capital, a
+    lowercase run, then another capital. That shape cannot express a LEADING
+    ACRONYM, so of this repo's public ``src/`` classes it could not see 71
+    multi-word names: ``ADRReviewPanel``, ``PRPort``, ``CIMonitorLoop``,
+    ``LLMClient``, ``HITLRunner``, ``BGWorkerManager``, ``JSONFormatter``.
+    P2.9 reported coverage over a vocabulary that structurally excluded
+    HydraFlow's own naming convention. Shared with the term-prose citation
+    regression via ``ubiquitous_language.is_class_like_name`` so there is one
+    spelling of the rule rather than three.
+    """
+    return class_like_names(text)

@@ -40,14 +40,40 @@ from disturbance.baseline import load_baseline
 from disturbance.models import Finding
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 _ARTIFACT_REL = "docs/arch/generated/traceability_matrix.md"
 _BASELINE_REL = "disturbance/baselines/traceability.yaml"
 _MARKER_RE = re.compile(r"<!--\s*untraced-pct:\s*(?P<pct>\d+)\s*-->")
+#: The default artifact's untraced-pct signature. The detector itself derives
+#: every signature from ``self._artifact_rel`` (see ``_untraced_signature``)
+#: so an overridden artifact path cannot leave the ceilings it declares
+#: pointing at signatures it never emits; this module-level copy exists only
+#: for the baseline-sync helper, which is bound to the default artifact.
 _SIGNATURE = f"{_ARTIFACT_REL}::untraced-pct"
-_MISMATCH_SIGNATURE = f"{_ARTIFACT_REL}::marker-mismatch"
-_REGRESSION_SIGNATURE = f"{_ARTIFACT_REL}::generation-regression"
+
+#: The largest untraced-pct count this detector will ever materialise, and
+#: therefore the ceiling it declares to the gate (``reachable_ceilings``).
+#:
+#: The marker's LEGITIMATE domain is 0..100, and the baseline landed at 100
+#: (#9733: zero Req-ID adoption, so every commit in the window is untraced).
+#: Capping the emitted count at exactly 100 — which ``min(pct, 100)`` did —
+#: made the block-new arm arithmetically dead: ``cur > base`` could not hold
+#: for ANY marker value, so doubling the committed debt to 150 left the gate
+#: green. Worse, the clamp ran BEFORE the marker-mismatch cross-check, so a
+#: forged 150 was laundered into a 100 that matched the recompute exactly and
+#: the tamper detector saw nothing either.
+#:
+#: The bound that remains is a MATERIALISATION bound, not a measurement one:
+#: ``detect`` emits one Finding per percentage point, so an unbounded marker
+#: is an out-of-memory vector. Ten times the legitimate domain is far enough
+#: above any honest value that nothing real is truncated, and far enough
+#: above the baseline that the block-new arm has a non-empty failing region.
+#: It is ONE constant so the clamp and the declared ceiling cannot drift
+#: apart — a ceiling that disagreed with the clamp would be the same defect
+#: one level up.
+_MAX_EMITTED_PCT = 1000
 
 #: Allowed |committed - recomputed| gap before the mismatch finding fires.
 #: The pct is ceiled, and the commit window legitimately shifts by a few
@@ -71,21 +97,51 @@ class TraceabilityDetector:
         match = _MARKER_RE.search(text)
         if match is None:
             return []
-        pct = min(int(match.group("pct")), 100)
+        committed_pct = int(match.group("pct"))
+        # Bound only what is MATERIALISED; the verifier below still sees the
+        # value the artifact actually claims, so a forged marker cannot be
+        # normalised into agreement with the recompute.
+        pct = min(committed_pct, _MAX_EMITTED_PCT)
         finding = Finding(
             dimension=self.name,
             path=self._artifact_rel,
-            signature=f"{self._artifact_rel}::untraced-pct",
+            signature=self._untraced_signature,
             message=(
-                f"{pct}% of recent PR-merge commits carry no Req-ID line "
-                "(requirements-traceability adoption ratchet)"
+                f"{committed_pct}% of recent PR-merge commits carry no Req-ID "
+                "line (requirements-traceability adoption ratchet)"
             ),
         )
         findings = [finding] * pct
-        verification = self._verify_marker(repo_root, committed_pct=pct)
+        verification = self._verify_marker(repo_root, committed_pct=committed_pct)
         if verification is not None:
             findings.append(verification)
         return findings
+
+    @property
+    def _untraced_signature(self) -> str:
+        return f"{self._artifact_rel}::untraced-pct"
+
+    @property
+    def _mismatch_signature(self) -> str:
+        return f"{self._artifact_rel}::marker-mismatch"
+
+    @property
+    def _regression_signature(self) -> str:
+        return f"{self._artifact_rel}::generation-regression"
+
+    def reachable_ceilings(self) -> Mapping[str, int]:
+        """Every signature this detector emits is capped, and by how much.
+
+        ``untraced-pct`` is capped by the materialisation bound; the two
+        verification signatures are single findings, so their ceiling is 1.
+        Declaring them all is what lets ``run_gate`` refuse a baseline that
+        has climbed to where its own block-new arm can no longer fire.
+        """
+        return {
+            self._untraced_signature: _MAX_EMITTED_PCT,
+            self._mismatch_signature: 1,
+            self._regression_signature: 1,
+        }
 
     def _verify_marker(self, repo_root: Path, *, committed_pct: int) -> Finding | None:
         """Recompute the fraction and flag a stale/tampered/regressed marker."""
@@ -97,7 +153,7 @@ class TraceabilityDetector:
                 return Finding(
                     dimension=self.name,
                     path=self._artifact_rel,
-                    signature=_REGRESSION_SIGNATURE,
+                    signature=self._regression_signature,
                     message=(
                         "traceability recompute parsed ZERO PR-merge commits "
                         "from git history while the ratchet baseline is "
@@ -112,7 +168,7 @@ class TraceabilityDetector:
             return Finding(
                 dimension=self.name,
                 path=self._artifact_rel,
-                signature=_MISMATCH_SIGNATURE,
+                signature=self._mismatch_signature,
                 message=(
                     f"committed untraced-pct marker ({committed_pct}%) "
                     f"deviates from the fraction recomputed from git history "

@@ -131,9 +131,19 @@ class TestTraceabilityDetector:
         _write_artifact(tmp_path, "# Matrix without a marker\n")
         assert TraceabilityDetector().detect(tmp_path) == []
 
-    def test_pct_clamped_to_100(self, tmp_path: Path) -> None:
+    def test_an_out_of_domain_marker_is_reported_not_normalised(
+        self, tmp_path: Path
+    ) -> None:
+        """This test used to pin ``== 100`` — the clamp that killed the arm.
+
+        Clamping to 100 against a baseline of 100 made ``cur > base``
+        unsatisfiable, so a marker of 250 (or 150, or any value at all) left
+        the gate green. What survives is the materialisation bound, which is
+        an order of magnitude above the metric's legitimate domain; see
+        ``TestReachableRange``.
+        """
         _write_artifact(tmp_path, "<!-- untraced-pct: 250 -->\n")
-        assert len(TraceabilityDetector().detect(tmp_path)) == 100
+        assert len(TraceabilityDetector().detect(tmp_path)) == 250
 
     def test_message_names_the_fraction(self, tmp_path: Path) -> None:
         _write_artifact(tmp_path, "<!-- untraced-pct: 42 -->\n")
@@ -356,3 +366,116 @@ class TestRegistryEntry:
 
     def test_other_dimensions_default_to_burn_down(self) -> None:
         assert all(s.burn_down for s in DIMENSIONS if s.name != "traceability")
+
+
+class TestReachableRange:
+    """The block-new arm shipped with an EMPTY failing region.
+
+    ``min(pct, 100)`` capped the emitted count at exactly the baseline
+    (#9733 landed grandfathered at 100), so ``cur > base`` could not hold for
+    any marker value — doubling the committed debt to 150 left the gate
+    green. The clamp also ran BEFORE the marker cross-check, so the forged
+    150 was normalised into a 100 that agreed with the recompute and the
+    tamper arm saw nothing either. One clamp, two blinded arms.
+    """
+
+    def test_a_marker_above_the_legitimate_domain_exceeds_the_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        """The value that used to pass. 150 > baseline 100 must now be `new`."""
+        _init_git_repo(tmp_path, untraced=4)  # recomputed 100
+        _write_artifact(tmp_path, "<!-- untraced-pct: 150 -->\n")
+
+        findings = TraceabilityDetector().detect(tmp_path)
+
+        assert len([f for f in findings if f.signature == _SIGNATURE]) == 150
+
+    def test_a_forged_marker_no_longer_slips_past_the_mismatch_check(
+        self, tmp_path: Path
+    ) -> None:
+        """The clamp laundered 150 into a 100 that matched the recompute."""
+        _init_git_repo(tmp_path, untraced=4)  # recomputed 100
+        _write_artifact(tmp_path, "<!-- untraced-pct: 150 -->\n")
+        _write_baseline(tmp_path, 100)
+
+        findings = TraceabilityDetector().detect(tmp_path)
+
+        mismatch = [f for f in findings if f.signature == _MISMATCH_SIGNATURE]
+        assert len(mismatch) == 1
+        assert "150%" in mismatch[0].message
+
+    def test_an_honest_marker_still_says_nothing(self, tmp_path: Path) -> None:
+        """The other direction: 100 against a recomputed 100 stays quiet."""
+        _init_git_repo(tmp_path, untraced=4)
+        _write_artifact(tmp_path, "<!-- untraced-pct: 100 -->\n")
+
+        findings = TraceabilityDetector().detect(tmp_path)
+
+        assert {f.signature for f in findings} == {_SIGNATURE}
+        assert len(findings) == 100
+
+    def test_an_absurd_marker_is_bounded_without_hiding_its_value(
+        self, tmp_path: Path
+    ) -> None:
+        """One Finding per point makes an unbounded marker an OOM vector.
+
+        The remaining bound is a materialisation bound: it caps the LIST, not
+        what the detector reports, so the message and the mismatch arm still
+        carry the number the artifact actually claims.
+        """
+        _init_git_repo(tmp_path, untraced=4)
+        _write_artifact(tmp_path, "<!-- untraced-pct: 1000000000 -->\n")
+        ceiling = TraceabilityDetector().reachable_ceilings()[_SIGNATURE]
+
+        findings = TraceabilityDetector().detect(tmp_path)
+
+        ratchet = [f for f in findings if f.signature == _SIGNATURE]
+        assert len(ratchet) == ceiling
+        assert "1000000000%" in ratchet[0].message
+
+    def test_the_live_baseline_sits_strictly_below_the_declared_ceiling(self) -> None:
+        """The property that makes the arm live, read off the shipped files.
+
+        This is the assertion whose failure IS the #9733 defect: baseline 100
+        against a ceiling of 100.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        baseline = load_baseline(repo_root / _BASELINE_REL)
+        ceilings = TraceabilityDetector().reachable_ceilings()
+
+        assert baseline, "traceability baseline is empty; this asserts nothing"
+        for signature, count in baseline.items():
+            assert count < ceilings[signature], (
+                f"{signature} baseline {count} is at or above its detector's "
+                f"reachable ceiling {ceilings[signature]} — the block-new arm "
+                "cannot fire"
+            )
+
+    def test_every_declared_ceiling_names_a_signature_the_detector_emits(
+        self, tmp_path: Path
+    ) -> None:
+        """A ceiling for a signature nothing produces would guard nothing.
+
+        Driven through the detector rather than read off the source, so the
+        declaration cannot drift away from what ``detect`` actually emits.
+        """
+        emitted: set[str] = set()
+
+        normal = tmp_path / "normal"
+        _init_git_repo(normal, untraced=4)
+        _write_artifact(normal, "<!-- untraced-pct: 100 -->\n")
+        emitted |= {f.signature for f in TraceabilityDetector().detect(normal)}
+
+        forged = tmp_path / "forged"
+        _init_git_repo(forged, untraced=4)
+        _write_artifact(forged, "<!-- untraced-pct: 5 -->\n")
+        _write_baseline(forged, 100)
+        emitted |= {f.signature for f in TraceabilityDetector().detect(forged)}
+
+        regressed = tmp_path / "regressed"
+        _init_git_repo(regressed, plain=1)
+        _write_artifact(regressed, "<!-- untraced-pct: 0 -->\n")
+        _write_baseline(regressed, 12)
+        emitted |= {f.signature for f in TraceabilityDetector().detect(regressed)}
+
+        assert emitted == set(TraceabilityDetector().reachable_ceilings())
