@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
+from onboarding.kernel_templates import render
 from onboarding.models import BootstrapDraft, BootstrapSpec
 
 METHODOLOGY_PROMPT = (
@@ -102,45 +103,16 @@ class DesignAIService:
 
     def draft_spec(self, draft: BootstrapDraft, note: str | None = None) -> str:
         spec = draft.spec
-        ui_choice = _ui_choice(spec.tech_stack)
-        backend = _backend_choice(spec.tech_stack)
-        note_line = f"\nRevision note: {note}" if note else ""
-        return (
-            "---\n"
-            "status: wizard-draft\n"
-            "generated_by: hydraflow-wizard\n"
-            "needs_refinement: true\n"
-            "methodology_refs:\n"
-            "  - docs/methodology/onboarding-hydraflow-format-repos.md\n"
-            "---\n\n"
-            f"# {spec.name} Bootstrap Spec\n\n"
-            f"## Name\n{spec.name}\n\n"
-            f"## Description\n{spec.description}\n\n"
-            "## Architecture Overview\n"
-            f"- Backend: {backend}\n"
-            f"- UI: {ui_choice}\n"
-            f"- Owner: {spec.owner}\n"
-            f"- Branches: {spec.main_branch} + {spec.staging_branch}\n\n"
-            "## 10-file Invariant Kernel\n"
-            "1. README.md\n"
-            "2. CLAUDE.md\n"
-            "3. pyproject.toml\n"
-            "4. .env.example\n"
-            "5. .github/workflows/ci.yml\n"
-            "6. .github/ISSUE_TEMPLATE/feature.yml\n"
-            "7. .github/pull_request_template.md\n"
-            "8. docs/adr/0001-record-architecture-baseline.md\n"
-            "9. docs/specs/bootstrap-spec.md\n"
-            "10. docs/plans/plan-01-bootstrap.md\n\n"
-            "## V1 IN\n"
-            f"- {backend} implementation skeleton\n"
-            f"- {spec.coverage_floor}% coverage gate\n"
-            f"- Safety guards: {', '.join(spec.safety_guards) or 'standard HydraFlow guards'}\n\n"
-            "## V1 OUT\n"
-            "- Production credentials\n"
-            "- Deep fleet-wide SHAPE refinement\n"
-            "- Post-bootstrap feature backlog\n"
-            f"{note_line}\n"
+        return render(
+            "wizard/design_spec_doc.md.tmpl",
+            name=spec.name,
+            description=spec.description,
+            owner=spec.owner,
+            main_branch=spec.main_branch,
+            staging_branch=spec.staging_branch,
+            backend=_backend_choice(spec.tech_stack),
+            ui_choice=_ui_choice(spec.tech_stack),
+            note_line=f"\nRevision note: {note}" if note else "",
         )
 
     def draft_plan(self, draft: BootstrapDraft, note: str | None = None) -> list[str]:
@@ -369,22 +341,11 @@ def _build_claude_prompt(draft: BootstrapDraft, message: str) -> str:
         f"{item.get('role', 'unknown')}: {item.get('content', '')}"
         for item in draft.chat_messages[-12:]
     )
-    return (
-        "You are HydraFlow's onboarding design assistant.\n"
-        "Return ONLY JSON with this schema:\n"
-        "{"
-        '"reply": "operator-facing response", '
-        '"field_updates": {"name": "...", "description": "...", '
-        '"owner": "...", "visibility": "private|public", '
-        '"tech_stack": ["python", "FastAPI"], '
-        '"safety_guards": ["branch-protection"], "coverage_floor": 85}, '
-        '"clarification": "optional question or null"'
-        "}\n"
-        "Only include field_updates when the operator supplied or revised the field. "
-        "Surface ambiguity as clarification instead of guessing.\n\n"
-        f"Current spec JSON:\n{draft.spec.model_dump_json()}\n\n"
-        f"Recent conversation:\n{conversation or '(none)'}\n\n"
-        f"Operator message:\n{message}"
+    return render(
+        "wizard/design_prompt.md.tmpl",
+        spec_json=draft.spec.model_dump_json(),
+        conversation=conversation or "(none)",
+        message=message,
     )
 
 

@@ -1,0 +1,44 @@
+---
+status: wizard-draft
+generated_by: hydraflow-wizard
+needs_refinement: true
+methodology_refs:
+  - docs/methodology/onboarding-hydraflow-format-repos.md
+---
+
+# {{name}} Bootstrap Spec
+
+## Name
+{{name}}
+
+## Description
+{{description}}
+
+## Architecture Overview
+- Backend: {{backend}}
+- UI: {{ui_choice}}
+- Owner: {{owner}}
+- Branches: {{main_branch}} + {{staging_branch}}
+
+## 10-file Invariant Kernel
+1. README.md
+2. CLAUDE.md
+3. pyproject.toml
+4. .env.example
+5. .github/workflows/ci.yml
+6. .github/ISSUE_TEMPLATE/feature.yml
+7. .github/pull_request_template.md
+8. docs/adr/0001-record-architecture-baseline.md
+9. docs/specs/bootstrap-spec.md
+10. docs/plans/plan-01-bootstrap.md
+
+## V1 IN
+- {{backend}} implementation skeleton
+- 71% coverage gate
+- Safety guards: standard HydraFlow guards
+
+## V1 OUT
+- Production credentials
+- Deep fleet-wide SHAPE refinement
+- Post-bootstrap feature backlog
+{{note_line}}

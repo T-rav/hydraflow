@@ -23,7 +23,19 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GUARDED = ("src/onboarding/kernel_writer.py", "src/onboarding/templating.py")
+# DERIVED, never spelled: every module in the onboarding package. A literal
+# tuple naming the two known writers is a predicate that silently narrows —
+# add a third materializer and the guard simply stops covering it while staying
+# green, which is the exact defect class this file exists to close
+# (docs/standards/parametrised_guards/README.md, #11723). Widening the subject
+# to the whole package costs nothing: no module here has any business holding a
+# document body, whether or not it stamps one today.
+GUARDED = tuple(
+    sorted(
+        p.relative_to(REPO_ROOT).as_posix()
+        for p in (REPO_ROOT / "src/onboarding").glob("*.py")
+    )
+)
 BODIES = REPO_ROOT / "src/hydraflow_resources/kernel_templates/bodies"
 
 # A fragment a builder may still legitimately hold (a Makefile prerequisite

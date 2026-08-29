@@ -27,6 +27,8 @@ import re
 from functools import cache
 from pathlib import Path
 
+from package_resources import resource_dir
+
 _PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
 
 
@@ -35,10 +37,14 @@ class KernelTemplateError(RuntimeError):
 
 
 def bodies_root() -> Path:
-    """Directory holding the stamped-document bodies."""
-    return Path(__file__).resolve().parent.parent / (
-        "hydraflow_resources/kernel_templates/bodies"
-    )
+    """Directory holding the stamped-document bodies.
+
+    Routed through :func:`package_resources.resource_dir` rather than walking
+    up from ``__file__``: that idiom means ``<repo>`` from ``<repo>/src/x.py``
+    but ``lib/python3.11/`` from ``site-packages/x.py``, so it silently
+    resolves outside the package in a wheel install (#11589).
+    """
+    return resource_dir("kernel_templates") / "bodies"
 
 
 @cache
