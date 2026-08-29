@@ -85,7 +85,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0115 | enforced | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld`, `pytest:tests/regressions/test_issue_11176.py::test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget` |
 | ADR-0116 | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
 | ADR-0117 | enforced | `pytest:tests/test_prompt_observatory.py` |
-| ADR-0118 | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
+| ADR-0118 | enforced | `pytest:tests/architecture/test_import_boundary_gate.py` |
 | ADR-0119 | enforced | `pytest:tests/test_credit_failover.py` |
 | ADR-0134 | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 | ADR-0135 | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
@@ -119,8 +119,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_gateway_env_key_coverage.py` | ADR-0142 |
+| `pytest:tests/architecture/test_import_boundary_gate.py` | ADR-0118 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
-| `pytest:tests/architecture/test_no_otel_imports.py` | ADR-0118 |
 | `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr` | ADR-0143 |
 | `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet` | ADR-0143 |
 | `pytest:tests/architecture/test_term_proposer_wiring.py` | ADR-0054 |

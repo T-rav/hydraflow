@@ -54,7 +54,8 @@ __all__ = [
     "call_witness",
     "declared_deny_lists",
     "floor_protects",
-    "import_witness",
+    "IMPORT_BOUNDARY_FLOOR",
+    "import_boundary_denials",
     "os_witness",
     "GuardedEnumeration",
     "SCAN_ROOT",
@@ -160,14 +161,6 @@ def call_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
         f"{_source_of(subject)}\n\ndef _witness(obj):\n    return obj.{member}()\n"
     )
     return member in (called_names(ast.parse(injected)) & deny_list)
-
-
-def import_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
-    """The import guard's half of :func:`call_witness`, same contract."""
-    from tests.architecture.test_director_no_authority import import_roots
-
-    injected = f"{_source_of(subject)}\n\nimport {member}\n"
-    return member in (import_roots(ast.parse(injected)) & deny_list)
 
 
 def os_witness(subject: str, member: str, deny_list: frozenset[str]) -> bool:
@@ -367,9 +360,6 @@ DENY_LIST_FLOORS: dict[str, frozenset[str]] = {
             "write_text",
         }
     ),
-    "test_director_no_authority._SPAWN_MACHINERY": frozenset(
-        {"multiprocessing", "subprocess"}
-    ),
     # #11724's two. `_OS_SPAWN_PREFIXES` carries prefixes rather than whole
     # attribute names: `exec` floors the entire `os.exec*` family, so dropping
     # it silently un-denies eight spellings at once (execl, execle, execlp,
@@ -391,6 +381,51 @@ def floor_protects(name: str, live: frozenset[str], member: str) -> bool:
     """
     floor = DENY_LIST_FLOORS[name]
     return not floor <= (live - {member})
+
+
+#: Shrink-only floor for the declared import boundaries, keyed
+#: ``<boundary>::<denied module>``.
+#:
+#: Same shape and same reason as :data:`DENY_LIST_FLOORS` above, one level out:
+#: an import deny-list cannot be derived, because most of what it denies
+#: appears nowhere in this repo — that is the point of denying it. So the floor
+#: is a second copy of the vocabulary, in a second file, and the enforced
+#: property is EQUALITY in both directions
+#: (``test_the_denial_floor_and_the_declarations_agree``). Containment alone
+#: would leave a denial added after the floor was written unprotected from
+#: arrival.
+#:
+#: One flat key space rather than two tables, because a boundary dropped whole
+#: and a single denial dropped from one boundary are the same loss: the rule
+#: silently stops being enforced and every guard over it stays green.
+#:
+#: ``concurrent.futures`` joined with #11753's fix and is floored from the
+#: start — the pin it replaces could not express it, so a drop back to the two
+#: stdlib roots would be that bug restored with the fix still in the file.
+IMPORT_BOUNDARY_FLOOR: frozenset[str] = frozenset(
+    {
+        "no-otel-under-src::opentelemetry",
+        "no-otel-under-src::telemetry.otel",
+        "no-otel-under-src::telemetry.slugs",
+        "no-otel-under-src::telemetry.spans",
+        "no-otel-under-src::telemetry.subprocess_bridge",
+        "no-scripts-at-boot-under-src::scripts",
+        "no-spawn-machinery-on-the-decision-path::concurrent.futures",
+        "no-spawn-machinery-on-the-decision-path::multiprocessing",
+        "no-spawn-machinery-on-the-decision-path::subprocess",
+    }
+)
+
+
+def import_boundary_denials(live: Iterable[str], member: str) -> bool:
+    """Would dropping *member* from the live denial set break its floor?
+
+    The registry's ``detects_drop`` for the declared import boundaries. Runs
+    the real comparison over the real objects rather than asserting either is
+    present: a member the floor does not carry is a member whose removal
+    nothing would notice, and this answers ``False`` for it.
+    """
+    return not (set(live) - {member}) >= IMPORT_BOUNDARY_FLOOR
 
 
 def proposal_keys_read_by_parser() -> frozenset[str]:
@@ -542,6 +577,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_canary_family_conformance as canary_sweep
     from tests.architecture import test_director_no_authority as director
     from tests.architecture import test_fatal_exception_set_centralized as fatal
+    from tests.architecture import test_import_boundary_gate as boundaries
     from tests.architecture import test_mockworld_loop_scenario_ratchet as mockworld
     from tests.architecture import test_path_membership_registry as membership
     from tests.architecture import test_policy_engine_is_pure as policy_purity
@@ -552,6 +588,18 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import vitals_conformance_registry as vitals
 
     decision_path = director.claiming_modules()
+    # The live denial vocabulary, flattened. Read once so the two rows below
+    # compare against ONE live object and the floor is the other — the
+    # arrangement in which losing a member is visible at all.
+    boundary_denials = boundaries.denial_ids()
+
+    def _boundary_drop_is_caught(member: str) -> bool:
+        """Dropping a whole boundary takes every denial it carried with it."""
+        surviving = {
+            entry for entry in boundary_denials if not entry.startswith(f"{member}::")
+        }
+        return not surviving >= IMPORT_BOUNDARY_FLOOR
+
     actuators = director.brokered_actuator_modules()
     canaries = {row.name for row in canary_registry.discovered_canaries()}
     proposal_keys = proposal_keys_read_by_parser()
@@ -647,6 +695,37 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "flag, so a dropped row stops anyone ever watching that rule fire "
                 "— and the rule stays in `select` looking enforced. Pinned "
                 "against the S-rules pyproject actually selects, both directions."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_import_boundary_gate.declarations()",
+            members=tuple(row.name for row in boundaries.BOUNDARIES),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_boundary_drop_is_caught,
+            why=(
+                "#11753. Each row is a whole import rule — ADR-0118's OTel ban, "
+                "#10365's container-boot invariant, ADR-0137's no-spawn claim. "
+                "Dropping one stops its subject tree being scanned at all while "
+                "the driver stays green over the rows that remain, which is the "
+                "gate-stops-seeing-its-subject class applied to the gate registry "
+                "itself. The drop reddens because every denial the boundary "
+                "carried leaves IMPORT_BOUNDARY_FLOOR's live side with it."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_import_boundary_gate.denial_cases()",
+            members=boundary_denials,
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=lambda member: import_boundary_denials(
+                boundary_denials, member
+            ),
+            why=(
+                "#11753. One denied module, on one boundary. Dropping "
+                "'concurrent.futures' restores the exact bug the fix closed — "
+                "ProcessPoolExecutor reaching multiprocessing's machinery "
+                "through a package the pin no longer names — with the fix still "
+                "in the file. A new denial goes in IMPORT_BOUNDARY_FLOOR as "
+                "well as in the declaration."
             ),
         ),
         GuardedEnumeration(
@@ -773,23 +852,6 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "module cannot reach. A dropped name is how 'let the reviewer "
                 "apply its own fix' becomes a one-line change nothing reddens. "
                 "A new member goes in DENY_LIST_FLOORS here as well."
-            ),
-        ),
-        GuardedEnumeration(
-            name="test_director_no_authority._SPAWN_MACHINERY",
-            members=tuple(sorted(director._SPAWN_MACHINERY)),  # noqa: SLF001
-            kind=EnumerationKind.SUBJECT,
-            detects_drop=lambda member: floor_protects(
-                "test_director_no_authority._SPAWN_MACHINERY",
-                director._SPAWN_MACHINERY,  # noqa: SLF001
-                member,
-            ),
-            why=(
-                "The constant introduced BY the fix for this class, with no "
-                "drops guard of its own. Dropping 'multiprocessing' leaves a "
-                "raw spawn on the decision path invisible to the call-site "
-                "guards, which know only sanctioned helper names. A new member "
-                "goes in DENY_LIST_FLOORS here as well as in the list."
             ),
         ),
         GuardedEnumeration(
@@ -940,6 +1002,30 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             undetected_reason="Evidence, not subject — the false-positive half.",
         ),
         GuardedEnumeration(
+            name="test_import_boundary_gate.witness_cases()",
+            members=tuple(
+                f"{boundary.name}::{witness.name}"
+                for boundary, witness in boundaries.witness_cases()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "Synthetic sources each paired with the verdict the LIVE "
+                "collector must reach on it — the two-directional negative "
+                "control every import boundary is required to state (#11753)."
+            ),
+            undetected_reason=(
+                "Evidence, not subject: each member is a source shape fed to "
+                "the collector, so dropping one drops the proof that the "
+                "collector sees that spelling. The SUBJECTS these rows "
+                "exercise — the boundaries and their denials — are floored "
+                "separately in IMPORT_BOUNDARY_FLOOR, so a rule losing a "
+                "member reddens there rather than here. The driver's own "
+                "test_every_boundary_witnesses_both_directions keeps the "
+                "corpus from shrinking to one direction, which is the shrink "
+                "that would matter."
+            ),
+        ),
+        GuardedEnumeration(
             name="test_director_no_authority._RAW_SPAWNS",
             members=tuple(row[0] for row in director._RAW_SPAWNS),  # noqa: SLF001
             kind=EnumerationKind.CORPUS,
@@ -952,10 +1038,11 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "Evidence, not subject. Each member is a source shape written "
                 "to a victim file; dropping one drops the proof that a "
                 "detector sees that spelling, which is a coverage question. "
-                "The SUBJECTS these rows exercise — _SPAWN_MACHINERY, "
-                "_OS_SPAWN_EXACT, _OS_SPAWN_PREFIXES — are floored separately "
-                "in DENY_LIST_FLOORS, so a rule losing a member reddens there "
-                "rather than here. Both halves of the corpus are carried in "
+                "The SUBJECTS these rows exercise are floored separately — "
+                "_OS_SPAWN_EXACT and _OS_SPAWN_PREFIXES in DENY_LIST_FLOORS, "
+                "the spawn deny-list in IMPORT_BOUNDARY_FLOOR — so a rule "
+                "losing a member reddens there rather than here. Both halves "
+                "of the corpus are carried in "
                 "one table rather than two, because a row's expected rule is "
                 "part of the row: the `os-getattr` row expects NO rule to "
                 "fire, and is this corpus's false-positive half."

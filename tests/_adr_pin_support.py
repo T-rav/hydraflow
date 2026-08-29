@@ -8,9 +8,12 @@ meta-guard proving this behaviour.
 
 The runtime skip lives here, in a module the ``tests/`` naming convention
 excludes from ``tests/architecture/test_no_ignored_active_tests.py``'s
-active-test-file scan (files whose name starts with ``test`` or is
-``conftest.py``), so this centrally-reviewed self-retiring resolution isn't
-flagged the same way an ad-hoc per-test skip would be. Lives at the ``tests/``
+active-test-file scan, so this centrally-reviewed self-retiring resolution
+isn't flagged the same way an ad-hoc per-test skip would be. That scan now
+covers exactly what pytest collects — the ``python_files`` globs
+(``test_*.py``, ``regression_*.py``) plus ``conftest.py`` — so the exemption
+holds by rule rather than by allowlist: a file pytest never collects has no
+active tests to suppress. Lives at the ``tests/``
 root rather than ``tests/regressions/`` — mirroring ``tests/_spawn_audit.py``
 and ``tests/_credit_reraise_audit.py`` — because
 ``tests/regressions/test_issue_9801_collection.py`` requires every file

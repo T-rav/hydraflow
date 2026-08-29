@@ -11,9 +11,12 @@ Fix: the pure false-close classifier moved to ``src/false_close.py`` and every
 importer now uses ``from false_close import ...``. These pins fail loudly if the
 ``scripts`` dependency ever creeps back into the #10365 boot chain.
 
-The repo-wide AST guard lives at
-``tests/architecture/test_src_does_not_import_scripts.py``; this file pins the
-specific modules whose boot import broke staging.
+The repo-wide guard is now DECLARATIVE: the rule is
+``no-scripts-at-boot-under-src`` in
+``tests/architecture/import_boundary_declarations.py``, run by
+``tests/architecture/test_import_boundary_gate.py`` over the shared collector
+in ``tests/architecture/import_edge_scan.py``. This file pins the specific
+modules whose boot import broke staging.
 """
 
 from __future__ import annotations

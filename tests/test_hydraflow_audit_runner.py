@@ -17,6 +17,7 @@ from scripts.hydraflow_audit.models import (
     Severity,
     Status,
 )
+from scripts.hydraflow_audit.na_justifications import NA_JUSTIFICATIONS
 from scripts.hydraflow_audit.runner import overall_exit_code, run_checks
 
 
@@ -119,12 +120,11 @@ def test_exceptions_in_a_check_become_fail_findings(ctx: CheckContext) -> None:
     assert "boom" in finding.message
 
 
-def test_overall_exit_code_zero_when_all_pass_or_na(ctx: CheckContext) -> None:
-    @registry.register("P1.1")
-    def _ok(_: CheckContext) -> Finding:
+def _static(check_id: str, status: Status):
+    def _check(_: CheckContext) -> Finding:
         return Finding(
-            check_id="P1.1",
-            status=Status.PASS,
+            check_id=check_id,
+            status=status,
             severity=Severity.STRUCTURAL,
             principle="P1",
             source="",
@@ -132,23 +132,49 @@ def test_overall_exit_code_zero_when_all_pass_or_na(ctx: CheckContext) -> None:
             remediation="",
         )
 
-    @registry.register("P1.2")
-    def _na(_: CheckContext) -> Finding:
-        return Finding(
-            check_id="P1.2",
-            status=Status.NA,
-            severity=Severity.STRUCTURAL,
-            principle="P1",
-            source="",
-            what="",
-            remediation="",
-        )
+    return _check
 
-    findings = run_checks([_spec("P1.1"), _spec("P1.2")], ctx)
+
+def test_overall_exit_code_zero_when_all_pass_or_justified_na(
+    ctx: CheckContext,
+) -> None:
+    """P1.8 carries a reviewed reason in NA_JUSTIFICATIONS, so its NA is green."""
+    assert "P1.8" in NA_JUSTIFICATIONS
+    registry.register("P1.1")(_static("P1.1", Status.PASS))
+    registry.register("P1.8")(_static("P1.8", Status.NA))
+
+    findings = run_checks([_spec("P1.1"), _spec("P1.8")], ctx)
+
+    assert [f.status for f in findings] == [Status.PASS, Status.NA]
     assert overall_exit_code(findings) == 0
 
 
-@pytest.mark.parametrize("bad", [Status.WARN, Status.FAIL, Status.NOT_IMPLEMENTED])
+def test_unjustified_na_becomes_inert_and_fails_the_gate(ctx: CheckContext) -> None:
+    """The #8383/#8386 defect: an absent subject must not count as a passing one.
+
+    P2.3/P2.4/P2.6/P2.7 reported NA for four months because the script they
+    shelled out to had been deleted, and `overall_exit_code` read NA as
+    success. A check with no registered reason for its NA is now INERT.
+    """
+    assert "P1.2" not in NA_JUSTIFICATIONS
+    registry.register("P1.2")(_static("P1.2", Status.NA))
+
+    findings = run_checks([_spec("P1.2")], ctx)
+
+    assert findings[0].status is Status.INERT
+    assert "NA_JUSTIFICATIONS" in findings[0].message
+    assert overall_exit_code(findings) == 1
+
+
+def test_every_justified_na_names_a_reason() -> None:
+    """An empty reason would make the registry a rubber stamp."""
+    blank = [cid for cid, why in NA_JUSTIFICATIONS.items() if not why.strip()]
+    assert blank == [], f"NA_JUSTIFICATIONS entries with no reason: {blank}"
+
+
+@pytest.mark.parametrize(
+    "bad", [Status.WARN, Status.FAIL, Status.INERT, Status.NOT_IMPLEMENTED]
+)
 def test_overall_exit_code_nonzero_on_any_bad_finding(
     bad: Status, ctx: CheckContext
 ) -> None:

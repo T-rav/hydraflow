@@ -171,9 +171,9 @@ def _bug_fixes_land_with_regression_tests(ctx: CheckContext) -> Finding:  # noqa
             timeout=20,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return finding("P10.3", Status.NA, "git log timed out")
+        return finding("P10.3", Status.INERT, "git log timed out — history unread")
     if result.returncode != 0:
-        return finding("P10.3", Status.NA, "git log failed")
+        return finding("P10.3", Status.INERT, "git log failed — history unread")
     fix_commits = [
         line.split("\t", 1)[0]
         for line in result.stdout.splitlines()
@@ -384,7 +384,7 @@ def _evaluate_pr_regression_delta(ctx: CheckContext, merge_base: str) -> Finding
             timeout=20,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return finding("P10.6", Status.NA, "git diff failed")
+        return finding("P10.6", Status.INERT, "git diff failed — PR delta unread")
     paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if _has_regression_delta(paths):
         return finding(
@@ -433,7 +433,12 @@ def _pr_gate_preflight(root: Path) -> tuple[str | None, Finding | None]:
         )
     merge_base = _resolve_merge_base(root, base)
     if merge_base is None:
-        return None, finding("P10.6", Status.NA, f"base ref {base!r} not resolvable")
+        return None, finding(
+            "P10.6",
+            Status.INERT,
+            f"base ref {base!r} not resolvable — a PR context was declared but its "
+            "merge base could not be found, so no delta was judged",
+        )
     return merge_base, None
 
 
@@ -454,7 +459,7 @@ def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
     assert merge_base is not None
     fix_shas = _pr_fix_shas(ctx.root, merge_base)
     if fix_shas is None:
-        return finding("P10.6", Status.NA, "git log failed")
+        return finding("P10.6", Status.INERT, "git log failed — PR commits unread")
     if not fix_shas:
         return finding("P10.6", Status.PASS, "no product fix(...) commits in this PR")
     reason = _skip_regression_reason(ctx.root, merge_base)
@@ -543,7 +548,7 @@ def _closed_issues_carry_fix_delta(ctx: CheckContext) -> Finding:
         return finding("P10.7", Status.NA, "not a git repo")
     commits = _recent_commits_with_bodies(ctx.root, _CLOSE_SCAN_COUNT)
     if commits is None:
-        return finding("P10.7", Status.NA, "git log failed")
+        return finding("P10.7", Status.INERT, "git log failed — close history unread")
     scanned = 0
     flagged: list[str] = []
     for sha, body in commits:
