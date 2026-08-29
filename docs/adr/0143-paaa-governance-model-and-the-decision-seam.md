@@ -1,8 +1,11 @@
 # ADR-0143: PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-28
-**Enforcement:** decision-of-record
+**Enforcement:** enforced
+**Enforced by:**
+- pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails
+- pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr
 **Binds:** factory
 **Supersedes:** none
 **Superseded by:** none
@@ -11,8 +14,13 @@
 **Precedent:** The chartered organization — a company is constituted by four declarations kept separately and read separately: a statement of objects (purpose), articles of association (the rules that must hold), a register of officers (who may bind the organization), and the statutory registers and minutes (the record). Second precedent: the policy-as-code separation formalized by XACML — an administration point where policy is *authored*, a decision point that *evaluates* it over attributes, and an enforcement point that *acts* on the verdict, with the decision point deliberately ignorant of how enforcement happens.
 **Divergence:** in a chartered organization all four declarations are written by humans and read by humans, and the record is inert. Here three of the four are already machine-read and machine-checked while the fourth (Purpose) is read by nothing at all — so the model must state which layers are checkable rather than assume symmetry (receipt: the 2026-08-28 sweep recorded in #11752, which found the same governance shape re-derived five times with five exception formats and no named model). And unlike XACML, the decision point here is not authoritative: the pure-Python reference implementation is the specification and an external engine is a replaceable candidate behind a protocol (receipt: ADR-0138's standing "No policy engine" ruling, which this ADR scopes against rather than overturns), and no decision may depend on a service being reachable (receipt: #11687 — no conformance claim may rest on an external service being up).
 
-> **This is a Proposed ADR — a design ruling for decision, not an accepted commitment.**
-> It names a model the repository already embodies five times over, and maps it onto surfaces that already exist. It adds no code and asks for no migration. Its own first guard is that a system cannot enlarge its own mandate, so this ADR does not enact itself: **Accepted is the operator's act (RATIFY), not the author's.** See §"On ratification" for what changes on acceptance. Accept, amend, or reject the framing.
+> **Ratified 2026-08-29 by the operator (RATIFY), on the path this ADR reserved for it.**
+> It names a model the repository already embodies five times over, and maps it onto surfaces
+> that already exist. Its own first guard is that a system cannot enlarge its own mandate, so it
+> did not enact itself: it landed Proposed and was accepted as a separate operator act.
+> Accepted via §"On ratification" path 1 — **accept with real enforcement**, not by exemption,
+> because the epic's children are the enforcement and an exemption claiming otherwise would
+> have been false.
 
 ## Context
 
@@ -166,4 +174,16 @@ On ratification, one of two paths applies:
 1. **Accept with real enforcement**, once the sibling work lands — the manifest schema test (#11748), the prose-to-artifact bindings (#11751), and the decision-seam tests (#11749) are the checks an *Enforced-by* block would name.
 2. **Accept with an exemption**, if the operator judges the ontology itself to be process-only, adding one justified line to `docs/standards/adr_enforcement/exemptions.md`.
 
-Landing Proposed keeps both open and enacts nothing — which is Guard 4 applied to this ADR itself.
+Landing Proposed kept both open and enacted nothing — which is Guard 4 applied to this ADR itself.
+
+**Outcome (2026-08-29): path 1.** The siblings landed — #11748 (`charter.yaml`, PR #11759), #11749
+(the decision seam, PR #11757) — and their tests are named in the *Enforced-by* block above, so this
+ADR classifies `REAL` rather than adding unenforced-decision debt. Path 2 was not taken: the
+ontology is not process-only, and an exemption asserting no machine-checkable invariant was
+feasible would have been false on its face.
+
+One nominated check is **not yet cited**: the prose-to-artifact bindings (#11751, PR #11758) were
+still open at ratification. `REAL` requires only that at least one typed check resolves, and two do,
+so the block is honest as it stands rather than citing a test that does not yet exist — which would
+have classified `WEAK` and created the very debt this section exists to avoid. Add
+`pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet` when #11758 lands.
