@@ -124,7 +124,7 @@ GATEWAY_PACKAGE_COVERAGE_CMD := PYTHONPATH=src $(UV) pytest $(GATEWAY_PACKAGE_TE
 # individually-green PRs is measured against the real merged tree.
 # The registry that explains each entry — and the guard that keeps this list
 # equal to it — is tests/architecture/aggregate_gate_registry.py.
-AGGREGATE_RATCHET_PATHS := tests/architecture/test_suite_hygiene_ratchet.py tests/architecture/test_no_ignored_active_tests.py tests/architecture/test_adr0023_test_local_class_instantiation.py tests/architecture/test_duration_ratchet.py tests/test_disturbance_ratchet.py
+AGGREGATE_RATCHET_PATHS := tests/architecture/test_suite_hygiene_ratchet.py tests/architecture/test_no_ignored_active_tests.py tests/architecture/test_adr0023_test_local_class_instantiation.py tests/architecture/test_mockworld_loop_scenario_ratchet.py tests/architecture/test_duration_ratchet.py tests/test_disturbance_ratchet.py
 
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3

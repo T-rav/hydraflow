@@ -11,6 +11,7 @@
 # tests/architecture/test_testing_standard_drift.py.
 id: testing
 enforced_by:
+  - tests/architecture/test_mockworld_loop_scenario_ratchet.py
   - tests/architecture/test_testing_standard_drift.py
 
 # The three layers, in the order both README tables read left to right.
