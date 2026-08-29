@@ -74,7 +74,8 @@ def _finding() -> Finding:
         ({_SIG: 100}, 100, True),
         ({_SIG: 100}, 101, True),
         # Ceiling 0: the detector can never emit this signature at all, so
-        # even a baseline of 0 has nothing above it.
+        # even a baseline of 0 has nothing above it. Iterating the baseline
+        # alone would never look at it.
         ({_SIG: 0}, 0, True),
         # The known-negatives. Without them the check could refuse
         # everything and every assertion above would still pass.
@@ -94,6 +95,15 @@ def test_dead_ratchet_arms_reports_exactly_the_unreachable_baselines(
     spec = _spec(tmp_path, [], ceilings)
 
     assert bool(dead_ratchet_arms(spec, {_SIG: baseline_count})) is is_dead
+
+
+def test_a_ceiling_of_zero_is_reported_even_with_no_baseline_entry(
+    tmp_path: Path,
+) -> None:
+    """The declared set is swept too, not only what the baseline records."""
+    spec = _spec(tmp_path, [], {_SIG: 0})
+
+    assert dead_ratchet_arms(spec, {})
 
 
 def test_the_gate_refuses_to_run_a_dimension_whose_arm_cannot_fire(

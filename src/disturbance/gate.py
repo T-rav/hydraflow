@@ -36,10 +36,14 @@ def dead_ratchet_arms(spec: DimensionSpec, baseline: Mapping[str, int]) -> list[
     """
     ceilings = spec.detector.reachable_ceilings()
     dead: list[str] = []
-    for signature, count in sorted(baseline.items()):
+    # Over the DECLARED ceilings as well as the recorded baseline: a
+    # signature capped at 0 is unreachable even at a baseline of 0, and
+    # iterating the baseline alone would never look at it.
+    for signature in sorted(set(baseline) | set(ceilings)):
         ceiling = ceilings.get(signature)
         if ceiling is None:
             continue  # unbounded: some reachable count always exceeds the baseline
+        count = baseline.get(signature, 0)
         if count >= ceiling:
             dead.append(
                 f"{spec.name}: baseline {signature!r} is {count}, but the "
