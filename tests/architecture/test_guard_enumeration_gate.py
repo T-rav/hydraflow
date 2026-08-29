@@ -48,7 +48,6 @@ from tests.architecture.guard_enumeration_registry import (
     GuardedEnumeration,
     call_witness,
     declared_deny_lists,
-    import_witness,
     os_witness,
     parametrised_module_sequences,
     proposal_keys_read_by_parser,
@@ -428,7 +427,6 @@ def _live_deny_lists() -> dict[str, frozenset[str]]:
         "test_director_no_authority.FORBIDDEN_MUTATIONS": director.FORBIDDEN_MUTATIONS,
         "test_director_no_authority.CONVERGENCE_WRITES": director.CONVERGENCE_WRITES,
         "test_director_no_authority.WRITE_PRIMITIVES": director.WRITE_PRIMITIVES,
-        "test_director_no_authority._SPAWN_MACHINERY": director._SPAWN_MACHINERY,  # noqa: SLF001
         "test_director_no_authority._OS_SPAWN_EXACT": director._OS_SPAWN_EXACT,  # noqa: SLF001
         # A tuple in the source — `str.startswith` takes one — coerced here
         # purely so the set algebra below has a set. The coercion is NOT what
@@ -454,17 +452,18 @@ _WITNESS_SUBJECTS: dict[str, tuple[str, str]] = {
         "src/review_worker_runner.py",
         "call",
     ),
-    "test_director_no_authority._SPAWN_MACHINERY": ("src/plan_broker.py", "import"),
     "test_director_no_authority._OS_SPAWN_EXACT": ("src/plan_broker.py", "os"),
     "test_director_no_authority._OS_SPAWN_PREFIXES": ("src/plan_broker.py", "os"),
 }
 
 #: Extractor name -> the witness that runs it. A dict rather than a chain of
 #: conditionals: #11724 made this a three-way choice, and the two-way `if/else`
-#: it replaced would have silently routed a new extractor to `import_witness`.
+#: it replaced would have silently routed a new extractor to the wrong one.
+#: #11753 took the import extractor back out — the import rule is DECLARED
+#: now, and the per-member sweep that proves each denied name is really seen
+#: moved with it, to ``test_a_denied_module_is_visible_to_the_live_machinery``.
 _WITNESSES = {
     "call": call_witness,
-    "import": import_witness,
     "os": os_witness,
 }
 
@@ -548,11 +547,10 @@ _UNDENIED_NAME = "a_call_no_deny_list_has_ever_carried"
 #: Rows where :data:`_UNDENIED_NAME` cannot falsify anything, and the name that
 #: can (#11724).
 #:
-#: The shared constant works for the four rows whose extractor is maximally
-#: permissive: ``called_names`` records ANY call name and ``import_roots`` ANY
-#: import root, so the fabricated name reaches the ``& deny_list`` step and the
-#: intersection is what answers False. Delete the intersection and those rows
-#: redden.
+#: The shared constant works for the rows whose extractor is maximally
+#: permissive: ``called_names`` records ANY call name, so the fabricated name
+#: reaches the ``& deny_list`` step and the intersection is what answers False.
+#: Delete the intersection and those rows redden.
 #:
 #: ``os_witness`` is different, and assuming parity made this control vacuous
 #: for its two rows. ``reachable_os_spawns`` is gated internally by

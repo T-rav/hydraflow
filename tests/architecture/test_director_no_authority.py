@@ -189,24 +189,6 @@ def called_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def import_roots(tree: ast.Module) -> set[str]:
-    """Top-level package of every absolute import in *tree*.
-
-    Public because ``guard_enumeration_registry`` witnesses ``_SPAWN_MACHINERY``
-    by feeding this extractor a subject module with an import injected. A
-    re-implementation there would be a second copy of the rule, and the two
-    would drift — which is the shape ``docs/standards/parametrised_guards``
-    exists to stop.
-    """
-    roots: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            roots.add(node.module.split(".")[0])
-    return roots
-
-
 @pytest.mark.parametrize("module", DECISION_PATH_MODULES)
 def test_the_decision_path_never_spawns_a_process(module: str) -> None:
     # The director's own turn is spawned by ``director_turn_runner``, which is
@@ -667,25 +649,47 @@ def test_the_declared_claim_and_the_list_are_the_same_set() -> None:
     )
 
 
-#: Raw spawn machinery. ``SPAWN_PRIMITIVES`` names HydraFlow's *sanctioned*
-#: helpers, and the repo-wide raw-spawn ratchet knows
-#: ``create_subprocess_exec``/``Popen``/``spawnv`` — so a plain
-#: ``subprocess.run(...)`` in a decision-path module passed BOTH (#11543).
-#: Verified: injecting ``run_subprocess`` reddens, injecting ``subprocess.run``
-#: did not. For ten modules that each claim purity, importing the machinery at
-#: all is the rule with no false positives; a synchronous blocking spawn on an
-#: async decision path is worse than the async one, not better.
-_SPAWN_MACHINERY: frozenset[str] = frozenset({"subprocess", "multiprocessing"})
+#: Raw spawn machinery is denied by DECLARATION, not by a predicate written
+#: here. ``import_boundary_declarations.no-spawn-machinery-on-the-decision-path``
+#: carries the deny-list, its reasons, and the witnesses that prove each
+#: spelling is really seen; ``test_import_boundary_gate`` runs it over this
+#: file's own ``DECISION_PATH_MODULES``, read by reference.
+#:
+#: The rule moved because the predicate that used to live here was wrong in a
+#: way nothing could see: it intersected the deny-list with the TOP-LEVEL root
+#: of each import, so ``from concurrent.futures import ProcessPoolExecutor`` in
+#: ``src/plan_broker.py`` reached ``multiprocessing``'s machinery through a
+#: package the pin collapsed to ``concurrent``. Two other guards in this repo
+#: had the same shape for different reasons, which is why the fix is one
+#: collector rather than a third patch.
+#:
+#: What stays here is the negative control below: the table of raw-spawn
+#: shapes, each paired with the NAME of the rule that must fire on it. Its
+#: ``"import"`` rows now run the LIVE declarative rule, so a fidelity change
+#: over there is measured here rather than assumed.
 
 
-@pytest.mark.parametrize("module", DECISION_PATH_MODULES)
-def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> None:
-    reached = import_roots(module_tree(module)) & _SPAWN_MACHINERY
-    assert not reached, (
-        f"{module} imports {sorted(reached)}. Every module on this list says it "
-        "does not spawn; the call-site guards only know the sanctioned helper "
-        "names and three raw signatures, so a plain subprocess.run() reaches "
-        "neither. A module that needs to spawn belongs behind a declared seam."
+def spawn_machinery_reached(tree: ast.Module) -> bool:
+    """Does *tree* import spawn machinery, per the live declared boundary?
+
+    Public and thin on purpose. ``_RAW_SPAWNS`` below and the decision path's
+    real verdict must run the SAME expression — a second copy would drift, and
+    the drift would be invisible in exactly the direction that matters.
+    """
+    from tests.architecture.import_boundary_declarations import Scope, declarations
+    from tests.architecture.import_edge_scan import denied_edges, import_edges
+
+    boundary = next(
+        row
+        for row in declarations()
+        if row.name == "no-spawn-machinery-on-the-decision-path"
+    )
+    return bool(
+        denied_edges(
+            import_edges(tree),
+            boundary.denied_modules(),
+            boot_only=boundary.scope is Scope.BOOT,
+        )
     )
 
 
@@ -696,7 +700,7 @@ def test_the_decision_path_does_not_even_import_spawn_machinery(module: str) -> 
 #: ``system`` and ``popen`` are far too common as BARE attribute names to
 #: sweep. That reasoning does not extend to an ``ast.Attribute`` whose value is
 #: the Name ``os`` — ``os.system(...)`` is unambiguous — and ``os`` is
-#: deliberately absent from ``_SPAWN_MACHINERY`` because every module on
+#: deliberately absent from the declared spawn deny-list because every module on
 #: ``DECISION_PATH_MODULES`` legitimately imports it for ``environ`` and paths.
 #: So the ``os``-qualified call was the one shape neither rule saw, and no
 #: other gate in the repo covered it either: bandit rates ``os.system`` B605
@@ -854,7 +858,8 @@ def test_the_os_spawn_subject_is_not_empty() -> None:
 #:
 #: Three rules can fire, and the row names which one must:
 #:
-#: * ``"import"`` — ``_SPAWN_MACHINERY``. Reaching ``subprocess`` at all
+#: * ``"import"`` — the declared spawn boundary, run through
+#:   :func:`spawn_machinery_reached`. Reaching ``subprocess`` at all
 #:   requires importing it, so the import is the cheapest true signal.
 #: * ``"os"`` — ``reachable_os_spawns``. The qualified form, added by #11724.
 #: * ``None`` — nothing here fires. A hole, recorded as a row so it cannot be
@@ -873,6 +878,17 @@ _RAW_SPAWNS: tuple[tuple[str, str, str, str | None], ...] = (
         "import",
     ),
     ("run-via-subprocess", "import subprocess", "subprocess.run(['true'])", "import"),
+    # The #11753 row. `from concurrent.futures import ProcessPoolExecutor`
+    # reaches the exact machinery `multiprocessing` names, and the pin this
+    # table used to measure collapsed it to `concurrent` before the
+    # deny-list was consulted — so it fired NOTHING, and the table said
+    # nothing about it because the row did not exist. It exists now.
+    (
+        "process-pool-via-concurrent-futures",
+        "from concurrent.futures import ProcessPoolExecutor",
+        "ProcessPoolExecutor().submit(print)",
+        "import",
+    ),
     ("os-system", "import os", "os.system('true')", "os"),
     ("os-popen", "import os", "os.popen('true')", "os"),
     ("os-execv", "import os", "os.execv('/bin/true', ['true'])", "os"),
@@ -908,7 +924,7 @@ def test_a_raw_spawn_is_caught_by_exactly_the_rule_the_table_names(
     tree = ast.parse(victim.read_text(encoding="utf-8"), filename=str(victim))
 
     fired = set()
-    if import_roots(tree) & _SPAWN_MACHINERY:
+    if spawn_machinery_reached(tree):
         fired.add("import")
     if reachable_os_spawns(tree):
         fired.add("os")
