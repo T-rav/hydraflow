@@ -463,6 +463,24 @@ def _no_scripts_at_boot_under_src() -> ImportBoundary:
                 ),
             ),
             Witness(
+                name="decorator-runs-at-def-time",
+                source=(
+                    "import importlib\n\n\n"
+                    '@importlib.import_module("scripts.gates").register\n'
+                    "def handler() -> None:\n"
+                    "    pass\n"
+                ),
+                flagged=True,
+                why=(
+                    "Only the BODY of a definition defers. A decorator "
+                    "expression is evaluated at def time — which is import "
+                    "time — so a reach there crashes the container exactly "
+                    "like a top-level one. The walk this replaces skipped the "
+                    "whole FunctionDef node, decorators and argument defaults "
+                    "included, so it could not see this at all."
+                ),
+            ),
+            Witness(
                 name="function-local-import",
                 source=(
                     "def activate() -> int:\n"

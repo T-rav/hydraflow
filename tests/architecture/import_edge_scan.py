@@ -250,6 +250,14 @@ def _is_type_checking(test: ast.expr) -> bool:
     return False
 
 
+def _body_of(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> tuple[ast.AST, ...]:
+    """The part of a definition that runs when it is CALLED, not when defined."""
+    body = node.body
+    return tuple(body) if isinstance(body, list) else (body,)
+
+
 def _children(node: ast.AST, boot: bool) -> Iterator[tuple[ast.AST, bool]]:
     """Every child of *node*, paired with ITS boot reachability.
 
@@ -260,11 +268,15 @@ def _children(node: ast.AST, boot: bool) -> Iterator[tuple[ast.AST, bool]]:
     executes at import like every other statement. Anything the grammar adds
     next is handled here by default rather than by someone remembering.
 
-    Three deferrals, and they are the whole rule:
+    Two deferrals, and they are the whole rule:
 
-    * a function or lambda BODY runs when it is called, not when the module is
-      imported. Decorators and argument defaults DO run at import, so they keep
-      the current reachability;
+    * a function's or lambda's BODY runs when it is called, not when the module
+      is imported. Everything ELSE about the definition — decorators, argument
+      defaults, annotations, PEP 695 type parameters — is evaluated at ``def``
+      time, so it keeps the current reachability. Stated as "only the body
+      defers" rather than as a list of the signature parts that do not, for the
+      same reason the block walk below is: a list would go stale the next time
+      the grammar grows one;
     * an ``if TYPE_CHECKING:`` body is elided at runtime. Its ``orelse`` is
       not, and neither is the test;
     * nothing else. A conditional import inside ``if sys.platform``, a
@@ -272,18 +284,10 @@ def _children(node: ast.AST, boot: bool) -> Iterator[tuple[ast.AST, bool]]:
       at import, and all are reported as boot-reachable even when the branch
       is never taken. The error lands on the loud side deliberately.
     """
-    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-        for decorator in node.decorator_list:
-            yield decorator, boot
-        yield node.args, boot
-        for stmt in node.body:
-            yield stmt, False
-        if node.returns is not None:
-            yield node.returns, False
-        return
-    if isinstance(node, ast.Lambda):
-        yield node.args, boot
-        yield node.body, False
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+        deferred = {id(stmt) for stmt in _body_of(node)}
+        for child in ast.iter_child_nodes(node):
+            yield child, boot and id(child) not in deferred
         return
     if isinstance(node, ast.If) and _is_type_checking(node.test):
         yield node.test, boot
