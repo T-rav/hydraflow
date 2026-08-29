@@ -42,7 +42,7 @@ Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on fi
 **Kind:** `service` · **Context:** `caretaker` · **Anchor:** `src/adr_pre_validator.py:ADRPreValidator` · **Confidence:** `accepted`
 **Aliases:** `adr pre-validator`, `adr structural validator`
 
-A service that validates ADR structure before submission to the ADRCouncilReviewer, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the council to skip reviews for trivially malformed drafts.
+A service that validates ADR structure before submission to the ADRReviewPanel, catching structural defects early in the review pipeline. Checks include: status field presence and validity, required section presence and non-emptiness (Context, Decision, Consequences), ADR number collisions, supersession integrity, volatile line citations, stale 'requires amending' notes, bare ADR references lacking title annotations, source-symbol references against the live repo, and cross-reference title accuracy. Returns an ADRValidationResult that distinguishes auto-fixable issues from blocking ones, allowing the panel to skip reviews for trivially malformed drafts.
 
 **Invariants:**
 - Runs all structural checks in a single `validate()` call and returns an ADRValidationResult — never raises on malformed input.
@@ -54,10 +54,10 @@ A service that validates ADR structure before submission to the ADRCouncilReview
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/adr_reviewer_loop.py:ADRReviewerLoop` · **Confidence:** `accepted`
 **Aliases:** `ADR reviewer loop`, `adr council review loop`, `adr review loop`
 
-Caretaker loop that polls for ADRs in `Proposed` status and runs council reviews via `ADRCouncilReviewer`. The loop is intentionally thin: all review logic and output formatting live in `ADRCouncilReviewer`, keeping tick scheduling and business logic separately testable. Review interval is `config.adr_review_interval`.
+Caretaker loop that polls for ADRs in `Proposed` status and runs panel reviews via `ADRReviewPanel`. The loop is intentionally thin: all review logic and output formatting live in `ADRReviewPanel`, keeping tick scheduling and business logic separately testable. Review interval is `config.adr_review_interval`.
 
 **Invariants:**
-- The loop delegates entirely to `ADRCouncilReviewer.review_proposed_adrs()`; no review logic lives in the loop itself.
+- The loop delegates entirely to `ADRReviewPanel.review_proposed_adrs()`; no review logic lives in the loop itself.
 - Kill-switch is via `enabled_cb("adr_reviewer")` and `config.adr_reviewer_loop_enabled` (ADR-0049).
 
 ## ADRReviewPanel

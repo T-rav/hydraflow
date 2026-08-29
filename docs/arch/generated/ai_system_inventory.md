@@ -59,7 +59,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
 | `adr_conformance` | `AdrConformanceLoop` | Governance & Audit | — | — | HITL escalation | Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100. |
-| `adr_reviewer` | `ADRReviewerLoop` | Intake | `adr_review_model` | — | — | Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate. |
+| `adr_reviewer` | `ADRReviewerLoop` | Intake | `adr_review_model` | — | — | Reviews proposed ADRs via a 3-judge panel and routes to accept, reject, or escalate. |
 | `auto_agent_preflight` | `AutoAgentPreflightLoop` | Autonomy | `adr_review_model`, `model` | — | HITL escalation | Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050). |
 | `auto_tighten` | `AutoTightenLoop` | Repo Health | — | — | — | Locks in coverage-floor gains |
 | `branch_protection_auditor` | `BranchProtectionAuditorLoop` | Governance & Audit | — | — | — | Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082. |
