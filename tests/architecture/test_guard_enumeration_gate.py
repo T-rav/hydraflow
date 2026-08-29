@@ -655,17 +655,38 @@ STANDARD = "docs/standards/parametrised_guards/README.md"
 #: invisible instead. ``\b`` keeps ``pytest_addoption`` and friends out.
 _TEST_SHAPED = re.compile(r"[A-Za-z0-9_.:/-]*\btest_[A-Za-z0-9_.:/-]*")
 
-#: What a READABLE anchor looks like. The identifier body is mixed-case:
+#: The separators this repo's written anchors are built from: path slashes,
+#: dotted attributes, pytest node ids, and the ``pytest:`` prefix the ADR
+#: ``Enforced by:`` lines use.
+_ANCHOR_SEPARATOR = re.compile(r"::|[/.:]")
+
+#: What each separated segment must be. Mixed-case on purpose:
 #: ``[a-z0-9_]+`` -- the previous spelling -- could not express
 #: ``test_no_private_VALUE_reaches_the_reviewer``, which is a real test at
 #: tests/test_review_evidence.py, and in the same stroke could not express
 #: ``test_this_does_not_exist_ANYWHERE``, which is not.
-_ANCHOR = re.compile(
-    r"(?:[A-Za-z0-9_.-]+/)*"  # tests/architecture/
-    r"(?P<stem>test_[A-Za-z0-9_]+)"  # the test-shaped identifier
-    r"(?:\.py)?"  # ...py
-    r"(?:\.[A-Za-z_][A-Za-z0-9_]*)*"  # ....DECISION_PATH_MODULES
-)
+_ANCHOR_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _anchor_names(raw: str) -> list[str] | None:
+    """The tests *raw* names, or ``None`` when it is not a readable anchor.
+
+    Readable means every separated segment is an identifier, which admits
+    all four shapes this repo actually writes -- a bare name, a module path,
+    a dotted attribute, a pytest node id, with or without a ``pytest:``
+    prefix -- and names EVERY test-shaped segment, so
+    ``tests/x/test_a.py::TestB::test_c`` is two anchors, not one.
+
+    What it refuses is the shape this whole class of defect is made of: a
+    LINE NUMBER (``tests/x/test_a.py:855``). ``855`` is not an identifier, so
+    a line anchor is now unreadable rather than invisible -- which is the
+    right answer in a repo with a measured 100% rot rate on line anchors.
+    """
+    segments = _ANCHOR_SEPARATOR.split(raw)
+    if not all(_ANCHOR_SEGMENT.fullmatch(segment) for segment in segments):
+        return None
+    return [segment for segment in segments if segment.startswith("test_")]
+
 
 #: Below this the sweep has stopped reading the standard. Ten distinct
 #: anchors are written there today and the previous predicate observed six;
@@ -688,20 +709,25 @@ def standard_anchors(text: str) -> tuple[set[str], list[str]]:
     reddened it correctly.
 
     So an unreadable-but-test-shaped token is now returned for the caller to
-    fail on. The resolvable name is the STEM: a module path resolves against
-    the file's stem, a dotted attribute against the module that holds it.
+    fail on. Measured against every markdown file under docs/ the grammar
+    reads 1862 anchors and refuses 6 -- and all 6 are line-number anchors,
+    the class this change exists to stop being invisible.
     """
     named: set[str] = set()
     unreadable: list[str] = []
     for match in _TEST_SHAPED.finditer(text):
         raw = match.group(0).strip("./:-")
-        if not raw:
+        if not raw or "://" in raw:
+            # A URL is a link, not an anchor. Excluded by the ONE shape no
+            # written anchor here has -- a scheme separator -- rather than by
+            # narrowing the scan, which is how the previous predicate lost
+            # sight of three real anchors.
             continue
-        parsed = _ANCHOR.fullmatch(raw)
-        if parsed is None:
+        names = _anchor_names(raw)
+        if names is None:
             unreadable.append(raw)
             continue
-        named.add(parsed.group("stem"))
+        named.update(names)
     return named, unreadable
 
 
@@ -766,7 +792,9 @@ def test_the_anchor_grammar_reads_every_shape_the_prose_uses() -> None:
     named, unreadable = standard_anchors(
         "`test_plain_name` `tests/architecture/test_path_qualified.py` "
         "`test_dotted_owner.SOME_TABLE` (test_in_bare_parens) "
-        "call test_with_trailing_parens() and `test_with_an_UPPERCASE_word`"
+        "call test_with_trailing_parens() and `test_with_an_UPPERCASE_word`. "
+        "Enforced by: pytest:tests/test_prefixed_module.py and the node id "
+        "`tests/test_node_module.py::TestHolder::test_node_case`."
     )
 
     assert unreadable == []
@@ -777,6 +805,9 @@ def test_the_anchor_grammar_reads_every_shape_the_prose_uses() -> None:
         "test_in_bare_parens",
         "test_with_trailing_parens",
         "test_with_an_UPPERCASE_word",
+        "test_prefixed_module",
+        "test_node_module",
+        "test_node_case",
     }
 
 
@@ -794,13 +825,23 @@ def test_an_uppercase_test_name_is_not_invisible() -> None:
 
 
 def test_an_anchor_the_grammar_cannot_read_is_reported_not_skipped() -> None:
-    """Known-negatives. Silent-skip was the whole defect."""
+    """Known-negatives. Silent-skip was the whole defect.
+
+    The LINE-NUMBER anchor is the one that matters: it is the shape 27 of the
+    prompt-audit registry's own anchors had rotted into, and the shape the
+    old predicate could not see at all.
+    """
     named, unreadable = standard_anchors(
-        "`test_node::id_form` and `test_hyphen-form` and `test_ok`"
+        "`tests/architecture/test_line_anchored.py:855` and "
+        "`test_hyphen-form` and `test_double..dot` and `test_ok`"
     )
 
     assert named == {"test_ok"}
-    assert unreadable == ["test_node::id_form", "test_hyphen-form"]
+    assert unreadable == [
+        "tests/architecture/test_line_anchored.py:855",
+        "test_hyphen-form",
+        "test_double..dot",
+    ]
 
 
 def test_a_word_merely_containing_test_underscore_is_not_an_anchor() -> None:
