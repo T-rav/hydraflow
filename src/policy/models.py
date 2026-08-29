@@ -9,10 +9,12 @@ Naming (deliberate, #11749): issue #11749 and epic #11752 call this type
 ``PolicyDecision``. That name was already taken — ``merge_policy.PolicyDecision``
 is the live merge-policy classification of one change against ``policy.yaml``,
 and the two are genuinely different questions ("may this PR merge" versus "does
-this article hold"). One name for two meanings in one ``src/`` is exactly what
-ADR-0053 forbids, and this is the layer whose whole job is vocabulary, so the
-new type took the new name rather than collapsing into the old one or churning
-a live actuator this change was not scoped to touch.
+this article hold"). ADR-0143's Consequences anticipate exactly this: "#11749
+must either name its type differently or make the collision deliberate; it must
+not silently shadow the existing one." One name for two meanings in one ``src/``
+is what ADR-0053 forbids, and this is the layer whose whole job is vocabulary,
+so the new type took the new name rather than collapsing into the old one or
+churning a live actuator this change was not scoped to touch.
 
 ``StandardDecision`` and not ``ArticleDecision``: the type is keyed by
 ``(standard, subject)`` and carries a ``standard`` field, so it is named after
