@@ -21,7 +21,7 @@ inherits the entire operating model.
                 │  takes specs through the lifecycle:      │
                 │    triage → discover → shape → plan →    │
                 │    implement → review → HITL → merge     │
-                │  governed by the four standards below    │
+                │  governed by the standards below         │
                 └──────────────────┬───────────────────────┘
                                    │  PR → integration branch → release-candidate → main
                                    ▼
@@ -38,23 +38,34 @@ following standards. The **product** ships when the standards are satisfied.
 The operator's job is to design, not to micromanage production. Anything
 the factory can do for itself, the factory should do for itself.
 
-## The four kernel standards
+## The kernel standards
 
-These four standards together constitute the factory's operating contract.
-Every HydraFlow-format repo gets the full set; together they describe how
-the factory takes a spec from intent to production.
+These standards together constitute the factory's operating contract. Every
+HydraFlow-format repo gets the full set; together they describe how the
+factory takes a spec from intent to production.
 
+The table is not a reading list — it is bound to `STANDARDS_DIRS` in
+[`src/onboarding/kernel_writer.py`](../../../src/onboarding/kernel_writer.py),
+which is what the stamper actually copies into a new repo, by
+`tests/architecture/test_factory_operation_standard_drift.py`. A standard the
+table names that the stamper does not ship, or a standard the stamper ships
+that the table does not name, reddens there. Both directions, because a
+kernel index that is missing a kernel standard is the same defect as one that
+promises a standard the child repo never receives.
+
+<!-- standards:kernel -->
 | Standard | Doc | One-line role |
 |---|---|---|
-| **Factory autonomy** | [`docs/standards/factory_autonomy/`](../factory_autonomy/README.md) | When agents act vs ask. Tractable + reversible work is factory work, not a permission gate. |
-| **Test pyramid** | [`docs/standards/testing/`](../testing/README.md) | Three layers (unit + MockWorld scenario + sandbox e2e) gate every load-bearing feature. |
+| **ADR enforcement** | [`docs/standards/adr_enforcement/`](../adr_enforcement/README.md) | An Accepted ADR must bind to a check that really asserts its decision, or carry a justified exemption; the debt ratchet only falls. |
 | **Branch protection** | [`docs/standards/branch_protection/`](../branch_protection/README.md) | Two-tier branch model (integration + release reference) with versioned ruleset configs and a re-applyable apply-script. |
-| **Ports and loops** | [`docs/standards/ports-and-loops/`](../ports-and-loops/README.md) | Per-port and per-loop expectations: kill-switch convention, test requirements, and structural contract for every port and background loop in the fleet. |
-| **Self-modifying maintenance** | this document, §"Self-modifying maintenance mode" | Recurring patterns become caretaker loops; lessons get encoded back into the kernel. |
-| **Ports and loops** | [`docs/standards/ports-and-loops/`](../ports-and-loops/README.md) | Structural contract for every hexagonal port and background loop: kill-switch, fake, wiki, ADR, standard row. |
+| **Factory autonomy** | [`docs/standards/factory_autonomy/`](../factory_autonomy/README.md) | When agents act vs ask. Tractable + reversible work is factory work, not a permission gate. |
+| **Factory operation** | [`docs/standards/factory_operation/`](../factory_operation/README.md) | This document. How the standards compose into one operating contract, and how the factory absorbs its own recurring patterns. |
+| **Ports and loops** | [`docs/standards/ports-and-loops/`](../ports-and-loops/README.md) | Structural contract for every hexagonal port and background loop: kill-switch, fake, wiki term, ADR, registry row. |
+| **Test pyramid** | [`docs/standards/testing/`](../testing/README.md) | Three layers (unit + MockWorld scenario + sandbox e2e) gate every load-bearing feature. |
+<!-- /standards:kernel -->
 
-The factory's behavior emerges from **all four** running together. Removing
-any one breaks the contract:
+The factory's behavior emerges from **all of them** running together.
+Removing any one breaks the contract:
 
 - Without **autonomy**: the operator becomes the bottleneck the factory
   was designed to eliminate.
@@ -62,8 +73,33 @@ any one breaks the contract:
   production, which means the operator becomes the test suite.
 - Without **branch protection**: bad code reaches the release reference,
   which means the operator becomes QA.
-- Without **self-modifying maintenance**: every recurring failure mode
-  is solved manually, which means the operator becomes the fix-up bot.
+- Without **ADR enforcement**: decisions stay prose, and the code drifts
+  away from them with nothing going red.
+- Without **ports and loops**: each new port or loop is a bespoke shape a
+  reviewer has to catch by eye.
+- Without **self-modifying maintenance** (this document,
+  §"Self-modifying maintenance mode"): every recurring failure mode is
+  solved manually, which means the operator becomes the fix-up bot.
+
+### Standards that stay here
+
+`docs/standards/` also holds standards that are deliberately **not** stamped
+into child repos. Each is a rule about instruments this repo builds and other
+repos do not have; shipping the prose without the machinery would hand a new
+repo a rule with no gate behind it — the exact shape both of them exist to
+prevent. The same test binds this table to the complement of `STANDARDS_DIRS`,
+so a new standard directory cannot appear in neither table.
+
+<!-- standards:local -->
+| Standard | Doc | Why it stays here |
+|---|---|---|
+| **Parametrised guards** | [`docs/standards/parametrised_guards/`](../parametrised_guards/README.md) | Its gate is a registry of *this* repo's architecture guards (`tests/architecture/guard_enumeration_registry.py`). A repo with no such guards inherits an empty rule. |
+| **Vitals vs conformance** | [`docs/standards/vitals_conformance/`](../vitals_conformance/README.md) | Its enforcement is a classification of this repo's own checks plus an egress-blocked CI lane. Stamping the prose without the lane ships a claim nothing answers. |
+<!-- /standards:local -->
+
+Moving one of these into the kernel means shipping its enforcement too:
+add it to `STANDARDS_DIRS`, move its row to the kernel table, and the test
+above stays green. Moving only the row does not.
 
 ## Self-modifying maintenance mode
 
@@ -158,11 +194,11 @@ beside (config) the kernel.
 This kernel doc lives in one place by name and is referenced from:
 
 - `CLAUDE.md` Knowledge Lookup index (the "Cross-cutting standards" row)
-- Each of the four sub-standards' "Discoverability" section
+- Each of the sub-standards' "Discoverability" section
 - `docs/wiki/dark-factory.md` (the operating-contract wiki entry)
 
 A future audit (extension of `principles_audit_loop`) should check that
-every HydraFlow-format repo has all four sub-standards present and the
+every HydraFlow-format repo has all of `STANDARDS_DIRS` present and the
 kernel references resolve.
 
 ## Enforced by
@@ -174,6 +210,5 @@ also checks that every cited path is still **collected by pytest** — a
 gate that exists but never runs is a citation to nothing.
 
 <!-- standard:enforced-by -->
-_None yet — this standard's prose is not yet bound to a machine-readable
-artifact. Filed as #11751._
+- `tests/architecture/test_factory_operation_standard_drift.py`
 <!-- /standard:enforced-by -->
