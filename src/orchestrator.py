@@ -134,7 +134,30 @@ class HydraFlowOrchestrator(
         self._running = False
         # Pipeline gate — when False, pipeline loops sleep until play is pressed.
         # Defaults to True for headless mode / tests; dashboard passes False.
-        self._pipeline_enabled = pipeline_enabled
+        #
+        # An UNTARGETED runtime is forced into that same state (#11786). Without
+        # a repo there is nothing for the pipeline to act on, and `config.py`
+        # already promises exactly this: "HYDRAFLOW_GITHUB_REPO is unset, so the
+        # triage/plan/implement/review/HITL loops will idle."
+        #
+        # It did not idle. `run()` called `prs.ensure_labels_exist()` during
+        # bootstrap, `_assert_repo` raised on the empty slug, and the exception
+        # left `run()` — so the runtime died and was restarted every ~25s,
+        # indefinitely, while the dashboard reported `status: idle`. Measured
+        # 2026-08-30: a clean boot crashlooped until a repo was configured.
+        #
+        # Disabling the gate is the fix rather than a try/except because this
+        # mode already exists and is documented three lines below in `run()`:
+        # "the orchestrator only runs background workers — no issue fetching,
+        # no repo sanitization, no session." That is the promised idle.
+        self._pipeline_enabled = pipeline_enabled and bool(config.repo)
+        if pipeline_enabled and not config.repo:
+            logger.warning(
+                "Pipeline gate forced OFF: no repo is configured, so there is "
+                "nothing to triage, plan, implement or review. Background "
+                "workers still run. Set HYDRAFLOW_GITHUB_REPO=<owner>/<repo> "
+                "to give the factory work."
+            )
         # Auth failure flag — set when a loop crashes due to AuthenticationError
         self._auth_failed = False
         # Credit pause — set when API credits are exhausted
