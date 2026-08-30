@@ -149,6 +149,29 @@ def compute(
     )
 
 
+def _is_nested_fixture_suite(rel: Path) -> bool:
+    """Is *rel* inside a fixture REPOSITORY's own test tree, not this suite?
+
+    ``tests/trust/adversarial/cases/<case>/{before,after}/tests/`` holds
+    miniature repositories the trust corpus runs a judge against. They are
+    FIXTURE DATA, and a before/after pair is *supposed* to carry near-identical
+    tests — that duplication is the corpus working, not the suite rotting. The
+    sensor counted it as a cross-file duplicate, which no amount of suite
+    cleanup could ever resolve: "fixing" the erosion would break the corpus.
+
+    *rel* is already relative to the suite root, so this repo's own modules
+    never contain a ``tests`` segment (``architecture/test_x.py``). A nested
+    one means we descended into a bundled repository carrying its own
+    ``tests/``.
+
+    Detected by SHAPE rather than by naming the adversarial directory: a
+    literal path prefix would be a predicate narrower than its subject and
+    would stop matching the day a fixture corpus is added elsewhere, with
+    nothing going red.
+    """
+    return "tests" in rel.parts
+
+
 def collect_tests(
     tests_dir: Path, globs: tuple[str, ...] | None = None
 ) -> dict[str, str]:
@@ -182,6 +205,8 @@ def collect_tests(
         for path in tests_dir.rglob(glob):
             rel = path.relative_to(tests_dir)
             if _SKIP_DIRS.intersection(rel.parts[:-1]):
+                continue
+            if _is_nested_fixture_suite(rel):
                 continue
             key = (Path(tests_dir.name) / rel).as_posix()
             out[key] = path.read_text(encoding="utf-8", errors="replace")

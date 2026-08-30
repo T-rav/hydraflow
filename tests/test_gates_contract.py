@@ -17,12 +17,29 @@ def test_contract_has_no_adr_gate() -> None:
     assert "ADR gate" not in names
 
 
-def test_contract_main_requires_fourteen_contexts() -> None:
+def test_contract_main_requires_the_umbrella_and_the_rc_gates() -> None:
+    """`main` is gated by the CI Gate umbrella plus the RC-promotion checks.
+
+    Asserts the SET, not a count. This test was
+    ``test_contract_main_requires_fourteen_contexts`` and pinned ``== 14``,
+    which says nothing about WHICH contexts and rots on any change to the
+    contract — including #11727's, which replaced ten individually-enumerated
+    lanes with the umbrella that fans all of them in via ``needs:`` (and five
+    more main never required).
+    """
     contract = load_gates(CONTRACT)
-    main = [
-        g for g in contract.gates if "main" in g.required_on and g.status == "active"
-    ]
-    assert len(main) == 14
+    main = {
+        g.name
+        for g in contract.gates
+        if "main" in g.required_on and g.status == "active"
+    }
+    assert main == {
+        "CI Gate",
+        "Resolve RC PR",
+        "Browser Scenarios",
+        "Trust Gate (adversarial corpus, fixture mode)",
+        "Sandbox (rc/* promotion PR full suite)",
+    }
 
 
 def test_contract_staging_requires_baseline_plus_ci_gate() -> None:
@@ -32,10 +49,16 @@ def test_contract_staging_requires_baseline_plus_ci_gate() -> None:
     ]
     # "CI Gate" is the aggregate ci-gate job that blocks red staging PRs
     # (incident #10672); it must be declared so a reconcile can't strip it.
+    # The two `quality (<dir>)` matrix legs are declared here rather than on
+    # main (#11727): they are no-ops that gate nothing, but they are DYNAMIC
+    # matrix contexts, and `test_required_matrix_contexts` needs them required
+    # somewhere to keep watching for an orphaned leg.
     assert {g.name for g in staging} == {
         "Detect Changes",
         "discover-projects",
         "CI Gate",
+        "quality (.)",
+        "quality (src/ui)",
     }
 
 

@@ -117,8 +117,10 @@ def test_real_contract_declares_repo_profile():
 
 def test_real_contract_output_unchanged_by_filtering():
     c = load_gates(CONTRACT)
-    assert len(resolve_contexts(c, "main")) == 14
+    assert len(resolve_contexts(c, "main")) == 5
     assert resolve_contexts(c, "staging") == [
+        "quality (.)",
+        "quality (src/ui)",
         "Detect Changes",
         "discover-projects",
         "CI Gate",
