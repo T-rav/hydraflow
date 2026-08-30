@@ -34,12 +34,11 @@ _ANCHOR = re.compile(r'^code_anchor:\s*"([^"]+)"', re.M)
 #: an entry may be removed once the collision is resolved, and nothing may
 #: ever be added — a new collision is the thing this file exists to stop.
 #:
-#: ``JudgeVerdict`` is `convergence_gate.JudgeVerdict` (a gate's approval:
-#: approve/feedback/signatures, and the anchor `verdict.md` points at) and
-#: `models.JudgeVerdict` (the verification judge's full evaluation:
-#: issue_number/criteria_results/...). Two genuinely different concepts; the
-#: rename is a naming decision across ~10 consumers, tracked separately.
-GRANDFATHERED: frozenset[str] = frozenset({"JudgeVerdict"})
+#: EMPTY as of #11782: `JudgeVerdict` was the sole entry, and the
+#: verification-judge class is now `models.VerificationJudgeVerdict`, leaving
+#: `convergence_gate.JudgeVerdict` — the class `docs/wiki/terms/verdict.md`
+#: actually anchors — as the only holder of the bare word.
+GRANDFATHERED: frozenset[str] = frozenset()
 
 
 def _anchored_class_names() -> dict[str, str]:

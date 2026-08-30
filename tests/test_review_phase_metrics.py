@@ -19,11 +19,11 @@ from events import EventType
 from models import (
     CriterionResult,
     CriterionVerdict,
-    JudgeVerdict,
     LoopResult,
     PRInfo,
     ReviewVerdict,
     Task,
+    VerificationJudgeVerdict,
 )
 from review_phase import ReviewPhase
 from tests.conftest import (
@@ -981,7 +981,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
@@ -1005,7 +1005,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
@@ -1028,7 +1028,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
@@ -1064,7 +1064,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue.id,
             verification_instructions="1. Run app\n2. Check output",
         )
@@ -1079,7 +1079,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue.id,
             summary="2/3 criteria passed, instructions: ready",
         )
@@ -1094,7 +1094,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create(id=99)
         pr = PRInfoFactory.create(number=200, issue_number=99)
-        verdict = JudgeVerdict(issue_number=99)
+        verdict = VerificationJudgeVerdict(issue_number=99)
 
         result = phase._get_judge_result(issue, pr, verdict)
 
@@ -1107,7 +1107,7 @@ class TestGetJudgeResult:
         phase = make_review_phase(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(issue_number=issue.id)
+        verdict = VerificationJudgeVerdict(issue_number=issue.id)
 
         result = phase._get_judge_result(issue, pr, verdict)
 
