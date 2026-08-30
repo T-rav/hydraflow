@@ -51,24 +51,54 @@ types. `_flow_stopped` is a pure function: no I/O, no mutation, no phase-specifi
 threshold. There is no parameterization to drift — either the three bodies match or they don't, and
 they match.
 
-## Origin: three independent extractions, not one copy-paste
+## Origin: one flow-DAG refactor series, relocated by three later decompositions
 
 Epic #11797 describes the sensor finding as `_flow_stopped` being "independently introduced in
-three modules in a single merged change (`53b4905..5402592`)." Direct history check narrows that:
-the three sites were each introduced by a **separate** god-class decomposition PR within that range,
-not one commit:
+three modules in a single merged change (`53b4905..5402592`)." Direct history check (`git log
+--format='%h %ad %s' --date=short -S'def _flow_stopped(state: FlowState) -> bool:' --all --
+src/`) shows the opposite of independent introduction: the function was written **once per
+phase, by a single four-PR series**, on one day, then merely relocated by three later,
+unrelated PRs.
 
-- `ab3e5d18` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) → review site
-- `2f440e80` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) → plan site
-- `1dfa9210` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) → implement site
+**Introduction — 2026-07-26, the #10682 flow-DAG (ADR-0111) rollout, four commits ~2.5 hours
+apart, same author:**
 
-Each module's docstring independently states the same rationale: pull the flow's module-level
-surface (constants, edge guards) into a `_common`/mixin-adjacent module so sibling mixins can share
-it without importing the parent phase file back (an import-cycle constraint of the decomposition
-pattern, not a behavioral one). `plan_phase_common.py`'s docstring even says the extraction was done
-"VERBATIM" from the pre-decomposition `plan_phase.py`. This is a convergent pattern applied three
-times by the same decomposition convention — not evidence of three people independently reasoning
-about `_flow_stopped`'s semantics and coincidentally landing on the same four lines.
+- `c5fecf36` (13:36) — refactor(implement): run implement as a flow (DAG) + no-progress abort (P2 of #10682) (#10694) → wrote `_flow_stopped` into `src/implement_phase.py`
+- `5ff50054` (14:23) — refactor(plan): run plan as a flow (DAG) on the primitive (P3a of #10682) (#10696) → wrote it into `src/plan_phase.py`
+- `48e918ab` (15:23) — refactor(review): run review as a flow (DAG) on the primitive (P3b of #10682) (#10700) → wrote it into `src/review_phase/_phase.py`
+- `e1c0336e` (16:06) — refactor(triage): run triage as a flow (DAG) on the primitive (P3c of #10682) (#10702) → wrote it into `src/triage_phase.py` (the fourth, out-of-scope site — see [Scope note](#recommendation))
+
+Each of these four commits re-expresses that phase's worker body on the `src/flows` `Flow`
+primitive per ADR-0111, and each one hand-writes the same four-line guard as part of that
+rewrite — one author applying one template four times in an afternoon, not four people
+independently converging on identical code.
+
+**Relocation — 2026-08-21/22, three unrelated god-class decompositions, nearly a month later:**
+
+- `ab3e5d18` (08-21) — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) → moved the review site from `review_phase/_phase.py` to `review_phase/_flow.py`
+- `2f440e80` (08-22) — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) → moved the plan site from `plan_phase.py` to `plan_phase_common.py`
+- `1dfa9210` (08-22) — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) → moved the implement site from `implement_phase.py` to `implement_phase/_common.py`
+
+These three PRs are not introductions, they are moves: each commit message and diff backs the
+"VERBATIM" claim `plan_phase_common.py`'s docstring already makes — `2f440e80` reports 57/57
+`PlanPhase` method bodies AST-identical before/after, `1dfa9210` reports 0 missing/0 extra/0
+changed across 61+133 methods, `ab3e5d18` reports the same shape for `ReviewPhase`. None of the
+three diffs touches `_flow_stopped`'s logic; they relocate the existing four lines into a
+`_common`/`_flow`/mixin module so sibling mixins can import them without an import cycle back
+through the parent phase file — a decomposition-pattern constraint, not a behavioral one.
+
+**Epic #11797's `53b4905..5402592` range is the relocation window, not the introduction
+window.** That range brackets the three August decompositions, which is why the sensor observed
+three near-simultaneous appearances of `_flow_stopped` at new file paths — the guard itself was
+already a month old at that point, having lived in `plan_phase.py`, `implement_phase.py`, and
+`review_phase/_phase.py` since the July 26 flow-DAG rollout. "Three modules in a single merged
+change" describes where the code landed, not when or how many times it was written.
+
+This origin reinforces the identical-classification below rather than complicating it: there is
+no independent-introduction story to reconcile against the byte-identical bodies. A single
+template was written four times on 2026-07-26 by one author in one refactor series, then carried
+verbatim — by three separate but equally mechanical relocations — into the files this issue
+compares.
 
 ## Usage context per site
 
