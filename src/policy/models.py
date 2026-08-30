@@ -37,7 +37,7 @@ from adr_conformance_remediation import RemediationAction
 # Re-exported: the decision seam's Charter IS the repo's charter. The
 # minimal placeholder that used to live here existed only because the
 # real loader had not landed (#11748); it has.
-from charter_model import Articles, Charter  # noqa: F401
+from charter_model import Articles, Charter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
@@ -80,6 +80,21 @@ class Fact(BaseModel):
         the extra key on parse and equality is over the declared fields.
         """
         return f"{self.standard}|{self.subject}|{self.key}"
+
+
+#: ``Articles``/``Charter`` are re-exported from :mod:`charter_model` — the
+#: decision seam's charter IS the repo's charter. Declared in ``__all__``
+#: rather than suppressed with `noqa`: the suppressions ratchet only shrinks.
+__all__ = [
+    "Articles",
+    "Charter",
+    "DecisionEngine",
+    "DecisionStatus",
+    "Fact",
+    "FactValue",
+    "RemediationAction",
+    "StandardDecision",
+]
 
 
 class DecisionStatus(StrEnum):

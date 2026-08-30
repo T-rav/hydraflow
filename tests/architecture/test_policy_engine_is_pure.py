@@ -112,6 +112,13 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
     # "does not constrain the transitive import graph" caveat is exactly the
     # gap that would open. The loader half (yaml, file reads) stays in
     # charter.py and is deliberately absent.
+    # The data-governance vocabulary: three constants and one regex predicate.
+    # Extracted from prompt_gate (which writes audit records) precisely so a
+    # pure module could ask "is this a valid data class?" without dragging I/O.
+    "src/data_class_vocabulary.py": {
+        "__future__": frozenset({"annotations"}),
+        "re": frozenset({"compile"}),
+    },
     "src/charter_model.py": {
         "__future__": frozenset({"annotations"}),
         # The data-governance vocabulary, extracted to its own pure module so
@@ -160,6 +167,7 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
 #: ``eval``, ``compile``, ``__file__`` and ``__builtins__`` are absent for
 #: that reason — the engine has no root and must not learn one.
 _PURE_BUILTINS: dict[str, frozenset[str]] = {
+    "src/data_class_vocabulary.py": frozenset({"bool", "str"}),
     "src/charter_model.py": frozenset(
         {
             "TypeError",
@@ -210,6 +218,7 @@ _PURE_BUILTINS: dict[str, frozenset[str]] = {
 #: this list, and every smuggled binding reddens because no smuggler's name is
 #: on it.
 _PURE_ANNOTATIONS: dict[str, frozenset[str]] = {
+    "src/data_class_vocabulary.py": frozenset({"bool", "str"}),
     "src/charter_model.py": frozenset(
         {
             "Any",
@@ -260,6 +269,27 @@ _PURE_ANNOTATIONS: dict[str, frozenset[str]] = {
         }
     ),
 }
+
+#: First-party modules a pure source may import WITHOUT being pinned pure
+#: itself, because only pure SYMBOLS are taken from them and those symbols are
+#: already pinned one-by-one in :data:`_PURE_IMPORTS`. The module as a whole
+#: touches the world.
+#:
+#: This list is the residual, and it sits on the LOUD side on purpose: a new
+#: first-party dependency that is neither pinned pure nor named here fails
+#: :func:`test_first_party_dependencies_are_pinned_pure_or_declared_mixed`.
+#: Adding a name here is a deliberate, reviewable act; forgetting to is a red
+#: test, never a silent widening.
+_MIXED_DEPENDENCIES: frozenset[str] = frozenset(
+    {
+        # Two enums are taken; its live_debt/accepted_adrs half scans the repo.
+        "adr_conformance",
+        # An enum and one pure classifier.
+        "adr_conformance_remediation",
+        # Two vocabulary constants; the rest of the module is collectors.
+        "policy.facts",
+    }
+)
 
 #: The modules that must stay pure — the *subjects* of this file, derived from
 #: the pins so the three lists cannot drift apart.
@@ -1119,3 +1149,49 @@ def test_string_annotation_rule_sees_a_quoted_annotation() -> None:
     ]
     assert _string_annotations(ast.parse("x: list['Deferred'] = []")) == ["Deferred"]
     assert _string_annotations(ast.parse("x: int = 1")) == []
+
+
+def _first_party_path(dotted: str) -> str | None:
+    """Repo-relative path for *dotted* if it is a first-party module."""
+    stem = dotted.replace(".", "/")
+    for candidate in (f"src/{stem}.py", f"src/{stem}/__init__.py"):
+        if (REPO / candidate).is_file():
+            return candidate
+    return None
+
+
+def test_first_party_dependencies_are_pinned_pure_or_declared_mixed() -> None:
+    """A pure source's first-party imports are pinned pure, or declared mixed.
+
+    Without this, the import pin is a check on SPELLING only: adding
+    ``charter_model`` to a pure source's allow-list would let that source
+    import a module nothing holds pure, and the hole would move one level down
+    rather than close. This file's own docstring names that gap — "it does not
+    constrain the transitive import graph" — and this closes the first level of
+    it, which is the level an allow-list edit can open.
+
+    It is also the machinery that WITNESSES every member of
+    :data:`_PURE_SOURCES` that does not live under ``src/policy/``: drop
+    ``src/charter_model.py`` from the pin and this reddens, because
+    ``policy/models.py`` still imports it and it is not a declared mixed
+    dependency. ``tests/architecture/test_guard_enumeration_gate.py`` requires
+    exactly that witness.
+    """
+    unpinned: list[str] = []
+    for source, modules in _PURE_IMPORTS.items():
+        for dotted in modules:
+            path = _first_party_path(dotted)
+            if path is None:  # stdlib or third-party
+                continue
+            if path in _PURE_SOURCES or dotted in _MIXED_DEPENDENCIES:
+                continue
+            unpinned.append(f"{source} -> {dotted} ({path})")
+
+    assert not unpinned, (
+        "a pure source imports a first-party module that is neither pinned "
+        "pure nor declared a mixed dependency:\n  "
+        + "\n  ".join(sorted(unpinned))
+        + "\nEither add the module to _PURE_IMPORTS (and expect its own pins to "
+        "redden until filled), or add it to _MIXED_DEPENDENCIES with a reason "
+        "naming which pure symbols are taken from it."
+    )

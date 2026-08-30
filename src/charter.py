@@ -86,7 +86,7 @@ import yaml
 
 # Re-exported so every existing `from charter import X` keeps working; the
 # model itself lives in a pure module the decision seam can also import.
-from charter_model import (  # noqa: F401
+from charter_model import (
     ACTORS_DIRECTORY,
     CHARTER_FILENAME,
     CHARTER_SCHEMA_VERSION,
@@ -121,6 +121,45 @@ from charter_model import (  # noqa: F401
     _as_str_tuple,
     _parse_actors,
 )
+
+#: Re-exported from :mod:`charter_model`. Declared rather than suppressed:
+#: a `noqa` would be a new entry in the suppressions ratchet, which only
+#: shrinks, and `__all__` states the same intent as an export contract.
+__all__ = [
+    "ACTORS_DIRECTORY",
+    "Articles",
+    "Artifacts",
+    "CHARTER_FILENAME",
+    "CHARTER_SCHEMA_VERSION",
+    "Charter",
+    "CharterError",
+    "CharterFinding",
+    "DEFAULT_ASSURANCE",
+    "FINDING_COVERAGE_FLOOR",
+    "FINDING_LEGACY_RAILS_MANIFEST",
+    "FINDING_MISSING_ARTIFACT",
+    "FINDING_MISSING_GATE_SCRIPT",
+    "FINDING_MISSING_LAYER",
+    "FINDING_MISSING_STANDARD",
+    "FINDING_UNCHECKABLE_CHARTER",
+    "FINDING_UNKNOWN_LAYER",
+    "FINDING_UNKNOWN_STANDARD",
+    "KNOWN_LAYERS",
+    "LEGACY_RAILS_FILENAME",
+    "LocalArticle",
+    "NON_FATAL_FINDING_CLASSES",
+    "Purpose",
+    "RAILS_SCHEMA_VERSION",
+    "RailsBlock",
+    "STANDARDS_DIR",
+    "UNCHECKABLE_NOTHING_DECLARED",
+    "UNCHECKABLE_REGISTRY_UNAVAILABLE",
+    "_as_float",
+    "_as_int",
+    "_as_mapping",
+    "_as_str_tuple",
+    "_parse_actors",
+]
 
 
 @dataclass(frozen=True)

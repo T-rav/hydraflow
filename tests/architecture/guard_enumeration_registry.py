@@ -649,7 +649,19 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         unclassified, _missing = policy_purity._delta(  # noqa: SLF001
             policy_modules_on_disk, classified
         )
-        return member in unclassified
+        if member in unclassified:
+            return True
+        # A pinned source OUTSIDE src/policy/ (charter_model, and the
+        # vocabulary module it imports) is not on the policy rglob, so the
+        # classification delta above cannot see it leave. Its witness is
+        # test_first_party_dependencies_are_pinned_pure_or_declared_mixed: a
+        # pure source still imports it, and it is not a declared mixed
+        # dependency, so dropping it from the pin reddens there instead.
+        for modules in policy_purity._PURE_IMPORTS.values():  # noqa: SLF001
+            for dotted in modules:
+                if policy_purity._first_party_path(dotted) == member:  # noqa: SLF001
+                    return dotted not in policy_purity._MIXED_DEPENDENCIES  # noqa: SLF001
+        return False
 
     return (
         # --- SUBJECTS, derived ------------------------------------------
