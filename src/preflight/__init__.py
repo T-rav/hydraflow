@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from config import HydraFlowConfig
 
@@ -214,17 +215,10 @@ def _check_stray_quality_processes(config: HydraFlowConfig) -> CheckResult:
     host loses an operator's work, and the safe action here is to be LOUD.
     """
     del config  # host-wide by nature; nothing repo-scoped to consult
-    try:
-        result = subprocess.run(  # noqa: S603, S607
-            ["ps", "-eo", "pid,etime,command"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    result = _run_fixed_argv(["ps", "-eo", "pid,etime,command"], timeout=15, text=True)
+    if result is None:
         return CheckResult(
-            "stray-quality", CheckStatus.WARN, f"could not enumerate processes: {exc}"
+            "stray-quality", CheckStatus.WARN, "could not enumerate processes"
         )
     if result.returncode != 0:
         return CheckResult(
@@ -249,23 +243,43 @@ def _check_stray_quality_processes(config: HydraFlowConfig) -> CheckResult:
     )
 
 
+def _run_fixed_argv(
+    argv: list[str], *, timeout: int, text: bool = False
+) -> subprocess.CompletedProcess[Any] | None:
+    """Run a FIXED argv for a preflight probe; ``None`` if it could not run.
+
+    One place in this module invokes a subprocess, so one suppression covers
+    it. Each caller adding its own bandit suppression grows the suppressions
+    ratchet, and that ratchet only shrinks — the `ps` sweep (#11820) hit
+    exactly that.
+
+    ``argv`` is always a literal list built in this file. Nothing here is
+    caller-supplied, which is why the rule is suppressed rather than the input
+    sanitised: there is no input.
+    """
+    try:
+        return subprocess.run(  # noqa: S603, S607
+            argv,
+            check=False,
+            capture_output=True,
+            text=text,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _check_docker() -> CheckResult:
     """Check that Docker is available and responsive."""
     if not shutil.which("docker"):
         return CheckResult("docker", CheckStatus.FAIL, "docker not found on PATH")
 
-    try:
-        result = subprocess.run(  # noqa: S603, S607
-            ["docker", "info"],
-            check=False,
-            capture_output=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            return CheckResult("docker", CheckStatus.PASS, "Docker daemon reachable")
-        return CheckResult("docker", CheckStatus.FAIL, "Docker daemon not reachable")
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return CheckResult("docker", CheckStatus.FAIL, f"Docker check failed: {exc}")
+    result = _run_fixed_argv(["docker", "info"], timeout=10)
+    if result is None:
+        return CheckResult("docker", CheckStatus.FAIL, "Docker check could not run")
+    if result.returncode == 0:
+        return CheckResult("docker", CheckStatus.PASS, "Docker daemon reachable")
+    return CheckResult("docker", CheckStatus.FAIL, "Docker daemon not reachable")
 
 
 def _check_agent_cli(tool: str) -> CheckResult:
