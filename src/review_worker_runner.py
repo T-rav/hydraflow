@@ -11,10 +11,16 @@ made structural rather than promised.
 **The prompt is built from a :class:`review_evidence.ReviewEvidence` and nothing
 else.** :func:`build_review_worker_prompt` takes a role and an evidence value —
 that is its whole signature, so there is no parameter through which an
-implementer's prompt, transcript or reasoning could arrive. This runner never
-sees a :class:`models.Task` either: the only description of the issue it can
-reach is the canonical one, which is also the only issue identity it holds, so
-there is no second source to disagree with the first. ADR-0137's review boundary
+implementer's prompt, transcript or reasoning could arrive. The runner's DISPATCH path never
+sees a :class:`models.Task` either: :meth:`ReviewWorkerRunner.dispatch` and
+``_run_child`` take an evidence value and a label list, so the only description
+of the issue that can reach a prompt is the canonical one.
+:meth:`ReviewWorkerRunner.gather` does take a ``Task`` — reading the issue's
+four canonical fields off it is its whole job — and carries none of it further.
+The distinction is stated rather than smoothed over: an earlier wording here
+said this module "never sees a ``Task``" full stop, which was true only until
+the evidence seam existed, and prose asserting a guard that is not there is the
+exact shape #11543 spent four passes removing from these files. ADR-0137's review boundary
 says a reviewer *"receives canonical issue/plan/diff/test evidence, never
 implementer-private context"*, and the way to make private context unreachable
 is to give it no path, not to filter it on the way past.
@@ -45,14 +51,20 @@ added.
 
 Air-gap: the spawn goes through ``runner_utils.run_lightweight_agent``, which
 this module names lexically, so it carries a ``SANDBOX_SEAMS`` row. The seam
-kind is ``config_disable``. Today nothing constructs this runner at all (see
-:class:`ReviewWorkerRunner`), so the row is declared **ahead** of the wiring
-rather than after it — a seam added with the actuator cannot be forgotten with
-the actuator, which is how s51/s56/s57 each wedged a sandbox. The two pins that
-will hold it once it is wired are already in place: the sandbox forces
-``execution_runtime=stage_subprocess``, under which nothing constructs a
+kind is ``config_disable``. The row was declared **ahead** of the wiring rather
+than after it — a seam added with the actuator cannot be forgotten with the
+actuator, which is how s51/s56/s57 each wedged a sandbox — and the two pins
+that hold it are in place now that the runner is constructed: the sandbox
+forces ``execution_runtime=stage_subprocess``, under which nothing constructs a
 director, and it clears ``fable_review_canary_repo``, so even a director that
-did exist would find every boundary outside the canary's bound.
+did exist would find every boundary outside the canary's bound. Both are
+asserted by running the override rather than by matching its source text
+(``tests/architecture/test_director_no_authority.py``).
+
+The git reads :meth:`ReviewWorkerRunner.gather` takes also go through the
+injected ``SubprocessRunner``, which the sandbox replaces wholesale — the same
+route ``implement_worker_runner.measure``'s probes take, and the reason neither
+is caught by that file's spawn-primitive guard.
 """
 
 from __future__ import annotations
@@ -85,6 +97,7 @@ from review_broker import (
     review_canary_covers,
     reviewer_independence_refusal,
 )
+from review_evidence import review_probes
 from runner_utils import run_lightweight_agent
 from worker_receipts import (
     artifact_digest,
@@ -94,16 +107,29 @@ from worker_receipts import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
+    from pathlib import Path
 
     from agent_cli import AgentTool
     from config import HydraFlowConfig
     from driver_contracts import DriverLease, DriverPhase, WorkerDispatchRequest
     from execution import SimpleResult, SubprocessRunner
     from gateway_mint_client import GatewayControlClient
+    from models import Task
     from plan_broker import PlanRouteDecision
     from review_evidence import ReviewEvidence
 
 logger = logging.getLogger("review_worker_runner")
+
+EVIDENCE_TIMEOUT_SECONDS = 30.0
+"""Wall-clock ceiling on ONE git read taken while assembling evidence.
+
+Separate from ``fable_review_worker_timeout_seconds``, which bounds the
+children. These reads happen before any child exists and are awaited inside the
+allocator tick like the rest of the boundary, so an unresponsive git must fail
+the probe rather than hold the fleet. The same figure as
+``implement_worker_runner.MEASURE_TIMEOUT_SECONDS``, because it is the same
+kind of read against the same kind of tree.
+"""
 
 MAX_ARTIFACT_CHARS = 20000
 """How much of a child's reply is RETAINED. A receipt is evidence, not a store."""
@@ -311,22 +337,26 @@ class ReviewWorkerArtifact:
 class ReviewWorkerRunner:
     """Dispatches admitted REVIEW requests as fresh children and mints receipts.
 
-    **Nothing constructs one yet, and that is stated rather than implied.**
-    ``FableDirector`` has no ``review_dispatcher``, ``service_registry`` has no
-    builder for it, and ``CanaryDispatchMixin._dispatch`` has no REVIEW branch —
-    so arming ``fable_review_canary_repo`` today dispatches nothing. The
-    blocker is upstream of the wiring: no code anywhere produces a
-    :class:`review_evidence.ReviewEvidence`, and a runner wired in ahead of its
-    evidence would have to assemble the diff and the test result itself, which
-    is the boundary #11543's next seam owns. Landing the actuator first is the
-    same order P5's three pure seams landed in.
+    **This is now wired, and arming the dial dispatches a real reviewer.**
+    ``service_registry._build_review_worker_runner`` builds one,
+    ``FableDirector`` takes it as ``review_dispatcher``, and
+    ``CanaryDispatchMixin._dispatch_review`` runs it for a REVIEW boundary
+    inside the canary's bound. The blocker that kept the actuator inert was
+    upstream of the wiring — nothing produced a
+    :class:`review_evidence.ReviewEvidence` — and :meth:`gather` is that seam:
+    canonical evidence assembled from the issue, its published comments and the
+    worktree, through the injected runner, and from nothing else.
 
-    When it *is* wired, it must be built **unconditionally** under
-    ``execution_runtime=fable_director``, armed or not, and gated only by
-    ``review_broker.review_canary_covers``. That is #11657's correction
-    inherited rather than relearned: making construction conditional on the
-    dial reads as a stronger default-off proof and is in fact the bug that
-    makes *arming* require a restart while only disarming stays live.
+    It is built **unconditionally** under ``execution_runtime=fable_director``,
+    armed or not, and gated only by ``review_broker.review_canary_covers``.
+    That is #11657's correction inherited rather than relearned: making
+    construction conditional on the dial reads as a stronger default-off proof
+    and is in fact the bug that makes *arming* require a restart while only
+    disarming stays live. Default-off is proven where it is actually true —
+    Classic and the deterministic controller build no director and therefore no
+    actuator, and a director whose dial is empty dispatches nothing, proven
+    differentially in ``tests/regressions/test_issue_11543_outside_the_slice.py``
+    rather than by an absent object.
     """
 
     def __init__(
@@ -335,12 +365,20 @@ class ReviewWorkerRunner:
         config: HydraFlowConfig,
         route_policy_revision: str,
         runner: SubprocessRunner,
+        base_ref: str,
         spawn: ReviewWorkerSpawn | None = None,
         gateway_client: GatewayControlClient | None = None,
     ) -> None:
         self._config = config
         self._route_policy_revision = route_policy_revision
         self._gateway_client = gateway_client
+        # What the reviewed snapshot's base is measured against. The
+        # repository's own base branch rather than a hardcoded ``main``, for
+        # ``implement_worker_runner``'s reason: ADR-0042's two-tier model cuts
+        # an agent branch from ``staging`` on this fleet, and a merge-base
+        # against the wrong ref would move every time the other branch did —
+        # which for a reviewer means the diff it is shown is not the change.
+        self._base_ref = base_ref
         # Injected from the composition root and REQUIRED, never built inside a
         # method: that is what lets the sandbox substitute a
         # ``FakeSubprocessRunner``, and what #11602/#11615 cost this repo twice
@@ -368,6 +406,98 @@ class ReviewWorkerRunner:
         assert the default IS the real seam — an injection point nobody checks
         is a seam in name only."""
         return self._spawn
+
+    # -- the evidence ------------------------------------------------------
+
+    async def gather(self, task: Task) -> ReviewEvidence:
+        """This issue's canonical evidence, read once per covered REVIEW boundary.
+
+        The seam #11543 was blocked on. Until it existed, a wired runner would
+        have had to assemble the diff itself at the point of dispatch, which is
+        precisely how implementer-private context arrives — not by anyone
+        deciding to pass it, but because the assembling code already had it in
+        hand.
+
+        **Every source here is a public pipeline artefact.** The issue and its
+        published comments, the worktree the change is in, and the declared
+        test command. The :class:`models.Task` is read for four canonical
+        fields and is not carried any further: ``dispatch`` takes an evidence
+        value and a label list, so there is no parameter through which the rest
+        of the task — its metadata, its links, a director's rationale — could
+        follow the evidence into a prompt.
+
+        Total, like ``implement_worker_runner.measure``: a probe that does not
+        answer yields ``unmeasured`` rather than raising, because an exception
+        here would travel up into an observer that must not be able to fail the
+        boundary it watches. :func:`review_evidence.snapshot_is_unreadable` is
+        what turns that into a refusal, at the director, before a spawn.
+
+        All four reads are one pass. A base read taken a second after a HEAD
+        read describes a tree that never existed, and a reviewer told to judge
+        "one exact snapshot" must be given one snapshot rather than two moments
+        that agree by luck.
+        """
+        from review_evidence import build_review_evidence, canonical_review_source
+
+        path = self._config.workspace_path_for_issue(task.id)
+        reads: dict[str, str] = {}
+        if path.is_dir():
+            for token, argv in review_probes(self._base_ref):
+                answer = await self._git(path, argv)
+                if answer is None:
+                    # One failed probe unmeasures the whole bundle rather than
+                    # leaving a hole in it. A reviewer shown a real diff beside
+                    # a blank HEAD would be told the snapshot is unknown by a
+                    # field it has no reason to read, having already been told
+                    # what the change is.
+                    reads = {}
+                    break
+                reads[token] = answer
+        return build_review_evidence(
+            canonical_review_source(
+                issue_number=task.id,
+                issue_title=task.title,
+                issue_body=task.body,
+                issue_comments=task.comments,
+                reads=reads,
+                # The declared command, not a re-run. Running the suite here
+                # would put ``make test`` inside the allocator tick, which is
+                # the hot-path defect this codebase has already fixed twice.
+                # What a reviewer is owed is the command its judgement is
+                # about; a recorded RESULT is the next seam, and the prompt
+                # already instructs a reviewer to name a missing test result as
+                # a finding rather than assume one.
+                test_command=self._config.test_command,
+            )
+        )
+
+    async def _git(self, cwd: Path, argv: Sequence[str]) -> str | None:
+        """One git read through the injected runner. ``None`` when it did not answer.
+
+        The injected ``SubprocessRunner``, which is what lets an air-gapped
+        scenario replace every git read wholesale — the same reason
+        ``implement_worker_runner.measure`` goes through it rather than reaching
+        a process directly, and why neither is caught by the spawn-primitive
+        guard in ``tests/architecture/test_director_no_authority.py``.
+        """
+        try:
+            result = await self._runner.run_simple(
+                ["git", "-C", str(cwd), *argv], timeout=EVIDENCE_TIMEOUT_SECONDS
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "review_worker_runner: evidence probe %s failed: %s", argv[0], exc
+            )
+            return None
+        if result.returncode != 0:
+            logger.info(
+                "review_worker_runner: evidence probe %s returned %d",
+                argv[0],
+                result.returncode,
+            )
+            return None
+        return result.stdout or ""
 
     async def dispatch(
         self,
@@ -881,7 +1011,7 @@ exactly this and nothing else:
 {_bullets(payload["changed_files"])}
 </changed_files>
 
-<diff branch="{payload["branch"]}" base="{payload["base_sha"]}" head="{payload["head_sha"]}">
+<diff branch="{_attr(payload["branch"])}" base="{_attr(payload["base_sha"])}" head="{_attr(payload["head_sha"])}">
 {_bounded_diff(str(payload["diff"]))}
 </diff>
 

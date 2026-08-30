@@ -303,6 +303,53 @@ class TermStore:
         return load_term_file(path)
 
 
+#: Any bare identifier. The class-shape question is answered by
+#: :func:`is_class_like_name`, not by the scanner, so the two can be reasoned
+#: about separately — a scanner narrow enough to encode the naming convention
+#: is a scanner that cannot see the names that break it.
+CLASS_NAME_CANDIDATE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+
+
+def is_class_like_name(name: str) -> bool:
+    """Two or more capitals AND at least one lowercase.
+
+    The canonical spelling of "this token is a multi-word type name" for
+    ADR-0053 tooling. Deliberately NOT "a capital, then a lowercase run, then
+    another capital" (``[A-Z][a-z]+[A-Z][A-Za-z]+``), which is the shape
+    everything here reached for first and which cannot express a LEADING
+    ACRONYM — so it silently skips ``ADRReviewPanel``, ``PRPort``,
+    ``LLMClient``, ``HITLRunner``, ``BGWorkerManager``, ``JSONFormatter``,
+    ``CIMonitorLoop``: 71 of this repo's public ``src/`` classes, and the very
+    naming convention the house uses most.
+
+    The two-capital rule still excludes ALL-CAPS prose words (``OK``,
+    ``SIGKILL``, ``README``, ``TDD``) and ordinary capitalised words
+    (``Proposed``, ``GitHub`` is two capitals and does qualify, which is
+    correct — it is a proper name the wiki should carry).
+
+    Live at two call sites that must agree: the term-prose citation
+    regression (``tests/regressions/test_term_prose_citations_resolve.py``)
+    and the audit's P2.9 ubiquitous-language coverage check
+    (``scripts/hydraflow_audit/checks/p2_architecture.py``). One predicate,
+    not three spellings of it.
+    """
+    return sum(1 for char in name if char.isupper()) >= 2 and any(
+        char.islower() for char in name
+    )
+
+
+def class_like_names(text: str) -> list[str]:
+    """Every distinct class-like token in *text*, in order of first appearance."""
+    seen: set[str] = set()
+    names: list[str] = []
+    for match in CLASS_NAME_CANDIDATE.finditer(text):
+        name = match.group(0)
+        if is_class_like_name(name) and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
 def build_symbol_index(src_root: Path) -> dict[str, list[str]]:
     """Walk *.py under src_root, return {ClassName: [path:ClassName, ...]}.
 

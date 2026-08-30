@@ -38,9 +38,12 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import re
+from pathlib import Path
 
 import pytest
 
+from pytest_collection import collected_test_globs, is_collected_test_file
 from tests.architecture.guard_enumeration_registry import (
     DENY_LIST_FLOORS,
     DERIVED_SUBJECT_NAMES,
@@ -48,7 +51,6 @@ from tests.architecture.guard_enumeration_registry import (
     GuardedEnumeration,
     call_witness,
     declared_deny_lists,
-    import_witness,
     os_witness,
     parametrised_module_sequences,
     proposal_keys_read_by_parser,
@@ -428,7 +430,6 @@ def _live_deny_lists() -> dict[str, frozenset[str]]:
         "test_director_no_authority.FORBIDDEN_MUTATIONS": director.FORBIDDEN_MUTATIONS,
         "test_director_no_authority.CONVERGENCE_WRITES": director.CONVERGENCE_WRITES,
         "test_director_no_authority.WRITE_PRIMITIVES": director.WRITE_PRIMITIVES,
-        "test_director_no_authority._SPAWN_MACHINERY": director._SPAWN_MACHINERY,  # noqa: SLF001
         "test_director_no_authority._OS_SPAWN_EXACT": director._OS_SPAWN_EXACT,  # noqa: SLF001
         # A tuple in the source — `str.startswith` takes one — coerced here
         # purely so the set algebra below has a set. The coercion is NOT what
@@ -454,17 +455,18 @@ _WITNESS_SUBJECTS: dict[str, tuple[str, str]] = {
         "src/review_worker_runner.py",
         "call",
     ),
-    "test_director_no_authority._SPAWN_MACHINERY": ("src/plan_broker.py", "import"),
     "test_director_no_authority._OS_SPAWN_EXACT": ("src/plan_broker.py", "os"),
     "test_director_no_authority._OS_SPAWN_PREFIXES": ("src/plan_broker.py", "os"),
 }
 
 #: Extractor name -> the witness that runs it. A dict rather than a chain of
 #: conditionals: #11724 made this a three-way choice, and the two-way `if/else`
-#: it replaced would have silently routed a new extractor to `import_witness`.
+#: it replaced would have silently routed a new extractor to the wrong one.
+#: #11753 took the import extractor back out — the import rule is DECLARED
+#: now, and the per-member sweep that proves each denied name is really seen
+#: moved with it, to ``test_a_denied_module_is_visible_to_the_live_machinery``.
 _WITNESSES = {
     "call": call_witness,
-    "import": import_witness,
     "os": os_witness,
 }
 
@@ -548,11 +550,10 @@ _UNDENIED_NAME = "a_call_no_deny_list_has_ever_carried"
 #: Rows where :data:`_UNDENIED_NAME` cannot falsify anything, and the name that
 #: can (#11724).
 #:
-#: The shared constant works for the four rows whose extractor is maximally
-#: permissive: ``called_names`` records ANY call name and ``import_roots`` ANY
-#: import root, so the fabricated name reaches the ``& deny_list`` step and the
-#: intersection is what answers False. Delete the intersection and those rows
-#: redden.
+#: The shared constant works for the rows whose extractor is maximally
+#: permissive: ``called_names`` records ANY call name, so the fabricated name
+#: reaches the ``& deny_list`` step and the intersection is what answers False.
+#: Delete the intersection and those rows redden.
 #:
 #: ``os_witness`` is different, and assuming parity made this control vacuous
 #: for its two rows. ``reachable_os_spawns`` is gated internally by
@@ -645,6 +646,115 @@ def test_the_guard_can_actually_see_every_denied_name(name: str, member: str) ->
 
 STANDARD = "docs/standards/parametrised_guards/README.md"
 
+#: Anything TEST-SHAPED, with whatever decoration the prose put around it: a
+#: path prefix, a ``.py`` extension, a dotted attribute, a pytest node id, a
+#: hyphen. Deliberately wider than what this gate can read, because its only
+#: job is to make an anchor VISIBLE — a token that reaches ``_ANCHOR`` and
+#: fails to parse is reported, and one that never matched here would be
+#: invisible instead. ``\b`` keeps ``pytest_addoption`` and friends out.
+_TEST_SHAPED = re.compile(r"[A-Za-z0-9_.:/-]*\btest_[A-Za-z0-9_.:/-]*")
+
+#: The separators this repo's written anchors are built from: path slashes,
+#: dotted attributes, pytest node ids, and the ``pytest:`` prefix the ADR
+#: ``Enforced by:`` lines use.
+_ANCHOR_SEPARATOR = re.compile(r"::|[/.:]")
+
+#: What each separated segment must be. Mixed-case on purpose:
+#: ``[a-z0-9_]+`` -- the previous spelling -- could not express
+#: ``test_no_private_VALUE_reaches_the_reviewer``, which is a real test at
+#: tests/test_review_evidence.py, and in the same stroke could not express
+#: ``test_this_does_not_exist_ANYWHERE``, which is not.
+_ANCHOR_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _anchor_names(raw: str) -> list[str] | None:
+    """The tests *raw* names, or ``None`` when it is not a readable anchor.
+
+    Readable means every separated segment is an identifier, which admits
+    all four shapes this repo actually writes -- a bare name, a module path,
+    a dotted attribute, a pytest node id, with or without a ``pytest:``
+    prefix -- and names EVERY test-shaped segment, so
+    ``tests/x/test_a.py::TestB::test_c`` is two anchors, not one.
+
+    What it refuses is the shape this whole class of defect is made of: a
+    LINE NUMBER (``tests/x/test_a.py:855``). ``855`` is not an identifier, so
+    a line anchor is now unreadable rather than invisible -- which is the
+    right answer in a repo with a measured 100% rot rate on line anchors.
+    """
+    segments = _ANCHOR_SEPARATOR.split(raw)
+    if not all(_ANCHOR_SEGMENT.fullmatch(segment) for segment in segments):
+        return None
+    return [segment for segment in segments if segment.startswith("test_")]
+
+
+#: Below this the sweep has stopped reading the standard. Ten distinct
+#: anchors are written there today and the previous predicate observed six;
+#: a floor rather than an equality so naming another test is not a test edit,
+#: but high enough that a re-narrowing of the grammar reddens here first.
+_MIN_STANDARD_ANCHORS = 9
+
+
+def standard_anchors(text: str) -> tuple[set[str], list[str]]:
+    """Every test the prose names, and every anchor it could not read.
+
+    The second half is the point. The previous predicate required a BACKTICK,
+    then ``test_``, then ``[a-z0-9_]+``, then a closing backtick, and treated
+    everything else as ABSENCE -- so an anchor it could not parse was a silent
+    skip rather than a failure. Nine test-shaped tokens were written in the
+    standard and it observed six: two were path-qualified inside their
+    backticks (tests/architecture/test_x.py), one sat in bare parentheses.
+    Appending a backticked ``test_this_does_not_exist_ANYWHERE`` to the file
+    left this gate green; the all-lowercase spelling of the same ghost
+    reddened it correctly.
+
+    So an unreadable-but-test-shaped token is now returned for the caller to
+    fail on. Measured against every markdown file under docs/ the grammar
+    reads 1862 anchors and refuses 6 -- and all 6 are line-number anchors,
+    the class this change exists to stop being invisible.
+    """
+    named: set[str] = set()
+    unreadable: list[str] = []
+    for match in _TEST_SHAPED.finditer(text):
+        raw = match.group(0).strip("./:-")
+        if not raw or "://" in raw:
+            # A URL is a link, not an anchor. Excluded by the ONE shape no
+            # written anchor here has -- a scheme separator -- rather than by
+            # narrowing the scan, which is how the previous predicate lost
+            # sight of three real anchors.
+            continue
+        names = _anchor_names(raw)
+        if names is None:
+            unreadable.append(raw)
+            continue
+        named.update(names)
+    return named, unreadable
+
+
+def _tests_defined_under(root: Path) -> set[str]:
+    """Every test function and test module name pytest would collect.
+
+    The globs come from ``pytest_collection`` -- pytest's own configured
+    ``python_files`` -- rather than a hardcoded ``test_*.py``. A second
+    spelling here would be blind to ``tests/regressions/regression_*.py``,
+    which is 103 files this repo really does collect (#9801/#9872), so an
+    anchor naming one of them would read as "that test does not exist" and
+    fail a correctly-written standard. Same defect class as #11777, which
+    is where that module comes from.
+    """
+    globs = collected_test_globs(root)
+    defined: set[str] = set()
+    for path in sorted((root / "tests").rglob("*.py")):
+        if not is_collected_test_file(path.name, globs):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        defined.update(
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        )
+        defined.add(path.stem)
+    return defined
+
 
 def test_every_test_the_standard_names_exists() -> None:
     """A written anchor pointing at nothing is this standard's own subject.
@@ -659,29 +769,96 @@ def test_every_test_the_standard_names_exists() -> None:
     still resolves" is exactly the class the repo has already been bitten by
     at eleven path-membership sites and every line-window assertion it had.
     """
-    import re
-
     from tests.architecture.guard_enumeration_registry import repo_root
 
     root = repo_root()
     text = (root / STANDARD).read_text(encoding="utf-8")
-    named = set(re.findall(r"`(test_[a-z0-9_]+)`", text))
+    named, unreadable = standard_anchors(text)
 
-    assert named, f"{STANDARD} names no tests; this guard has no subject"
+    assert not unreadable, (
+        f"{STANDARD} carries test-shaped anchors this gate cannot read: "
+        f"{unreadable}. An unreadable anchor used to be indistinguishable "
+        "from no anchor, which is how an anchor pointing at nothing stayed "
+        "green. Fix the spelling, or widen _ANCHOR — never leave it silent."
+    )
+    assert len(named) >= _MIN_STANDARD_ANCHORS, (
+        f"{STANDARD} names only {len(named)} tests ({sorted(named)}); the "
+        "predicate has stopped seeing its subject"
+    )
 
-    defined: set[str] = set()
-    for path in sorted((root / "tests").rglob("test_*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        defined.update(
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        )
-        defined.add(path.stem)
-
-    missing = sorted(named - defined)
+    missing = sorted(named - _tests_defined_under(root))
     assert not missing, (
         f"{STANDARD} names these tests, and none of them exist: {missing}. "
         "Fix the name or write the test — a standard whose anchors do not "
         "resolve is the defect it documents."
     )
+
+
+def test_the_anchor_grammar_reads_every_shape_the_prose_uses() -> None:
+    """Known-positives, asserted on the predicate rather than on the corpus.
+
+    A clean corpus cannot tell a working predicate from a blind one: the
+    previous spelling swept the real standard clean while missing three of
+    its nine anchors.
+    """
+    named, unreadable = standard_anchors(
+        "`test_plain_name` `tests/architecture/test_path_qualified.py` "
+        "`test_dotted_owner.SOME_TABLE` (test_in_bare_parens) "
+        "call test_with_trailing_parens() and `test_with_an_UPPERCASE_word`. "
+        "Enforced by: pytest:tests/test_prefixed_module.py and the node id "
+        "`tests/test_node_module.py::TestHolder::test_node_case`."
+    )
+
+    assert unreadable == []
+    assert named == {
+        "test_plain_name",
+        "test_path_qualified",
+        "test_dotted_owner",
+        "test_in_bare_parens",
+        "test_with_trailing_parens",
+        "test_with_an_UPPERCASE_word",
+        "test_prefixed_module",
+        "test_node_module",
+        "test_node_case",
+    }
+
+
+def test_an_uppercase_test_name_is_not_invisible() -> None:
+    """``[a-z0-9_]+`` could not express a real test in this repo.
+
+    ``test_no_private_VALUE_reaches_the_reviewer`` lives at
+    tests/test_review_evidence.py. Under the old predicate the standard could
+    have cited it and this gate would have said nothing either way.
+    """
+    named, unreadable = standard_anchors("`test_no_private_VALUE_reaches_the_reviewer`")
+
+    assert unreadable == []
+    assert named == {"test_no_private_VALUE_reaches_the_reviewer"}
+
+
+def test_an_anchor_the_grammar_cannot_read_is_reported_not_skipped() -> None:
+    """Known-negatives. Silent-skip was the whole defect.
+
+    The LINE-NUMBER anchor is the one that matters: it is the shape 27 of the
+    prompt-audit registry's own anchors had rotted into, and the shape the
+    old predicate could not see at all.
+    """
+    named, unreadable = standard_anchors(
+        "`tests/architecture/test_line_anchored.py:855` and "
+        "`test_hyphen-form` and `test_double..dot` and `test_ok`"
+    )
+
+    assert named == {"test_ok"}
+    assert unreadable == [
+        "tests/architecture/test_line_anchored.py:855",
+        "test_hyphen-form",
+        "test_double..dot",
+    ]
+
+
+def test_a_word_merely_containing_test_underscore_is_not_an_anchor() -> None:
+    """The other direction: the widened scan must not invent anchors."""
+    named, unreadable = standard_anchors("pytest_addoption and conftest.py")
+
+    assert named == set()
+    assert unreadable == []

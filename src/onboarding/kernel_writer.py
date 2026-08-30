@@ -34,13 +34,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from ci_scaffold import QUALITY_GATE_CONTEXT, generate_workflow
+from ci_scaffold import generate_workflow
 from makefile_scaffold import generate_makefile
 from onboarding.kernel_lock import (
     KERNEL_LOCK_FILENAME,
     build_lock,
     dump_lock,
 )
+from onboarding.kernel_templates import render
 from package_resources import checkout_path
 
 METHODOLOGY_REF = "docs/methodology/onboarding-hydraflow-format-repos.md"
@@ -212,141 +213,50 @@ def _makefile(spec: KernelSpec) -> str:
 
 
 def _pyproject(spec: KernelSpec) -> str:
-    return f"""[project]
-name = "{spec.name}"
-version = "0.1.0"
-description = "{spec.description}"
-requires-python = ">=3.11"
-dependencies = []
-
-[project.scripts]
-{spec.entry} = "{spec.pkg}.cli:main"
-
-[project.optional-dependencies]
-dev = [
-  "pytest>=8",
-  "pytest-cov>=5",
-  "ruff>=0.6",
-  "pyright>=1.1.380",
-  "bandit>=1.7",
-]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
-
-[tool.coverage.run]
-source = ["src"]
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-"""
+    return render(
+        "pyproject.toml.tmpl",
+        description=spec.description,
+        entry=spec.entry,
+        name=spec.name,
+        pkg=spec.pkg,
+    )
 
 
 def _cli(spec: KernelSpec) -> str:
-    # No ``if __name__ == "__main__"`` guard: the CLI is exposed via
-    # ``[project.scripts]`` and the guard would be an uncovered line that drops
-    # the fresh kernel below its own coverage floor (breaking green-day-one).
-    return f'''"""CLI entrypoint for {spec.name}."""
-
-from __future__ import annotations
-
-
-def main() -> None:
-    """Run the placeholder V1 command."""
-    print("{spec.name} ready")
-'''
+    return render("cli.py.tmpl", name=spec.name)
 
 
 def _smoke_test(spec: KernelSpec) -> str:
-    return f'''"""Smoke test proving the CLI is importable and runs."""
-
-from __future__ import annotations
-
-from {spec.pkg}.cli import main
-
-
-def test_main_smoke(capsys) -> None:
-    main()
-
-    assert "{spec.name} ready" in capsys.readouterr().out
-'''
+    return render("test_smoke.py.tmpl", name=spec.name, pkg=spec.pkg)
 
 
 def _claude_md(spec: KernelSpec) -> str:
     """CLAUDE.md skeleton with explicit template-owned vs product-owned sections."""
-    return f"""# {spec.title}
-
-<!-- TEMPLATE-OWNED: managed by the HydraFlow kernel. Re-stamping with --force may -->
-<!-- overwrite this block. Put project-specific rules in the PRODUCT-OWNED section. -->
-
-## Quick rules (always apply)
-
-- **Never commit to `{spec.main_branch}`.** All changes go through a worktree branch and a PR.
-- **PRs target `{spec.staging_branch}`, not `{spec.main_branch}`.**
-- **Always run `make quality`** before declaring work complete.
-- **Always write unit tests before committing.**
-- Knowledge lives in [`docs/wiki/`](docs/wiki/index.md); decisions in [`docs/adr/`](docs/adr/README.md).
-- Cross-cutting rules live in [`docs/standards/`](docs/standards/).
-
-## Commands
-
-- `make quality` — full quality gate
-- `make test` — tests + coverage
-- `make audit DIR=.` — HydraFlow-format structural audit
-
-<!-- END TEMPLATE-OWNED -->
-
-<!-- PRODUCT-OWNED: your project's load-bearing rules and glossary. The kernel -->
-<!-- writer never overwrites anything below this marker. -->
-
-## Domain rules
-
-{spec.safety_block}
-
-## Glossary
-
-<!-- Add ubiquitous-language terms here. -->
-"""
+    return render(
+        "CLAUDE.md.tmpl",
+        main_branch=spec.main_branch,
+        safety_block=spec.safety_block,
+        staging_branch=spec.staging_branch,
+        title=spec.title,
+    )
 
 
 def _readme(spec: KernelSpec) -> str:
-    return f"""# {spec.title}
-
-{spec.description}
-
-## Architecture
-
-| Layer | Path |
-|---|---|
-| Application package | `src/{spec.pkg}` |
-| Tests | `tests/` |
-| ADRs | `docs/adr/` |
-| Wiki | `docs/wiki/` |
-| Standards | `docs/standards/` |
-
-## Quality
-
-```
-make quality
-```
-
-## Safety
-
-{spec.safety_block}
-"""
+    return render(
+        "README.md.tmpl",
+        description=spec.description,
+        pkg=spec.pkg,
+        safety_block=spec.safety_block,
+        title=spec.title,
+    )
 
 
 def _env_example(spec: KernelSpec) -> str:
-    return f"""# {spec.title} — environment configuration
-# Domain-specific variables belong at the top of this block.
-LOG_LEVEL=INFO
-"""
+    return render("env.example.tmpl", title=spec.title)
 
 
 def _gitignore() -> str:
-    return ".venv/\n__pycache__/\n.coverage\ncoverage.xml\n.pytest_cache/\ndist/\n.hydraflow/\n"
+    return render("gitignore.tmpl")
 
 
 def _quality_workflow(spec: KernelSpec) -> str:
@@ -361,187 +271,44 @@ def _quality_workflow(spec: KernelSpec) -> str:
 
 
 def _issue_template(spec: KernelSpec, name: str) -> str:
-    return f"""---
-name: {name}
-about: HydraFlow-managed {name.lower()}
-labels: {spec.label_prefix}-find
----
-
-## Context
-
-## Expected outcome
-"""
+    return render(
+        "issue_template.md.tmpl",
+        kind=name,
+        kind_lower=name.lower(),
+        label_prefix=spec.label_prefix,
+    )
 
 
 def _pull_request_template(spec: KernelSpec) -> str:
-    return f"""## Summary
-
-## Verification
-
-- [ ] `make quality`
-
-## Domain safety
-
-{spec.safety_block}
-"""
+    return render("pull_request_template.md.tmpl", safety_block=spec.safety_block)
 
 
 def _adr_readme() -> str:
-    return (
-        "# Architecture Decision Records\n\n"
-        "| ADR | Title | Status |\n"
-        "|---|---|---|\n"
-        "| [0001](0001-initial-architecture.md) | Initial architecture | Accepted |\n"
-    )
+    return render("adr_README.md.tmpl")
 
 
 def _adr_0001(spec: KernelSpec) -> str:
-    return f"""# ADR-0001: Initial architecture
-
-## Status
-
-Accepted
-
-## Context
-
-{spec.description}
-
-## Decision
-
-Start with a small Python package, a strict `make quality` gate, and
-HydraFlow-compatible project hygiene (labels, standards, wiki, ADRs).
-
-## Consequences
-
-The repo is auditable by `make audit` from day one and ready for the factory.
-"""
+    return render("adr_0001.md.tmpl", description=spec.description)
 
 
 def _wiki_index(spec: KernelSpec) -> str:
-    topic_rows = "\n".join(f"- [{topic}](./{topic}.md)" for topic in WIKI_TOPICS)
-    return f"""# {spec.title} Wiki
-
-Karpathy-pattern knowledge base. The RepoWikiLoop keeps these topic pages fresh.
-
-## Topics
-
-{topic_rows}
-"""
+    return render("wiki_index.md.tmpl", title=spec.title)
 
 
 def _wiki_topic(spec: KernelSpec, topic: str) -> str:
-    return f"""# {topic.title()}
-
-Seed page for the `{topic}` topic. Entries accrue here as the project grows;
-this file is product-owned and is never clobbered by re-stamping.
-"""
+    return render("wiki_topic.md.tmpl", topic=topic, topic_title=topic.title())
 
 
 def _prep_script(spec: KernelSpec) -> str:
-    return f'''"""Preparation checks for {spec.name}."""
-
-from __future__ import annotations
-
-import argparse
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Preparation checks.")
-    parser.add_argument(
-        "--decimal-purity",
-        action="store_true",
-        help="Run the decimal-purity AST guard over money paths.",
-    )
-    parser.parse_args()
-
-
-if __name__ == "__main__":
-    main()
-'''
+    return render("prep.py.tmpl", name=spec.name)
 
 
 def _branch_protection_script(spec: KernelSpec) -> str:
-    return f'''"""Apply branch protection to this repository (GitHub classic protection API).
-
-Free-tier private repos cannot use the modern Rulesets API, so this kernel ships
-the classic ``PUT /repos/{{owner}}/{{repo}}/branches/{{branch}}/protection`` variant
-(onboarding doc friction F2). Requires an authenticated ``gh`` CLI with admin on
-the repo.
-
-The canonical required check is the ``{QUALITY_GATE_CONTEXT}`` aggregator job in
-``.github/workflows/quality.yml`` -- NOT the ``quality`` job itself. ``quality``
-is matrix-expanded over a matrix discovered at runtime, so GitHub only ever
-reports ``quality (<project_dir>)`` check runs; a bare ``quality`` context would
-sit at "expected -- waiting for status" and block every PR forever, and the leg
-names cannot be enumerated at stamp time because the leg set is not known until
-``discover-projects`` runs (#11715).
-
-Usage::
-
-    python scripts/setup_branch_protection.py            # dry-run
-    python scripts/setup_branch_protection.py --apply
-    python scripts/setup_branch_protection.py --repo owner/name --apply
-"""
-
-from __future__ import annotations
-
-import argparse
-import json
-import subprocess
-import sys
-
-REQUIRED_CHECKS = ["{QUALITY_GATE_CONTEXT}"]
-PROTECTED_BRANCHES = ["{spec.main_branch}", "{spec.staging_branch}"]
-
-
-def _repo_slug(explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    url = subprocess.check_output(
-        ["git", "remote", "get-url", "origin"], text=True
-    ).strip()
-    for prefix in ("https://github.com/", "git@github.com:"):
-        if url.startswith(prefix):
-            slug = url[len(prefix) :]
-            return slug.removesuffix(".git")
-    raise SystemExit(f"could not derive owner/name from remote: {{url}}")
-
-
-def _protection_payload() -> dict:
-    return {{
-        "required_status_checks": {{"strict": True, "contexts": REQUIRED_CHECKS}},
-        "enforce_admins": True,
-        "required_pull_request_reviews": {{"required_approving_review_count": 0}},
-        "restrictions": None,
-    }}
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default=None, help="owner/name (default: git remote)")
-    parser.add_argument("--apply", action="store_true", help="apply (default: dry-run)")
-    args = parser.parse_args(argv)
-
-    slug = _repo_slug(args.repo)
-    payload = _protection_payload()
-    for branch in PROTECTED_BRANCHES:
-        endpoint = f"repos/{{slug}}/branches/{{branch}}/protection"
-        if not args.apply:
-            print(f"[dry-run] PUT {{endpoint}} <- {{json.dumps(payload)}}")
-            continue
-        subprocess.run(
-            ["gh", "api", "--method", "PUT", endpoint, "--input", "-"],
-            input=json.dumps(payload),
-            text=True,
-            check=True,
-        )
-        print(f"protected {{slug}}@{{branch}}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
+    return render(
+        "branch_protection.py.tmpl",
+        main_branch=spec.main_branch,
+        staging_branch=spec.staging_branch,
+    )
 
 
 def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Ownership]]:
@@ -631,57 +398,16 @@ def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Owners
     return plan
 
 
-_PERSONAS_METHODOLOGY_REF = "docs/methodology/councils-of-personas.md"
-
-
 def _agents_council_files(spec: KernelSpec) -> list[tuple[str, str, Ownership]]:
     """The councils-of-personas skeleton (#10949): four TEMPLATE-owned READMEs."""
-    agents = (
-        f"# {spec.title} — agents layer (councils of personas)\n\n"
-        "Chartered review chambers per the HydraFlow methodology: personas as\n"
-        "versioned contracts, chambers with bounded decision rights, ADR-style\n"
-        "decision records, and per-persona calibration. Full pattern:\n"
-        f"HydraFlow `{_PERSONAS_METHODOLOGY_REF}` (reference implementation:\n"
-        "T-rav/harvestd `agents/`).\n\n"
-        "- `personas/` — one contract file per persona.\n"
-        "- `council/` — the general chamber contract + one charter per chamber.\n"
-        "- `council/decisions/` — one numbered record per adjudication.\n"
-    )
-    personas = (
-        "# Persona contracts\n\n"
-        "One file per persona. Each contract carries: identity (what it looks\n"
-        "for, what it deliberately ignores), the exact structured verdict\n"
-        "format, `authority:` frontmatter (decide vs advise — default advise),\n"
-        "`feeds:` frontmatter (which chambers consume it), and kernel\n"
-        "boundaries (what it may never do: no merge authority, no money, no\n"
-        "editing its own contract). A persona whose output cannot be parsed\n"
-        "cannot be calibrated; an uncalibratable persona is noise.\n\n"
-        "**Vote honesty (mandatory):** seats on the same model substrate are\n"
-        "~1.x effective votes, never N. State it wherever seat counts appear.\n"
-    )
-    council = (
-        "# The Council — chamber charters\n\n"
-        "One charter per chamber: chair, seats, and a bounded decision right.\n"
-        "House rules (from the general contract):\n\n"
-        "- Seat verdicts BEFORE chair consolidation.\n"
-        "- Disagreement escalates by name; it is never averaged.\n"
-        "- No chamber creates; chambers review, adjudicate, record.\n"
-        "- No chamber holds money or merge authority — verdicts propose,\n"
-        "  the factory's gates and the human floor commit.\n\n"
-        f"Calibration rules live in HydraFlow `{_PERSONAS_METHODOLOGY_REF}`:\n"
-        "finding-survival rate per persona, fatigue budget, drift rule.\n"
-    )
-    decisions = (
-        "# Decision records\n\n"
-        "One numbered, ADR-style file per adjudication. The chair's closing\n"
-        "duty is the commit: **no committed record, no verdict.** This\n"
-        "directory listing IS the index — no hand-maintained tables.\n"
-    )
     return [
-        ("agents/README.md", agents, Ownership.TEMPLATE),
-        ("agents/personas/README.md", personas, Ownership.TEMPLATE),
-        ("agents/council/README.md", council, Ownership.TEMPLATE),
-        ("agents/council/decisions/README.md", decisions, Ownership.TEMPLATE),
+        (dest, render(f"council/{body}.tmpl", title=spec.title), Ownership.TEMPLATE)
+        for dest, body in (
+            ("agents/README.md", "agents_README.md"),
+            ("agents/personas/README.md", "personas_README.md"),
+            ("agents/council/README.md", "council_README.md"),
+            ("agents/council/decisions/README.md", "decisions_README.md"),
+        )
     ]
 
 

@@ -100,8 +100,11 @@ AGGREGATE_GATES: tuple[AggregateGate, ...] = (
     AggregateGate(
         test_path="tests/architecture/test_no_ignored_active_tests.py",
         subject=(
-            "skip/xfail/commented-out coverage across every .py under tests/ "
-            "(no allowance — the count must stay at zero)"
+            "skip/xfail/commented-out coverage across every pytest-collected "
+            "file under tests/ (python_files globs + conftest.py), against the "
+            "shrink-only DEFERRED_XFAILS set; everything outside that set must "
+            "stay at zero, and an entry inside it that no longer resolves fails "
+            "too"
         ),
         subject_roots=("tests",),
         evidence='TESTS_ROOT.rglob("*.py")',
@@ -111,6 +114,17 @@ AGGREGATE_GATES: tuple[AggregateGate, ...] = (
         subject="dead test-local classes across every test module under tests/",
         subject_roots=("tests",),
         evidence='_dead_test_local_classes(real_repo_root / "tests")',
+    ),
+    AggregateGate(
+        test_path="tests/architecture/test_mockworld_loop_scenario_ratchet.py",
+        subject=(
+            "every BaseBackgroundLoop subclass anywhere under src/ must be "
+            "driven by at least one scenario anywhere under tests/scenarios/, "
+            "vs the shrink-only grandfather snapshot in "
+            "tests/architecture/mockworld_loop_scenario_baseline.json"
+        ),
+        subject_roots=("src", "tests/scenarios"),
+        evidence="uncovered_loops()",
     ),
     AggregateGate(
         test_path="tests/architecture/test_duration_ratchet.py",

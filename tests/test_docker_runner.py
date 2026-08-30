@@ -10,8 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-docker = pytest.importorskip("docker", reason="docker package not installed")
-
 from config import Credentials, HydraFlowConfig
 from docker_runner import (
     DockerProcess,

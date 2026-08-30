@@ -463,11 +463,6 @@ class TestBgWorkerToggleEndpoint:
         assert data["enabled"] is False
         mock_orch.set_bg_worker_enabled.assert_called_once_with("memory_sync", False)
 
-    def test_route_is_registered(self, config, event_bus, state, tmp_path) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        paths = {route.path for route in router.routes if hasattr(route, "path")}
-        assert "/api/control/bg-worker" in paths
-
 
 # ---------------------------------------------------------------------------
 # /api/control/bg-worker/restart endpoint (supervisor restart-loop action)
@@ -475,13 +470,6 @@ class TestBgWorkerToggleEndpoint:
 
 
 class TestBgWorkerRestartEndpoint:
-    def test_restart_route_is_registered(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        paths = {route.path for route in router.routes if hasattr(route, "path")}
-        assert "/api/control/bg-worker/restart" in paths
-
     @pytest.mark.asyncio
     async def test_restart_returns_error_without_orchestrator(
         self, config, event_bus, state, tmp_path
@@ -555,13 +543,6 @@ class TestBgWorkerIntervalEndpoint:
         ep = find_endpoint(router, "/api/control/bg-worker/interval")
         assert ep is not None
         return ep, mock_orch
-
-    def test_interval_route_is_registered(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        paths = {route.path for route in router.routes if hasattr(route, "path")}
-        assert "/api/control/bg-worker/interval" in paths
 
     @pytest.mark.asyncio
     async def test_interval_update_succeeds_for_pr_unsticker(self, _endpoint) -> None:
@@ -757,13 +738,6 @@ class TestBgWorkerWatchdogTimeoutEndpoint:
         assert ep is not None
         return ep, mock_orch
 
-    def test_watchdog_timeout_route_is_registered(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        paths = {route.path for route in router.routes if hasattr(route, "path")}
-        assert "/api/control/bg-worker/watchdog-timeout" in paths
-
     @pytest.mark.asyncio
     async def test_watchdog_timeout_update_succeeds(self, _endpoint) -> None:
         endpoint, mock_orch = _endpoint
@@ -938,11 +912,6 @@ class TestClearCreditPauseEndpoint:
         assert data["status"] == "cleared"
         mock_orch.clear_credit_pause.assert_called_once()
 
-    def test_route_is_registered(self, config, event_bus, state, tmp_path) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        paths = {route.path for route in router.routes if hasattr(route, "path")}
-        assert "/api/control/clear-credit-pause" in paths
-
 
 # ---------------------------------------------------------------------------
 # /api/pipeline endpoint
@@ -1031,3 +1000,42 @@ class TestStartReusesWiredOrchestrator:
         assert response.status_code == 409
         assert "already running" in json.loads(response.body)["error"]
         assert captured == {}
+
+
+CONTROL_ROUTES = frozenset(
+    {
+        "/api/control/bg-worker",
+        "/api/control/bg-worker/interval",
+        "/api/control/bg-worker/restart",
+        "/api/control/bg-worker/trigger",
+        "/api/control/bg-worker/watchdog-timeout",
+        "/api/control/clear-credit-pause",
+        "/api/control/config",
+        "/api/control/credit-refresh",
+        "/api/control/settings-schema",
+        "/api/control/start",
+        "/api/control/status",
+        "/api/control/stop",
+    }
+)
+
+
+def test_every_control_route_is_registered(config, event_bus, state, tmp_path) -> None:
+    """The control surface is pinned as a SET, in both directions.
+
+    This replaces five separate "my route is registered" checks that each sat
+    in a different test class. Existence checks only ever fail one way: add a
+    sixth control route and nothing reddens, because no test was asked about
+    it. Comparing the whole set makes an unlisted route fail here, which is
+    the same both-directions rule the branch-protection and standards gates
+    use (#11723).
+    """
+    router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+    registered = {route.path for route in router.routes if hasattr(route, "path")}
+    control = {path for path in registered if path.startswith("/api/control/")}
+
+    assert control == set(CONTROL_ROUTES), (
+        "the registered control routes and CONTROL_ROUTES disagree:\n"
+        f"  registered but unlisted: {sorted(control - CONTROL_ROUTES)}\n"
+        f"  listed but unregistered: {sorted(CONTROL_ROUTES - control)}"
+    )

@@ -31,6 +31,13 @@ asserted, so it stops reading zero exactly when it stops being true; and
 — arming is per-repository and live, and reporting the preset's field would
 tell an operator with an armed canary that dispatch was not armed.
 
+#11543 made that field's own reading true again. It asked only the PLAN dial,
+which was the whole story at #11541 and was wrong by two dials by P5: an
+operator who armed the Implement or Review canary was told dispatch was not
+armed — the same lie the paragraph above rejects, arriving through a new dial
+rather than through the preset. It now answers over ``canaries_armed``, which
+carries one row per dial so the aggregate and the detail cannot disagree.
+
 Read-only. Nothing here can change a dial; the dials live on the settings
 screen, where the runtime dials are restart-required and the canary dial is
 not.
@@ -57,6 +64,13 @@ logger = logging.getLogger("hydraflow.dashboard")
 def _desired(config: HydraFlowConfig) -> dict[str, Any]:
     """What the operator asked for, straight off the config."""
     preset = resolve_preset(config.scheduling_model, config.execution_runtime)
+    # One row per canary dial, so the aggregate below and the detail cannot
+    # disagree about which boundary is live.
+    armed = {
+        "plan": config.fable_plan_canary_armed(),
+        "implement": config.fable_implement_canary_armed(),
+        "review": config.fable_review_canary_armed(),
+    }
     return {
         "preset": preset.name,
         "scheduling_model": config.scheduling_model.value,
@@ -68,14 +82,26 @@ def _desired(config: HydraFlowConfig) -> dict[str, Any]:
         # will be — reporting it here would tell an operator with an armed
         # canary that dispatch is not armed, which is the one thing this
         # endpoint exists to stop happening.
-        "director_dispatch_armed": config.fable_plan_canary_armed(),
+        # TRUE WHEN ANY CANARY IS ARMED, not when the Plan one is (#11543).
+        # It read ``fable_plan_canary_armed()`` alone while that was the only
+        # dial, and by P5 there are three — so an operator who armed the
+        # Implement or the Review canary was told dispatch was not armed,
+        # which is the exact failure the surrounding docstring says this field
+        # exists to prevent, one dial over. Derived from the per-dial map below
+        # rather than by re-listing the predicates, so a fourth canary reaches
+        # this answer by being added once.
+        "director_dispatch_armed": any(armed.values()),
+        "canaries_armed": armed,
         "plan_canary_repo": str(config.fable_plan_canary_repo or ""),
-        # The two dials above differ in liveness and an operator has to know
-        # which: selecting the runtime needs a restart, arming the canary does
-        # not, and a single restart_required flag over both would be false half
-        # the time.
+        "implement_canary_repo": str(config.fable_implement_canary_repo or ""),
+        "review_canary_repo": str(config.fable_review_canary_repo or ""),
+        # The runtime dial and the canary dials differ in liveness and an
+        # operator has to know which: selecting the runtime needs a restart,
+        # arming a canary does not, and a single restart_required flag over
+        # both would be false half the time.
         "restart_required": True,
         "plan_canary_restart_required": False,
+        "canary_restart_required": False,
     }
 
 

@@ -3,7 +3,7 @@ id: "01M15RKRY48S4039D4NPNPR963"
 name: "Articles"
 kind: "invariant"
 bounded_context: "shared-kernel"
-code_anchor: "src/charter.py:Articles"
+code_anchor: "src/charter_model.py:Articles"
 aliases: []
 related: []
 evidence: []

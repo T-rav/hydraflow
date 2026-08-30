@@ -48,8 +48,8 @@ from policy.facts import (
     conformance_facts,
 )
 from policy.models import (
+    Articles,
     Charter,
-    CharterArticles,
     DecisionEngine,
     DecisionStatus,
     Fact,
@@ -75,7 +75,7 @@ __all__ = [
     "STANDARD_ADR_CONFORMANCE",
     "STANDARD_ADR_ENFORCEMENT",
     "Charter",
-    "CharterArticles",
+    "Articles",
     "DecisionEngine",
     "DecisionEngineError",
     "DecisionStatus",

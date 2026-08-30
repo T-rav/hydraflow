@@ -28,7 +28,6 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-docker = pytest.importorskip("docker", reason="docker package not installed")
 
 from docker_runner import DockerRunner
 

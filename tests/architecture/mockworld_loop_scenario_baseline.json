@@ -1,0 +1,6 @@
+{
+  "//": "Frozen grandfather snapshot for the MockWorld loop-scenario ratchet (docs/standards/testing/README.md, enforced by tests/architecture/test_mockworld_loop_scenario_ratchet.py). Keys are BaseBackgroundLoop CLASS NAMES, not paths: a class name survives the module->package decomposition that silently re-keys a path-keyed baseline (src/path_membership.py). This is a MONOTONIC ratchet: the set of loops with no MockWorld scenario may only shrink. NEVER add an id to `baseline_snapshot` -- it is a frozen literal, and a NEW loop must ship a scenario. Pay a snapshot entry down by writing the scenario and moving the class name into `resolved`; live grandfathered = baseline_snapshot - resolved.",
+  "//scope": "The snapshot landed EMPTY, which is the honest state and not an oversight: at introduction all 64 BaseBackgroundLoop subclasses were already driven by at least one scenario (43 through the LoopCatalog by key, 21 by direct construction). The gate is therefore absolute on arrival. The list exists so that a future loop which genuinely cannot be scenario-driven has a reviewed, written place to say so, instead of the gate being deleted.",
+  "baseline_snapshot": [],
+  "resolved": []
+}

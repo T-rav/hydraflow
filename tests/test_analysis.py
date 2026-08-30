@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis import PlanAnalyzer
@@ -79,10 +81,33 @@ class TestExtractFilePaths:
         assert "config.py" in result
         assert "models.py" in result
 
-    def test_extract_file_paths_with_subdirectories(self) -> None:
-        section = "- `tests/test_models.py`: Test the models"
-        result = PlanAnalyzer._extract_file_paths(section)
-        assert "tests/test_models.py" in result
+    @pytest.mark.parametrize(
+        ("section", "expected"),
+        [
+            pytest.param(
+                "- `tests/test_models.py`: Test the models",
+                "tests/test_models.py",
+                id="subdirectories",
+            ),
+            pytest.param(
+                "Modify **path/to/file.py** for the change.",
+                "path/to/file.py",
+                id="bold",
+            ),
+            pytest.param(
+                "- `./src/main.py`: entry point",
+                "src/main.py",
+                id="strips_leading_dot_slash",
+            ),
+            pytest.param(
+                "### 1. `agent.py` — AgentRunner\nDesc",
+                "agent.py",
+                id="numbered_headings",
+            ),
+        ],
+    )
+    def test_extract_file_paths(self, section: str, expected: str) -> None:
+        assert expected in PlanAnalyzer._extract_file_paths(section)
 
     def test_extract_file_paths_deduplicates(self) -> None:
         section = "- `models.py`: once\n### `models.py`\nAgain"
@@ -92,21 +117,6 @@ class TestExtractFilePaths:
     def test_extract_file_paths_empty_section(self) -> None:
         result = PlanAnalyzer._extract_file_paths("")
         assert result == []
-
-    def test_extract_file_paths_from_bold(self) -> None:
-        section = "Modify **path/to/file.py** for the change."
-        result = PlanAnalyzer._extract_file_paths(section)
-        assert "path/to/file.py" in result
-
-    def test_extract_file_paths_strips_leading_dot_slash(self) -> None:
-        section = "- `./src/main.py`: entry point"
-        result = PlanAnalyzer._extract_file_paths(section)
-        assert "src/main.py" in result
-
-    def test_extract_file_paths_numbered_headings(self) -> None:
-        section = "### 1. `agent.py` — AgentRunner\nDesc"
-        result = PlanAnalyzer._extract_file_paths(section)
-        assert "agent.py" in result
 
     def test_extract_file_paths_filters_non_code_extensions(self) -> None:
         section = "- `notes.txt`: not a code file\n- `data.csv`: data"

@@ -13,6 +13,7 @@ _STATUS_GLYPH = {
     Status.WARN: "!",
     Status.FAIL: "✗",
     Status.NA: "-",
+    Status.INERT: "∅",
     Status.NOT_IMPLEMENTED: "?",
 }
 
@@ -47,6 +48,7 @@ def format_terminal(findings: list[Finding]) -> str:
             f"WARN {counts[Status.WARN]} / "
             f"FAIL {counts[Status.FAIL]} / "
             f"NA {counts[Status.NA]} / "
+            f"INERT {counts[Status.INERT]} / "
             f"?? {counts[Status.NOT_IMPLEMENTED]}"
         )
         lines.append(headline)
@@ -63,9 +65,33 @@ def format_terminal(findings: list[Finding]) -> str:
     summary = _summarise(findings)
     lines.append(
         f"Total: PASS {summary['pass']}  WARN {summary['warn']}  FAIL {summary['fail']}  "
-        f"NA {summary['na']}  NOT_IMPLEMENTED {summary['not_implemented']}"
+        f"NA {summary['na']}  INERT {summary['inert']}  "
+        f"NOT_IMPLEMENTED {summary['not_implemented']}"
     )
+    lines.extend(_inert_banner(findings))
     return "\n".join(lines)
+
+
+def _inert_banner(findings: list[Finding]) -> list[str]:
+    """Name every inert check under the totals, where it cannot be scrolled past.
+
+    A count in a row of counts is easy to read as noise. The failure this
+    guards against is precisely someone glancing at a green-looking audit and
+    moving on, so an inert check gets its own block, by id, with the reason it
+    could not measure anything.
+    """
+    inert = [f for f in findings if f.status is Status.INERT]
+    if not inert:
+        return []
+    lines = [
+        "",
+        "!" * 40,
+        f"{len(inert)} INERT check(s) — the audit advertises these but did not",
+        "perform them. An absent subject is not a passing subject.",
+        "!" * 40,
+    ]
+    lines.extend(f"  \u2205 {f.check_id}  {f.message}" for f in inert)
+    return lines
 
 
 def _summarise(findings: list[Finding]) -> dict[str, int]:
@@ -75,6 +101,7 @@ def _summarise(findings: list[Finding]) -> dict[str, int]:
         "warn": counts[Status.WARN],
         "fail": counts[Status.FAIL],
         "na": counts[Status.NA],
+        "inert": counts[Status.INERT],
         "not_implemented": counts[Status.NOT_IMPLEMENTED],
         "total": len(findings),
     }

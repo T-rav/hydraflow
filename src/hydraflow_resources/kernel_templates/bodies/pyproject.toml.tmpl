@@ -1,0 +1,29 @@
+[project]
+name = "{{name}}"
+version = "0.1.0"
+description = "{{description}}"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+{{entry}} = "{{pkg}}.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "pyright>=1.1.380",
+  "bandit>=1.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

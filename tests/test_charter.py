@@ -58,7 +58,9 @@ def _charter(**over) -> Charter:
             standards=_STANDARDS,
             assurance="internal",
             local=(
-                LocalArticle(id="staging_only_prs", statement="PRs target staging"),
+                LocalArticle(
+                    article_id="staging_only_prs", statement="PRs target staging"
+                ),
             ),
         ),
         "artifacts": Artifacts(required=_ARTIFACTS),
@@ -112,7 +114,7 @@ def test_from_dict_loads_all_four_layers_plus_rails() -> None:
     assert charter.purpose == Purpose(product="a factory", goals=("lights_off",))
     assert charter.articles.standards == ("testing",)
     assert charter.articles.assurance == "public-code"
-    assert charter.articles.local == (LocalArticle(id="x", statement="y"),)
+    assert charter.articles.local == (LocalArticle(article_id="x", statement="y"),)
     assert charter.actors == "agents/"
     assert charter.artifacts.required == ("docs/adr",)
     assert charter.rails.template_version == "2"
@@ -417,7 +419,7 @@ def test_nothing_declared_check_id_says_why() -> None:
 def test_purpose_and_local_articles_alone_do_not_make_a_charter_checkable() -> None:
     charter = Charter(
         purpose=Purpose(product="a factory"),
-        articles=Articles(local=(LocalArticle(id="x", statement="y"),)),
+        articles=Articles(local=(LocalArticle(article_id="x", statement="y"),)),
     )
     report = compute_charter_drift(charter, ObservedRepo(), repo="o/r")
     assert FINDING_UNCHECKABLE_CHARTER in _classes(report)

@@ -133,24 +133,27 @@ new contributors do not have to translate. The inward-only import rule is
 the one invariant that keeps the other three (ports, DDD, testability)
 possible; once domain imports infrastructure, all three collapse.
 
-**How to apply.** Greenfield: create the layer directories up front, name
-them after bounded contexts you can say out loud, and add
-`scripts/check_layer_imports.py` to CI before any domain code is written.
-Adoption: introduce `ports.py` first, migrate infrastructure behind
-Protocols one at a time, then add the import checker with an allowlist
-that shrinks per PR. Rename domain types to match the ubiquitous language
-as their first refactor — before anything else changes.
+**How to apply.** Greenfield: create the layer directories up front and
+name them after bounded contexts you can say out loud. Adoption: introduce
+`ports.py` first, then migrate infrastructure behind Protocols one at a time
+until P2.7 is green. Rename domain types to match the ubiquitous language as
+their first refactor — before anything else changes.
+
+P2.7 is enforced by convention, not by a per-repo layer map: an import into
+the domain layer is impure when its root module is a third-party package that
+is not a declarative modelling library, or a first-party module named like
+infrastructure (`*_loop`, `*_runner`, `*_adapter`, `*_client`, `*_gateway`,
+`server`). #8383 deleted the previous `scripts/check_layer_imports.py` for
+being "hardcoded around HydraFlow's own four-layer topology", and asked that
+any replacement be convention-based; this is that replacement.
 
 | check_id | type | source | what | remediation |
 |---|---|---|---|---|
 | P2.1 | STRUCTURAL | ADR-0003 | `src/` directory exists | Move module code under `src/` to keep test discovery clean |
 | P2.2 | STRUCTURAL | docs/wiki/architecture.md | `src/ports.py` exists and defines at least one `Protocol` | Extract the first cross-layer boundary (likely the PR/VCS adapter) |
 | P2.2a | STRUCTURAL | docs/wiki/architecture.md | Each infrastructure boundary the project uses has a Protocol in `ports.py` (VCS, workspace, runner, LLM if applicable) | Add a Protocol the first time you reach for `AsyncMock` in a unit test; that is the signal a port is missing |
-| P2.3 | STRUCTURAL | docs/wiki/architecture.md | `scripts/check_layer_imports.py` exists | Port the HydraFlow script; configure the layer map for this repo |
-| P2.4 | BEHAVIORAL | ADR-0003 | `make layer-check` exits 0 (no upward imports) | Refactor the offending import behind a `ports.py` Protocol |
 | P2.5 | STRUCTURAL | docs/wiki/architecture.md | A composition root module (e.g. `service_registry.py`) wires layers | Centralise dependency assembly so tests can swap fakes cleanly |
-| P2.6 | STRUCTURAL | docs/wiki/architecture.md | Composition root is the *only* module allowed to import across layer boundaries (explicit ALLOWLIST entry) | Layer checker treats the root as a documented exception, not a blanket escape hatch |
-| P2.7 | STRUCTURAL | docs/wiki/architecture.md | Domain layer has no imports from infrastructure, runners, or third-party adapter SDKs | The layer-check must special-case this to a hard failure; domain purity is the load-bearing invariant |
+| P2.7 | STRUCTURAL | docs/wiki/architecture.md | Domain layer has no imports from infrastructure, runners, or third-party adapter SDKs | Move the dependency behind a `ports.py` Protocol and inject it at the composition root; domain purity is the load-bearing invariant |
 | P2.8 | BEHAVIORAL | docs/wiki/architecture.md | Domain types carry behaviour (methods), not just `@dataclass`/Pydantic fields | Anaemic domain is a sign logic leaked into application or infra; audit samples `src/<domain>/*.py` and warns on files with zero methods on public types |
 | P2.9 | CULTURAL | docs/wiki/architecture.md | Ubiquitous language: domain type names appear in `docs/wiki/architecture.md` and in `CLAUDE.md` with matching semantics | When the doc says "Issue" and the code says "Task", translation overhead accumulates; keep one name per concept |
 
@@ -200,9 +203,9 @@ only required when a dashboard or UI exists.
 ### P4. Quality Gates
 
 **Rule.** `make quality` is the single command a developer runs before
-declaring work complete. It composes lint, typecheck, security, test, and
-layer-check into one fail-fast pipeline. `make quality-lite` runs the
-non-test checks for quick iteration.
+declaring work complete. It composes lint, typecheck, security and test
+into one fail-fast pipeline. `make quality-lite` runs the non-test checks for
+quick iteration.
 
 **Why.** Quality tools only help when they run. One canonical target removes
 the "did I run all of them" ambiguity and gives CI a single command to mirror.
@@ -220,7 +223,7 @@ credible.
 | P4.3 | BEHAVIORAL | docs/wiki/patterns.md | `make security` target exists and exits 0 | Add `bandit -r src/ --severity-level medium` |
 | P4.4 | BEHAVIORAL | docs/wiki/patterns.md | `make test` target exists and exits 0 | Wire pytest behind the target |
 | P4.5 | BEHAVIORAL | docs/wiki/patterns.md | `make quality-lite` composes lint + typecheck + security | Add the aggregate target |
-| P4.6 | BEHAVIORAL | docs/wiki/patterns.md | `make quality` composes quality-lite + test + layer-check | Add the final gate target |
+| P4.6 | BEHAVIORAL | docs/wiki/patterns.md | `make quality` composes quality-lite + test | Add the final gate target |
 | P4.7 | STRUCTURAL | docs/wiki/patterns.md | Tool configs live in `pyproject.toml` (not a forest of dotfiles) | Move ruff/pyright/bandit/pytest configs into `pyproject.toml` |
 
 ### P5. CI and Branch Protection
@@ -422,6 +425,19 @@ but every bug fix from today forward lands with a regression test.
   projects. Non-orchestration repos will see P6 as "N/A" rather than FAIL.
 - The bar is 10 principles today; the list is expected to grow. Adding P11
   is an ADR amendment, not a code refactor.
+- P2.3, P2.4 and P2.6 were RETIRED (2026-08). All three measured
+  `scripts/check_layer_imports.py` — its existence, its exit code, and an
+  `ALLOWLIST` token in its source. #8383 deleted that script ~4 hours after
+  #8386 merged these rows, as un-generalisable to managed repos, so the three
+  checks reported `NA` for every repo from the day they were written while the
+  audit stayed green. Rows describing a named HydraFlow script are not
+  portable principles; P2.7 now carries the invariant they proxied, checked
+  directly. Retiring a row is not a reversal of the principle — the inward-only
+  import rule stands and is enforced by P2.7.
+- `NA` no longer counts as success on its own. A check may only report `NA`
+  when `scripts/hydraflow_audit/na_justifications.py` records a reviewed reason
+  for it; any other `NA` becomes `INERT` and fails the audit, as does a check
+  whose tooling did not complete. An absent subject is not a passing subject.
 - Several checks (P2.8 anaemic-type detection, P2.9 ubiquitous-language,
   P10.2 orphan-module coverage) are heuristic — the audit reports them as
   warnings even when the numeric threshold is met, so reviewers apply

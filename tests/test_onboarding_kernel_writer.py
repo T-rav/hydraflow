@@ -198,6 +198,48 @@ def test_force_restamps_template_files_but_protects_product_files(tmp_path) -> N
     assert actions["CLAUDE.md"] == "protected"
 
 
+def test_claude_md_markers_do_not_contradict_the_enforced_ownership(tmp_path) -> None:
+    """The generated prose must describe the protection the stamper actually applies.
+
+    Regression for a false statement that shipped to every child repo: the
+    TEMPLATE-OWNED marker read "Re-stamping with --force may overwrite this
+    block", but CLAUDE.md is ``Ownership.PRODUCT`` and ``stamp_kernel`` reports
+    it ``protected`` even under ``force=True`` -- the block cannot be
+    overwritten at all.
+
+    Nothing caught it because the only marker assertions in this suite check
+    that the strings are *present*, and no parser reads them; the markers are
+    notes to a human, so their accuracy is only ever enforced by a test like
+    this one. The assertion is derived from the stamper's own reported action
+    rather than spelling a phrase, so it keeps meaning if ownership changes.
+    """
+    target = tmp_path / "game1"
+    first = stamp_kernel(_spec(), target)
+    claude_text = (target / "CLAUDE.md").read_text(encoding="utf-8")
+
+    (target / "CLAUDE.md").write_text("# product\n", encoding="utf-8")
+    forced = stamp_kernel(_spec(), target, force=True)
+
+    written = {f.path: f.action for f in first.files}["CLAUDE.md"]
+    under_force = {f.path: f.action for f in forced.files}["CLAUDE.md"]
+    assert written == "written"
+    assert under_force == "protected", (
+        "this test's premise is that CLAUDE.md is protected under --force; if "
+        "ownership changed, the marker prose must change with it"
+    )
+
+    lowered = claude_text.lower()
+    # Positive: the prose must STATE the protection. A weaker "does not claim
+    # otherwise" check would pass against a file with the markers deleted.
+    assert "not even with --force" in lowered, (
+        "CLAUDE.md is protected even under --force, but its markers do not say "
+        "so; a child repo reading this file would believe the opposite"
+    )
+    # Negative: the retired claim must not come back in either spelling.
+    assert "--force may" not in lowered
+    assert "may overwrite this block" not in lowered
+
+
 def test_invalid_package_name_raises(tmp_path) -> None:
     with pytest.raises(KernelWriterError, match="valid Python identifier"):
         stamp_kernel(_spec(package_name="1bad-name!"), tmp_path / "game1")

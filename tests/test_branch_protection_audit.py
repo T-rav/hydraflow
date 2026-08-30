@@ -16,19 +16,12 @@ from branch_protection_audit import (
     ruleset_required_contexts,
     undeclared_legacy_contexts,
 )
+from tests.branch_protection_fixtures import LEGACY_LAYER_CONTEXTS
 
 CANONICAL_DIR = Path("docs/standards/branch_protection")
 
-# The exact undeclared-legacy-layer drift from #10148: a legacy branch-protection
-# rule requires 5 contexts on staging that gates.toml declares required_on
-# ["main"] only (signal-only on staging per ADR-0042's two-tier model).
-_LEGACY_LAYER_CONTEXTS = [
-    "Tests",
-    "Type Check",
-    "quality (.)",
-    "Architecture Check",
-    "Lint & Format",
-]
+#: Derived from the live contract — see tests/branch_protection_fixtures.py
+_LEGACY_LAYER_CONTEXTS = LEGACY_LAYER_CONTEXTS
 
 
 def _with_id(cfg: dict, n: int) -> dict:
@@ -223,7 +216,18 @@ def test_undeclared_legacy_contexts_clean_when_live_matches_declarative() -> Non
 def test_undeclared_legacy_contexts_clean_when_legacy_is_subset_of_declared() -> None:
     """A legacy rule that only re-requires already-declared contexts is not drift."""
     canonical_main = json.loads((CANONICAL_DIR / "main_ruleset.json").read_text())
-    legacy = _legacy_protection_for(["Tests"])  # "Tests" IS required_on main
+    # DERIVED from the canonical ruleset rather than named: this line said
+    # `["Tests"]` with the comment "IS required_on main" until #11727 moved
+    # main onto the CI Gate umbrella, at which point the premise silently
+    # inverted and the test failed for a reason its own comment denied.
+    declared_on_main = sorted(
+        check["context"]
+        for rule in canonical_main["rules"]
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    )
+    assert declared_on_main, "main declares no contexts — nothing to subset"
+    legacy = _legacy_protection_for(declared_on_main[:1])
 
     assert undeclared_legacy_contexts(canonical_main, canonical_main, legacy) == []
 

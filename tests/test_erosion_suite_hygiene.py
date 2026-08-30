@@ -129,7 +129,13 @@ def test_unparseable_file_is_skipped_not_raised() -> None:
 # --- collect_tests -----------------------------------------------------------
 
 
+_PYPROJECT_WITH_REGRESSION_GLOB = (
+    '[tool.pytest.ini_options]\npython_files = ["test_*.py", "regression_*.py"]\n'
+)
+
+
 def test_collect_tests_matches_pytest_globs_recursively(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT_WITH_REGRESSION_GLOB)
     tests = tmp_path / "tests"
     (tests / "regressions").mkdir(parents=True)
     (tests / "test_a.py").write_text("def test_a(): pass\n")
@@ -144,3 +150,88 @@ def test_collect_tests_matches_pytest_globs_recursively(tmp_path: Path) -> None:
         "tests/regressions/regression_issue_1.py",
         "tests/test_a.py",
     ]
+
+
+def test_collect_tests_follows_pytest_defaults_when_repo_declares_none(
+    tmp_path: Path,
+) -> None:
+    """No ``python_files`` key means pytest's own defaults — and so does this.
+
+    Pinned rather than left implicit: the fallback DOES narrow the set (no
+    ``regression_*.py``), so if it ever starts being reached for a repo that
+    configures the key, the count drops silently. This is the shape of that
+    fallback, stated once, where a change to it is visible.
+    """
+    tests = tmp_path / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_a.py").write_text("def test_a(): pass\n")
+    (tests / "regression_issue_1.py").write_text("def test_r(): pass\n")
+    (tests / "b_test.py").write_text("def test_b(): pass\n")
+
+    collected = collect_tests(tests)
+
+    assert sorted(collected) == ["tests/b_test.py", "tests/test_a.py"]
+
+
+def test_collect_tests_accepts_explicit_globs(tmp_path: Path) -> None:
+    tests = tmp_path / "tests"
+    tests.mkdir(parents=True)
+    (tests / "regression_issue_1.py").write_text("def test_r(): pass\n")
+
+    collected = collect_tests(tests, globs=("regression_*.py",))
+
+    assert sorted(collected) == ["tests/regression_issue_1.py"]
+
+
+def test_a_bundled_fixture_repo_is_not_measured_as_this_suite(tmp_path: Path) -> None:
+    """A fixture repo's own `tests/` tree is data, not this suite's erosion.
+
+    `tests/trust/adversarial/cases/<case>/{before,after}/tests/` holds miniature
+    repositories the trust corpus judges. A before/after pair is SUPPOSED to
+    carry near-identical tests — that is the corpus working. Counting it as a
+    cross-file duplicate produced a finding no suite cleanup could resolve:
+    "fixing" it would break the corpus.
+    """
+    suite = tmp_path / "tests"
+    (suite / "trust" / "cases" / "c1" / "before" / "tests").mkdir(parents=True)
+    (suite / "trust" / "cases" / "c1" / "after" / "tests").mkdir(parents=True)
+    body = "def test_same():\n    assert True\n"
+    (suite / "trust" / "cases" / "c1" / "before" / "tests" / "test_x.py").write_text(
+        body
+    )
+    (suite / "trust" / "cases" / "c1" / "after" / "tests" / "test_x.py").write_text(
+        body
+    )
+    (suite / "test_mine.py").write_text("def test_mine():\n    assert True\n")
+
+    collected = collect_tests(suite, globs=("test_*.py",))
+
+    assert "tests/test_mine.py" in collected, (
+        "the suite's own module must still be collected — a skip rule that "
+        "swallowed everything would make every erosion metric read zero"
+    )
+    nested = [key for key in collected if "/tests/" in key]
+    assert not nested, f"bundled fixture suites were measured: {nested}"
+    assert compute(collected).cross_file_duplicates == ()
+
+
+def test_the_branch_protection_fixture_derives_a_usable_legacy_layer() -> None:
+    """The #10148 fixture is computed, so it cannot rot — but it must not empty.
+
+    Three modules spelled this list independently and all three broke together
+    when the contract moved one gate between branches. It is derived now; this
+    pins that the derivation still yields a usable, genuinely-undeclared set.
+    """
+    from scripts.gates.contract import load_gates
+    from scripts.gates.resolve import resolve_contexts
+
+    from tests.branch_protection_fixtures import (
+        GATES_TOML,
+        LEGACY_LAYER_CONTEXTS,
+        LEGACY_LAYER_SIZE,
+    )
+
+    assert len(LEGACY_LAYER_CONTEXTS) == LEGACY_LAYER_SIZE
+    declared = set(resolve_contexts(load_gates(GATES_TOML), "staging"))
+    assert declared, "staging declares nothing — the contract went vacuous"
+    assert not set(LEGACY_LAYER_CONTEXTS) & declared

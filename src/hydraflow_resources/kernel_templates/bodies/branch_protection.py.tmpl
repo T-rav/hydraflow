@@ -1,0 +1,80 @@
+"""Apply branch protection to this repository (GitHub classic protection API).
+
+Free-tier private repos cannot use the modern Rulesets API, so this kernel ships
+the classic ``PUT /repos/{owner}/{repo}/branches/{branch}/protection`` variant
+(onboarding doc friction F2). Requires an authenticated ``gh`` CLI with admin on
+the repo.
+
+The canonical required check is the ``Quality Gate`` aggregator job in
+``.github/workflows/quality.yml`` -- NOT the ``quality`` job itself. ``quality``
+is matrix-expanded over a matrix discovered at runtime, so GitHub only ever
+reports ``quality (<project_dir>)`` check runs; a bare ``quality`` context would
+sit at "expected -- waiting for status" and block every PR forever, and the leg
+names cannot be enumerated at stamp time because the leg set is not known until
+``discover-projects`` runs (#11715).
+
+Usage::
+
+    python scripts/setup_branch_protection.py            # dry-run
+    python scripts/setup_branch_protection.py --apply
+    python scripts/setup_branch_protection.py --repo owner/name --apply
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+
+REQUIRED_CHECKS = ["Quality Gate"]
+PROTECTED_BRANCHES = ["{{main_branch}}", "{{staging_branch}}"]
+
+
+def _repo_slug(explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    url = subprocess.check_output(
+        ["git", "remote", "get-url", "origin"], text=True
+    ).strip()
+    for prefix in ("https://github.com/", "git@github.com:"):
+        if url.startswith(prefix):
+            slug = url[len(prefix) :]
+            return slug.removesuffix(".git")
+    raise SystemExit(f"could not derive owner/name from remote: {url}")
+
+
+def _protection_payload() -> dict:
+    return {
+        "required_status_checks": {"strict": True, "contexts": REQUIRED_CHECKS},
+        "enforce_admins": True,
+        "required_pull_request_reviews": {"required_approving_review_count": 0},
+        "restrictions": None,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", default=None, help="owner/name (default: git remote)")
+    parser.add_argument("--apply", action="store_true", help="apply (default: dry-run)")
+    args = parser.parse_args(argv)
+
+    slug = _repo_slug(args.repo)
+    payload = _protection_payload()
+    for branch in PROTECTED_BRANCHES:
+        endpoint = f"repos/{slug}/branches/{branch}/protection"
+        if not args.apply:
+            print(f"[dry-run] PUT {endpoint} <- {json.dumps(payload)}")
+            continue
+        subprocess.run(
+            ["gh", "api", "--method", "PUT", endpoint, "--input", "-"],
+            input=json.dumps(payload),
+            text=True,
+            check=True,
+        )
+        print(f"protected {slug}@{branch}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

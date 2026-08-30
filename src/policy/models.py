@@ -34,6 +34,11 @@ from pydantic import BaseModel, Field, computed_field
 
 from adr_conformance_remediation import RemediationAction
 
+# Re-exported: the decision seam's Charter IS the repo's charter. The
+# minimal placeholder that used to live here existed only because the
+# real loader had not landed (#11748); it has.
+from charter_model import Articles, Charter
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
 
@@ -77,6 +82,21 @@ class Fact(BaseModel):
         return f"{self.standard}|{self.subject}|{self.key}"
 
 
+#: ``Articles``/``Charter`` are re-exported from :mod:`charter_model` — the
+#: decision seam's charter IS the repo's charter. Declared in ``__all__``
+#: rather than suppressed with `noqa`: the suppressions ratchet only shrinks.
+__all__ = [
+    "Articles",
+    "Charter",
+    "DecisionEngine",
+    "DecisionStatus",
+    "Fact",
+    "FactValue",
+    "RemediationAction",
+    "StandardDecision",
+]
+
+
 class DecisionStatus(StrEnum):
     """The four answers a standard can give about one subject.
 
@@ -116,39 +136,6 @@ class StandardDecision(BaseModel):
     reason: str = ""
     remediation: RemediationAction | None = None
     facts: list[Fact] = Field(default_factory=list)
-
-
-class CharterArticles(BaseModel):
-    """The ``articles`` block of a repo charter — which standards are in force.
-
-    Minimal on purpose. ``charter.yaml`` and its full loader are #11748; this
-    is the slice the decision seam needs (``Charter.articles.standards``
-    selects which collectors run and which standards the engine decides), so
-    the protocol below can carry its real signature before that lands.
-    """
-
-    standards: list[str] = Field(default_factory=list)
-
-
-class Charter(BaseModel):
-    """A repo's governing declaration, as far as the decision seam sees it."""
-
-    articles: CharterArticles = Field(default_factory=CharterArticles)
-
-    @classmethod
-    def for_standards(cls, *standards: str) -> Charter:
-        """A charter placing exactly *standards* in force."""
-        return cls(articles=CharterArticles(standards=list(standards)))
-
-    def governs(self, standard: str) -> bool:
-        """Is *standard* in force? An empty ``standards`` list governs all.
-
-        Fail-OPEN is correct here and only here: an empty article list is "no
-        charter has been written yet", not "nothing is enforced". Silently
-        deciding nothing would turn the day #11748's loader mis-parses
-        ``charter.yaml`` into a green run over zero standards.
-        """
-        return not self.articles.standards or standard in self.articles.standards
 
 
 @runtime_checkable

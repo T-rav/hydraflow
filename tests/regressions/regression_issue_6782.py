@@ -84,7 +84,6 @@ class TestGCLoopNoCircuitBreaker:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6782 — fix not yet landed", strict=False)
     async def test_same_issue_not_retried_after_consecutive_failures(
         self, tmp_path: Path
     ) -> None:
@@ -133,7 +132,6 @@ class TestOrphanedDirNoCircuitBreaker:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6782 — fix not yet landed", strict=False)
     async def test_orphaned_dir_not_retried_after_consecutive_failures(
         self, tmp_path: Path
     ) -> None:

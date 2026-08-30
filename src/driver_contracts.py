@@ -259,12 +259,23 @@ class RejectionReason(StrEnum):
     """
 
     WORKTREE_UNMEASURED = "worktree_unmeasured"
-    """The fence could not be armed, so no write-capable worker was started.
+    """The issue's worktree could not be read, so no worker was started.
 
     The :data:`sandbox_verified` shape applied to the writer lease: a fence
     that cannot be measured is *unverified*, never "unchanged". Reported before
     any spawn, so a repository whose worktree has gone missing costs nothing
     rather than costing a worker whose result could never be admitted.
+
+    Deliberately no longer says "no *write-capable* worker". #11543 gave the
+    same unreadable tree a second consequence: a reviewer's canonical evidence
+    names the branch, base and HEAD its proposal is bounded to, and a tree that
+    cannot be read names none of them — so the reviewer would be asked to judge
+    "one exact snapshot" while the prompt states no snapshot, and every
+    proposal it returned would be adjudicated against a head sha that never
+    existed. The underlying fact is identical (the tree could not be read), so
+    it is the same code with honest prose rather than a second code meaning the
+    same thing; narrowing the wording to writers is what would have made an
+    operator read a reviewer's refusal as impossible.
     """
 
     HIBERNATING = "hibernating"

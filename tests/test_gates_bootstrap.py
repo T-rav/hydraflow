@@ -85,5 +85,5 @@ def test_gates_plan_section_for_this_repo_lists_main_checks() -> None:
             RepoProfile(languages=["python"], capabilities=["ghas"]), contract
         )
     )
-    assert "Tests" in section
+    assert "CI Gate" in section
     assert "Detect Changes" in section
