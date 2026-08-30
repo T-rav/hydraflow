@@ -213,3 +213,25 @@ def test_a_bundled_fixture_repo_is_not_measured_as_this_suite(tmp_path: Path) ->
     nested = [key for key in collected if "/tests/" in key]
     assert not nested, f"bundled fixture suites were measured: {nested}"
     assert compute(collected).cross_file_duplicates == ()
+
+
+def test_the_branch_protection_fixture_derives_a_usable_legacy_layer() -> None:
+    """The #10148 fixture is computed, so it cannot rot — but it must not empty.
+
+    Three modules spelled this list independently and all three broke together
+    when the contract moved one gate between branches. It is derived now; this
+    pins that the derivation still yields a usable, genuinely-undeclared set.
+    """
+    from scripts.gates.contract import load_gates
+    from scripts.gates.resolve import resolve_contexts
+
+    from tests.branch_protection_fixtures import (
+        GATES_TOML,
+        LEGACY_LAYER_CONTEXTS,
+        LEGACY_LAYER_SIZE,
+    )
+
+    assert len(LEGACY_LAYER_CONTEXTS) == LEGACY_LAYER_SIZE
+    declared = set(resolve_contexts(load_gates(GATES_TOML), "staging"))
+    assert declared, "staging declares nothing — the contract went vacuous"
+    assert not set(LEGACY_LAYER_CONTEXTS) & declared

@@ -22,19 +22,15 @@ from pathlib import Path
 
 from branch_protection_audit import audit_repo
 from mockworld.fakes import FakeGitHub
+from tests.branch_protection_fixtures import LEGACY_LAYER_CONTEXTS
 
 _CANONICAL_DIR = (
     Path(__file__).resolve().parents[1] / "docs" / "standards" / "branch_protection"
 )
 
 # The exact undeclared-legacy-layer drift from #10148.
-_LEGACY_LAYER_CONTEXTS = [
-    "Tests",
-    "Type Check",
-    "quality (.)",
-    "Architecture Check",
-    "Lint & Format",
-]
+#: Derived from the live contract — see tests/branch_protection_fixtures.py
+_LEGACY_LAYER_CONTEXTS = LEGACY_LAYER_CONTEXTS
 
 
 def _canonical(name: str) -> dict:
