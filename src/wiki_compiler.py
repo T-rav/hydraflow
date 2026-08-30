@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from circuit_breaker import CircuitBreaker
 from dedup_store import DedupStore
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from knowledge_metrics import metrics as _metrics
@@ -566,6 +567,21 @@ class WikiCompiler:
         self._gate_block_dedup = gate_block_dedup or DedupStore(
             "prompt_gate_blocked",
             config.data_root / "dedup" / "prompt_gate_blocked.json",
+        )
+        # A REPEATED model failure is not transient. Measured 2026-08-30: the
+        # compile call timed out at 300s, was logged as a warning, swallowed,
+        # and retried on the next cycle — 71 times, ~6 hours of model spend
+        # for zero output, with nothing louder than a WARNING to say so.
+        #
+        # The reasoning is already in this file, one branch below: a
+        # prompt-gate block "is a persistent policy misconfiguration, not a
+        # transient failure: every tick re-blocks, so a soft warn would be a
+        # PERMANENT silent no-op". A recurring timeout is that same class and
+        # was not being treated as it.
+        self._model_breaker = CircuitBreaker(
+            "wiki-compilation-model",
+            max_failures=config.wiki_compilation_breaker_failures,
+            reset_timeout=float(config.wiki_compilation_breaker_reset_seconds),
         )
 
     async def compile_topic(
@@ -1169,6 +1185,16 @@ class WikiCompiler:
         """
         from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
+        if not self._model_breaker.allow_request():
+            # OPEN: skip the spawn entirely rather than burn another full
+            # timeout. This is the whole point — an open circuit that still
+            # paid for the call would save nothing.
+            logger.debug(
+                "Wiki compilation skipped — circuit breaker is %s",
+                self._model_breaker.state,
+            )
+            return None
+
         try:
             result = await run_lightweight_agent(
                 runner=self._runner,
@@ -1195,20 +1221,40 @@ class WikiCompiler:
                         detail=result.stderr[:200],
                     )
                     return None
-                logger.warning(
-                    "Wiki compilation model failed (rc=%d): %s",
-                    result.returncode,
-                    result.stderr[:200],
+                self._record_model_failure(
+                    f"rc={result.returncode}: {result.stderr[:200]}"
                 )
                 return None
+            self._model_breaker.record_success()
             clear_prompt_gate_block(self._gate_block_dedup, "wiki_compilation")
             return result.stdout if result.stdout else None
         except TimeoutError:
-            logger.warning("Wiki compilation model timed out")
+            self._record_model_failure("timed out")
             return None
         except (OSError, FileNotFoundError, NotImplementedError) as exc:
-            logger.warning("Wiki compilation model unavailable: %s", exc)
+            self._record_model_failure(f"unavailable: {exc}")
             return None
+
+    def _record_model_failure(self, detail: str) -> None:
+        """Log the failure, and escalate to ERROR when the circuit opens.
+
+        Each individual failure stays a WARNING — one slow call is genuinely
+        transient. The ERROR fires exactly once, on the transition to OPEN,
+        because that is the moment the failure stops being transient and
+        becomes a standing condition an operator should see.
+        """
+        was_open = self._model_breaker.state == self._model_breaker.OPEN
+        self._model_breaker.record_failure()
+        if not was_open and self._model_breaker.state == self._model_breaker.OPEN:
+            logger.error(
+                "Wiki compilation model failing persistently (%s) — circuit "
+                "OPEN for %.0fs. The loop will skip its model calls instead of "
+                "spending a full timeout per cycle.",
+                detail,
+                self._model_breaker.reset_timeout,
+            )
+        else:
+            logger.warning("Wiki compilation model failed (%s)", detail)
 
     @staticmethod
     def _dedup_known_ids(ids: list[str], known_ids: set[str]) -> list[str]:
