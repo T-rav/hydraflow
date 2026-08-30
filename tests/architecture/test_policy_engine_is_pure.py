@@ -106,9 +106,31 @@ _WHOLE_MODULE = "<module>"
 #: shared vocabulary the ledger is keyed by — and none of its collectors.
 #: ``policy.store`` (the ledger writer) appears nowhere and must not.
 _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
+    # The charter data model. NOT under src/policy/, but pinned here because
+    # models.py imports it: widening an allow-list to a module nothing holds
+    # pure would move the hole rather than close it, and this file's own
+    # "does not constrain the transitive import graph" caveat is exactly the
+    # gap that would open. The loader half (yaml, file reads) stays in
+    # charter.py and is deliberately absent.
+    "src/charter_model.py": {
+        "__future__": frozenset({"annotations"}),
+        # The data-governance vocabulary, extracted to its own pure module so
+        # this one need not import prompt_gate (which writes audit records).
+        "data_class_vocabulary": frozenset({"is_valid_data_class"}),
+        "dataclasses": frozenset({"dataclass", "field"}),
+        # PurePosixPath only: it never touches the filesystem. `Path` is
+        # deliberately absent — the loader that reads files lives in charter.py.
+        "pathlib": frozenset({"PurePosixPath"}),
+        "typing": frozenset({"Any"}),
+    },
     "src/policy/models.py": {
         "__future__": frozenset({"annotations"}),
         "adr_conformance_remediation": frozenset({"RemediationAction"}),
+        # The decision seam's Charter IS the repo's charter. The minimal
+        # placeholder that used to live in models.py existed only because
+        # #11748's loader had not landed; charter_model is the pure half of
+        # that loader and is itself pinned below.
+        "charter_model": frozenset({"Articles", "Charter"}),
         "collections.abc": frozenset({"Sequence"}),
         "datetime": frozenset({"datetime"}),
         "enum": frozenset({"StrEnum"}),
@@ -138,8 +160,27 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
 #: ``eval``, ``compile``, ``__file__`` and ``__builtins__`` are absent for
 #: that reason — the engine has no root and must not learn one.
 _PURE_BUILTINS: dict[str, frozenset[str]] = {
+    "src/charter_model.py": frozenset(
+        {
+            "TypeError",
+            "ValueError",
+            "bool",
+            "bytes",
+            "classmethod",
+            "dict",
+            "float",
+            "frozenset",
+            "int",
+            "isinstance",
+            "list",
+            "property",
+            "str",
+            "tuple",
+            "type",
+        }
+    ),
     "src/policy/models.py": frozenset(
-        {"bool", "classmethod", "float", "int", "list", "property", "str"}
+        {"bool", "float", "int", "list", "property", "str"}
     ),
     "src/policy/python_engine.py": frozenset(
         {
@@ -169,10 +210,29 @@ _PURE_BUILTINS: dict[str, frozenset[str]] = {
 #: this list, and every smuggled binding reddens because no smuggler's name is
 #: on it.
 _PURE_ANNOTATIONS: dict[str, frozenset[str]] = {
+    "src/charter_model.py": frozenset(
+        {
+            "Any",
+            "Articles",
+            "Artifacts",
+            "Charter",
+            "CharterFinding",
+            "LocalArticle",
+            "Purpose",
+            "RailsBlock",
+            "bool",
+            "dict",
+            "float",
+            "frozenset",
+            "int",
+            "list",
+            "str",
+            "tuple",
+        }
+    ),
     "src/policy/models.py": frozenset(
         {
             "Charter",
-            "CharterArticles",
             "DecisionStatus",
             "Fact",
             "FactValue",
@@ -713,7 +773,15 @@ def test_every_policy_module_is_classified() -> None:
         path.relative_to(REPO).as_posix()
         for path in (REPO / _POLICY_PACKAGE).rglob("*.py")
     }
-    unclassified, missing = _delta(on_disk, set(_PURE_SOURCES) | set(_IO_SOURCES))
+    # Scoped to the package: _PURE_SOURCES may legitimately pin a module from
+    # outside src/policy/ (charter_model), which is not "listed but missing"
+    # here — this test asks whether every POLICY module is classified.
+    classified = {
+        source
+        for source in set(_PURE_SOURCES) | set(_IO_SOURCES)
+        if source.startswith(f"{_POLICY_PACKAGE}/")
+    }
+    unclassified, missing = _delta(on_disk, classified)
 
     assert not unclassified and not missing, (
         f"{_POLICY_PACKAGE}/ and this guard's lists disagree.\n"

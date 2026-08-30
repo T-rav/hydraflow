@@ -39,7 +39,7 @@ Introduce a **repo charter** — a small declarative `charter.yaml` written into
 
 ### Ruling 1 — the declaration is small, declarative, and forward-compatible
 
-The `rails:` block of `charter.yaml` (schema in `src/charter.py`, `charter.RailsBlock` inside `charter.Charter`) declares:
+The `rails:` block of `charter.yaml` (schema in `src/charter_model.py`, `charter_model.RailsBlock` inside `charter_model.Charter`; both re-exported from `charter`) declares:
 
 - `template_version` — the template version the repo was stamped/upgraded to;
 - `layers` — the active template layers by name (`universal` kernel / `language_pack` / `domain_rails`);

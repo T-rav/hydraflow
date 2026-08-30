@@ -45,6 +45,12 @@ from datetime import UTC, datetime
 from json import dumps
 from typing import TYPE_CHECKING
 
+from data_class_vocabulary import (
+    DATA_CLASS_INTERNAL,
+    DATA_CLASS_PUBLIC_CODE,
+    FAIL_CLOSED_DATA_CLASS,
+    is_valid_data_class,
+)
 from file_util import append_jsonl
 from prompt_observatory import observe
 
@@ -54,8 +60,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.prompt_gate")
 
 #: The two unregulated data classes (in ascending restriction order).
-DATA_CLASS_PUBLIC_CODE = "public-code"
-DATA_CLASS_INTERNAL = "internal"
+
 
 #: Every class more restrictive than ``internal`` carries this prefix.
 REGULATED_PREFIX = "regulated-"
@@ -63,7 +68,7 @@ REGULATED_PREFIX = "regulated-"
 #: Fail-closed class assigned on ANY classification uncertainty (unknown or
 #: malformed class string, conflicting regulated issue labels). It is
 #: regulated and — absent an explicit allowlist entry — blocks every backend.
-FAIL_CLOSED_DATA_CLASS = "regulated-unclassified"
+
 
 #: Issue labels of the form ``data-class:<class>`` override the repo's
 #: declared class upward (never downward, never sideways).
@@ -77,7 +82,6 @@ DATA_CLASS_LABEL_PREFIX = "data-class:"
 #: forever (see ``prompt_gate_alerts``; #9734 review finding 3).
 PROMPT_GATE_BLOCKED_MARKER = "prompt gate blocked"
 
-_VALID_CLASS_RE = re.compile(r"^(?:public-code|internal|regulated-[a-z0-9][a-z0-9-]*)$")
 
 #: v1 built-in redaction pattern set (spec #9734: SSN-like, credit-card-like,
 #: generic ``key=value`` secrets). Merged with — and overridable by —
@@ -90,11 +94,6 @@ BUILTIN_REDACTION_PATTERNS: dict[str, str] = {
         r"\s*[:=]\s*[^\s'\"]+"
     ),
 }
-
-
-def is_valid_data_class(raw: str) -> bool:
-    """True when *raw* is a well-formed data class string."""
-    return bool(_VALID_CLASS_RE.fullmatch(raw.strip()))
 
 
 def normalize_data_class(raw: str) -> str:
