@@ -26,6 +26,29 @@ from preflight import (
 # ---------------------------------------------------------------------------
 
 
+#: The host-mode preflight set, asserted BY NAME rather than by count.
+#: `assert len(results) == 9` says nothing about WHICH checks ran and rots on
+#: every addition — it broke when `stray-quality` landed, reporting a number
+#: instead of naming the gap.
+#: The mode-independent preflight checks, asserted BY NAME. A bare
+#: `assert len(results) == 9` says nothing about WHICH checks ran and rots on
+#: every addition — it broke when `stray-quality` landed, reporting a number
+#: instead of naming the gap.
+#:
+#: `agent-cli-*` entries are deliberately excluded: there is one per configured
+#: tool field, so pinning them here would couple this test to tool defaults it
+#: is not about.
+_MODE_INDEPENDENT_CHECKS = {
+    "disk-space",
+    "gh-auth",
+    "gh-cli",
+    "git",
+    "plugins",
+    "repo-root",
+    "stray-quality",
+}
+
+
 def test_check_git_found() -> None:
     with patch("preflight.shutil.which", return_value="/usr/bin/git"):
         result = _check_git()
@@ -307,8 +330,19 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
     ):
         results = await run_preflight_checks(config)
 
-    # git, gh-cli, gh-auth, repo-root, disk-space, 3x agent-cli, plugins
-    assert len(results) == 9
+    # Assert the SET, not a count. `assert len(results) == 9` says nothing
+    # about WHICH checks ran and rots on every addition — it broke when
+    # `stray-quality` landed, naming a number instead of the gap.
+    assert {r.name for r in results} == {
+        "git",
+        "gh-cli",
+        "gh-auth",
+        "repo-root",
+        "disk-space",
+        "agent-cli-claude",
+        "plugins",
+        "stray-quality",
+    }
     # No docker check in host mode
     assert not any(r.name == "docker" for r in results)
 
@@ -338,8 +372,10 @@ async def test_run_preflight_checks_docker_mode(tmp_path: Path) -> None:
     ):
         results = await run_preflight_checks(config)
 
-    assert any(r.name == "docker" for r in results)
-    assert len(results) == 10  # 9 base + docker
+    names = {r.name for r in results}
+    assert "docker" in names, "docker mode must add the docker daemon check"
+    # Docker mode is host mode PLUS docker — nothing may be dropped.
+    assert names >= _MODE_INDEPENDENT_CHECKS
 
 
 @pytest.mark.asyncio
