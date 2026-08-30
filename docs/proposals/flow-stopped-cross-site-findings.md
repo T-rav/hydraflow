@@ -4,7 +4,7 @@
 #11804, itself scoped by #11798/#11797's concept-scatter sensor finding, #10106/#10104).
 **Verdict:** all three definitions are **identical** (byte-for-byte body/signature/docstring, and
 semantically — same input contract, same pure logic, no side effects). Unification is **safe,
-conditional** on landing test evidence first; see [Evidence gap](#evidence-gap-read-before-trusting-this-note).
+conditional** on landing test evidence first; see [Evidence gap](#evidence-gap--read-before-trusting-this-note).
 
 ## Evidence gap — read before trusting this note
 
@@ -58,9 +58,9 @@ three modules in a single merged change (`53b4905..5402592`)." Direct history ch
 the three sites were each introduced by a **separate** god-class decomposition PR within that range,
 not one commit:
 
-- `ab3e5d18` — refactor(pr-manager,review-phase): decompose two god classes (#11628) → review site
-- `2f440e80` — refactor(orchestrator,plan-phase): decompose two god classes (#11645) → plan site
-- `1dfa9210` — refactor(implement,mockworld): decompose ImplementPhase into mixins (#11658) → implement site
+- `ab3e5d18` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) → review site
+- `2f440e80` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) → plan site
+- `1dfa9210` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) → implement site
 
 Each module's docstring independently states the same rationale: pull the flow's module-level
 surface (constants, edge guards) into a `_common`/mixin-adjacent module so sibling mixins can share
@@ -107,9 +107,11 @@ review (`grep -rn` at HEAD) — phase-specific fail-closed exits, each also sett
 - **Unification safe? Conditional — yes**, pending #11805/#11807.
 
 ### Implement ↔ Review
-- **Classification: identical.** Same basis as above (4 vs 2 gate nodes wired; review additionally
-  has a non-`_flow_stopped` gate-to-`done` path via `_approve_path_handled` that implement's
-  analogous `gate` node lacks entirely — implement's `gate` → `done` edge is unconditional).
+- **Classification: identical.** Same basis as above (4 vs 2 gate nodes wired; review's `gate` node
+  additionally branches on a non-`_flow_stopped` guard, `_approve_path_handled` — routing to
+  `cleanup` directly on the approve path, or via `route` → `cleanup` otherwise, with `done` reached
+  only downstream of `cleanup` — where implement's analogous `gate` node has a single unconditional
+  `gate` → `done` edge and no equivalent guard).
 - **Unification safe? Conditional — yes**, pending #11806/#11807.
 
 ## Recommendation
