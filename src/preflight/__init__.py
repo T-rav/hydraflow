@@ -57,6 +57,7 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     # Strays from a PREVIOUS run, found before this one starts competing
     # with them for the same CPU (#11820).
     results.append(_check_stray_quality_processes(config))
+    results.append(_check_contracts_sandbox(config))
 
     return results
 
@@ -199,6 +200,60 @@ def _etime_seconds(etime: str) -> int:
     nums = [int(b) for b in bits]
     hours, minutes, seconds = ([0] + nums)[-3:] if len(nums) == 2 else nums
     return days * 86_400 + hours * 3_600 + minutes * 60 + seconds
+
+
+def _check_contracts_sandbox(config: HydraFlowConfig) -> CheckResult:
+    """The contracts sandbox repo must exist while external recording is on.
+
+    `ContractRefreshLoop` re-records FakeGitHub cassettes against
+    `config.contracts_sandbox_repo`. When that repo does not exist the loop
+    degrades gracefully — `if main_sha is None: return None` — so it completes,
+    the factory reports healthy, and the only trace is a warning per cycle.
+
+    Measured 2026-08-30: `T-rav-Hydra-Ops/hydraflow-contracts-sandbox` returns
+    404 and had been doing so long enough that six `gh: Not Found` warnings in
+    one run read as background noise. A permanent condition wearing a transient
+    failure's clothes — the same shape as the wiki-compilation burn (#11819),
+    where a swallowed warning cost six hours before anyone looked.
+
+    Reported at boot instead, ONCE, where an operator is already reading. A
+    recurring mid-run warning is the one thing guaranteed to be tuned out.
+    """
+    if not getattr(config, "contract_refresh_external_enabled", False):
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.PASS,
+            "external contract recording disabled; sandbox repo not required",
+        )
+
+    slug = getattr(config, "contracts_sandbox_repo", "") or ""
+    if not slug:
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.WARN,
+            "external contract recording is ON but contracts_sandbox_repo is empty",
+        )
+
+    result = _run_fixed_argv(
+        ["gh", "api", f"repos/{slug}", "--jq", ".full_name"], timeout=20, text=True
+    )
+    if result is None:
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.WARN,
+            f"could not reach GitHub to check {slug}",
+        )
+    if result.returncode == 0:
+        return CheckResult("contracts-sandbox", CheckStatus.PASS, f"{slug} reachable")
+    return CheckResult(
+        "contracts-sandbox",
+        CheckStatus.WARN,
+        f"contracts sandbox {slug!r} is unreachable, so ContractRefreshLoop's "
+        "external recorder can never re-record cassettes — it will warn every "
+        "cycle and never succeed (#11821). Create the repo, repoint "
+        "`contracts_sandbox_repo`, or set "
+        "`contract_refresh_external_enabled=false` to stop attempting it.",
+    )
 
 
 def _check_stray_quality_processes(config: HydraFlowConfig) -> CheckResult:
