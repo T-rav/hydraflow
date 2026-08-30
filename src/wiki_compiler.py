@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from circuit_breaker import CircuitBreaker
 from dedup_store import DedupStore
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from knowledge_metrics import metrics as _metrics
@@ -577,8 +578,6 @@ class WikiCompiler:
         # transient failure: every tick re-blocks, so a soft warn would be a
         # PERMANENT silent no-op". A recurring timeout is that same class and
         # was not being treated as it.
-        from circuit_breaker import CircuitBreaker  # noqa: PLC0415
-
         self._model_breaker = CircuitBreaker(
             "wiki-compilation-model",
             max_failures=config.wiki_compilation_breaker_failures,
