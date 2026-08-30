@@ -20,15 +20,40 @@ from branch_protection_audit import (
 CANONICAL_DIR = Path("docs/standards/branch_protection")
 
 # The exact undeclared-legacy-layer drift from #10148: a legacy branch-protection
-# rule requires 5 contexts on staging that gates.toml declares required_on
-# ["main"] only (signal-only on staging per ADR-0042's two-tier model).
+# rule requires 5 contexts on staging that gates.toml does NOT declare there.
+#
+# The premise is asserted, not assumed — see
+# ``test_the_legacy_layer_premise_still_holds``. It went stale once: this list
+# carried ``quality (.)`` while that gate was ``required_on ["main"]``, #11727
+# moved it to ``["staging"]``, and the audit engine then correctly stopped
+# reporting it — failing three tests here and one scenario with no hint that
+# the FIXTURE, not the engine, was wrong.
 _LEGACY_LAYER_CONTEXTS = [
     "Tests",
     "Type Check",
-    "quality (.)",
+    "Security Scan",
     "Architecture Check",
     "Lint & Format",
 ]
+
+
+def test_the_legacy_layer_premise_still_holds() -> None:
+    """Every `_LEGACY_LAYER_CONTEXTS` entry must be UNDECLARED for staging."""
+    from scripts.gates.contract import load_gates
+    from scripts.gates.resolve import resolve_contexts
+
+    repo_root = Path(__file__).resolve().parents[1]
+    contract = load_gates(repo_root / "docs/standards/branch_protection/gates.toml")
+    declared = set(resolve_contexts(contract, "staging"))
+
+    assert declared, "no staging contexts resolved — the contract went vacuous"
+    leaked = sorted(set(_LEGACY_LAYER_CONTEXTS) & declared)
+    assert not leaked, (
+        f"{leaked} are now DECLARED for staging, so the audit engine will not "
+        "report them as an undeclared legacy layer. Replace them in "
+        "_LEGACY_LAYER_CONTEXTS with contexts the contract does not declare "
+        "for staging."
+    )
 
 
 def _with_id(cfg: dict, n: int) -> dict:
@@ -223,7 +248,18 @@ def test_undeclared_legacy_contexts_clean_when_live_matches_declarative() -> Non
 def test_undeclared_legacy_contexts_clean_when_legacy_is_subset_of_declared() -> None:
     """A legacy rule that only re-requires already-declared contexts is not drift."""
     canonical_main = json.loads((CANONICAL_DIR / "main_ruleset.json").read_text())
-    legacy = _legacy_protection_for(["Tests"])  # "Tests" IS required_on main
+    # DERIVED from the canonical ruleset rather than named: this line said
+    # `["Tests"]` with the comment "IS required_on main" until #11727 moved
+    # main onto the CI Gate umbrella, at which point the premise silently
+    # inverted and the test failed for a reason its own comment denied.
+    declared_on_main = sorted(
+        check["context"]
+        for rule in canonical_main["rules"]
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    )
+    assert declared_on_main, "main declares no contexts — nothing to subset"
+    legacy = _legacy_protection_for(declared_on_main[:1])
 
     assert undeclared_legacy_contexts(canonical_main, canonical_main, legacy) == []
 

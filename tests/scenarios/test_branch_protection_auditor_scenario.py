@@ -30,15 +30,49 @@ pytestmark = pytest.mark.scenario_loops
 
 _CANONICAL_DIR = Path("docs/standards/branch_protection")
 # The exact undeclared-legacy-layer drift from #10148: a legacy
-# branch-protection rule on staging requires 5 contexts gates.toml declares
-# required_on ["main"] only (signal-only on staging per ADR-0042).
+# branch-protection rule on staging requires 5 contexts that gates.toml does
+# NOT declare for staging, so the auditor must report every one of them.
+#
+# The premise is asserted, not assumed — see
+# ``test_the_legacy_layer_premise_still_holds``. It went stale once already:
+# this list carried ``quality (.)`` while that gate was declared
+# ``required_on ["main"]``, and #11727 moved it to ``["staging"]``, at which
+# point the auditor correctly stopped reporting it and this scenario failed
+# with no hint that its FIXTURE, not the code, was wrong.
 _LEGACY_LAYER_CONTEXTS = [
     "Tests",
     "Type Check",
-    "quality (.)",
+    "Security Scan",
     "Architecture Check",
     "Lint & Format",
 ]
+
+
+@pytest.mark.scenario_loops
+def test_the_legacy_layer_premise_still_holds() -> None:
+    """Every `_LEGACY_LAYER_CONTEXTS` entry must be UNDECLARED for staging.
+
+    The scenario below asserts the auditor reports all five. If the contract
+    starts declaring one for staging, the auditor is RIGHT to drop it and the
+    scenario fails pointing at the assertion rather than at this list — which
+    is exactly what happened when #11727 moved `quality (.)` onto staging.
+    This turns that into a one-line diagnosis.
+    """
+    from scripts.gates.contract import load_gates
+    from scripts.gates.resolve import resolve_contexts
+
+    repo_root = Path(__file__).resolve().parents[2]
+    contract = load_gates(repo_root / "docs/standards/branch_protection/gates.toml")
+    declared = set(resolve_contexts(contract, "staging"))
+
+    assert declared, "no staging contexts resolved — the contract went vacuous"
+    leaked = sorted(set(_LEGACY_LAYER_CONTEXTS) & declared)
+    assert not leaked, (
+        f"{leaked} are now DECLARED for staging, so the auditor will not report "
+        "them as an undeclared legacy layer. Replace them in "
+        "_LEGACY_LAYER_CONTEXTS with contexts the contract does not declare "
+        "for staging."
+    )
 
 
 def _canonical(name: str) -> dict:
