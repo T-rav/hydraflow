@@ -53,6 +53,10 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     # Language detection runs per-repo later; at preflight we only check Tier 1.
     results.append(_check_plugins(config, detected_languages=set()))
 
+    # Strays from a PREVIOUS run, found before this one starts competing
+    # with them for the same CPU (#11820).
+    results.append(_check_stray_quality_processes(config))
+
     return results
 
 
@@ -144,6 +148,105 @@ def _check_disk_space(path: Path) -> CheckResult:
         return CheckResult(
             "disk-space", CheckStatus.WARN, f"Could not check disk space: {exc}"
         )
+
+
+#: A `make quality` run far past the suite's own budget is not slow, it is
+#: abandoned. The suite's own per-test cap is 300s and a full run is ~10-15
+#: minutes; an hour is well beyond anything a live run reaches.
+STRAY_PROCESS_AGE_SECONDS = 3600
+
+#: Command substrings that identify a heavyweight suite run. Deliberately
+#: narrow: this check only ever REPORTS, but a wide pattern would report an
+#: operator's own editor or shell and train everyone to ignore it.
+_STRAY_MARKERS = ("make quality", "make quality-unlocked", "pytest tests/")
+
+
+def _stray_process_lines(ps_output: str, *, min_age_seconds: int) -> list[str]:
+    """Rows from ``ps -eo pid,etime,command`` that look abandoned.
+
+    Pure so it can be tested against recorded output — the alternative is a
+    check that only runs on a host that already has the bug.
+
+    ``etime`` is ``[[DD-]HH:]MM:SS``. A row is stray when it names a suite run
+    AND has outlived :data:`STRAY_PROCESS_AGE_SECONDS`.
+    """
+    stray: list[str] = []
+    for line in ps_output.splitlines()[1:]:
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        _pid, etime, command = parts
+        if not any(marker in command for marker in _STRAY_MARKERS):
+            continue
+        if _etime_seconds(etime) >= min_age_seconds:
+            stray.append(f"{_pid} ({etime}) {command[:90]}")
+    return stray
+
+
+def _etime_seconds(etime: str) -> int:
+    """Parse ps ELAPSED (``[[DD-]HH:]MM:SS``) into seconds; 0 if unparseable."""
+    days = 0
+    rest = etime
+    if "-" in etime:
+        day_part, _, rest = etime.partition("-")
+        if not day_part.isdigit():
+            return 0
+        days = int(day_part)
+    bits = rest.split(":")
+    if not all(b.isdigit() for b in bits) or not 2 <= len(bits) <= 3:
+        return 0
+    nums = [int(b) for b in bits]
+    hours, minutes, seconds = ([0] + nums)[-3:] if len(nums) == 2 else nums
+    return days * 86_400 + hours * 3_600 + minutes * 60 + seconds
+
+
+def _check_stray_quality_processes(config: HydraFlowConfig) -> CheckResult:
+    """Report suite runs left over from a previous cycle (#11820).
+
+    Measured 2026-08-30: a `make quality` from a factory build survived the
+    factory's own stop, ran for **11h53m** at ``PPID=1`` holding 2.4 GB, and
+    drove load average to 25. A fresh `make quality` on that host produced 60
+    failures across dozens of unrelated files — every one passing standalone,
+    thin enough to read as flakiness rather than starvation.
+
+    So this reports before the new run starts competing with the old one. It
+    does not kill anything: signalling processes at startup is how a shared
+    host loses an operator's work, and the safe action here is to be LOUD.
+    """
+    del config  # host-wide by nature; nothing repo-scoped to consult
+    try:
+        result = subprocess.run(  # noqa: S603, S607
+            ["ps", "-eo", "pid,etime,command"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return CheckResult(
+            "stray-quality", CheckStatus.WARN, f"could not enumerate processes: {exc}"
+        )
+    if result.returncode != 0:
+        return CheckResult(
+            "stray-quality", CheckStatus.WARN, "ps exited non-zero; skipped"
+        )
+
+    stray = _stray_process_lines(
+        result.stdout, min_age_seconds=STRAY_PROCESS_AGE_SECONDS
+    )
+    if not stray:
+        return CheckResult(
+            "stray-quality", CheckStatus.PASS, "no abandoned suite runs on this host"
+        )
+    listed = "; ".join(stray[:5])
+    return CheckResult(
+        "stray-quality",
+        CheckStatus.WARN,
+        f"{len(stray)} suite run(s) older than "
+        f"{STRAY_PROCESS_AGE_SECONDS // 3600}h still running — they will "
+        f"starve this run and can fail unrelated tests (#11820): {listed}. "
+        "Stop them by PID (never `pkill -f` on a shared host).",
+    )
 
 
 def _check_docker() -> CheckResult:
