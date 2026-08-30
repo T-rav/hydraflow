@@ -19,19 +19,19 @@ GitHub itself rather than by convention alone.
 <!-- generated:gates -->
 | Gate | Dimension | Tier | Required on | Runs on |
 |---|---|---|---|---|
-| Tests | unit-tests | core | main | staging, rc |
-| Lint & Format | lint | core | main | staging, rc |
-| Type Check | types | core | main | staging, rc |
-| Security Scan | sast | core | main | staging, rc |
-| Smoke Tests | smoke | core | main | staging, rc |
-| Scenario Tests | scenario | core | main | staging, rc |
-| Regression Tests | regression | core | main | staging, rc |
-| Principles Audit | principles | core | main | staging, rc |
-| quality (.) | quality | core | main | staging, rc |
-| quality (src/ui) | quality | core | main | staging, rc |
+| Tests | unit-tests | core |  | staging, rc |
+| Lint & Format | lint | core |  | staging, rc |
+| Type Check | types | core |  | staging, rc |
+| Security Scan | sast | core |  | staging, rc |
+| Smoke Tests | smoke | core |  | staging, rc |
+| Scenario Tests | scenario | core |  | staging, rc |
+| Regression Tests | regression | core |  | staging, rc |
+| Principles Audit | principles | core |  | staging, rc |
+| quality (.) | quality | core |  | staging, rc |
+| quality (src/ui) | quality | core |  | staging, rc |
 | Detect Changes | change-detect | core | staging | staging |
 | discover-projects | project-discover | core | staging | staging |
-| CI Gate | ci-aggregate | core | staging | staging |
+| CI Gate | ci-aggregate | core | staging, main | staging, main |
 | Resolve RC PR | rc-resolve | extra | main | rc |
 | Browser Scenarios | browser-e2e | extra | main | rc |
 | Trust Gate (adversarial corpus, fixture mode) | trust | extra | main | rc |

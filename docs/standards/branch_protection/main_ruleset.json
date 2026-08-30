@@ -38,34 +38,7 @@
         "strict_required_status_checks_policy": false,
         "required_status_checks": [
           {
-            "context": "Tests"
-          },
-          {
-            "context": "Lint & Format"
-          },
-          {
-            "context": "Type Check"
-          },
-          {
-            "context": "Security Scan"
-          },
-          {
-            "context": "Smoke Tests"
-          },
-          {
-            "context": "Scenario Tests"
-          },
-          {
-            "context": "Regression Tests"
-          },
-          {
-            "context": "Principles Audit"
-          },
-          {
-            "context": "quality (.)"
-          },
-          {
-            "context": "quality (src/ui)"
+            "context": "CI Gate"
           },
           {
             "context": "Resolve RC PR"
