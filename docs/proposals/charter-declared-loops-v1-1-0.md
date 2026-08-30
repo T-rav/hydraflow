@@ -82,13 +82,20 @@ actors: agents/                           # pointer ONLY, never a role list
 This is enforced — `_parse_actors` raises `CharterError` on a role list, per ADR-0143
 Ruling 6. The reason is not stylistic: a roster in the charter plus a directory of actor
 files is **two tables over one vocabulary**, the same defect that shipped as the dual
-`Charter` classes (`src/charter.py:416` and `src/policy/models.py:133`).
+`Charter` classes — `charter.py`'s loader class and a minimal one in
+`policy/models.py`, the latter existing only because the decision seam is held pure and
+could not import a module that reads files.
 
-Note that those two classes **already disagree about empty** on the one field they
-share: `policy.models.Charter.governs()` is deliberately fail-OPEN on an empty
-`standards` list ("no charter has been written yet"), while `charter.py` treats an empty
-charter as fatal `uncheckable-charter`. Guard 3 below therefore enters contested
-vocabulary and must say which convention it extends. It extends `charter.py`'s.
+**Both are now one class.** The model layer moved to `charter_model.py` (pure), the
+loader stayed in `charter.py` (impure), and `policy.models.Charter` *is*
+`charter_model.Charter`. The review that produced this revision flagged the duplication;
+it also claimed the two "already disagree about empty", and **that claim was wrong**.
+`policy.models.Charter.governs()` is fail-OPEN on an empty `standards` list, while
+`charter.py`'s `declares_nothing_checkable` is a conjunction over *five* fields
+(standards, artifacts, layers, gate scripts, coverage floor) that raises a **finding**,
+not an exception. They answer different questions and both refuse to let an empty
+declaration read as silent success. Guard 3 below extends the loader's fail-loud
+convention.
 
 So `loops.yml` **cannot** simply move into `charter.yaml` as a roster. The contract must
 declare *behaviour*, with the actors themselves still derived from the directory.

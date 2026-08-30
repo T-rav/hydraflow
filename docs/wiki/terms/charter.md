@@ -3,7 +3,7 @@ id: "01M15ZFDYDYQD5FER7DDSBFADD"
 name: "Charter"
 kind: "value_object"
 bounded_context: "shared-kernel"
-code_anchor: "src/charter.py:Charter"
+code_anchor: "src/charter_model.py:Charter"
 aliases: []
 related: []
 evidence: []

@@ -98,7 +98,7 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 
 ## Articles
 
-**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/charter.py:Articles` · **Confidence:** `accepted`
+**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/charter_model.py:Articles` · **Confidence:** `accepted`
 
 The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo charter of ADR-0121 as amended by #11748 (`charter.yaml`, whose `articles:` block is `charter.Articles`) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered / blocking, and HydraFlow acts on the verdict.
 
@@ -153,7 +153,7 @@ Hexagonal port used by caretaker loops (TermProposerLoop, others) to open auto-m
 
 ## Charter
 
-**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/charter.py:Charter` · **Confidence:** `accepted`
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/charter_model.py:Charter` · **Confidence:** `accepted`
 
 The governing declaration a HydraFlow-governed repository carries at its root, in the file named by `charter.CHARTER_FILENAME` (`charter.yaml`). It states the repository's Purpose, its Articles (adopted standards by id, an assurance class, and local articles), a pointer to where its Actors are declared, and the Artifacts it commits to carrying — the four layers of ADR-0143 — plus a `rails:` block holding the ADR-0121 template-conformance fields with their semantics unchanged. It supersedes `rails.yaml`, which loads for one cycle as a rails-only charter with a non-fatal `legacy-rails-manifest` finding. It is HydraFlow's implementation surface for the PAAA ontology, never a schema anyone outside HydraFlow is asked to conform to.
 
@@ -726,7 +726,7 @@ Caretaker loop that polls HITL items and delegates to `PRUnsticker` to resolve a
 
 **Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/onboarding/kernel_writer.py:KernelSpec` · **Confidence:** `accepted`
 
-The first layer of the PAAA governance model (ADR-0143): what a repository is *for* — its direction, goals, set-points, and the intent the work serves. It answers "what is this thing trying to do?" for a system arriving at the repository cold, with no institutional memory. Purpose is the one PAAA layer **nothing checks**. It now has a declaration surface — #11748 landed the `purpose:` block in `charter.yaml`, parsed into `Purpose` (`src/charter.py`) — but **no drift check reads it**, and none should be added without a ruling saying what checking intent would even mean. Outside the charter it still lives implicitly in `README.md` prose, in the one-line description the onboarding kernel stamps into a new repository (`KernelSpec.description`), and in milestone and epic text; nothing reads any of those as a statement of intent either.
+The first layer of the PAAA governance model (ADR-0143): what a repository is *for* — its direction, goals, set-points, and the intent the work serves. It answers "what is this thing trying to do?" for a system arriving at the repository cold, with no institutional memory. Purpose is the one PAAA layer **nothing checks**. It now has a declaration surface — #11748 landed the `purpose:` block in `charter.yaml`, parsed into `Purpose` (`src/charter_model.py`) — but **no drift check reads it**, and none should be added without a ruling saying what checking intent would even mean. Outside the charter it still lives implicitly in `README.md` prose, in the one-line description the onboarding kernel stamps into a new repository (`KernelSpec.description`), and in milestone and epic text; nothing reads any of those as a statement of intent either.
 
 **Invariants:**
 - Purpose is declarative intent, never an executable check — nothing today decides anything against it.

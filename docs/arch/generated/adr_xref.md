@@ -127,7 +127,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0118 | — | `pytest:tests/architecture/test_import_boundary_gate.py` |
 | ADR-0119 | `src.credit_failover` | `pytest:tests/test_credit_failover.py` |
 | ADR-0120 | `src.control_register` | — |
-| ADR-0121 | `src.charter`, `src.charter_drift_caretaker_loop`, `src.dashboard_routes._onboarding_routes`, `src.onboarding.templating` | — |
+| ADR-0121 | `src.charter`, `src.charter_drift_caretaker_loop`, `src.charter_model`, `src.dashboard_routes._onboarding_routes`, `src.onboarding.templating` | — |
 | ADR-0122 | — | — |
 | ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
 | ADR-0124 | `src.goal_supervisor_loop`, `src.supervisor_observation` | — |
@@ -149,7 +149,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0140 | `src.dashboard_routes._gateway_policy_routes`, `src.driver_contracts`, `src.hydraflow_gateway.app`, `src.operator_identity`, `src.routing_matrix` | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 | ADR-0141 | `src.driver_contracts`, `src.route_enforcement` | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | — | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
-| ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.charter`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.erosion.concentration_baseline`, `src.erosion.mass_baseline`, `src.erosion.scatter_baseline`, `src.erosion.suite_hygiene_baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.principle_register`, `src.prompt_gate`, `src.repo_store` | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet` |
+| ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.charter`, `src.charter_model`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.erosion.concentration_baseline`, `src.erosion.mass_baseline`, `src.erosion.scatter_baseline`, `src.erosion.suite_hygiene_baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.principle_register`, `src.prompt_gate`, `src.repo_store` | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet` |
 
 ## Module → ADRs
 
@@ -189,6 +189,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.caching_issue_store` | ADR-0041 |
 | `src.charter` | ADR-0121, ADR-0143 |
 | `src.charter_drift_caretaker_loop` | ADR-0121 |
+| `src.charter_model` | ADR-0121, ADR-0143 |
 | `src.code_grooming_loop` | ADR-0065 |
 | `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094, ADR-0102, ADR-0103, ADR-0106, ADR-0112, ADR-0137 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
