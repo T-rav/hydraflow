@@ -372,6 +372,16 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
+    (
+        "wiki_compilation_breaker_failures",
+        "HYDRAFLOW_WIKI_COMPILATION_BREAKER_FAILURES",
+        3,
+    ),
+    (
+        "wiki_compilation_breaker_reset_seconds",
+        "HYDRAFLOW_WIKI_COMPILATION_BREAKER_RESET_SECONDS",
+        1800,
+    ),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
     (
         "max_troubleshooting_prompt_chars",
@@ -4136,6 +4146,24 @@ class HydraFlowConfig(BaseModel):
         ge=30,
         le=600,
         description="Timeout in seconds for wiki compilation LLM calls",
+    )
+    wiki_compilation_breaker_failures: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Consecutive wiki-compilation model failures before the circuit "
+            "opens and the loop stops spending a full timeout per cycle."
+        ),
+    )
+    wiki_compilation_breaker_reset_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86_400,
+        description=(
+            "Seconds the wiki-compilation circuit stays OPEN before probing "
+            "with a single call."
+        ),
     )
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
