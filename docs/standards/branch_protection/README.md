@@ -27,8 +27,8 @@ GitHub itself rather than by convention alone.
 | Scenario Tests | scenario | core |  | staging, rc |
 | Regression Tests | regression | core |  | staging, rc |
 | Principles Audit | principles | core |  | staging, rc |
-| quality (.) | quality | core |  | staging, rc |
-| quality (src/ui) | quality | core |  | staging, rc |
+| quality (.) | quality | core | staging | staging, rc |
+| quality (src/ui) | quality | core | staging | staging, rc |
 | Detect Changes | change-detect | core | staging | staging |
 | discover-projects | project-discover | core | staging | staging |
 | CI Gate | ci-aggregate | core | staging, main | staging, main |

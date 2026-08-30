@@ -39,6 +39,12 @@
         "strict_required_status_checks_policy": false,
         "required_status_checks": [
           {
+            "context": "quality (.)"
+          },
+          {
+            "context": "quality (src/ui)"
+          },
+          {
             "context": "Detect Changes"
           },
           {
