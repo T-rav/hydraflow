@@ -23,22 +23,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from branch_protection_audit import AuditReport, audit_repo
+from tests.branch_protection_fixtures import LEGACY_LAYER_CONTEXTS
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
 pytestmark = pytest.mark.scenario_loops
 
 _CANONICAL_DIR = Path("docs/standards/branch_protection")
-# The exact undeclared-legacy-layer drift from #10148: a legacy
-# branch-protection rule on staging requires 5 contexts gates.toml declares
-# required_on ["main"] only (signal-only on staging per ADR-0042).
-_LEGACY_LAYER_CONTEXTS = [
-    "Tests",
-    "Type Check",
-    "quality (.)",
-    "Architecture Check",
-    "Lint & Format",
-]
+#: Derived from the live contract — see tests/branch_protection_fixtures.py
+_LEGACY_LAYER_CONTEXTS = LEGACY_LAYER_CONTEXTS
 
 
 def _canonical(name: str) -> dict:
