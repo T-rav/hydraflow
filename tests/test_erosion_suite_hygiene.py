@@ -181,3 +181,35 @@ def test_collect_tests_accepts_explicit_globs(tmp_path: Path) -> None:
     collected = collect_tests(tests, globs=("regression_*.py",))
 
     assert sorted(collected) == ["tests/regression_issue_1.py"]
+
+
+def test_a_bundled_fixture_repo_is_not_measured_as_this_suite(tmp_path: Path) -> None:
+    """A fixture repo's own `tests/` tree is data, not this suite's erosion.
+
+    `tests/trust/adversarial/cases/<case>/{before,after}/tests/` holds miniature
+    repositories the trust corpus judges. A before/after pair is SUPPOSED to
+    carry near-identical tests — that is the corpus working. Counting it as a
+    cross-file duplicate produced a finding no suite cleanup could resolve:
+    "fixing" it would break the corpus.
+    """
+    suite = tmp_path / "tests"
+    (suite / "trust" / "cases" / "c1" / "before" / "tests").mkdir(parents=True)
+    (suite / "trust" / "cases" / "c1" / "after" / "tests").mkdir(parents=True)
+    body = "def test_same():\n    assert True\n"
+    (suite / "trust" / "cases" / "c1" / "before" / "tests" / "test_x.py").write_text(
+        body
+    )
+    (suite / "trust" / "cases" / "c1" / "after" / "tests" / "test_x.py").write_text(
+        body
+    )
+    (suite / "test_mine.py").write_text("def test_mine():\n    assert True\n")
+
+    collected = collect_tests(suite, globs=("test_*.py",))
+
+    assert "tests/test_mine.py" in collected, (
+        "the suite's own module must still be collected — a skip rule that "
+        "swallowed everything would make every erosion metric read zero"
+    )
+    nested = [key for key in collected if "/tests/" in key]
+    assert not nested, f"bundled fixture suites were measured: {nested}"
+    assert compute(collected).cross_file_duplicates == ()

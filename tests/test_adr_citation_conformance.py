@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from adr_citation_resolve import unresolved_citations
 from adr_index import ADRIndex
 
@@ -74,28 +76,26 @@ def _index(tmp_path: Path) -> ADRIndex:
     return ADRIndex(tmp_path / "docs" / "adr")
 
 
-def test_bare_symbol_resolves(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("source", "citation"),
+    [
+        pytest.param("class Bar:\n    pass\n", "src/foo.py:Bar", id="bare_symbol"),
+        pytest.param(
+            "MAX_RETRIES = 3\n", "src/foo.py:MAX_RETRIES", id="module_level_constant"
+        ),
+        pytest.param(
+            "class Bar:\n    def baz(self):\n        pass\n",
+            "src/foo.py:Bar.baz",
+            id="dotted_method",
+        ),
+        # A bare `src/foo.py` citation (no :Symbol) resolves when the file exists.
+        pytest.param("x = 1\n", "src/foo.py", id="bare_file_citation_present_file"),
+    ],
+)
+def test_citation_resolves(tmp_path: Path, source: str, citation: str) -> None:
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "foo.py").write_text("class Bar:\n    pass\n")
-    _write_adr(tmp_path / "docs" / "adr", 1, "src/foo.py:Bar")
-
-    assert unresolved_citations(_index(tmp_path), repo_root=tmp_path) == []
-
-
-def test_module_level_constant_resolves(tmp_path: Path) -> None:
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "foo.py").write_text("MAX_RETRIES = 3\n")
-    _write_adr(tmp_path / "docs" / "adr", 1, "src/foo.py:MAX_RETRIES")
-
-    assert unresolved_citations(_index(tmp_path), repo_root=tmp_path) == []
-
-
-def test_dotted_method_resolves(tmp_path: Path) -> None:
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "foo.py").write_text(
-        "class Bar:\n    def baz(self):\n        pass\n"
-    )
-    _write_adr(tmp_path / "docs" / "adr", 1, "src/foo.py:Bar.baz")
+    (tmp_path / "src" / "foo.py").write_text(source)
+    _write_adr(tmp_path / "docs" / "adr", 1, citation)
 
     assert unresolved_citations(_index(tmp_path), repo_root=tmp_path) == []
 
@@ -128,15 +128,6 @@ def test_dead_path_does_not_resolve(tmp_path: Path) -> None:
     assert unresolved_citations(_index(tmp_path), repo_root=tmp_path) == [
         (7, "src/missing.py", "Bar")
     ]
-
-
-def test_bare_file_citation_present_file_resolves(tmp_path: Path) -> None:
-    """A bare `src/foo.py` citation (no :Symbol) resolves when the file exists."""
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "foo.py").write_text("x = 1\n")
-    _write_adr(tmp_path / "docs" / "adr", 1, "src/foo.py")
-
-    assert unresolved_citations(_index(tmp_path), repo_root=tmp_path) == []
 
 
 def test_bare_file_citation_missing_file_is_exempt(tmp_path: Path) -> None:
