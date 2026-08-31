@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -57,6 +58,9 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     # Strays from a PREVIOUS run, found before this one starts competing
     # with them for the same CPU (#11820).
     results.append(_check_stray_quality_processes(config))
+    # A leaked factory matches none of the suite markers above, so it needs its
+    # own structural check — three trees survived 21h undetected (#11840).
+    results.append(_check_abandoned_factory_trees(config))
     results.append(_check_contracts_sandbox(config))
 
     return results
@@ -185,6 +189,43 @@ def _stray_process_lines(ps_output: str, *, min_age_seconds: int) -> list[str]:
     return stray
 
 
+#: A `make factory` process group has one job: supervise `python -m server`.
+#: When that server is gone the group is abandoned however young it is, so this
+#: check keys on structure and never on age — a healthy factory runs for days,
+#: and an age rule would flag the working one forever (#11840).
+#:
+#: Both patterns anchor to the EXECUTABLE. On a host running LLM agents `ps` is
+#: full of processes *talking about* these commands: the factory's own triage
+#: agent carries "make factory" inside its prompt, and a monitoring shell
+#: carries it in its own command line. Matching the phrase anywhere would point
+#: an operator at live factory work. Measured 2026-08-30, a substring count of
+#: "python -m server" gave 2 for an abandoned tree and 4 for a healthy one —
+#: both non-zero, so it cannot separate them at all.
+_FACTORY_LEADER_RE = re.compile(r"/make\s+factory(\s|$)")
+_FACTORY_SERVER_RE = re.compile(r"/python[0-9.]*\s+-m\s+server(\s|$)")
+
+
+def _abandoned_factory_groups(ps_output: str) -> list[str]:
+    """PGIDs of `make factory` groups that have lost their server (#11840).
+
+    Takes ``ps -eo pgid,pid,etime,command``. Pure, so the three-way fixture in
+    ``tests/regressions/test_issue_11840_abandoned_factory_trees.py`` can pin
+    healthy / abandoned / decoy without needing a host that has the bug.
+    """
+    leaders: set[str] = set()
+    served: set[str] = set()
+    for line in ps_output.splitlines()[1:]:
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        pgid, _pid, _etime, command = parts
+        if _FACTORY_LEADER_RE.search(command):
+            leaders.add(pgid)
+        if _FACTORY_SERVER_RE.search(command):
+            served.add(pgid)
+    return sorted(leaders - served)
+
+
 def _etime_seconds(etime: str) -> int:
     """Parse ps ELAPSED (``[[DD-]HH:]MM:SS``) into seconds; 0 if unparseable."""
     days = 0
@@ -253,6 +294,50 @@ def _check_contracts_sandbox(config: HydraFlowConfig) -> CheckResult:
         "cycle and never succeed (#11821). Create the repo, repoint "
         "`contracts_sandbox_repo`, or set "
         "`contract_refresh_external_enabled=false` to stop attempting it.",
+    )
+
+
+def _check_abandoned_factory_trees(config: HydraFlowConfig) -> CheckResult:
+    """Report `make factory` groups whose server is gone (#11840).
+
+    Measured 2026-08-30: three trees from 00:35, 00:37 and 00:38 were alive at
+    21:30 — 24 processes holding ports 5556-5558, each running a vite watcher
+    with no server left to serve. `_check_stray_quality_processes` reported PASS
+    throughout, because a leaked factory matches none of its markers.
+
+    Reports only, like its sibling: signalling processes from a preflight check
+    is how a shared host loses someone's work, and one of the decoys this
+    predicate had to learn to exclude was the factory's own live triage agent.
+    """
+    del config  # host-wide by nature
+    result = _run_fixed_argv(
+        ["ps", "-eo", "pgid,pid,etime,command"], timeout=15, text=True
+    )
+    if result is None:
+        return CheckResult(
+            "abandoned-factory", CheckStatus.WARN, "could not enumerate processes"
+        )
+    if result.returncode != 0:
+        return CheckResult(
+            "abandoned-factory", CheckStatus.WARN, "ps exited non-zero; skipped"
+        )
+
+    groups = _abandoned_factory_groups(result.stdout)
+    if not groups:
+        return CheckResult(
+            "abandoned-factory",
+            CheckStatus.PASS,
+            "no abandoned factory trees on this host",
+        )
+    listed = ", ".join(groups[:5])
+    return CheckResult(
+        "abandoned-factory",
+        CheckStatus.WARN,
+        f"{len(groups)} `make factory` group(s) have no running server and are "
+        f"abandoned (#11840): pgid {listed}. Each still holds a UI dev server "
+        "and a port. Confirm with `ps -eo pgid,pid,command | awk '$1==<pgid>'`, "
+        "then stop by process group (`kill -TERM -<pgid>`) — never `pkill -f`, "
+        "which matches agents whose prompts mention these commands.",
     )
 
 

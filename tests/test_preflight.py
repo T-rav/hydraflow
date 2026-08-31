@@ -343,6 +343,7 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
         "agent-cli-claude",
         "plugins",
         "stray-quality",
+        "abandoned-factory",
         "contracts-sandbox",
     }
     # No docker check in host mode
