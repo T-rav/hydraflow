@@ -33,6 +33,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.orchestrator")
 
 
+def _is_escape_bookkeeping_issue(config: HydraFlowConfig, issue_id: int) -> bool:
+    """True when *issue_id* is an OPEN escape-ledger surfacing (#11816).
+
+    Fail-soft by design: any error reading the surfaces ledger returns False,
+    which restores the pre-#11816 behaviour (treat as a normal orphan). A
+    bookkeeping issue wrongly requeued is recoverable; a real orphan wrongly
+    skipped would sit review-labeled forever, which is the #9815 defect this
+    check must not reintroduce.
+    """
+    try:
+        from escape.surfaces import SurfacedIssueLedger  # noqa: PLC0415
+
+        path = config.diagnostics_dir / "escape_surfaces.jsonl"
+        if not path.is_file():
+            return False
+        return SurfacedIssueLedger(path).has_open_link_for_issue(issue_id)
+    except Exception:  # noqa: BLE001 - never block the orphan path on a read
+        logger.debug("escape-surfacing check failed for #%s", issue_id, exc_info=True)
+        return False
+
+
 class OrchestratorWorkMixin:
     """Stage work functions of :class:`orchestrator.HydraFlowOrchestrator`."""
 
@@ -193,6 +214,19 @@ class OrchestratorWorkMixin:
         Every gh failure is fail-soft back to the legacy wait path.
         """
         if self._config.review_orphan_max_requeues <= 0:
+            return False
+        if _is_escape_bookkeeping_issue(self._config, issue.id):
+            # Not an interruption: an escape-ledger surfacing resolves by a row
+            # in the ledger, never a PR, so "no open PR" is its EXPECTED state.
+            # #11787 was requeued 2 minutes after a CORRECT resolution because
+            # `_reconcile_surfaced_issues` had not ticked yet; the fresh cycle
+            # could not produce a PR either, so it would burn the whole attempt
+            # budget and escalate to HITL (#11816).
+            logger.info(
+                "Review orphan: issue #%s has an open escape-ledger surfacing "
+                "— no PR is expected; leaving it for ledger reconciliation",
+                issue.id,
+            )
             return False
         strikes = self._state.increment_review_orphan_strike(issue.id)
         if strikes < self._config.review_orphan_strike_threshold:
