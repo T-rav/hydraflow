@@ -66,17 +66,39 @@ class TestExtractFieldFromSources:
 
     # --- Basic extraction from body dict ---
 
-    def test_extracts_from_body_primary_field(self) -> None:
-        result = _extract_field_from_sources(
-            ("path", "repo_path"), {"path": "/tmp/repo"}, None, (None, None)
-        )
-        assert result == "/tmp/repo"
-
-    def test_extracts_from_body_alias_field(self) -> None:
-        result = _extract_field_from_sources(
-            ("path", "repo_path"), {"repo_path": "/tmp/repo"}, None, (None, None)
-        )
-        assert result == "/tmp/repo"
+    @pytest.mark.parametrize(
+        ("keys", "body", "expected"),
+        [
+            pytest.param(
+                ("path", "repo_path"),
+                {"path": "/tmp/repo"},
+                "/tmp/repo",
+                id="extracts_from_body_primary_field",
+            ),
+            pytest.param(
+                ("path", "repo_path"),
+                {"repo_path": "/tmp/repo"},
+                "/tmp/repo",
+                id="extracts_from_body_alias_field",
+            ),
+            pytest.param(
+                ("slug", "repo"),
+                {"slug": "   "},
+                "",
+                id="ignores_whitespace_only_values",
+            ),
+            pytest.param(
+                ("slug", "repo"),
+                {"slug": "  trimmed  "},
+                "trimmed",
+                id="strips_whitespace_from_values",
+            ),
+        ],
+    )
+    def test_reads_the_body(
+        self, keys: tuple[str, ...], body: dict[str, str], expected: str
+    ) -> None:
+        assert _extract_field_from_sources(keys, body, None, (None, None)) == expected
 
     def test_extracts_from_nested_req_in_body(self) -> None:
         body = {"req": {"slug": "nested-slug"}}
@@ -157,18 +179,6 @@ class TestExtractFieldFromSources:
     def test_returns_empty_string_when_no_sources(self) -> None:
         result = _extract_field_from_sources(("slug", "repo"), None, None, (None, None))
         assert result == ""
-
-    def test_ignores_whitespace_only_values(self) -> None:
-        result = _extract_field_from_sources(
-            ("slug", "repo"), {"slug": "   "}, None, (None, None)
-        )
-        assert result == ""
-
-    def test_strips_whitespace_from_values(self) -> None:
-        result = _extract_field_from_sources(
-            ("slug", "repo"), {"slug": "  trimmed  "}, None, (None, None)
-        )
-        assert result == "trimmed"
 
     def test_ignores_non_string_values(self) -> None:
         result = _extract_field_from_sources(

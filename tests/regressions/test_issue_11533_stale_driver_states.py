@@ -112,8 +112,30 @@ def test_spec_transition_map_states_the_live_nominal_path() -> None:
     assert "`TRIAGE → PLAN → READY → REVIEW → MERGED`" in _transition_map_line()
 
 
-def test_spec_declares_the_eleven_state_literal() -> None:
-    assert "**11-state** literal" in SPEC.read_text()
+@pytest.mark.parametrize(
+    "clause",
+    [
+        pytest.param(
+            "**11-state** literal", id="spec_declares_the_eleven_state_literal"
+        ),
+        pytest.param(
+            "_STAGE_PRIORITY", id="spec_names_the_stage_priority_reconciliation_rule"
+        ),
+        # Priority-only reconciliation silently reverts backward transitions; the
+        # spec must mandate an intent record written before the swap.
+        pytest.param(
+            "pending_stage_transition",
+            id="reconciliation_is_recorded_intent_not_bare_priority",
+        ),
+        # A third label dragged in mid-swap must preempt, not be removed by the driver.
+        pytest.param(
+            "external drift, not an interrupted swap",
+            id="reconciliation_carves_out_external_operator_drift",
+        ),
+    ],
+)
+def test_spec_states(clause: str) -> None:
+    assert clause in SPEC.read_text()
 
 
 def test_spec_no_longer_claims_a_thirteen_state_literal() -> None:
@@ -149,10 +171,6 @@ def test_spec_retains_the_section_that_answers_an_adversarial_finding(
     heading: str,
 ) -> None:
     assert heading in SPEC.read_text()
-
-
-def test_spec_names_the_stage_priority_reconciliation_rule() -> None:
-    assert "_STAGE_PRIORITY" in SPEC.read_text()
 
 
 def test_spec_names_the_queue_strategy_same_day_flip_as_the_anti_pattern() -> None:
@@ -219,12 +237,6 @@ def test_adr_0137_answers_each_adversarial_finding(finding: str) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_reconciliation_is_recorded_intent_not_bare_priority() -> None:
-    # Priority-only reconciliation silently reverts backward transitions; the
-    # spec must mandate an intent record written before the swap.
-    assert "pending_stage_transition" in SPEC.read_text()
-
-
 def test_spec_names_the_backward_transition_hazard() -> None:
     text = SPEC.read_text()
 
@@ -276,11 +288,6 @@ def test_spec_splits_the_bundled_p2_row_by_risk() -> None:
     text = SPEC.read_text()
 
     assert "| **P2a** |" in text and "| **P2b** |" in text and "| **P2c** |" in text
-
-
-def test_reconciliation_carves_out_external_operator_drift() -> None:
-    # A third label dragged in mid-swap must preempt, not be removed by the driver.
-    assert "external drift, not an interrupted swap" in SPEC.read_text()
 
 
 def test_intent_record_staleness_is_defined() -> None:

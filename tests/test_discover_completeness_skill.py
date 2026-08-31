@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from discover_completeness import (
     build_discover_completeness_prompt,
     parse_discover_completeness_result,
@@ -113,49 +115,47 @@ class TestParseDiscoverCompletenessResult:
         assert len(findings) == 1
         assert "acceptance-criteria" in findings[0]
 
-    def test_retry_keyword_shallow_section(self):
+    @pytest.mark.parametrize(
+        ("keyword", "summary_tail", "finding_tail"),
+        [
+            pytest.param(
+                "shallow-section:open-questions",
+                "only one bullet",
+                "single bullet present",
+                id="retry_keyword_shallow_section",
+            ),
+            pytest.param(
+                "paraphrase-only",
+                "brief is a rephrase of the issue body",
+                "no new information added",
+                id="retry_keyword_paraphrase_only",
+            ),
+            pytest.param(
+                "vague-criterion",
+                "'make it faster' is not observable",
+                "'faster' lacks a metric",
+                id="retry_keyword_vague_criterion",
+            ),
+            pytest.param(
+                "hid-ambiguity",
+                "issue says 'maybe' but brief claims zero opens",
+                "'maybe' in issue body not reflected in questions",
+                id="retry_keyword_hid_ambiguity",
+            ),
+        ],
+    )
+    def test_retry_keyword_reaches_the_summary(
+        self, keyword: str, summary_tail: str, finding_tail: str
+    ):
         transcript = (
             "DISCOVER_COMPLETENESS_RESULT: RETRY\n"
-            "SUMMARY: shallow-section:open-questions — only one bullet\n"
+            f"SUMMARY: {keyword} — {summary_tail}\n"
             "FINDINGS:\n"
-            "- shallow-section:open-questions — single bullet present\n"
+            f"- {keyword} — {finding_tail}\n"
         )
         passed, summary, _ = parse_discover_completeness_result(transcript)
         assert passed is False
-        assert "shallow-section:open-questions" in summary
-
-    def test_retry_keyword_paraphrase_only(self):
-        transcript = (
-            "DISCOVER_COMPLETENESS_RESULT: RETRY\n"
-            "SUMMARY: paraphrase-only — brief is a rephrase of the issue body\n"
-            "FINDINGS:\n"
-            "- paraphrase-only — no new information added\n"
-        )
-        passed, summary, _ = parse_discover_completeness_result(transcript)
-        assert passed is False
-        assert "paraphrase-only" in summary
-
-    def test_retry_keyword_vague_criterion(self):
-        transcript = (
-            "DISCOVER_COMPLETENESS_RESULT: RETRY\n"
-            "SUMMARY: vague-criterion — 'make it faster' is not observable\n"
-            "FINDINGS:\n"
-            "- vague-criterion — 'faster' lacks a metric\n"
-        )
-        passed, summary, _ = parse_discover_completeness_result(transcript)
-        assert passed is False
-        assert "vague-criterion" in summary
-
-    def test_retry_keyword_hid_ambiguity(self):
-        transcript = (
-            "DISCOVER_COMPLETENESS_RESULT: RETRY\n"
-            "SUMMARY: hid-ambiguity — issue says 'maybe' but brief claims zero opens\n"
-            "FINDINGS:\n"
-            "- hid-ambiguity — 'maybe' in issue body not reflected in questions\n"
-        )
-        passed, summary, _ = parse_discover_completeness_result(transcript)
-        assert passed is False
-        assert "hid-ambiguity" in summary
+        assert keyword in summary
 
     def test_findings_block_parsed_multiline(self):
         transcript = (

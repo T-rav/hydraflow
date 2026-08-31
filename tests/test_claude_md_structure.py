@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 DOCS_WIKI = REPO_ROOT / "docs" / "wiki"
@@ -25,26 +27,33 @@ def _read_claude_md() -> str:
 
 
 class TestKnowledgeLookupSection:
-    def test_has_knowledge_lookup_section(self) -> None:
-        content = _read_claude_md()
-        assert "## Knowledge Lookup" in content, (
-            "CLAUDE.md must have a '## Knowledge Lookup' section pointing "
-            "agents at ADRs, the repo wiki, and docs/."
-        )
-
-    def test_references_adr_index(self) -> None:
-        content = _read_claude_md()
-        assert "docs/adr/" in content, (
-            "CLAUDE.md must reference docs/adr/ so agents know where to "
-            "find architecture decision records."
-        )
-
-    def test_references_wiki(self) -> None:
-        content = _read_claude_md()
-        assert "docs/wiki" in content, (
-            "CLAUDE.md must reference the wiki so agents know about "
-            "the per-repo LLM knowledge base."
-        )
+    @pytest.mark.parametrize(
+        ("needle", "why"),
+        [
+            pytest.param(
+                "## Knowledge Lookup",
+                "have a '## Knowledge Lookup' section pointing agents at ADRs, "
+                "the repo wiki, and docs/",
+                id="has_knowledge_lookup_section",
+            ),
+            pytest.param(
+                "docs/adr/",
+                "reference docs/adr/ so agents know where to find architecture "
+                "decision records",
+                id="references_adr_index",
+            ),
+            pytest.param(
+                "docs/wiki",
+                "reference the wiki so agents know about the per-repo LLM "
+                "knowledge base",
+                id="references_wiki",
+            ),
+        ],
+    )
+    def test_section_points_at_the_knowledge_sources(
+        self, needle: str, why: str
+    ) -> None:
+        assert needle in _read_claude_md(), f"CLAUDE.md must {why}."
 
 
 class TestGotchasContent:

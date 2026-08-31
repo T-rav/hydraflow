@@ -313,40 +313,41 @@ class TestFuzzyFallbackGate:
         table = self._table(tmp_path, self._opus_models())
         assert table.estimate_cost("claude-opus-4-9", 1000, 1000) is None
 
-    def test_bare_tier_alias_still_resolves_exactly(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("model_id", "cost"),
+        [
+            pytest.param("opus", 5.0, id="bare_tier_alias_still_resolves_exactly"),
+            # Variant tags after a full known id remain resolvable (canonical id
+            # is a token-boundary prefix, residual token is non-numeric).
+            pytest.param(
+                "claude-opus-4-7-extended",
+                5.0,
+                id="non_numeric_suffix_variant_still_fuzzy_matches",
+            ),
+            pytest.param(
+                "anthropic/claude-opus-4-7",
+                5.0,
+                id="provider_prefix_form_fuzzy_matches_on_token_boundary",
+            ),
+            # Both "claude-opus-4" (alias) and "claude-opus-4-20250514"
+            # (canonical) align at token boundaries; the more specific
+            # canonical id must win — hence 15.0, not 5.0.
+            pytest.param(
+                "claude-opus-4-20250514-preview", 15.0, id="longest_candidate_wins"
+            ),
+        ],
+    )
+    def test_resolves_to(self, tmp_path, model_id: str, cost: float):
         table = self._table(tmp_path, self._opus_models())
-        rate = table.get_rate("opus")
+        rate = table.get_rate(model_id)
         assert rate is not None
-        assert rate.input_cost_per_million == 5.0
-
-    def test_non_numeric_suffix_variant_still_fuzzy_matches(self, tmp_path):
-        # Variant tags after a full known id remain resolvable (canonical id
-        # is a token-boundary prefix, residual token is non-numeric).
-        table = self._table(tmp_path, self._opus_models())
-        rate = table.get_rate("claude-opus-4-7-extended")
-        assert rate is not None
-        assert rate.input_cost_per_million == 5.0
-
-    def test_provider_prefix_form_fuzzy_matches_on_token_boundary(self, tmp_path):
-        table = self._table(tmp_path, self._opus_models())
-        rate = table.get_rate("anthropic/claude-opus-4-7")
-        assert rate is not None
-        assert rate.input_cost_per_million == 5.0
+        assert rate.input_cost_per_million == cost
 
     def test_candidate_inside_larger_token_does_not_match(self, tmp_path):
         # "claude-opus-4-7" appears in the string but glued to an alnum char
         # on the left — not a token-boundary match.
         table = self._table(tmp_path, self._opus_models())
         assert table.get_rate("xclaude-opus-4-7") is None
-
-    def test_longest_candidate_wins(self, tmp_path):
-        # Both "claude-opus-4" (alias) and "claude-opus-4-20250514"
-        # (canonical) align at token boundaries; the more specific canonical
-        # id must win.
-        table = self._table(tmp_path, self._opus_models())
-        rate = table.get_rate("claude-opus-4-20250514-preview")
-        assert rate is not None
-        assert rate.input_cost_per_million == 15.0
 
     def test_unknown_model_warns_once(self, tmp_path, caplog):
         table = self._table(tmp_path, self._opus_models())
