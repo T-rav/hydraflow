@@ -4142,6 +4142,18 @@ class HydraFlowConfig(BaseModel):
         default="claude",
         description="CLI backend for wiki compilation",
     )
+    auth_retry_base_delay: float = Field(
+        default=5.0,
+        ge=0.0,
+        le=60.0,
+        description=(
+            "Base seconds for the agent-CLI auth-retry backoff; doubles per "
+            "attempt (5s, 10s at the defaults). Configurable so scenario tests "
+            "can exercise the retry path without paying 15s of real sleep "
+            "(#11844) — production behaviour is unchanged at the default."
+        ),
+    )
+
     wiki_compilation_timeout: int = Field(
         default=300,
         ge=30,
