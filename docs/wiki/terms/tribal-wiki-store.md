@@ -20,7 +20,7 @@ proposal_imports_seen: 2
 
 ## Definition
 
-Cross-repo knowledge store that mirrors the per-repo wiki layout (index.json + topic.md pages) but is not namespaced by repo. All entries carry source_repo='global' and are written only by the generalization pass (src/wiki_compiler.py) when the same principle is observed in two or more per-repo wikis. Loaded at every plan/implement/review phase alongside the target repo's wiki so tribal rules apply regardless of which repo is being worked on. Routes reads, writes, staleness filtering, and contradiction marking through the underlying RepoWikiStore to keep on-disk format consistent with per-repo wikis.
+Cross-repo knowledge store that mirrors the per-repo wiki layout (index.json + topic.md pages) but is not namespaced by repo. All entries carry source_repo='global' and are written only by the generalization pass (src/wiki_compiler/_judge.py) when the same principle is observed in two or more per-repo wikis. Loaded at every plan/implement/review phase alongside the target repo's wiki so tribal rules apply regardless of which repo is being worked on. Routes reads, writes, staleness filtering, and contradiction marking through the underlying RepoWikiStore to keep on-disk format consistent with per-repo wikis.
 
 ## Invariants
 
