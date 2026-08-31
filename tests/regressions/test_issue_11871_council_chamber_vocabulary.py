@@ -165,3 +165,79 @@ def test_collect_errors_actually_calls_the_vocabulary_check(tmp_path: Path) -> N
         "collect_errors did not surface the illegal verdict — "
         "the vocabulary check is not wired into the gate"
     )
+
+
+# ---------------------------------------------------------------------------
+# #11870: the gate false-positived on a LEGAL verdict.
+#
+# `VERDICT_RE` captured `[^\n·]+`, stopping at the first `·`. A real verdict's
+# qualifier runs to end of line and may contain ` · ` separators, so
+# `FIX (list: a · b)` was truncated to `FIX (list: a` — an unclosed paren that
+# the strip-the-group `_base_term` could not remove, leaving the whole
+# fragment to fail the vocabulary check.
+#
+# A gate that rejects legal values is worse than no gate: it teaches people to
+# ignore or disable it. These pin the shape that actually ships.
+# ---------------------------------------------------------------------------
+
+_REAL_11870_VERDICT = (
+    "FIX (list: right-sizing splits #11865 #11866 #11868 #11869 · verdicts "
+    "page resequenced first · GNAA fixture test moved to schema time · "
+    "regulated-* demo charter for composition-rule visibility · e2e scaffold "
+    "dedup · P1 gradient with stated reason — all applied same run)"
+)
+
+
+def test_a_qualifier_containing_field_separators_is_still_legal(
+    tmp_path: Path,
+) -> None:
+    """The verbatim verdict from #11870, which the first version rejected."""
+    rec = _record(tmp_path, "design", _REAL_11870_VERDICT)
+    assert verdict_violations(tmp_path, _AGENTS, [rec]) == []
+
+
+def test_an_unbalanced_qualifier_does_not_swallow_the_term(tmp_path: Path) -> None:
+    """Truncating at the first `(` is what makes this robust.
+
+    A strip-the-balanced-group rule keeps the WHOLE string when the closing
+    paren is missing — the precise mechanism of the #11870 false positive.
+    """
+    assert _base_term("FIX (unclosed") == "FIX"
+    assert _base_term("ACCEPT (defer) trailing") == "ACCEPT"
+
+
+def test_the_fix_did_not_weaken_the_check(tmp_path: Path) -> None:
+    """Widening the capture must not let an illegal verdict through.
+
+    `SOUND WITH FIXES` has no parenthetical, so a change that over-truncated
+    could accidentally reduce it to something legal.
+    """
+    rec = _record(tmp_path, "design", "SOUND WITH FIXES (with a qualifier)")
+    errors = verdict_violations(tmp_path, _AGENTS, [rec])
+    assert len(errors) == 1
+    assert "SOUND WITH FIXES" in errors[0]
+
+
+def test_the_capture_keeps_the_whole_verdict_field() -> None:
+    """Pins the regex half of the #11870 fix independently.
+
+    Mutation testing showed the `_base_term` fix alone already rescues a
+    truncated capture (splitting at `(` works either way), so restoring the
+    old `[^\\n·]+` pattern failed NOTHING. That makes the regex change
+    unpinned — a later "simplification" back to the old pattern would pass
+    the suite while silently truncating every qualifier.
+
+    Verdict is the last field on the Date line, so the capture must reach the
+    end of it, closing paren included.
+    """
+    from check_council_conformance import VERDICT_RE
+
+    line = (
+        "**Date:** 2026-08-31 · **Seats:** a · **Verdict:** "
+        "FIX (list: a · b · c)\n**Dissent:** none\n"
+    )
+    m = VERDICT_RE.search(line)
+    assert m is not None
+    captured = m.group("verdict")
+    assert captured.endswith(")"), f"capture truncated mid-qualifier: {captured!r}"
+    assert "· b · c" in captured, "the separators inside the qualifier were lost"
