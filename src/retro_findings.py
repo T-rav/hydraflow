@@ -13,6 +13,7 @@ Pure: filesystem reads for existence only, no network, no subprocess.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -125,7 +126,11 @@ def _rejection_reason(
         return _gate_reason(finding, signal)
     if isinstance(finding, BugfixFinding):
         return _bugfix_reason(finding, signal, repo_root)
-    return _policy_reason(finding, repo_root)
+    if isinstance(finding, PolicyFinding):
+        return _policy_reason(finding, repo_root)
+    # A new finding kind must declare its own checks. Falling through to the
+    # policy path would silently validate it against the wrong anchors.
+    return f"unrecognised finding kind {finding.kind!r} has no validation"
 
 
 def _gate_reason(finding: GateFinding, signal: RetroSignal) -> str | None:
@@ -136,7 +141,12 @@ def _gate_reason(finding: GateFinding, signal: RetroSignal) -> str | None:
             f"guard_path {finding.guard_path!r} is outside the guard allowlist "
             f"{GUARD_PREFIXES}"
         )
-    if str(signal.count) not in finding.observed:
+    # Word-boundary, not substring: a bare `in` test let count=7 pass on
+    # "took 70 seconds" and count=2 on any 2026 date. Counts are small
+    # integers and model prose is full of numbers, so the substring form was
+    # nearly free to satisfy — and it is the ONLY thing forcing a GATE finding
+    # to be quantified.
+    if not re.search(rf"(?<!\d){re.escape(str(signal.count))}(?!\d)", finding.observed):
         return (
             f"observed does not restate the signal count {signal.count} — "
             "a prose-only observation is not evidence"
