@@ -357,8 +357,15 @@ class TestRendering:
         await loop._do_work()
 
         title, body = prs.create_issue.await_args.args[:2]
-        assert title.startswith("Erosion: 1 god class")
-        assert "Hub" in title
+        # The title carries NO metrics: the loop refreshes the body of a class
+        # issue and cannot edit the title, so a number here freezes at filing
+        # and rots (#11547's said 4898 LOC against a body reading 5278). The
+        # live values belong in the evidence table, asserted below.
+        assert title == "Erosion: god classes and god files above the mass threshold"
+        assert not any(ch.isdigit() for ch in title), (
+            f"a digit in the title will go stale: {title!r}"
+        )
+        assert "Hub" in body
         assert extract_class_key(body).startswith("findclass:erosion_metrics:")
         assert extract_folded_sites(body) == ["src/hub.py:Hub"]
         assert "40 methods" in body
@@ -377,7 +384,14 @@ class TestRendering:
         await loop._do_work()
 
         title, body = prs.create_issue.await_args.args[:2]
-        assert "2 parametrize copies" in title
+        # Same rule: counts live in the refreshed body, never the frozen title.
+        assert title == (
+            "Erosion: test suite carries parametrize copies and cross-file duplicates"
+        )
+        assert not any(ch.isdigit() for ch in title), (
+            f"a digit in the title will go stale: {title!r}"
+        )
+        assert "| parametrize copies (tests that collapse away) | 2 |" in body
         assert extract_class_key(body).startswith("findclass:erosion_metrics:")
         assert extract_folded_sites(body) == ["tests/test_dup.py::test_case_0"]
         assert "test_case_0, test_case_1, test_case_2" in body
