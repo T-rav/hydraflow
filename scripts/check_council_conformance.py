@@ -194,6 +194,60 @@ def _immutability_violations(
     return _parse_ledger_changes(log_output, known_records), None
 
 
+#: A chamber's legal consolidated verdicts, DERIVED from its own contract line
+#: (``Chair consolidates: **A / B / C**``) rather than hard-coded here. The
+#: contract is the declaration; a second copy in this script would be a second
+#: writer for one vocabulary, and the two would drift — which is the defect
+#: class this check exists to catch, one layer up.
+CONSOLIDATES_RE = re.compile(r"Chair consolidates:\s*\*\*(?P<vocab>[^*]+)\*\*")
+VERDICT_RE = re.compile(
+    r"^\*\*Date:\*\*.*?\*\*Verdict:\*\*\s*(?P<verdict>[^\n·]+)", re.M | re.S
+)
+
+
+def _base_term(term: str) -> str:
+    """Strip a parenthetical qualifier: ``FIX (list)`` and ``ACCEPT (defer)``
+    are the vocabulary's own shape, in the contract and in shipped records."""
+    return re.sub(r"\s*\([^)]*\)", "", term).strip().upper()
+
+
+def chamber_vocabulary(agents: Path, chamber: str) -> set[str] | None:
+    """Legal verdict bases for *chamber*, or None when it declares no contract."""
+    contract = agents / "council" / f"{chamber}.md"
+    if not contract.is_file():
+        return None
+    match = CONSOLIDATES_RE.search(contract.read_text())
+    if not match:
+        return None
+    return {_base_term(t) for t in match.group("vocab").split("/") if t.strip()}
+
+
+def verdict_violations(root: Path, agents: Path, records: list[Path]) -> list[str]:
+    """Records whose **Verdict:** is not legal vocabulary for their chamber.
+
+    Field PRESENCE was already checked; this checks the VALUE. PR #11870 shipped
+    `SOUND WITH FIXES` — the PM persona's register — in a design-chamber record
+    whose contract fixes SHIP / FIX (list) / RESTRUCTURE, and
+    `make council-conformance` passed it.
+    """
+    out: list[str] = []
+    for rec in records:
+        chamber = rec.parent.name
+        vocab = chamber_vocabulary(agents, chamber)
+        if vocab is None:
+            continue
+        match = VERDICT_RE.search(rec.read_text())
+        if not match:
+            continue  # presence is REQUIRED_FIELDS' job; do not double-report
+        verdict = _base_term(match.group("verdict"))
+        if verdict and verdict not in vocab:
+            out.append(
+                f"{rec.relative_to(root)}: verdict {verdict!r} is not "
+                f"{chamber} chamber vocabulary ({' / '.join(sorted(vocab))})"
+            )
+    return out
+
+
 def collect_errors(root: Path, check_git: bool = True) -> list[str]:
     errors: list[str] = []
     agents = root / "agents"
@@ -211,6 +265,8 @@ def collect_errors(root: Path, check_git: bool = True) -> list[str]:
             errors.append(f"{rel}: missing/invalid **Enforcement:** line")
         elif match.group(1) == "enforced" and "**Enforced by:**" not in text:
             errors.append(f"{rel}: enforced without an **Enforced by:** check")
+
+    errors.extend(verdict_violations(root, agents, records))
 
     for chamber_dir in sorted(d for d in decisions.iterdir() if d.is_dir()):
         nums = sorted(

@@ -64,7 +64,7 @@ async def test_a_persistently_failing_model_is_spawned_a_bounded_number_of_times
     compiler = WikiCompiler(config=_config(), runner=MagicMock(), credentials=creds)
 
     for _ in range(CYCLES):
-        assert await compiler._call_model("prompt") is None
+        assert await compiler._call_model("prompt", "test") is None
 
     assert len(spawns) == 3, (
         f"{CYCLES} cycles against a permanently failing model produced "
@@ -98,5 +98,5 @@ async def test_a_recovering_model_is_not_locked_out(
     compiler._model_breaker.record_failure()
     compiler._model_breaker.record_failure()
 
-    assert await compiler._call_model("prompt") == "compiled"
+    assert await compiler._call_model("prompt", "test") == "compiled"
     assert compiler._model_breaker.state == compiler._model_breaker.CLOSED

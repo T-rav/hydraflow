@@ -658,7 +658,7 @@ class WikiCompiler:
                 entries_text="\n\n".join(self._entry_block(e) for e in batch),
                 other_topics=", ".join(other_topics),
             )
-            raw = await self._call_model(prompt)
+            raw = await self._call_model(prompt, f"compile:{topic}")
             batch_compiled = self._parse_entries(raw) if raw is not None else []
             if not batch_compiled:
                 failed_batches += 1
@@ -878,7 +878,7 @@ class WikiCompiler:
             other_topics=", ".join(other_topics),
         )
 
-        raw = await self._call_model(prompt)
+        raw = await self._call_model(prompt, "flow_synthesize")
         if raw is None:
             state["_stop"] = True
             return state
@@ -1040,7 +1040,7 @@ class WikiCompiler:
             siblings_text=siblings_text,
         )
 
-        raw = await self._call_model(prompt)
+        raw = await self._call_model(prompt, "detect_contradictions")
         if raw is None:
             return ContradictionCheck()
         return self._parse_contradiction_output(raw)
@@ -1067,7 +1067,7 @@ class WikiCompiler:
             title_b=entry_b.title,
             content_b=entry_b.content,
         )
-        raw = await self._call_model(prompt)
+        raw = await self._call_model(prompt, "generalize_pair")
         if raw is None:
             return GeneralizationCheck()
         return self._parse_generalization_output(raw)
@@ -1153,7 +1153,7 @@ class WikiCompiler:
             decision=suggestion.get("decision", ""),
             consequences=suggestion.get("consequences", ""),
         )
-        raw = await self._call_model(prompt)
+        raw = await self._call_model(prompt, "judge_adr_draft")
         if raw is None:
             decision.reason = "llm unavailable"
             return decision
@@ -1212,7 +1212,7 @@ class WikiCompiler:
             raw_text=truncated,
         )
 
-        raw = await self._call_model(prompt)
+        raw = await self._call_model(prompt, "synthesize_ingest")
         if raw is None:
             return []
 
@@ -1226,7 +1226,7 @@ class WikiCompiler:
         )
         return entries
 
-    async def _call_model(self, prompt: str) -> str | None:
+    async def _call_model(self, prompt: str, context: str) -> str | None:
         """Call the configured CLI backend for wiki compilation.
 
         Routes through ``run_lightweight_agent`` so the spawn is
@@ -1273,20 +1273,20 @@ class WikiCompiler:
                     )
                     return None
                 self._record_model_failure(
-                    f"rc={result.returncode}: {result.stderr[:200]}"
+                    f"rc={result.returncode}: {result.stderr[:200]}", context
                 )
                 return None
             self._model_breaker.record_success()
             clear_prompt_gate_block(self._gate_block_dedup, "wiki_compilation")
             return result.stdout if result.stdout else None
         except TimeoutError:
-            self._record_model_failure("timed out")
+            self._record_model_failure("timed out", context)
             return None
         except (OSError, FileNotFoundError, NotImplementedError) as exc:
-            self._record_model_failure(f"unavailable: {exc}")
+            self._record_model_failure(f"unavailable: {exc}", context)
             return None
 
-    def _record_model_failure(self, detail: str) -> None:
+    def _record_model_failure(self, detail: str, context: str) -> None:
         """Log the failure, and escalate to ERROR when the circuit opens.
 
         Each individual failure stays a WARNING — one slow call is genuinely
@@ -1298,14 +1298,17 @@ class WikiCompiler:
         self._model_breaker.record_failure()
         if not was_open and self._model_breaker.state == self._model_breaker.OPEN:
             logger.error(
-                "Wiki compilation model failing persistently (%s) — circuit "
+                "Wiki model call %r failing persistently (%s) — circuit "
                 "OPEN for %.0fs. The loop will skip its model calls instead of "
-                "spending a full timeout per cycle.",
+                "spending a full timeout per cycle. NOTE: the breaker is shared "
+                "by every wiki model operation, so this name is the call that "
+                "TRIPPED it, not necessarily the only one affected.",
+                context,
                 detail,
                 self._model_breaker.reset_timeout,
             )
         else:
-            logger.warning("Wiki compilation model failed (%s)", detail)
+            logger.warning("Wiki model call %r failed (%s)", context, detail)
 
     @staticmethod
     def _dedup_known_ids(ids: list[str], known_ids: set[str]) -> list[str]:
