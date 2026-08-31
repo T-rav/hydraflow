@@ -200,15 +200,29 @@ def _immutability_violations(
 #: writer for one vocabulary, and the two would drift — which is the defect
 #: class this check exists to catch, one layer up.
 CONSOLIDATES_RE = re.compile(r"Chair consolidates:\s*\*\*(?P<vocab>[^*]+)\*\*")
+# Verdict is the LAST field on the Date line, so capture to end of line.
+# An earlier `[^\n·]+` stopped at the first `·` — but a verdict's own
+# parenthetical may contain ` · ` separators, which truncated
+# `FIX (list: a · b)` to `FIX (list: a` and left an UNCLOSED paren that
+# `_base_term` could not strip, rejecting a legal verdict (#11870).
 VERDICT_RE = re.compile(
-    r"^\*\*Date:\*\*.*?\*\*Verdict:\*\*\s*(?P<verdict>[^\n·]+)", re.M | re.S
+    r"^\*\*Date:\*\*.*?\*\*Verdict:\*\*\s*(?P<verdict>[^\n]+)", re.M | re.S
 )
 
 
 def _base_term(term: str) -> str:
-    """Strip a parenthetical qualifier: ``FIX (list)`` and ``ACCEPT (defer)``
-    are the vocabulary's own shape, in the contract and in shipped records."""
-    return re.sub(r"\s*\([^)]*\)", "", term).strip().upper()
+    """The vocabulary term, without its qualifier.
+
+    ``FIX (list)`` and ``ACCEPT (defer)`` are the vocabulary's own shape — in
+    the chamber contracts and in shipped records — so the qualifier is dropped.
+
+    Truncated at the FIRST ``(`` rather than by stripping a balanced ``(...)``
+    group. A real qualifier runs to end of line and may contain anything,
+    including unbalanced brackets; a strip-the-group rule silently keeps the
+    WHOLE string when the closing paren is missing, which is how a legal
+    `FIX (list: a · b)` came to be rejected (#11870).
+    """
+    return term.split("(", 1)[0].strip().upper()
 
 
 def chamber_vocabulary(agents: Path, chamber: str) -> set[str] | None:
