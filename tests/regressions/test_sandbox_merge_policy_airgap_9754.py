@@ -30,6 +30,12 @@ def test_sandbox_disables_merge_policy_and_other_external_reachers() -> None:
     assert config.merge_policy_enabled is True
     assert config.research_enabled is True
     assert config.auto_pr_preflight_gate_enabled is True
+    # Forced ON first. #11821 made the production default False (the recorder
+    # targeted a sandbox repo that 404s), which would make the post-override
+    # assertion below pass WITHOUT the override doing anything — the
+    # masked-by-upstream-pin shape. Setting it True keeps this a test of
+    # `_apply_sandbox_config_overrides` rather than of a default.
+    config.contract_refresh_external_enabled = True
 
     _apply_sandbox_config_overrides(config)
 

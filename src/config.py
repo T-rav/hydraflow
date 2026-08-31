@@ -5637,14 +5637,25 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     contract_refresh_external_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Run ContractRefreshLoop's external recorders (github → "
             "contracts-sandbox repo, claude → api.anthropic.com, docker → "
             "alpine image pull). Disabling skips them so the loop completes "
             "fast in the air-gapped sandbox (only the local git recorder "
             "runs); each external recorder otherwise blocks up to the 120s "
-            "subprocess timeout. Production defaults to True."
+            "subprocess timeout.\n\n"
+            "Defaults to FALSE since #11821. The github recorder targets "
+            "``contracts_sandbox_repo``, whose default "
+            "(``T-rav-Hydra-Ops/hydraflow-contracts-sandbox``) returns 404 — "
+            "so the shipped default sent every install into a recorder that "
+            "could never succeed, warning once per cycle and reading as "
+            "background noise. Operator decision, 2026-08-30: turn it off "
+            "rather than leave it failing.\n\n"
+            "Turning it back ON is supported and safe: the ``contracts-sandbox`` "
+            "preflight check verifies the repo is reachable at boot and names "
+            "the remedy if it is not, so this cannot silently regress to a "
+            "permanently-degraded recorder again."
         ),
     )
 
