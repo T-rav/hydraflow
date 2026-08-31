@@ -29,6 +29,7 @@ import pytest
 
 from repo_wiki import WikiEntry
 from wiki_compiler import WikiCompiler
+from tests.helpers import bare_wiki_compiler
 
 REPO = "acme/widget"
 
@@ -85,11 +86,7 @@ class TestSupersessionMappingIsTopical:
     async def test_each_new_entry_supersedes_only_its_own_topical_match(
         self, topic_dir: Path
     ) -> None:
-        compiler = WikiCompiler.__new__(WikiCompiler)
-        compiler._config = MagicMock()
-        compiler._credentials = MagicMock()
-        compiler._credentials.gh_token = ""
-        compiler._runner = MagicMock()
+        compiler = bare_wiki_compiler()
 
         # Each new entry declares correspondence to exactly the one old
         # entry it topically replaces — a 1:1 rewrite, not a merge.

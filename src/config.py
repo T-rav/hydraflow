@@ -377,6 +377,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
     ("wiki_compilation_batch_chars", "HYDRAFLOW_WIKI_COMPILATION_BATCH_CHARS", 20_000),
     (
+        "wiki_compilation_max_batches_per_tick",
+        "HYDRAFLOW_WIKI_COMPILATION_MAX_BATCHES_PER_TICK",
+        4,
+    ),
+    (
         "wiki_compilation_breaker_failures",
         "HYDRAFLOW_WIKI_COMPILATION_BREAKER_FAILURES",
         3,
@@ -4208,6 +4213,17 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Seconds the wiki-compilation circuit stays OPEN before probing "
             "with a single call."
+        ),
+    )
+    wiki_compilation_max_batches_per_tick: int = Field(
+        default=4,
+        ge=0,
+        le=1000,
+        description=(
+            "Most synthesis batches one topic may spend in a single tick. "
+            "Batching alone bounds each CALL but not the tick: a 4089-entry "
+            "topic would buy its whole backlog at once. The remainder stays "
+            "active and is compiled on later ticks. 0 disables the cap."
         ),
     )
     wiki_barren_compile_cooldown_hours: float = Field(

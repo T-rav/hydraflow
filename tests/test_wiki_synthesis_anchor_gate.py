@@ -19,12 +19,13 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from knowledge_metrics import metrics
 from repo_wiki import RepoWikiStore, flag_generic_entries_stale
+from tests.helpers import bare_wiki_compiler
 from wiki_anchor_gate import config_field_vocabulary
 from wiki_compiler import WikiCompiler
 
@@ -85,11 +86,7 @@ def _write_entry_file(
 
 
 def _compiler() -> WikiCompiler:
-    compiler = WikiCompiler.__new__(WikiCompiler)
-    compiler._config = MagicMock()
-    compiler._credentials = MagicMock()
-    compiler._credentials.gh_token = ""
-    compiler._runner = MagicMock()
+    compiler = bare_wiki_compiler()
     return compiler
 
 

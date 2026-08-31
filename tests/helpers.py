@@ -2112,3 +2112,39 @@ def wiki_compiler_mock(
         ) or (compile_topic or 0)
     compiler.last_anchor_gate_verdict = (rejected or [], accepted)
     return compiler
+
+
+def bare_wiki_compiler(**config_overrides: Any) -> Any:
+    """A ``WikiCompiler`` built past ``__init__`` with a usable stub config.
+
+    Eight test files each hand-rolled this, and each set only the fields it
+    happened to need. Adding a numeric knob to the real config then broke all
+    of them at once with ``'>' not supported between 'int' and 'MagicMock'`` —
+    the crash is loud, but the fix would have been eight edits, and the ninth
+    builder written tomorrow would have missed it again (#11819).
+
+    Every NUMERIC field the compile paths read is given a real number here.
+    A bare ``MagicMock`` attribute is fine for a string or a flag; it is a
+    latent crash the moment the subject compares or does arithmetic on it.
+    """
+    from unittest.mock import MagicMock
+
+    from wiki_compiler import WikiCompiler
+
+    compiler = WikiCompiler.__new__(WikiCompiler)
+    config = MagicMock()
+    config.wiki_compilation_tool = "stub"
+    config.wiki_compilation_model = "stub"
+    config.wiki_compilation_provider = None
+    config.wiki_compilation_timeout = 60
+    config.wiki_compilation_batch_chars = 20_000
+    config.wiki_compilation_max_batches_per_tick = 0  # uncapped unless asked
+    for name, value in config_overrides.items():
+        setattr(config, name, value)
+    compiler._config = config
+    compiler._credentials = MagicMock()
+    compiler._credentials.gh_token = ""
+    compiler._runner = MagicMock()
+    compiler._last_rejected_digests = []
+    compiler._last_accepted_count = 0
+    return compiler

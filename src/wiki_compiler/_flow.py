@@ -27,7 +27,11 @@ from repo_wiki import (
     synthesis_matches_active_bodies,
 )
 
+from ._batching import batch_by_chars
 from ._prompts import _COMPILE_TOPIC_PROMPT
+
+if TYPE_CHECKING:
+    from config import HydraFlowConfig
 
 logger = logging.getLogger("hydraflow.wiki_compiler")
 
@@ -46,6 +50,19 @@ def _flow_aborted(state: FlowState) -> bool:
     return bool(state.get("_stop"))
 
 
+def _tracked_entry_block(entry: dict[str, Any]) -> str:
+    """The prompt rendering of one tracked active entry.
+
+    Extracted so the batcher measures the SAME string the prompt sends. A
+    budget that measures one rendering and ships another bounds nothing.
+    """
+    return (
+        f"### {entry['title']} (id: {entry['id']})\n{entry['body']}\n"
+        f"Source: #{entry['source_issue'] or 'N/A'} ({entry['source_phase']})\n"
+        f"Created: {entry['created_at']}"
+    )
+
+
 class WikiCompilerFlowMixin:
     """The tracked compile flow (ADR-0111): extract, verify, synthesize, validate."""
 
@@ -55,6 +72,9 @@ class WikiCompilerFlowMixin:
     # runtime ``...`` body is a real class attribute and would win the MRO
     # over the sibling that really implements it (#11629).
     # ------------------------------------------------------------------
+    # A bare annotation is safe unguarded — it creates no class attribute, so
+    # it cannot shadow the real one the host assigns in ``__init__``.
+    _config: HydraFlowConfig
 
     if TYPE_CHECKING:
 
@@ -208,29 +228,70 @@ class WikiCompilerFlowMixin:
         topic = state["topic"]
         other_topics = state["other_topics"]
 
-        entries_text = "\n\n".join(
-            f"### {e['title']} (id: {e['id']})\n{e['body']}\n"
-            f"Source: #{e['source_issue'] or 'N/A'} ({e['source_phase']})\n"
-            f"Created: {e['created_at']}"
-            for e in active_entries
-        )
-
         if other_topics is None:
             other_topics = [t for t in DEFAULT_TOPICS if t != topic]
 
-        prompt = _COMPILE_TOPIC_PROMPT.format(
-            topic=topic,
-            repo=repo,
-            entries_text=entries_text,
-            other_topics=", ".join(other_topics),
+        # Batched, and capped (#11819). The legacy ``compile_topic`` got the
+        # batcher; this path — the one Phase 8 runs, and the one holding 4089
+        # active ``patterns`` entries — did not, and put every one of them in a
+        # single 300s prompt. Two bounds, because batching alone only trades a
+        # call that times out for hundreds that do not:
+        #   * ``wiki_compilation_batch_chars`` bounds ONE call's prompt, so it
+        #     can finish;
+        #   * ``wiki_compilation_max_batches_per_tick`` bounds the TICK, so a
+        #     huge topic converges over several ticks instead of buying its
+        #     whole backlog at once.
+        batches = batch_by_chars(
+            active_entries,
+            lambda entry: len(_tracked_entry_block(entry)),
+            self._config.wiki_compilation_batch_chars,
         )
+        cap = self._config.wiki_compilation_max_batches_per_tick
+        if cap > 0 and len(batches) > cap:
+            logger.info(
+                "Wiki compile_tracked %s/%s: %d batches over the %d/tick cap — "
+                "compiling the first %d, the rest stay active for the next tick",
+                repo,
+                topic,
+                len(batches),
+                cap,
+                cap,
+            )
+            batches = batches[:cap]
 
-        raw = await self._call_model(prompt, "flow_synthesize")
-        if raw is None:
-            state["_stop"] = True
-            return state
+        compiled: list[WikiEntry] = []
+        synthesized_inputs: list[dict[str, Any]] = []
+        failed = 0
+        for batch in batches:
+            prompt = _COMPILE_TOPIC_PROMPT.format(
+                topic=topic,
+                repo=repo,
+                entries_text="\n\n".join(_tracked_entry_block(e) for e in batch),
+                other_topics=", ".join(other_topics),
+            )
+            raw = await self._call_model(prompt, f"flow_synthesize:{topic}")
+            batch_compiled = self._parse_entries(raw) if raw is not None else []
+            if not batch_compiled:
+                # A failed batch's inputs are NOT carried forward. In the
+                # tracked layout an input that reaches ``validate`` is marked
+                # superseded, so carrying it — the legacy path's fail-safe —
+                # would retire an entry that was never synthesized. Leaving it
+                # out keeps it ``active`` and it is retried next tick.
+                failed += 1
+                continue
+            compiled.extend(batch_compiled)
+            synthesized_inputs.extend(batch)
 
-        compiled = self._parse_entries(raw)
+        if failed:
+            logger.warning(
+                "Wiki compile_tracked %s/%s: %d of %d batches produced nothing "
+                "— their entries stay active rather than being superseded",
+                repo,
+                topic,
+                failed,
+                len(batches),
+            )
+
         if not compiled:
             logger.warning(
                 "Wiki compile_tracked for %s/%s produced no valid entries — "
@@ -240,6 +301,18 @@ class WikiCompilerFlowMixin:
             )
             state["_stop"] = True
             return state
+
+        # Supersession follows what was actually synthesized. ``validate``
+        # supersedes every entry in ``active_entries`` — falling back to the
+        # first synthesis id for any the model did not claim — so leaving the
+        # full set here would retire the failed and capped-off batches under a
+        # synthesis that never read them. The provenance union captured in
+        # ``verify`` still spans the whole original set, which over-approximates
+        # in the documented safe direction (#10590): extra code_refs make the
+        # downstream verifier corroborate more readily; a DROPPED claim is the
+        # bug.
+        active_entries = synthesized_inputs
+        state["active_entries"] = synthesized_inputs
 
         # Repo-specificity gate (#9954): drop anchor-less platitudes before
         # they are written as synthesis entries. Keeping originals when the
