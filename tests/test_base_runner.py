@@ -205,7 +205,14 @@ class TestExecute:
     async def test_auth_failure_retries_with_backoff(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
-        """Auth failures are retried 3 times before raising."""
+        """Auth failures are retried 3 times, with a doubling backoff."""
+        # The base delay is set EXPLICITLY rather than inherited: ConfigFactory
+        # now defaults it near-zero so no scenario pays real backoff (#11844),
+        # and a test asserting production values must state the value it is
+        # asserting. Reading it back from the config also means this keeps
+        # testing the DOUBLING rule if the production default ever changes,
+        # instead of pinning two magic numbers.
+        config.auth_retry_base_delay = 5.0
         runner = _TestRunner(config, event_bus)
 
         with (
@@ -220,10 +227,11 @@ class TestExecute:
             await runner._execute(["claude", "-p"], "prompt", tmp_path, {"issue": 42})
 
         assert mock.await_count == 3
-        # 2 sleeps: 5s after attempt 1, 10s after attempt 2
+        # 2 sleeps: base after attempt 1, base*2 after attempt 2
+        base = config.auth_retry_base_delay
         assert sleep_mock.await_count == 2
-        sleep_mock.assert_any_await(5.0)
-        sleep_mock.assert_any_await(10.0)
+        sleep_mock.assert_any_await(base)
+        sleep_mock.assert_any_await(base * 2)
 
     @pytest.mark.asyncio
     async def test_auth_failure_succeeds_on_retry(
