@@ -39,6 +39,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
+from signature_normalize import normalize_signature
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -64,25 +65,11 @@ _MARKER_RE = re.compile(r"<!--\s*\[log-ingest:([0-9a-f]+)\]\s*-->")
 # Normalisation patterns applied (in order) to reduce a raw message to a stable
 # signature. Order matters: quoted strings and paths are collapsed before bare
 # numbers so that digits *inside* a path/quote don't fragment the template.
-_UUID_RE = re.compile(
-    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-)
-_TIMESTAMP_RE = re.compile(
-    r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
-)
-_ISSUE_PR_RE = re.compile(r"#\d+")
-_PATH_RE = re.compile(r"(?:/[\w.+-]+)+(?:/)?|[\w.+-]+/[\w./+-]+")
-_HEX_RE = re.compile(r"\b0x[0-9a-fA-F]+\b|\b[0-9a-fA-F]{8,}\b")
-_DQ_RE = re.compile(r'"[^"]*"')
-_SQ_RE = re.compile(r"'[^']*'")
 # Match a run of digits (optionally with a decimal part) that starts on a word
 # boundary. A trailing word boundary is intentionally NOT required so that a
 # number glued to a unit — ``70ms``, ``5xx``, ``30s`` — still collapses to the
 # placeholder, otherwise every distinct duration/size would form its own
 # cluster and defeat grouping.
-_NUM_RE = re.compile(r"\b\d+(?:\.\d+)?")
-_WS_RE = re.compile(r"\s+")
 
 # Pull a likely source file out of a traceback or message for the issue body.
 _SOURCE_FILE_RE = re.compile(r'File "([^"]+\.py)"|(\b[\w./-]+\.py)\b')
@@ -111,27 +98,6 @@ class _Cluster:
             f"{self.level}:{self.signature}".encode(),
             usedforsecurity=False,
         ).hexdigest()[:16]
-
-
-def normalize_signature(msg: str) -> str:
-    """Reduce a raw log message to a stable signature key.
-
-    Strips the variable parts of a message (timestamps, UUIDs, issue/PR
-    numbers, file paths, hex/uuid hashes, quoted strings, bare digits) to
-    placeholders so that otherwise-identical errors cluster together
-    regardless of their per-occurrence specifics.
-    """
-    text = msg.strip()
-    text = _TIMESTAMP_RE.sub("<TS>", text)
-    text = _UUID_RE.sub("<UUID>", text)
-    text = _DQ_RE.sub("<STR>", text)
-    text = _SQ_RE.sub("<STR>", text)
-    text = _ISSUE_PR_RE.sub("#<N>", text)
-    text = _PATH_RE.sub("<PATH>", text)
-    text = _HEX_RE.sub("<HASH>", text)
-    text = _NUM_RE.sub("<N>", text)
-    text = _WS_RE.sub(" ", text)
-    return text.strip()
 
 
 class LogIngestLoop(BaseBackgroundLoop):
