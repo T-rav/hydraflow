@@ -7,6 +7,8 @@
 - pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails
 - pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr
 - pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet
+- pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members
+- pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status
 **Binds:** factory
 **Supersedes:** none
 **Superseded by:** none
@@ -88,7 +90,7 @@ evidence collectors        tests, ratchets, ADR analysis, runtime probes
         |
 normalized Facts
         |
-decision layer             compliant | violated | exempt | grandfathered | blocking
+decision layer             compliant | violated | exempt | grandfathered  (+ blocking: bool)
         |
 typed decision
         |
@@ -96,7 +98,7 @@ HydraFlow                  block, create work, remediate, verify, ratchet
 ```
 
 - **YAML declares.** The declaration is the contract a team reads and reviews in a pull request. It is prose-adjacent, diffable, and owned by the repository.
-- **A decision layer decides.** It consumes normalized facts and returns a verdict from a closed set — *compliant*, *violated*, *exempt*, *grandfathered*, *blocking* — plus the reason. It is pure over its inputs.
+- **A decision layer decides.** It consumes normalized facts and returns a verdict from a closed set — *compliant*, *violated*, *exempt*, *grandfathered* — plus an orthogonal *blocking* flag and the reason. It is pure over its inputs. (Amended 2026-08-31; see the amendment below for why *blocking* is not a fifth status.)
 - **HydraFlow acts.** Blocking a merge, creating work, remediating, verifying, and ratcheting are HydraFlow's, and stay HydraFlow's.
 
 The five re-derivations in the Context section each fuse all three parts into one function. Separating them is what makes a sixth standard cheap.
@@ -166,9 +168,40 @@ The two concerns share the word "policy" and share nothing else. They differ on 
 - **Four terms enter the ubiquitous language.** `Purpose`, `Articles`, `Actors`, and `Artifacts` land in `docs/wiki/terms/` under ADR-0053, each anchored to a live symbol, so the four words stop being prose and start being checked They ship at `confidence: accepted` even though this ADR is Proposed: term files have no soft-launch lifecycle in this repo — the anchor-resolution and uniqueness gates are the admission test, and `tests/test_seed_terms.py::test_seed_terms_are_accepted` rejects any other value. If the framing is rejected, the four files are deleted rather than downgraded.
 - **The Actors layer is cited by role, not by path.** The chamber directories beneath `agents/` are being renamed under #11741 while this ADR is written. The ADR names the tree and the role it plays; it deliberately does not hard-code a subdirectory path that is mid-rename.
 
+## Amendment (2026-08-31): *blocking* is an orthogonal flag, not a fifth verdict
+
+**The original ruling, quoted for the record.** Ruling 4 declared the decision
+layer returns "a verdict from a closed set — *compliant*, *violated*, *exempt*,
+*grandfathered*, *blocking* — plus the reason", and the seam diagram read
+`compliant | violated | exempt | grandfathered | blocking`.
+
+**What shipped instead.** `src/policy/models.py` defines `DecisionStatus` with
+**four** members and carries `blocking` as a separate `bool` on
+`StandardDecision`. The code's shape is the better one and this amendment ratifies
+it rather than reversing it: *blocking* answers a different question from the
+other four. They classify **what is true** of a subject; *blocking* decides **what
+to do about it**. A single violation may or may not gate depending on the lane it
+is found in, so the two vary independently — collapsing them into one closed set
+makes "violated but not gating" inexpressible, which is a real and common state
+(the enforcement exemption and baseline lanes both produce it).
+
+**Why this is an amendment and not a silent edit.** ADR-0143 is Accepted with
+real enforcement, so the text is the thing that is wrong, and future standards are
+written against the text. Left unreconciled, anyone implementing a new standard
+from Ruling 4 would model `blocking` as a fifth status and collide with
+`DecisionStatus` at review time — the exact drift class the vocabulary campaign
+exists to prevent.
+
+**Enforcement.** The reconciled claim is now checked, not merely agreed:
+`tests/architecture/test_adr0143_decision_shape.py` pins the `DecisionStatus`
+member set exactly and asserts `blocking` is a field on `StandardDecision` rather
+than a status member. Both are cited in the *Enforced-by* block above, alongside
+the three checks that were already there. Prose agreement rots; a checked
+invariant does not.
+
 ## On ratification
 
-This ADR is `decision-of-record` and carries no *Enforced-by* block, which is why it lands **Proposed**: an Accepted ADR with no real enforcement would either red the enforcement ratchet (`tests/architecture/test_adr_enforcement_ratchet.py::test_no_new_or_ungrandfathered_debt`) or need an exemption claiming no machine-checkable invariant is feasible — and that claim would be false, because the epic's own children are the enforcement.
+This ADR was `decision-of-record` and carried no *Enforced-by* block when written, which is why it landed **Proposed**. It has since been ratified — the header now reads **Accepted** / `enforced` with a populated *Enforced-by* block — so the paragraph below is retained as the record of that decision, not as current status: an Accepted ADR with no real enforcement would either red the enforcement ratchet (`tests/architecture/test_adr_enforcement_ratchet.py::test_no_new_or_ungrandfathered_debt`) or need an exemption claiming no machine-checkable invariant is feasible — and that claim would be false, because the epic's own children are the enforcement.
 
 On ratification, one of two paths applies:
 
