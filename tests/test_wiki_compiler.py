@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from repo_wiki import RepoWikiStore, WikiEntry
+from tests.helpers import ConfigFactory
 from wiki_compiler import ContradictionCheck, WikiCompiler
 
 
@@ -19,7 +20,7 @@ def store(tmp_path: Path) -> RepoWikiStore:
 
 @pytest.fixture
 def compiler() -> WikiCompiler:
-    config = MagicMock()
+    config = ConfigFactory.create()
     config.wiki_compilation_tool = "claude"
     config.wiki_compilation_model = "haiku"
     config.wiki_compilation_timeout = 30

@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers import ConfigFactory
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # The dotenv package may not be installed in the test environment.  Ensure a
@@ -242,7 +244,7 @@ class TestCheckAndPublishBootGap:
         old_ts = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
         events_path.write_text('{"timestamp": "' + old_ts + '"}\n', encoding="utf-8")
 
-        config = MagicMock()
+        config = ConfigFactory.create()
         config.event_log_path = events_path
         config.boot_gap_alert_threshold_seconds = 600
         bus = MagicMock()
@@ -263,7 +265,7 @@ class TestCheckAndPublishBootGap:
         fresh_ts = datetime.now(UTC).isoformat()
         events_path.write_text('{"timestamp": "' + fresh_ts + '"}\n', encoding="utf-8")
 
-        config = MagicMock()
+        config = ConfigFactory.create()
         config.event_log_path = events_path
         config.boot_gap_alert_threshold_seconds = 600
         bus = MagicMock()
@@ -277,7 +279,7 @@ class TestCheckAndPublishBootGap:
     async def test_no_publish_when_events_log_is_missing(self, tmp_path: Path) -> None:
         from server import _check_and_publish_boot_gap
 
-        config = MagicMock()
+        config = ConfigFactory.create()
         config.event_log_path = tmp_path / "does-not-exist.jsonl"
         config.boot_gap_alert_threshold_seconds = 600
         bus = MagicMock()

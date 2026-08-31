@@ -17,6 +17,7 @@ from models import (  # noqa: E402
     TraceTokenStats,
     TraceToolProfile,
 )
+from tests.helpers import ConfigFactory
 from trace_rollup import write_phase_rollup  # noqa: E402
 
 
@@ -78,7 +79,7 @@ def _write_subprocess_file(data_root: Path, trace: SubprocessTrace) -> None:
 
 @pytest.fixture
 def config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
+    cfg = ConfigFactory.create()
     cfg.data_root = tmp_path
     return cfg
 
