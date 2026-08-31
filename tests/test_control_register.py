@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from control_register import (
     ControlClass,
     FleetEntry,
@@ -64,30 +66,34 @@ class TestSetpointLoading:
         assert spec.active
         assert spec.signed_by == "travis"
 
-    def test_missing_band_is_malformed_and_skipped(self, tmp_path: Path) -> None:
-        _write_control(tmp_path, "setpoints.yaml", "gate_health:\n  value: 0.9\n")
-        assert load_setpoints(tmp_path) == {}
-
-    def test_zero_band_is_malformed_and_skipped(self, tmp_path: Path) -> None:
-        # ADR-0120: the assembly is "deadband + hysteresis" — no deadband,
-        # no regulator.
-        _write_control(
-            tmp_path,
-            "setpoints.yaml",
-            "gate_health:\n  value: 0.9\n  band: 0\n  signed_by: travis\n",
-        )
-        assert load_setpoints(tmp_path) == {}
-
-    def test_syntactically_broken_yaml_degrades_to_no_setpoints(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(
+                "gate_health:\n  value: 0.9\n",
+                id="missing_band_is_malformed_and_skipped",
+            ),
+            # ADR-0120: the assembly is "deadband + hysteresis" — no deadband,
+            # no regulator.
+            pytest.param(
+                "gate_health:\n  value: 0.9\n  band: 0\n  signed_by: travis\n",
+                id="zero_band_is_malformed_and_skipped",
+            ),
+            # Signing is a hand edit; a syntax slip must never crash a loop
+            # cycle — it degrades to "no setpoints" (legacy behavior).
+            pytest.param(
+                "gate_health:\n  value: [unclosed\n",
+                id="syntactically_broken_yaml_degrades_to_no_setpoints",
+            ),
+            pytest.param(
+                "- just\n- a\n- list\n", id="non_mapping_yaml_degrades_to_no_setpoints"
+            ),
+        ],
+    )
+    def test_malformed_register_degrades_to_no_setpoints(
+        self, tmp_path: Path, body: str
     ) -> None:
-        # Signing is a hand edit; a syntax slip must never crash a loop
-        # cycle — it degrades to "no setpoints" (legacy behavior).
-        _write_control(tmp_path, "setpoints.yaml", "gate_health:\n  value: [unclosed\n")
-        assert load_setpoints(tmp_path) == {}
-
-    def test_non_mapping_yaml_degrades_to_no_setpoints(self, tmp_path: Path) -> None:
-        _write_control(tmp_path, "setpoints.yaml", "- just\n- a\n- list\n")
+        _write_control(tmp_path, "setpoints.yaml", body)
         assert load_setpoints(tmp_path) == {}
 
     def test_setpoint_for_returns_single_spec(self, tmp_path: Path) -> None:

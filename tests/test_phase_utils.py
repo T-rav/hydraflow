@@ -1301,27 +1301,21 @@ class TestIssueStateIsResolved:
     guarantees.
     """
 
-    def test_completed_is_resolved(self) -> None:
+    @pytest.mark.parametrize(
+        ("state", "resolved"),
+        [
+            pytest.param("COMPLETED", True, id="completed_is_resolved"),
+            # A duplicate/wontfix close (``not planned``) is just as done (#10025).
+            pytest.param("NOT_PLANNED", True, id="not_planned_is_resolved"),
+            pytest.param("OPEN", False, id="open_is_not_resolved"),
+            # ``PRManager.get_issue_state`` fail-closes with ``UNKNOWN`` on error.
+            pytest.param("UNKNOWN", False, id="unknown_is_not_resolved"),
+        ],
+    )
+    def test_resolution(self, state: str, resolved: bool) -> None:
         from phase_utils import issue_state_is_resolved
 
-        assert issue_state_is_resolved("COMPLETED") is True
-
-    def test_not_planned_is_resolved(self) -> None:
-        """A duplicate/wontfix close (``not planned``) is just as done (#10025)."""
-        from phase_utils import issue_state_is_resolved
-
-        assert issue_state_is_resolved("NOT_PLANNED") is True
-
-    def test_open_is_not_resolved(self) -> None:
-        from phase_utils import issue_state_is_resolved
-
-        assert issue_state_is_resolved("OPEN") is False
-
-    def test_unknown_is_not_resolved(self) -> None:
-        """``PRManager.get_issue_state`` fail-closes with ``UNKNOWN`` on error."""
-        from phase_utils import issue_state_is_resolved
-
-        assert issue_state_is_resolved("UNKNOWN") is False
+        assert issue_state_is_resolved(state) is resolved
 
     def test_none_and_empty_fail_open(self) -> None:
         from phase_utils import issue_state_is_resolved

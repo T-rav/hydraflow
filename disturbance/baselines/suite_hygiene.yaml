@@ -1,12 +1,16 @@
 comment: "High-water marks for structural test redundancy (erosion.suite_hygiene):\
   \ parametrize copies (identical bodies in one file) and cross-file duplicate tests.\
   \ The gate fails only when a count rises above its mark; falling is the point. Last\
-  \ moved: #11548 batch 7 — eleven 4-member groups collapsed into parametrize tables\
-  \ across nine files, three of them in test_planner.py (plan-malformation errors,\
-  \ task-graph rejections, Feature file:line rejections); 11 groups x 3 copies each,\
-  \ 445 -> 412. Collected cases unchanged across all nine files (466 -> 466). 45\
-  \ functions were removed — the 44 group members, plus test_traceability's\
-  \ overlong_id_rejected, a non-member folded into the same rejection table so the\
-  \ table would not omit one of the five rejections. All 45 survive as case ids."
-cross_file_duplicates: 21
-parametrize_copies: 412
+  \ moved: batch 8 \u2014 the 4-member groups batch 7 named as the remaining collapsible\
+  \ set. 29 of 31 collapsed into parametrize tables across 26 files, 401 -> 314 copies;\
+  \ batch 7 predicted an honest floor of ~320 and this lands there. The two left are\
+  \ groups whose four members live in four DIFFERENT test classes (test_dashboard_lifecycle's\
+  \ per-route smoke tests, test_wiki_anchor_gate's not-anchored cases): tabling them\
+  \ would cross a section boundary and strip each class of its own case. Collected\
+  \ cases identical in every touched file (1326 -> 1326) and all 113 removed function\
+  \ names survive as case ids. Cross-file duplicates re-measured, not assumed: still\
+  \ 19, so no collapse created one. Measured from this branch's own base: 401/19,\
+  \ BELOW the committed 412/21 \u2014 drift that landed in other PRs without a regen,\
+  \ recorded here rather than left to look like this batch's work."
+cross_file_duplicates: 19
+parametrize_copies: 314
