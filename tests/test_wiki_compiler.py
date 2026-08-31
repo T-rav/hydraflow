@@ -29,6 +29,16 @@ def compiler() -> WikiCompiler:
     # and every test here would silently exercise the wrong path.
     config.wiki_compilation_breaker_failures = 3
     config.wiki_compilation_breaker_reset_seconds = 1800
+    # A REAL int: batching compares `used + size > budget`, and EVERY
+    # comparison against a MagicMock raises TypeError (verified: `>`, `>=`,
+    # `<` all raise, in both operand orders). So a mocked value here is a
+    # LATENT CRASH, not a silently-wrong branch — and it stays latent for
+    # exactly as long as no test reaches the comparison, which is why the
+    # existing suite passed until batching put one on the main path.
+    #
+    # Arithmetic is the silent direction: `1 + MagicMock()` returns a truthy
+    # MagicMock and propagates. Comparison fails loudly; arithmetic does not.
+    config.wiki_compilation_batch_chars = 20_000
     runner = MagicMock()
     creds = MagicMock()
     creds.gh_token = "fake-token"
