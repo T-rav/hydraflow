@@ -207,7 +207,7 @@ async def test_snapshot_degrades_to_empty_when_ps_fails() -> None:
     from orchestrator_lifecycle import _snapshot_descendants
 
     with patch(
-        "subprocess_util.run_subprocess_result",
+        "orchestrator_lifecycle.run_subprocess_result",
         side_effect=OSError("boom"),
     ):
         assert await _snapshot_descendants() == set()
@@ -229,7 +229,7 @@ async def test_snapshot_parses_real_ps_output_from_the_async_seam() -> None:
     fake.returncode = 0
     fake.stdout = f"  PID  PPID\n{me} 1\n4242 {me}\n9001 4242\n"
     with patch(
-        "subprocess_util.run_subprocess_result", AsyncMock(return_value=fake)
+        "orchestrator_lifecycle.run_subprocess_result", AsyncMock(return_value=fake)
     ):
         assert await _snapshot_descendants() == {4242, 9001}
 

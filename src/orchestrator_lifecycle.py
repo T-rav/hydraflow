@@ -32,6 +32,7 @@ from models import (
 )
 from process_group import descendant_pids
 from runner_utils import reap_all_tracked_processes
+from subprocess_util import run_subprocess_result
 
 
 async def _snapshot_descendants() -> set[int]:
@@ -48,8 +49,6 @@ async def _snapshot_descendants() -> set[int]:
     Best-effort: a `ps` that fails must never block a stop, so this degrades to
     "reap nothing extra" — the behaviour before #11820 — rather than raising.
     """
-    from subprocess_util import run_subprocess_result  # noqa: PLC0415
-
     try:
         result = await run_subprocess_result("/bin/ps", "-eo", "pid,ppid", timeout=15)
     except (OSError, TimeoutError, asyncio.CancelledError):
