@@ -174,6 +174,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("loop_startup_stagger_s", "HYDRAFLOW_LOOP_STARTUP_STAGGER_S", 120),
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
+    ("retro_evidence_max_chars", "HYDRAFLOW_RETRO_EVIDENCE_MAX_CHARS", 40_000),
+    ("retro_findings_max_per_tick", "HYDRAFLOW_RETRO_FINDINGS_MAX_PER_TICK", 3),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
     ("dependabot_merge_interval", "HYDRAFLOW_DEPENDABOT_MERGE_INTERVAL", 3600),
     (
@@ -367,6 +369,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("visual_max_retries", "HYDRAFLOW_VISUAL_MAX_RETRIES", 2),
     ("agent_timeout", "HYDRAFLOW_AGENT_TIMEOUT", 3600),
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
+    ("retro_finder_timeout", "HYDRAFLOW_RETRO_FINDER_TIMEOUT", 180),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
@@ -825,6 +828,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TRANSCRIPT_SUMMARIZATION_ENABLED",
         True,
     ),
+    ("retro_finder_enabled", "HYDRAFLOW_RETRO_FINDER_ENABLED", True),
     ("unstick_auto_merge", "HYDRAFLOW_UNSTICK_AUTO_MERGE", True),
     ("unstick_all_causes", "HYDRAFLOW_UNSTICK_ALL_CAUSES", True),
     (
@@ -1164,6 +1168,7 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("wiki_compilation_provider", "HYDRAFLOW_WIKI_COMPILATION_PROVIDER"),
     ("adr_review_provider", "HYDRAFLOW_ADR_REVIEW_PROVIDER"),
     ("transcript_summary_provider", "HYDRAFLOW_TRANSCRIPT_SUMMARY_PROVIDER"),
+    ("retro_finder_provider", "HYDRAFLOW_RETRO_FINDER_PROVIDER"),
     ("triage_honeypot_provider", "HYDRAFLOW_TRIAGE_HONEYPOT_PROVIDER"),
     ("pr_unstick_provider", "HYDRAFLOW_PR_UNSTICK_PROVIDER"),
     ("term_proposer_provider", "HYDRAFLOW_TERM_PROPOSER_PROVIDER"),
@@ -1249,6 +1254,7 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
         "transcript_summary_tool",
         "transcript_summary_model",
     ),
+    ("HYDRAFLOW_RETRO_FINDER", "retro_finder_tool", "retro_finder_model"),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
@@ -3373,6 +3379,9 @@ class HydraFlowConfig(BaseModel):
     transcript_summary_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
     ] = Field(default="claude", description="Backend for transcript summarization.")
+    retro_finder_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
+        Field(default="claude", description="Backend for the retrospective finder.")
+    )
     triage_honeypot_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
     ] = Field(
@@ -4408,6 +4417,31 @@ class HydraFlowConfig(BaseModel):
         ge=5_000,
         le=500_000,
         description="Max transcript characters to send for summarization (truncated from end)",
+    )
+    # Retrospective finder (trace-grounded GATE/POLICY/BUGFIX findings)
+    retro_finder_enabled: bool = Field(
+        default=True,
+        description="Turn retrospective signals into typed findings via a model call",
+    )
+    retro_finder_model: str = Field(
+        default="haiku",
+        description="Cheap model that proposes findings from retrospective signals",
+    )
+    retro_finder_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for the retrospective finder",
+    )
+    retro_evidence_max_chars: int = Field(
+        default=40_000,
+        ge=2_000,
+        le=200_000,
+        description="Max evidence characters sent to the retrospective finder",
+    )
+    retro_findings_max_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=25,
+        description="Max retrospective findings emitted per loop tick",
     )
     # Report issue worker
     report_issue_tool: Literal["claude", "codex"] = Field(
@@ -6139,6 +6173,12 @@ class HydraFlowConfig(BaseModel):
         le=600,
         description="Timeout in seconds for transcript summarization model calls",
     )
+    retro_finder_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=900,
+        description="Timeout in seconds for the retrospective finder model call",
+    )
     # Execution mode
     dry_run: bool = Field(
         default=False, description="Log actions without executing them"
@@ -7186,6 +7226,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         for field in (
             "triage_tool",
             "transcript_summary_tool",
+            "retro_finder_tool",
             "report_issue_tool",
             "adr_review_tool",
         ):

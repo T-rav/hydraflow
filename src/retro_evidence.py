@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from models import SubprocessTrace
 
@@ -68,7 +68,7 @@ def _load_traces(issue_dir: Path) -> list[SubprocessTrace]:
             traces.append(
                 SubprocessTrace.model_validate_json(path.read_text(encoding="utf-8"))
             )
-        except Exception:
+        except (OSError, ValidationError, ValueError):
             logger.debug("Skipping malformed subprocess trace: %s", path)
     return traces
 

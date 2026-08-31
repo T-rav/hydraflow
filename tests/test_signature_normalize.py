@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import log_ingest_loop  # noqa: E402
@@ -22,20 +24,17 @@ class TestOneIdentityNotTwoCopies:
 
 
 class TestNormalization:
-    def test_issue_numbers_collapse(self):
-        assert normalize_signature("failed on #1234") == normalize_signature(
-            "failed on #99"
-        )
-
-    def test_paths_collapse(self):
-        assert normalize_signature("error in src/foo/bar.py") == normalize_signature(
-            "error in src/other/baz.py"
-        )
-
-    def test_quoted_strings_collapse(self):
-        assert normalize_signature('cannot open "a.txt"') == normalize_signature(
-            'cannot open "b.txt"'
-        )
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [
+            ("failed on #1234", "failed on #99"),
+            ("error in src/foo/bar.py", "error in src/other/baz.py"),
+            ('cannot open "a.txt"', 'cannot open "b.txt"'),
+        ],
+        ids=["issue_numbers", "paths", "quoted_strings"],
+    )
+    def test_variable_parts_collapse_to_one_signature(self, left, right):
+        assert normalize_signature(left) == normalize_signature(right)
 
     def test_different_errors_stay_distinct(self):
         assert normalize_signature("connection refused") != normalize_signature(
