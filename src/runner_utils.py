@@ -19,6 +19,7 @@ import httpx
 import process_group
 from activity_parser import ActivityParser, get_activity_parser
 from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
+from credit_failover import apply_credit_failover
 from docker_runner import get_docker_runner
 from events import EventBus, EventType, HydraFlowEvent
 from execution import HostRunner, SimpleResult, SubprocessRunner, get_default_runner
@@ -1557,6 +1558,32 @@ async def run_lightweight_agent(
             f"for source {source!r}"
         )
         raise ValueError(msg)
+    # Credit failover (#11853). `base_runner` has applied this at its spawn
+    # since #10844; this path never did, so while Claude credits were capped
+    # every lightweight caller pinned to `claude` kept addressing the dead
+    # provider and burned a full timeout per call. Measured 2026-08-31: work
+    # spawns rerouted and completed while `issue_refinement` crashed 434 times
+    # and the wiki compiler's breaker opened twice — same cap, opposite halves
+    # of the factory.
+    #
+    # `apply_credit_failover` owns every guard (not claude/gateway, disabled,
+    # not currently active, no z.ai credential), so this is a no-op whenever
+    # nothing is capped. The model must move with the provider: the zai backend
+    # only accepts glm-*, so routing there while still asking for `haiku` would
+    # trade a timeout for a rejection.
+    failover_provider, failover_cmd = apply_credit_failover(
+        transport_provider, _telemetry_cmd(transport_provider, tool, model), config
+    )
+    if failover_provider != transport_provider:
+        _, model = parse_command_tool_model(failover_cmd)
+        logger.info(
+            "credit-failover: rerouting lightweight %s call to %s/%s (source=%s)",
+            transport_provider,
+            failover_provider,
+            model,
+            source,
+        )
+        transport_provider = failover_provider
     # Backend selection (pluggable one-shot provider). The chosen backend owns
     # its own credit-exhaustion detection (CLI: output text; OpenRouter: HTTP
     # 429/402). Both spawns live in THIS seam module so the CH-6 gate (above)
