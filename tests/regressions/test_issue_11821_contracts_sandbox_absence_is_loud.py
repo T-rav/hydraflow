@@ -48,7 +48,10 @@ def test_a_missing_sandbox_warns_and_names_the_remedies(
     assert result.status == CheckStatus.WARN
     assert "acme/sandbox" in result.message
     # The message must say what to DO. A warning that only states a fact is
-    # the kind that gets read once and ignored thereafter.
+    # the kind that gets read once and ignored thereafter. Since #11837 it must
+    # also name the NARROW remedy first — recommending the shared kill-switch
+    # alone is what took docker and claude down with github.
+    assert "contract_refresh_external_recorders" in result.message
     assert "contract_refresh_external_enabled=false" in result.message
 
 
