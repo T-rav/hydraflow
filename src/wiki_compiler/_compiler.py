@@ -27,6 +27,7 @@ from repo_wiki import (
 from wiki_anchor_gate import config_field_vocabulary, has_repo_anchor
 from wiki_synthesis_ledger import synthesis_digest
 
+from ._batching import batch_by_chars
 from ._flow import WikiCompilerFlowMixin
 from ._judge import WikiCompilerJudgeMixin
 from ._model_io import WikiCompilerModelIOMixin
@@ -121,20 +122,11 @@ class WikiCompiler(
         smallest prompt that can carry it; if that one call times out the
         circuit breaker bounds the cost.
         """
-        budget = max(self._config.wiki_compilation_batch_chars, 1)
-        batches: list[list[WikiEntry]] = []
-        current: list[WikiEntry] = []
-        used = 0
-        for entry in entries:
-            size = len(self._entry_block(entry))
-            if current and used + size > budget:
-                batches.append(current)
-                current, used = [], 0
-            current.append(entry)
-            used += size
-        if current:
-            batches.append(current)
-        return batches
+        return batch_by_chars(
+            entries,
+            lambda entry: len(self._entry_block(entry)),
+            self._config.wiki_compilation_batch_chars,
+        )
 
     async def compile_topic(
         self,

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -26,6 +26,7 @@ from repo_wiki import (
     _mark_tracked_entry_superseded,
     _write_tracked_synthesis_entry,
 )
+from tests.helpers import bare_wiki_compiler
 from wiki_compiler import WikiCompiler
 
 REPO = "acme/widget"
@@ -272,14 +273,7 @@ class TestCompileTopicTracked:
                 title=f"Original {i + 1}",
             )
 
-        compiler = WikiCompiler.__new__(WikiCompiler)
-        compiler._config = MagicMock()
-        compiler._config.wiki_compilation_tool = "stub"
-        compiler._config.wiki_compilation_model = "stub"
-        compiler._config.wiki_compilation_timeout = 60
-        compiler._credentials = MagicMock()
-        compiler._credentials.gh_token = ""
-        compiler._runner = MagicMock()
+        compiler = bare_wiki_compiler()
         return compiler, tracked_root
 
     @pytest.mark.asyncio
@@ -321,11 +315,7 @@ class TestCompileTopicTracked:
             title="Solo",
         )
 
-        compiler = WikiCompiler.__new__(WikiCompiler)
-        compiler._config = MagicMock()
-        compiler._credentials = MagicMock()
-        compiler._credentials.gh_token = ""
-        compiler._runner = MagicMock()
+        compiler = bare_wiki_compiler()
         compiler._call_model = AsyncMock(
             side_effect=AssertionError("should not be called")
         )

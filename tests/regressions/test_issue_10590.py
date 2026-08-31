@@ -41,6 +41,7 @@ from repo_wiki import (
     _write_tracked_synthesis_entry,
 )
 from wiki_compiler import WikiCompiler
+from tests.helpers import bare_wiki_compiler
 
 REPO = "acme/widget"
 
@@ -84,14 +85,7 @@ def _write_source_entry(
 
 
 def _make_compiler() -> WikiCompiler:
-    compiler = WikiCompiler.__new__(WikiCompiler)
-    compiler._config = MagicMock()
-    compiler._config.wiki_compilation_tool = "stub"
-    compiler._config.wiki_compilation_model = "stub"
-    compiler._config.wiki_compilation_timeout = 60
-    compiler._credentials = MagicMock()
-    compiler._credentials.gh_token = ""
-    compiler._runner = MagicMock()
+    compiler = bare_wiki_compiler()
     return compiler
 
 
