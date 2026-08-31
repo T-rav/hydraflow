@@ -43,7 +43,9 @@ def _make_loop_with_prs(
 
     retro = MagicMock()
     retro._load_recent = MagicMock(return_value=[])
-    retro._detect_patterns = AsyncMock()
+    retro.analyze_evidence = AsyncMock(
+        return_value={"signals": 0, "filed": 0, "policy": 0, "dropped": 0, "errors": 0}
+    )
 
     insights = MagicMock()
     insights.load_recent = MagicMock(return_value=[])

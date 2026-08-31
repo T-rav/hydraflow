@@ -83,6 +83,8 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         acknowledged: list[str] = []
         patterns_filed = 0
         stale_proposals = 0
+        findings_dropped = 0
+        signals_seen = 0
 
         for item in items:
             if self._stop_event.is_set():
@@ -91,6 +93,8 @@ class RetrospectiveLoop(BaseBackgroundLoop):
                 result = await self._process_item(item)
                 patterns_filed += result.get("patterns_filed", 0)
                 stale_proposals += result.get("stale_proposals", 0)
+                findings_dropped += result.get("findings_dropped", 0)
+                signals_seen += result.get("signals_seen", 0)
                 acknowledged.append(item.id)
                 await self._publish_update(item, "processed")
             except Exception as exc:
@@ -109,6 +113,8 @@ class RetrospectiveLoop(BaseBackgroundLoop):
             "processed": len(acknowledged),
             "patterns_filed": patterns_filed,
             "stale_proposals": stale_proposals,
+            "findings_dropped": findings_dropped,
+            "signals_seen": signals_seen,
         }
 
     async def _process_item(self, item: QueueItem) -> dict[str, int]:
@@ -123,10 +129,20 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         return {}
 
     async def _handle_retro_patterns(self) -> dict[str, int]:
-        """Run retrospective pattern detection."""
+        """Run evidence-grounded retrospective analysis and report what it did.
+
+        The returned counts are the real ones (#11890). This used to return a
+        hardcoded ``{"patterns_filed": 0}`` regardless of what was filed, so
+        the loop reported zero for its entire life.
+        """
         entries = self._retro._load_recent(self._config.retrospective_window)
-        await self._retro._detect_patterns(entries)
-        return {"patterns_filed": 0}
+        counts = await self._retro.analyze_evidence(entries)
+        return {
+            "patterns_filed": counts.get("filed", 0),
+            "policy_suggestions": counts.get("policy", 0),
+            "findings_dropped": counts.get("dropped", 0),
+            "signals_seen": counts.get("signals", 0),
+        }
 
     async def _handle_review_patterns(self) -> dict[str, int]:
         """Run review insight pattern analysis and file issues for new patterns."""
