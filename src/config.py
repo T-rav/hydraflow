@@ -674,6 +674,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         0.5,
     ),
     (
+        "wiki_compaction_similarity_threshold",
+        "HYDRAFLOW_WIKI_COMPACTION_SIMILARITY_THRESHOLD",
+        0.8,
+    ),
+    (
         "wiki_barren_compile_cooldown_hours",
         "HYDRAFLOW_WIKI_BARREN_COMPILE_COOLDOWN_HOURS",
         24.0,
@@ -4224,6 +4229,18 @@ class HydraFlowConfig(BaseModel):
             "Batching alone bounds each CALL but not the tick: a 4089-entry "
             "topic would buy its whole backlog at once. The remainder stays "
             "active and is compiled on later ticks. 0 disables the cap."
+        ),
+    )
+    wiki_compaction_similarity_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Body-similarity score at or above which two active wiki entries "
+            "count as a merge candidate. A topic with no candidate pair has "
+            "nothing for synthesis to merge, so its spawn is skipped entirely. "
+            "0 disables the check (every topic compiles, the pre-#11898 "
+            "behaviour)."
         ),
     )
     wiki_barren_compile_cooldown_hours: float = Field(

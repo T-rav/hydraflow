@@ -23,6 +23,7 @@ from repo_wiki import (
     DEFAULT_TOPICS,
     RepoWikiStore,
     WikiEntry,
+    _load_tracked_active_entries,
     active_lint_tracked,
     classify_topic,
     flag_generic_entries_stale,
@@ -38,6 +39,7 @@ from wiki_drift_detector import (
     scan_semantic_drift,
 )
 from wiki_maint_queue import MaintenanceQueue, MaintenanceTask
+from wiki_merge_candidates import has_compaction_work
 from wiki_synthesis_ledger import WikiSynthesisLedger
 
 if TYPE_CHECKING:
@@ -336,6 +338,8 @@ class RepoWikiLoop(BaseBackgroundLoop):
             cooldown_hours=self._config.wiki_barren_compile_cooldown_hours,
         )
         now = datetime.now(UTC)
+        # #11898: resolved once per tick — the same value gates every topic.
+        compaction_threshold = self._config.wiki_compaction_similarity_threshold
 
         for slug in repos:
             # Phase 1: Active lint — self-healing pass
@@ -403,6 +407,18 @@ class RepoWikiLoop(BaseBackgroundLoop):
                             continue
                         if not synthesis_ledger.should_compile(slug, topic, now=now):
                             continue
+                        if not has_compaction_work(
+                            [e.content for e in entries],
+                            threshold=compaction_threshold,
+                        ):
+                            logger.info(
+                                "Wiki compile %s/%s: %d entries, no merge "
+                                "candidates — skipping synthesis",
+                                slug,
+                                topic,
+                                len(entries),
+                            )
+                            continue
                         try:
                             after = await self._wiki_compiler.compile_topic(
                                 store, slug, topic
@@ -457,6 +473,21 @@ class RepoWikiLoop(BaseBackgroundLoop):
                         if not compile_state.should_compile(gate_key, fingerprint):
                             continue
                         if not synthesis_ledger.should_compile(slug, topic, now=now):
+                            continue
+                        if not has_compaction_work(
+                            [
+                                str(e["body"])
+                                for e in _load_tracked_active_entries(topic_dir)
+                            ],
+                            threshold=compaction_threshold,
+                        ):
+                            logger.info(
+                                "Wiki compile_tracked %s/%s: %d active entries, "
+                                "no merge candidates — skipping synthesis",
+                                slug,
+                                topic,
+                                len(active_files),
+                            )
                             continue
                         try:
                             synthesized = (

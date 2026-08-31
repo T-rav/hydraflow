@@ -38,7 +38,13 @@ _SLUG = "o/r"
 
 
 def _write_active_tracked_entry(
-    tracked_root: Path, slug: str, topic: str, *, entry_id: str, source_issue: int
+    tracked_root: Path,
+    slug: str,
+    topic: str,
+    *,
+    entry_id: str,
+    source_issue: int,
+    body: str | None = None,
 ) -> Path:
     topic_dir = tracked_root / slug / topic
     topic_dir.mkdir(parents=True, exist_ok=True)
@@ -52,11 +58,10 @@ def _write_active_tracked_entry(
         "source_phase: implement\n"
         f"created_at: {now}\n"
         "status: active\n"
-        "---\n"
+        "---\n" + (body or "See `src/foo.py:Bar` for details.\n"),
         # A src/*.py anchor keeps wiki_anchor_gate.has_repo_anchor happy —
         # anchor-less entries get flagged stale by flag_generic_entries_stale
         # before the compile phase ever sees them (config default: on).
-        "See `src/foo.py:Bar` for details.\n",
         encoding="utf-8",
     )
     return path
@@ -270,4 +275,71 @@ async def test_barren_topic_stops_recompiling_even_as_its_content_changes(
         f"compile_topic_tracked counts {calls_after_tick}. [1, 2, 3] means the "
         "barren gate never fired and the loop is still re-buying a rejection "
         "it already paid for."
+    )
+
+
+async def test_a_topic_with_nothing_to_merge_never_spawns_synthesis(
+    tmp_path: Path,
+) -> None:
+    """#11898 across real ticks: no merge candidates, so no model call at all.
+
+    Measured on the live wiki: `patterns` holds 162 active entries with ZERO
+    near-duplicate bodies, and 3878 more already superseded. Every scenario
+    above seeds DISTINCT entries, which is the same shape — so before this
+    check they all paid a synthesis spawn to be told there was nothing to do.
+
+    The distinction that matters: the fingerprint gate (#11373) and the barren
+    ledger (#11888) both let the FIRST compile through. This one does not.
+    """
+    from repo_wiki import RepoWikiStore
+
+    topic = DEFAULT_TOPICS[0]
+    tracked_root = tmp_path / "tracked_wiki"
+    # DISTINCT bodies — the other scenarios in this file seed five IDENTICAL
+    # ones, which really are five duplicates, so they still (correctly) compile.
+    for i in range(5):
+        _write_active_tracked_entry(
+            tracked_root,
+            _SLUG,
+            topic,
+            entry_id=f"e{i}",
+            source_issue=i,
+            body=(
+                f"`src/module_{i}.py:Thing{i}` handles the {i}th distinct "
+                f"concern; see ADR-00{i}{i} for why it is separate.\n"
+            ),
+        )
+    store = RepoWikiStore(
+        wiki_root=tmp_path / "wiki_root_unused",
+        tracked_root=tracked_root,
+        self_slug=None,
+    )
+
+    wiki_store = MagicMock()
+    wiki_store.list_repos.return_value = [_SLUG]
+
+    compiler = FakeWikiCompiler()
+    world = MockWorld(tmp_path)
+    seed_ports(world, wiki_store=wiki_store, wiki_compiler=compiler)
+
+    ticks = {"n": 0}
+
+    async def _heal(self, closed_issues, stats):
+        ticks["n"] += 1
+        result = await self._lint_and_compile_repos(
+            [_SLUG], tracked_root, closed_issues, store=store
+        )
+        stats.update(result)
+
+    with patch("repo_wiki_loop.RepoWikiLoop._heal_and_open_maintenance_pr", _heal):
+        await world.run_with_loops(["repo_wiki"], cycles=2)
+
+    assert ticks["n"] == 2, (
+        f"only {ticks['n']} of 2 ticks reached the compile phase — the "
+        "assertion below cannot distinguish 'skipped' from 'never ran'"
+    )
+    assert compiler.compile_calls == [], (
+        "synthesis was spawned for a topic whose five entries share no "
+        "near-duplicate pair — there is nothing for a model to merge, and "
+        "the anchor gate would have dropped whatever it returned"
     )

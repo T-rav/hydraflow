@@ -2139,6 +2139,9 @@ def bare_wiki_compiler(**config_overrides: Any) -> Any:
     config.wiki_compilation_timeout = 60
     config.wiki_compilation_batch_chars = 20_000
     config.wiki_compilation_max_batches_per_tick = 0  # uncapped unless asked
+    # 0 = 'every topic has work', so a fixture that seeds no duplicates still
+    # reaches the compile it is testing (#11898).
+    config.wiki_compaction_similarity_threshold = 0.0
     for name, value in config_overrides.items():
         setattr(config, name, value)
     compiler._config = config
