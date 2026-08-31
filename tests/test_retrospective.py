@@ -455,7 +455,7 @@ class TestRetrospectiveEntry:
 
 
 # ---------------------------------------------------------------------------
-# _file_improvement_issue memory routing
+# memory routing
 # ---------------------------------------------------------------------------
 
 
@@ -565,7 +565,7 @@ class TestRetrospectiveQueueEnqueue:
     async def test_record_falls_back_to_inline_when_no_queue(
         self, config: HydraFlowConfig
     ) -> None:
-        """Without a queue, record() calls _detect_patterns inline."""
+        """Without a queue, record() runs the evidence analysis inline."""
         state = StateTracker(config.state_file)
         mock_prs = AsyncMock()
         mock_prs.get_pr_diff_names = AsyncMock(return_value=["src/foo.py"])
@@ -574,5 +574,5 @@ class TestRetrospectiveQueueEnqueue:
         _write_plan(config, 42, "## Files\n- src/foo.py\n")
         review = ReviewResultFactory.create()
 
-        # Should not raise — falls back to inline _detect_patterns
+        # Should not raise — falls back to inline analyze_evidence
         await collector.record(42, 101, review)
