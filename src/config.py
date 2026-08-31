@@ -674,11 +674,6 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         0.5,
     ),
     (
-        "wiki_compaction_similarity_threshold",
-        "HYDRAFLOW_WIKI_COMPACTION_SIMILARITY_THRESHOLD",
-        0.8,
-    ),
-    (
         "wiki_barren_compile_cooldown_hours",
         "HYDRAFLOW_WIKI_BARREN_COMPILE_COOLDOWN_HOURS",
         24.0,
@@ -773,6 +768,11 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
     ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
     ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
+    (
+        "wiki_compaction_similarity_threshold",
+        "HYDRAFLOW_WIKI_COMPACTION_SIMILARITY_THRESHOLD",
+        0.8,
+    ),
 ]
 
 # Formal give-up window thresholds (#10735) — one N-in-T pair per child-class.
