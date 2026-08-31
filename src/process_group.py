@@ -93,6 +93,50 @@ def kill_process_group(proc: object, sig: signal.Signals = signal.SIGKILL) -> No
 # (runner_utils imports execution) and this is the shared stdlib-only home.
 # ---------------------------------------------------------------------------
 
+
+def descendant_pids(ps_output: str, root_pid: int) -> set[int]:
+    """Transitive descendants of ``root_pid`` from ``ps -eo pid,ppid`` output.
+
+    Group reaping cannot cross a ``start_new_session`` boundary, and the factory
+    has two of them: it owns one group, the agent CLI starts a second, and the
+    agent's Bash tool starts a third. ``killpg`` on the factory's group reaches
+    nothing below the agent, so a build three groups down survived a clean stop
+    for 11h53m holding 2.4 GB and manufactured 60 false test failures for
+    everyone else on the host (#11820).
+
+    Ancestry is the only link that survives those boundaries — and it survives
+    only while the parents are alive. Once a process reparents to PPID=1 there
+    is no record it ever descended from the factory, so callers must collect
+    with this BEFORE signalling anything; reaping first destroys the evidence.
+
+    Pure, so the measured three-group chain can be a fixture rather than
+    something reproducible only on a host that already has the bug.
+
+    An unknown ``root_pid`` yields an empty set, never the whole table: this
+    feeds a kill path, so the failure direction has to be reaping nothing.
+    """
+    children: dict[int, list[int]] = {}
+    for line in ps_output.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+
+    found: set[int] = set()
+    queue = list(children.get(root_pid, ()))
+    while queue:
+        pid = queue.pop()
+        if pid in found:  # also breaks cycles in malformed ps output
+            continue
+        found.add(pid)
+        queue.extend(children.get(pid, ()))
+    return found
+
+
 _TRACKED: set[Any] = set()
 
 
