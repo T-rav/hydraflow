@@ -52,7 +52,6 @@ def _write_trace(config, issue: int, phase: str, run: int, idx: int, **over) -> 
         "tools": {"tool_counts": {}, "tool_errors": {}, "total_invocations": 0},
         "tool_calls": [],
         "skill_results": [],
-        "turn_count": 1,
         "inference_count": 1,
     }
     payload.update(over)

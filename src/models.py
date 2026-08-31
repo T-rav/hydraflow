@@ -1691,7 +1691,6 @@ class TraceSpanStats(BaseModel):
     """Aggregated span counts from a trace file."""
 
     total_spans: int
-    total_turns: int
     total_inference_calls: int
     duration_seconds: float
 
@@ -1786,7 +1785,6 @@ class SubprocessTrace(BaseModel):
     tools: TraceToolProfile
     tool_calls: list[ToolCallSpan] = Field(default_factory=list)
     skill_results: list[SkillResultRecord] = Field(default_factory=list)
-    turn_count: int = 0
     inference_count: int = 0
 
 

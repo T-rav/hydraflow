@@ -150,7 +150,6 @@ class TestDiagnosticsWaterfallScenario:
                     },
                 ],
                 "inference_count": 0,
-                "turn_count": 0,
             },
         )
 

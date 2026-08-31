@@ -50,7 +50,6 @@ def _make_summary(*, issue_number: int = 42, phase: str = "implement") -> TraceS
         trace_ids=[],
         spans=TraceSpanStats(
             total_spans=1,
-            total_turns=1,
             total_inference_calls=1,
             duration_seconds=10.0,
         ),

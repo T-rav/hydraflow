@@ -208,7 +208,6 @@ def test_skill_action_from_subprocess_trace_skill_results(config) -> None:
                 },
             ],
             "inference_count": 0,
-            "turn_count": 0,
         },
     )
     result = build_waterfall(
@@ -270,7 +269,6 @@ def test_subprocess_action_from_bash_tool_calls(config) -> None:
             ],
             "skill_results": [],
             "inference_count": 0,
-            "turn_count": 0,
         },
     )
     result = build_waterfall(
