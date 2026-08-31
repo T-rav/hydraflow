@@ -273,7 +273,15 @@ class RetrospectiveCollector:
         of which could name a file, a command, an error or a guard, because
         ``RetrospectiveEntry`` carries no field that could hold one.
         """
-        counts = {"signals": 0, "filed": 0, "policy": 0, "dropped": 0, "errors": 0}
+        counts = {
+            "signals": 0,
+            "filed": 0,
+            "policy": 0,
+            "dropped": 0,
+            "errors": 0,
+            "unparseable": 0,
+            "capped": 0,
+        }
         issues = sorted({e.issue_number for e in entries})
         if not issues:
             return counts
@@ -283,9 +291,15 @@ class RetrospectiveCollector:
         if not signals:
             return counts
 
-        findings = await self._finder.find(
-            signals, issue_labels=await self._window_labels(issues)
+        # Label lookup is one API call per issue in the window; skip it
+        # entirely when the finder will not spawn.
+        labels = (
+            await self._window_labels(issues)
+            if self._config.retro_finder_enabled
+            else []
         )
+        findings = await self._finder.find(signals, issue_labels=labels)
+        counts["unparseable"] = getattr(self._finder, "unparseable", 0)
         kept, dropped = validate(findings, signals, Path(self._config.repo_root))
         counts["dropped"] = len(dropped)
         for drop in dropped:

@@ -21,8 +21,14 @@ from pydantic import TypeAdapter, ValidationError
 
 import runner_utils
 from config import Credentials
+from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
+from prompt_gate_alerts import (
+    alert_prompt_gate_block,
+    clear_prompt_gate_block,
+    is_prompt_gate_blocked,
+)
 from retro_findings import RetroFinding
 
 if TYPE_CHECKING:
@@ -80,10 +86,18 @@ class RetroFinder:
         config: HydraFlowConfig,
         runner: Any = None,
         credentials: Any = None,
+        event_bus: Any = None,
+        gate_block_dedup: DedupStore | None = None,
     ) -> None:
         self._config = config
         self._runner = runner or get_default_runner()
         self._credentials = credentials or Credentials()
+        self._bus = event_bus
+        self._gate_block_dedup = gate_block_dedup or DedupStore(
+            "retro_finder_gate_blocked",
+            config.data_root / "dedup" / "retro_finder_gate_blocked.json",
+        )
+        self.unparseable = 0
 
     async def find(
         self,
@@ -105,7 +119,8 @@ class RetroFinder:
         raw = await self._call_model(prompt, issue_labels=issue_labels)
         if not raw:
             return []
-        return _parse(raw)
+        findings, self.unparseable = parse_findings(raw)
+        return findings
 
     def _render(self, signals: Sequence[RetroSignal]) -> str:
         budget = self._config.retro_evidence_max_chars
@@ -150,29 +165,53 @@ class RetroFinder:
             return ""
 
         if result.returncode != 0:
+            if is_prompt_gate_blocked(result.stderr):
+                # A gate block is a persistent policy misconfiguration, not a
+                # transient failure: every call re-blocks, so a soft warn would
+                # make this finder a PERMANENT silent no-op (#9734 finding 3,
+                # the same escalation transcript_summarizer performs).
+                await alert_prompt_gate_block(
+                    dedup=self._gate_block_dedup,
+                    event_bus=self._bus,
+                    source="retro_finder",
+                    repo=self._config.repo or "",
+                    detail=result.stderr[:200],
+                )
+                return ""
             logger.warning(
                 "Retro finder failed (rc=%d): %s",
                 result.returncode,
                 result.stderr[:200],
             )
             return ""
+        clear_prompt_gate_block(self._gate_block_dedup, "retro_finder")
         return result.stdout or ""
 
 
-def _parse(raw: str) -> list[RetroFinding]:
-    """Extract findings from model output, skipping anything malformed."""
+def parse_findings(raw: str) -> tuple[list[RetroFinding], int]:
+    """Parse model output into findings plus a count of what would not parse.
+
+    The unparseable count matters: a finding rejected here (wrong shape, no
+    anchor) used to vanish at debug level, so a model emitting structurally
+    broken output was indistinguishable from one with nothing to report. The
+    whole design promises drops are counted, not silent.
+    """
     payload = _extract_array(raw)
     if payload is None:
         logger.warning("Retro finder returned no parseable JSON array")
-        return []
+        return [], 0
 
     findings: list[RetroFinding] = []
+    unparseable = 0
     for item in payload:
         try:
             findings.append(_finding_adapter.validate_python(item))
         except ValidationError:
-            logger.debug("Skipping unusable finding: %s", str(item)[:160])
-    return findings
+            unparseable += 1
+            logger.info(
+                "Retro finder produced an unusable finding: %s", str(item)[:160]
+            )
+    return findings, unparseable
 
 
 def _extract_array(raw: str) -> list[Any] | None:

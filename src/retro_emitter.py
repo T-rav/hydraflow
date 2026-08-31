@@ -39,7 +39,7 @@ async def emit(
     config: HydraFlowConfig,
 ) -> dict[str, int]:
     """File validated findings, capped per tick. Returns per-outcome counts."""
-    counts = {"filed": 0, "policy": 0, "errors": 0}
+    counts = {"filed": 0, "policy": 0, "errors": 0, "capped": 0}
     if prs is None:
         logger.debug("Retro emission skipped: no PR port wired")
         return counts
@@ -47,7 +47,9 @@ async def emit(
     by_id = {s.id: s for s in signals}
     cap = config.retro_findings_max_per_tick
 
-    for finding in list(findings)[:cap]:
+    ordered = list(findings)
+    counts["capped"] = max(0, len(ordered) - cap)
+    for finding in ordered[:cap]:
         signal = by_id.get(finding.signal_id)
         if signal is None:
             continue

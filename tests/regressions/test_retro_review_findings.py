@@ -115,3 +115,96 @@ class TestUnknownKindsAreRejectedNotPolicyValidated:
 
         assert kept == []
         assert "kind" in dropped[0].reason
+
+
+class TestPassTwoFindings:
+    """Second review iteration over the modules pass one did not reach."""
+
+    @pytest.mark.asyncio
+    async def test_a_prompt_gate_block_escalates_instead_of_warning_forever(self):
+        """A gate block is permanent — every call re-blocks (#9734 finding 3).
+
+        A soft warn makes the finder a PERMANENT SILENT NO-OP. transcript_summarizer
+        already escalates this exact case; the finder must too.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from retro_finder import RetroFinder
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create()
+        config.retro_finder_enabled = True
+        blocked = type("R", (), {"returncode": 1, "stdout": "", "stderr": "prompt gate blocked: data-class"})()
+
+        with (
+            patch("runner_utils.run_lightweight_agent", new=AsyncMock(return_value=blocked)),
+            patch("retro_finder.is_prompt_gate_blocked", return_value=True),
+            patch("retro_finder.alert_prompt_gate_block", new=AsyncMock()) as alert,
+        ):
+            findings = await RetroFinder(config).find([SIGNAL])
+
+        assert findings == []
+        alert.assert_awaited_once()
+
+    def test_findings_dropped_at_parse_time_are_counted_not_silent(self):
+        """Otherwise a malformed model looks identical to 'nothing to report'."""
+        import json
+
+        from retro_finder import parse_findings
+
+        payload = json.dumps(
+            [
+                {"kind": "gate", "signal_id": SIGNAL.id, "title": "t",
+                 "guard_path": "tests/architecture/x.py", "observed": "7"},
+                {"kind": "gate", "signal_id": SIGNAL.id, "title": "no anchor"},
+                {"kind": "telepathy"},
+            ]
+        )
+
+        findings, unparseable = parse_findings(payload)
+
+        assert len(findings) == 1
+        assert unparseable == 2
+
+    @pytest.mark.asyncio
+    async def test_findings_beyond_the_per_tick_cap_are_counted(self):
+        """The cap must not silently discard the remainder."""
+        from unittest.mock import AsyncMock, patch
+
+        from retro_emitter import emit
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create()
+        config.retro_findings_max_per_tick = 2
+        findings = [_gate("7 occurrences") for _ in range(5)]
+
+        with patch("retro_emitter.file_or_fold", new=AsyncMock(return_value=1)):
+            counts = await emit(findings, [SIGNAL], object(), config)
+
+        assert counts["filed"] == 2
+        assert counts["capped"] == 3
+
+    @pytest.mark.asyncio
+    async def test_labels_are_not_fetched_when_the_finder_is_disabled(self, tmp_path):
+        """10 GitHub calls per tick for a spawn that will not happen."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from retrospective import RetrospectiveCollector, RetrospectiveEntry
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create()
+        config.data_root = tmp_path / "d"
+        config.repo_root = tmp_path
+        config.retro_finder_enabled = False
+        prs = MagicMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        collector = RetrospectiveCollector(config, MagicMock(), prs)
+
+        with patch("retrospective.extract", return_value=[SIGNAL]):
+            await collector.analyze_evidence(
+                [RetrospectiveEntry(issue_number=n, pr_number=n,
+                                    timestamp="2026-08-31T00:00:00+00:00")
+                 for n in range(1, 11)]
+            )
+
+        prs.get_issue_labels.assert_not_awaited()
