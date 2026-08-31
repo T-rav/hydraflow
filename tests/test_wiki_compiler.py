@@ -532,7 +532,7 @@ class TestModelCircuitBreaker:
             "runner_utils.run_lightweight_agent", self._failing_agent(calls)
         )
         monkeypatch.setattr(
-            "wiki_compiler.is_prompt_gate_blocked", lambda _stderr: False
+            "wiki_compiler._model_io.is_prompt_gate_blocked", lambda _stderr: False
         )
 
         for _ in range(10):

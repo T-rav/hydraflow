@@ -38,7 +38,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0029 | — | `pytest:tests/test_caretaker_loop_wiring.py` |
 | ADR-0030 | `src.dashboard_routes._routes` | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
 | ADR-0031 | `src.config`, `src.discover_phase`, `src.discover_runner`, `src.models`, `src.plan_phase_prepass`, `src.review_phase._phase`, `src.shape_phase`, `src.shape_runner`, `src.triage_phase` | `pytest:tests/test_discover_phase.py`, `pytest:tests/test_shape_phase.py`, `pytest:tests/test_discover_runner.py`, `pytest:tests/test_shape_runner.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
-| ADR-0032 | `src.base_runner`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler` | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
+| ADR-0032 | `src.base_runner`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler._compiler` | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0033 | `src.adr_reviewer`, `src.config` | — |
 | ADR-0034 | `src.adr_reviewer`, `src.config` | `pytest:tests/test_state_machine.py` |
 | ADR-0035 | `src.config` | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
@@ -439,7 +439,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.vitals.control` | ADR-0133 |
 | `src.vitals_methodology` | ADR-0133 |
 | `src.wiki_carryover` | ADR-0064 |
-| `src.wiki_compiler` | ADR-0032 |
+| `src.wiki_compiler._compiler` | ADR-0032 |
 | `src.wiki_rot_detector_loop` | ADR-0045 |
 | `src.workspace._manager` | ADR-0003, ADR-0009, ADR-0010, ADR-0112 |
 | `src.workspace_gc_landed_safety` | ADR-0069 |

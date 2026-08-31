@@ -57,7 +57,7 @@ async def test_a_persistently_failing_model_is_spawned_a_bounded_number_of_times
         return result
 
     monkeypatch.setattr("runner_utils.run_lightweight_agent", _always_times_out)
-    monkeypatch.setattr("wiki_compiler.is_prompt_gate_blocked", lambda _s: False)
+    monkeypatch.setattr("wiki_compiler._model_io.is_prompt_gate_blocked", lambda _s: False)
 
     creds = MagicMock()
     creds.gh_token = "fake-token"

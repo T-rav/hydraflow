@@ -26,11 +26,12 @@ import pytest
 from knowledge_metrics import metrics
 from repo_wiki import RepoWikiStore, flag_generic_entries_stale
 from wiki_anchor_gate import config_field_vocabulary
-from wiki_compiler import (
-    _COMPILE_TOPIC_PROMPT,
-    _SYNTHESIZE_INGEST_PROMPT,
-    WikiCompiler,
-)
+from wiki_compiler import WikiCompiler
+
+# From the defining module, not the package: a re-export is a SECOND name for
+# the same constant, and re-exporting one invites a patch that rebinds the copy
+# while every reader keeps its own module global (#11547 batch 8).
+from wiki_compiler._prompts import _COMPILE_TOPIC_PROMPT, _SYNTHESIZE_INGEST_PROMPT
 
 REPO = "acme/widget"
 
