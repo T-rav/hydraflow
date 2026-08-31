@@ -23,6 +23,7 @@ from repo_wiki_loop import (
     _maintenance_pr_body,
     _porcelain_paths,
 )
+from tests.helpers import wiki_compiler_mock
 from wiki_maint_queue import MaintenanceQueue, MaintenanceTask
 
 
@@ -606,7 +607,7 @@ class TestTrackedCompileStatsReporting:
         self, git_repo: Path
     ) -> None:
         from datetime import UTC, datetime
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from repo_wiki import RepoWikiStore
 
@@ -639,8 +640,7 @@ class TestTrackedCompileStatsReporting:
             empty_topics=[],
         )
 
-        compiler = MagicMock()
-        compiler.compile_topic_tracked = AsyncMock(return_value=2)
+        compiler = wiki_compiler_mock(compile_topic_tracked=2, accepted=2)
 
         loop = _stub_loop(_make_config(git_repo))
         loop._wiki_compiler = compiler

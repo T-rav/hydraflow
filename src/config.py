@@ -665,6 +665,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_CI_PASS_RATE",
         0.5,
     ),
+    (
+        "wiki_barren_compile_cooldown_hours",
+        "HYDRAFLOW_WIKI_BARREN_COMPILE_COOLDOWN_HOURS",
+        24.0,
+    ),
     ("docker_cpu_limit", "HYDRAFLOW_DOCKER_CPU_LIMIT", 2.0),
     ("docker_spawn_delay", "HYDRAFLOW_DOCKER_SPAWN_DELAY", 2.0),
     ("visual_retry_delay", "HYDRAFLOW_VISUAL_RETRY_DELAY", 2.0),
@@ -4182,6 +4187,17 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Seconds the wiki-compilation circuit stays OPEN before probing "
             "with a single call."
+        ),
+    )
+    wiki_barren_compile_cooldown_hours: float = Field(
+        default=24.0,
+        ge=0.0,
+        le=720.0,
+        description=(
+            "Hours a wiki topic whose synthesis wrote nothing AND re-proposed "
+            "only already-rejected entries is skipped for. 0 disables the "
+            "barren gate entirely (every changed topic re-compiles, the "
+            "pre-#11888 behaviour)."
         ),
     )
 

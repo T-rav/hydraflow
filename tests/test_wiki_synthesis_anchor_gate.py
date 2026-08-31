@@ -32,6 +32,7 @@ from wiki_compiler import WikiCompiler
 # the same constant, and re-exporting one invites a patch that rebinds the copy
 # while every reader keeps its own module global (#11547 batch 8).
 from wiki_compiler._prompts import _COMPILE_TOPIC_PROMPT, _SYNTHESIZE_INGEST_PROMPT
+from wiki_synthesis_ledger import synthesis_digest
 
 REPO = "acme/widget"
 
@@ -110,11 +111,40 @@ class TestSynthesisPromptGrounding:
 class TestFilterAnchoredEntries:
     def test_platitude_dropped_anchored_kept(self) -> None:
         entries = WikiCompiler._parse_entries(json.dumps([_PLATITUDE, _ANCHORED]))
-        kept = WikiCompiler._filter_anchored_entries(
+        compiler = WikiCompiler.__new__(WikiCompiler)
+        kept = compiler._filter_anchored_entries(
             entries, repo=REPO, topic="gotchas", context="test"
         )
         assert [e.title for e in kept] == [_ANCHORED["title"]]
         assert metrics.snapshot()["wiki_entries_rejected_no_anchor"] == 1
+
+    def test_the_gate_reports_what_it_dropped(self) -> None:
+        """#11888: the barren ledger needs the verdict, not just the survivors."""
+        entries = WikiCompiler._parse_entries(json.dumps([_PLATITUDE, _ANCHORED]))
+        compiler = WikiCompiler.__new__(WikiCompiler)
+        compiler._filter_anchored_entries(
+            entries, repo=REPO, topic="gotchas", context="test"
+        )
+        rejected, accepted = compiler.last_anchor_gate_verdict
+        assert accepted == 1
+        assert rejected == [
+            synthesis_digest(_PLATITUDE["title"], _PLATITUDE["content"])
+        ]
+
+    def test_a_second_call_replaces_the_verdict_rather_than_appending(self) -> None:
+        """A stale verdict folded into the ledger would mark a moving topic barren."""
+        compiler = WikiCompiler.__new__(WikiCompiler)
+        both = WikiCompiler._parse_entries(json.dumps([_PLATITUDE, _ANCHORED]))
+        compiler._filter_anchored_entries(
+            both, repo=REPO, topic="gotchas", context="test"
+        )
+        only_anchored = WikiCompiler._parse_entries(json.dumps([_ANCHORED]))
+        compiler._filter_anchored_entries(
+            only_anchored, repo=REPO, topic="gotchas", context="test"
+        )
+        rejected, accepted = compiler.last_anchor_gate_verdict
+        assert rejected == []
+        assert accepted == 1
 
 
 class TestCompileTopicTrackedGate:
