@@ -15,12 +15,10 @@ class TestTraceSpanStats:
     def test_defaults(self) -> None:
         stats = TraceSpanStats(
             total_spans=10,
-            total_turns=3,
             total_inference_calls=5,
             duration_seconds=42.5,
         )
         assert stats.total_spans == 10
-        assert stats.total_turns == 3
         assert stats.total_inference_calls == 5
         assert stats.duration_seconds == 42.5
 
@@ -93,7 +91,6 @@ class TestTraceSummary:
             trace_ids=["0xabc"],
             spans=TraceSpanStats(
                 total_spans=10,
-                total_turns=3,
                 total_inference_calls=5,
                 duration_seconds=42.5,
             ),
@@ -113,7 +110,6 @@ class TestTraceSummary:
         )
         assert summary.issue_number == 123
         assert summary.phase == "implement"
-        assert summary.spans.total_turns == 3
         assert summary.tokens.cache_hit_rate == 0.44
 
     def test_roundtrip_serialization(self) -> None:
@@ -124,7 +120,6 @@ class TestTraceSummary:
             trace_ids=["0x123"],
             spans=TraceSpanStats(
                 total_spans=5,
-                total_turns=2,
                 total_inference_calls=3,
                 duration_seconds=10.0,
             ),

@@ -91,7 +91,6 @@ class TestSubprocessTrace:
                 ),
             ],
             skill_results=[],
-            turn_count=4,
             inference_count=4,
         )
         as_json = trace.model_dump_json()
@@ -110,7 +109,6 @@ class TestTraceSummaryNewFields:
             "trace_ids": [],
             "spans": {
                 "total_spans": 0,
-                "total_turns": 0,
                 "total_inference_calls": 0,
                 "duration_seconds": 0.0
             },
@@ -147,7 +145,6 @@ class TestTraceSummaryNewFields:
             trace_ids=[],
             spans=TraceSpanStats(
                 total_spans=10,
-                total_turns=4,
                 total_inference_calls=4,
                 duration_seconds=120.0,
             ),

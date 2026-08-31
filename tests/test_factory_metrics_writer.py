@@ -49,7 +49,6 @@ def _write_subprocess(
         ),
         tool_calls=[],
         skill_results=[],
-        turn_count=2,
         inference_count=2,
     )
     out_dir = tmp_path / "traces" / str(issue) / "implement" / f"run-{run_id}"

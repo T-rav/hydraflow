@@ -139,7 +139,6 @@ def test_waterfall_route_full_issue_returns_all_kinds(
                 },
             ],
             "inference_count": 0,
-            "turn_count": 0,
         },
     )
     resp = client.get("/api/diagnostics/issue/1234/waterfall")

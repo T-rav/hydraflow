@@ -62,7 +62,6 @@ def _trace(
         tools=TraceToolProfile(tool_counts={}, tool_errors={}, total_invocations=0),
         tool_calls=list(spans),
         skill_results=list(skills),
-        turn_count=1,
         inference_count=1,
     )
 
