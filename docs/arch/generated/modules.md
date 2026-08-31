@@ -42,6 +42,7 @@ graph LR
     src_state["src.state"]
     src_stillness["src.stillness"]
     src_vitals["src.vitals"]
+    src_wiki_compiler["src.wiki_compiler"]
     src_workspace["src.workspace"]
     src -- "2" --> src_agent
     src -- "7" --> src_arch
@@ -52,8 +53,8 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "9" --> src_epic
     src -- "24" --> src_erosion
-    src -- "9" --> src_escape
-    src -- "5" --> src_flows
+    src -- "10" --> src_escape
+    src -- "4" --> src_flows
     src -- "1" --> src_health_monitor_loop
     src -- "26" --> src_hydraflow_gateway
     src -- "1" --> src_implement_phase
@@ -68,6 +69,7 @@ graph LR
     src -- "1" --> src_signal_control
     src -- "68" --> src_state
     src -- "6" --> src_vitals
+    src -- "10" --> src_wiki_compiler
     src -- "5" --> src_workspace
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
@@ -92,6 +94,7 @@ graph LR
     src_intervention -- "3" --> src_escape
     src_mockworld -- "1" --> src_preflight
     src_mockworld_fakes -- "28" --> src_mockworld
+    src_mockworld_fakes -- "1" --> src_wiki_compiler
     src_mockworld_fakes_fake_github -- "5" --> src_mockworld
     src_pr_unsticker -- "4" --> src_agent
     src_pr_unsticker -- "4" --> src_state
@@ -100,12 +103,14 @@ graph LR
     src_review_phase -- "1" --> src_flows
     src_review_phase -- "6" --> src_reviewer
     src_review_phase -- "8" --> src_state
+    src_review_phase -- "4" --> src_wiki_compiler
     src_runners -- "1" --> src_hydraflow_gateway
     src_runners -- "1" --> src_preflight
     src_vitals -- "2" --> src_audit
     src_vitals -- "1" --> src_erosion
     src_vitals -- "2" --> src_escape
     src_vitals -- "2" --> src_intervention
+    src_wiki_compiler -- "1" --> src_flows
 ```
 
 <!-- arch:generated -->

@@ -1,3 +1,5 @@
+import pytest
+
 from adr_conformance import MUTATING_MAKE_TARGETS, is_mutating, resolve_check
 from adr_index import Check
 
@@ -12,10 +14,35 @@ def test_pytest_check_resolves_by_ast(tmp_path):
     assert not resolve_check(Check("pytest", "tests/t.py::test_missing", "x"), tmp_path)
 
 
-def test_pytest_parametrized_matches_base_name(tmp_path):
+@pytest.mark.parametrize(
+    ("module_source", "node_id"),
+    [
+        pytest.param(
+            "def test_p():\n    assert True\n",
+            "tests/t.py::test_p[case1]",
+            id="pytest_parametrized_matches_base_name",
+        ),
+        pytest.param(
+            "class TestFoo:\n    def test_bar(self):\n        assert True\n",
+            "tests/t.py::TestFoo::test_bar",
+            id="pytest_class_method_resolves_when_direct_child",
+        ),
+        pytest.param(
+            "class TestFoo:\n    def test_bar(self):\n        assert True\n",
+            "tests/t.py::TestFoo::test_bar[case1]",
+            id="pytest_class_method_parametrized_strips_suffix",
+        ),
+        pytest.param(
+            "def test_bar():\n    assert True\n",
+            "tests/t.py::",
+            id="pytest_dangling_double_colon_treated_as_module_only",
+        ),
+    ],
+)
+def test_pytest_node_id_resolves(tmp_path, module_source: str, node_id: str):
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "t.py").write_text("def test_p():\n    assert True\n")
-    assert resolve_check(Check("pytest", "tests/t.py::test_p[case1]", "x"), tmp_path)
+    (tmp_path / "tests" / "t.py").write_text(module_source)
+    assert resolve_check(Check("pytest", node_id, "x"), tmp_path)
 
 
 def test_make_check_resolves_by_makefile_grep(tmp_path):
@@ -67,16 +94,6 @@ def test_recipe_scan_reads_only_the_named_targets_recipe(tmp_path):
     assert is_mutating(Check("make", "release", "make:release"), tmp_path) is True
 
 
-def test_pytest_class_method_resolves_when_direct_child(tmp_path):
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "t.py").write_text(
-        "class TestFoo:\n    def test_bar(self):\n        assert True\n"
-    )
-    assert resolve_check(
-        Check("pytest", "tests/t.py::TestFoo::test_bar", "x"), tmp_path
-    )
-
-
 def test_pytest_class_method_false_when_method_defined_in_different_class(tmp_path):
     # The exact false-positive the reviewer flagged: test_bar exists, but not
     # as a member of TestFoo. A flat ast.walk() name match would wrongly
@@ -104,16 +121,6 @@ def test_pytest_class_method_false_when_class_missing(tmp_path):
     )
 
 
-def test_pytest_class_method_parametrized_strips_suffix(tmp_path):
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "t.py").write_text(
-        "class TestFoo:\n    def test_bar(self):\n        assert True\n"
-    )
-    assert resolve_check(
-        Check("pytest", "tests/t.py::TestFoo::test_bar[case1]", "x"), tmp_path
-    )
-
-
 def test_pytest_module_level_function_still_resolves(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "t.py").write_text("def test_bar():\n    assert True\n")
@@ -128,9 +135,3 @@ def test_pytest_module_only_citation_resolves_when_file_exists(tmp_path):
     (tmp_path / "tests" / "t.py").write_text("def test_bar():\n    assert True\n")
     assert resolve_check(Check("pytest", "tests/t.py", "x"), tmp_path)
     assert not resolve_check(Check("pytest", "tests/missing.py", "x"), tmp_path)
-
-
-def test_pytest_dangling_double_colon_treated_as_module_only(tmp_path):
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "t.py").write_text("def test_bar():\n    assert True\n")
-    assert resolve_check(Check("pytest", "tests/t.py::", "x"), tmp_path)

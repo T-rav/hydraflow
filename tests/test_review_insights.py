@@ -624,31 +624,32 @@ class TestGetCommonFeedbackSection:
         records = [_make_record(pr_number=1, categories=[])]
         assert get_common_feedback_section(records) == ""
 
-    def test_includes_remediation_hint_for_missing_tests(self) -> None:
-        """Feedback section should include actionable remediation for known categories."""
-        records = [
-            _make_record(pr_number=i, categories=["missing_tests"]) for i in range(3)
-        ]
+    @pytest.mark.parametrize(
+        ("category", "hint"),
+        [
+            pytest.param(
+                "missing_tests",
+                "failure/error paths",
+                id="includes_remediation_hint_for_missing_tests",
+            ),
+            pytest.param(
+                "edge_cases",
+                "empty inputs",
+                id="includes_remediation_hint_for_edge_cases",
+            ),
+            pytest.param(
+                "error_handling",
+                "error-path tests",
+                id="includes_remediation_hint_for_error_handling",
+            ),
+        ],
+    )
+    def test_includes_remediation_hint(self, category: str, hint: str) -> None:
+        """Every known category earns an actionable remediation line."""
+        records = [_make_record(pr_number=i, categories=[category]) for i in range(3)]
         section = get_common_feedback_section(records)
         assert "Action:" in section
-        assert "failure/error paths" in section
-
-    def test_includes_remediation_hint_for_edge_cases(self) -> None:
-        records = [
-            _make_record(pr_number=i, categories=["edge_cases"]) for i in range(3)
-        ]
-        section = get_common_feedback_section(records)
-        assert "Action:" in section
-        assert "empty inputs" in section
-
-    def test_includes_remediation_hint_for_error_handling(self) -> None:
-        """Feedback section should include actionable remediation for error_handling."""
-        records = [
-            _make_record(pr_number=i, categories=["error_handling"]) for i in range(3)
-        ]
-        section = get_common_feedback_section(records)
-        assert "Action:" in section
-        assert "error-path tests" in section
+        assert hint in section
 
     def test_no_remediation_hint_for_unknown_category(self) -> None:
         """Categories without remediation hints should not get an Action line."""

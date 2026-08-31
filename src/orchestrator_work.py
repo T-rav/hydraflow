@@ -18,6 +18,7 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from adr_utils import is_adr_issue_title
+from escape.surfaces import SurfacedIssueLedger
 from models import GitHubIssue, Task
 from orchestrator_common import _POST_MERGE_DELAY
 from phase_utils import handle_pool_worker_exception, release_batch_in_flight
@@ -31,6 +32,30 @@ if TYPE_CHECKING:
 # Same logger as the host — the moved code's records keep their
 # pre-extraction ``hydraflow.orchestrator`` origin.
 logger = logging.getLogger("hydraflow.orchestrator")
+
+
+def _is_escape_bookkeeping_issue(config: HydraFlowConfig, issue_id: int) -> bool:
+    """True when *issue_id* is an OPEN escape-ledger surfacing (#11816).
+
+    Fail-soft by design: any error reading the surfaces ledger returns False,
+    which restores the pre-#11816 behaviour (treat as a normal orphan). A
+    bookkeeping issue wrongly requeued is recoverable; a real orphan wrongly
+    skipped would sit review-labeled forever, which is the #9815 defect this
+    check must not reintroduce.
+    """
+    try:
+        path = config.diagnostics_dir / "escape_surfaces.jsonl"
+        if not path.is_file():
+            return False
+        return SurfacedIssueLedger(path).has_open_link_for_issue(issue_id)
+    except (OSError, ValueError, TypeError, KeyError):
+        # The realistic failure set for a JSONL read: missing/unreadable file,
+        # malformed row, unexpected shape. Narrow rather than bare — a bare
+        # `except Exception` needs a new BLE001 suppression and that ratchet
+        # only shrinks. Anything outside this set is a real bug and should
+        # surface rather than be silently swallowed on the orphan path.
+        logger.debug("escape-surfacing check failed for #%s", issue_id, exc_info=True)
+        return False
 
 
 class OrchestratorWorkMixin:
@@ -193,6 +218,19 @@ class OrchestratorWorkMixin:
         Every gh failure is fail-soft back to the legacy wait path.
         """
         if self._config.review_orphan_max_requeues <= 0:
+            return False
+        if _is_escape_bookkeeping_issue(self._config, issue.id):
+            # Not an interruption: an escape-ledger surfacing resolves by a row
+            # in the ledger, never a PR, so "no open PR" is its EXPECTED state.
+            # #11787 was requeued 2 minutes after a CORRECT resolution because
+            # `_reconcile_surfaced_issues` had not ticked yet; the fresh cycle
+            # could not produce a PR either, so it would burn the whole attempt
+            # budget and escalate to HITL (#11816).
+            logger.info(
+                "Review orphan: issue #%s has an open escape-ledger surfacing "
+                "— no PR is expected; leaving it for ledger reconciliation",
+                issue.id,
+            )
             return False
         strikes = self._state.increment_review_orphan_strike(issue.id)
         if strikes < self._config.review_orphan_strike_threshold:

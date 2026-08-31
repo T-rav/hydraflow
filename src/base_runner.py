@@ -419,7 +419,16 @@ class BaseRunner:
                 except AuthenticationRetryError as exc:
                     last_auth_error = exc
                     if attempt < self._AUTH_RETRY_MAX:
-                        delay = self._AUTH_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                        # Config-backed so a scenario can exercise the retry
+                        # path without 15s of real sleep. The class constant
+                        # remains the default, so a runner built without a
+                        # config behaves exactly as before (#11844).
+                        base = getattr(
+                            self._config,
+                            "auth_retry_base_delay",
+                            self._AUTH_RETRY_BASE_DELAY,
+                        )
+                        delay = base * (2 ** (attempt - 1))
                         self._log.warning(
                             "Auth failed (attempt %d/%d), retrying in %.0fs: %s",
                             attempt,

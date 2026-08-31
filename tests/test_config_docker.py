@@ -662,22 +662,46 @@ class TestDockerConfigEnvVarOverrides:
         )
         assert cfg.docker_pids_limit == 512
 
-    def test_pids_limit_env_override_below_minimum_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("env_var", "value", "match"),
+        [
+            pytest.param(
+                "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+                "15",
+                "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+                id="pids_limit_env_override_below_minimum_raises",
+            ),
+            pytest.param(
+                "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+                "4097",
+                "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+                id="pids_limit_env_override_above_maximum_raises",
+            ),
+            pytest.param(
+                "HYDRAFLOW_DOCKER_MEMORY_LIMIT",
+                "invalid_val",
+                "Invalid HYDRAFLOW_DOCKER_MEMORY_LIMIT",
+                id="memory_limit_env_override_invalid_value_rejected",
+            ),
+            pytest.param(
+                "HYDRAFLOW_DOCKER_TMP_SIZE",
+                "4gb",
+                "Invalid HYDRAFLOW_DOCKER_TMP_SIZE",
+                id="tmp_size_env_override_invalid_value_rejected",
+            ),
+        ],
+    )
+    def test_out_of_range_env_override_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        env_var: str,
+        value: str,
+        match: str,
     ) -> None:
-        monkeypatch.setenv("HYDRAFLOW_DOCKER_PIDS_LIMIT", "15")
-        with pytest.raises(ValueError, match="HYDRAFLOW_DOCKER_PIDS_LIMIT"):
-            HydraFlowConfig(
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_pids_limit_env_override_above_maximum_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("HYDRAFLOW_DOCKER_PIDS_LIMIT", "4097")
-        with pytest.raises(ValueError, match="HYDRAFLOW_DOCKER_PIDS_LIMIT"):
+        """A bad override fails construction — it is never silently clamped."""
+        monkeypatch.setenv(env_var, value)
+        with pytest.raises(ValueError, match=match):
             HydraFlowConfig(
                 repo_root=tmp_path,
                 workspace_base=tmp_path / "wt",
@@ -710,28 +734,6 @@ class TestDockerConfigEnvVarOverrides:
             state_file=tmp_path / "s.json",
         )
         assert cfg.docker_tmp_size == "2g"
-
-    def test_memory_limit_env_override_invalid_value_rejected(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("HYDRAFLOW_DOCKER_MEMORY_LIMIT", "invalid_val")
-        with pytest.raises(ValueError, match="Invalid HYDRAFLOW_DOCKER_MEMORY_LIMIT"):
-            HydraFlowConfig(
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_tmp_size_env_override_invalid_value_rejected(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("HYDRAFLOW_DOCKER_TMP_SIZE", "4gb")
-        with pytest.raises(ValueError, match="Invalid HYDRAFLOW_DOCKER_TMP_SIZE"):
-            HydraFlowConfig(
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
 
     def test_execution_mode_default_value_overridden_by_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
