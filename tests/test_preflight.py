@@ -46,6 +46,7 @@ _MODE_INDEPENDENT_CHECKS = {
     "plugins",
     "repo-root",
     "stray-quality",
+    "contracts-sandbox",
 }
 
 
@@ -342,6 +343,7 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
         "agent-cli-claude",
         "plugins",
         "stray-quality",
+        "contracts-sandbox",
     }
     # No docker check in host mode
     assert not any(r.name == "docker" for r in results)
