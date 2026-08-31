@@ -19,7 +19,6 @@ import asyncio
 import logging
 import os
 import signal
-import subprocess
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
@@ -35,21 +34,25 @@ from process_group import descendant_pids
 from runner_utils import reap_all_tracked_processes
 
 
-def _snapshot_descendants() -> set[int]:
+async def _snapshot_descendants() -> set[int]:
     """Every live descendant of this process, captured before we signal.
+
+    Routed through ``subprocess_util.run_subprocess_result`` rather than a raw
+    spawn. Two independent guards insist on this and both are right: a raw
+    ``subprocess.run`` needs a new lint suppression (and that ratchet only
+    shrinks), while a raw ``create_subprocess_exec`` bypasses the reap-aware
+    registry — so its own child would orphan on cancellation, which is the very
+    defect class this function exists to close (#9648/#9623). A leak-fix that
+    leaks is not a fix.
 
     Best-effort: a `ps` that fails must never block a stop, so this degrades to
     "reap nothing extra" — the behaviour before #11820 — rather than raising.
     """
+    from subprocess_util import run_subprocess_result  # noqa: PLC0415
+
     try:
-        result = subprocess.run(  # noqa: S603
-            ["/bin/ps", "-eo", "pid,ppid"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        result = await run_subprocess_result("/bin/ps", "-eo", "pid,ppid", timeout=15)
+    except (OSError, TimeoutError, asyncio.CancelledError):
         logger.warning("Stop: could not enumerate processes; skipping tree reap")
         return set()
     if result.returncode != 0:
@@ -194,7 +197,7 @@ class OrchestratorLifecycleMixin:
         # only reachable by ancestry — and ancestry survives only while the
         # parents live. Reaping first reparents them to PID 1 and erases the
         # link this needs (#11820).
-        descendants = _snapshot_descendants()
+        descendants = await _snapshot_descendants()
         self._svc.planners.terminate()
         self._svc.agents.terminate()
         self._svc.reviewers.terminate()

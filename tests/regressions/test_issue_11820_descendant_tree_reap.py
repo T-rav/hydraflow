@@ -158,7 +158,8 @@ async def test_stop_reaps_surviving_descendants(config) -> None:
         patch.object(orch, "_build_interrupted_issues", AsyncMock(return_value=[])),
         patch("orchestrator_lifecycle.reap_all_tracked_processes", return_value=0),
         patch(
-            "orchestrator_lifecycle._snapshot_descendants", return_value={2862, 2867}
+            "orchestrator_lifecycle._snapshot_descendants",
+            AsyncMock(return_value={2862, 2867}),
         ),
         patch("orchestrator_lifecycle._reap_surviving_descendants") as reap_tree,
     ):
@@ -180,7 +181,7 @@ async def test_snapshot_happens_before_any_reaping(config) -> None:
         patch.object(orch := _orch(config), "_build_interrupted_issues", AsyncMock(return_value=[])),
         patch(
             "orchestrator_lifecycle._snapshot_descendants",
-            side_effect=lambda: (calls.append("snapshot"), set())[1],
+            AsyncMock(side_effect=lambda: (calls.append("snapshot"), set())[1]),
         ),
         patch(
             "orchestrator_lifecycle.reap_all_tracked_processes",
@@ -195,12 +196,42 @@ async def test_snapshot_happens_before_any_reaping(config) -> None:
     assert calls.index("snapshot") < calls.index("reap_groups") < calls.index("reap_tree")
 
 
-def test_snapshot_degrades_to_empty_when_ps_fails() -> None:
-    """A stop must never be blocked by an unusable `ps`."""
+@pytest.mark.asyncio
+async def test_snapshot_degrades_to_empty_when_ps_fails() -> None:
+    """A stop must never be blocked by an unusable `ps`.
+
+    Routed through the reap-aware helper (a raw spawn orphans its own child
+    on cancellation — the defect this function exists to close), so the seam
+    patched here is that helper.
+    """
     from orchestrator_lifecycle import _snapshot_descendants
 
-    with patch("orchestrator_lifecycle.subprocess.run", side_effect=OSError("boom")):
-        assert _snapshot_descendants() == set()
+    with patch(
+        "subprocess_util.run_subprocess_result",
+        side_effect=OSError("boom"),
+    ):
+        assert await _snapshot_descendants() == set()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_parses_real_ps_output_from_the_async_seam() -> None:
+    """Positive path: proves the async spawn is actually wired to the parser.
+
+    Without this the failure test above passes even if the function always
+    returned an empty set.
+    """
+    import os
+
+    from orchestrator_lifecycle import _snapshot_descendants
+
+    me = os.getpid()
+    fake = MagicMock()
+    fake.returncode = 0
+    fake.stdout = f"  PID  PPID\n{me} 1\n4242 {me}\n9001 4242\n"
+    with patch(
+        "subprocess_util.run_subprocess_result", AsyncMock(return_value=fake)
+    ):
+        assert await _snapshot_descendants() == {4242, 9001}
 
 
 def test_reap_survivors_skips_the_already_dead_and_counts_the_rest() -> None:
