@@ -23,12 +23,12 @@ from models import (
     ConflictResolutionResult,
     CriterionResult,
     CriterionVerdict,
-    JudgeVerdict,
     LoopResult,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
     Task,
+    VerificationJudgeVerdict,
     VisualValidationDecision,
     VisualValidationPolicy,
 )
@@ -1370,7 +1370,7 @@ class TestRunPostMergeHooks:
         """When judge returns a verdict, a verification record is written to JSONL."""
         mock_judge = AsyncMock()
         issue = TaskFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
@@ -1443,7 +1443,7 @@ class TestRunPostMergeHooks:
     ) -> None:
         """When verification JSONL write fails, epic checker still runs."""
         mock_judge = AsyncMock()
-        verdict = JudgeVerdict(issue_number=42)
+        verdict = VerificationJudgeVerdict(issue_number=42)
         mock_judge.judge = AsyncMock(return_value=verdict)
         mock_epic = AsyncMock()
         phase = make_review_phase(config)

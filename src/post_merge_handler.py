@@ -32,7 +32,6 @@ from models import (
     HitlEscalation,
     IssueOutcomeType,
     JudgeResult,
-    JudgeVerdict,
     MergeApprovalContext,
     PRInfo,
     ReviewResult,
@@ -40,6 +39,7 @@ from models import (
     SystemAlertPayload,
     Task,
     VerificationCriterion,
+    VerificationJudgeVerdict,
     VisualGatePayload,
     VisualValidationDecision,
     VisualValidationPolicy,
@@ -710,7 +710,7 @@ class PostMergeHandler:
                 pr.issue_number,
             )
 
-        verdict: JudgeVerdict | None = None
+        verdict: VerificationJudgeVerdict | None = None
         if self._verification_judge:
             verdict = await self._safe_hook(
                 "verification judge",
@@ -868,9 +868,9 @@ class PostMergeHandler:
         self,
         issue: Task,
         pr: PRInfo,
-        verdict: JudgeVerdict | None,
+        verdict: VerificationJudgeVerdict | None,
     ) -> JudgeResult | None:
-        """Convert a JudgeVerdict into a JudgeResult for verification issue creation."""
+        """Convert a VerificationJudgeVerdict into a JudgeResult for verification issue creation."""
         if verdict is None:
             return None
 

@@ -1392,8 +1392,21 @@ class InstructionsQuality(StrEnum):
     NEEDS_REFINEMENT = "needs_refinement"
 
 
-class JudgeVerdict(BaseModel):
-    """Full result of the verification judge evaluation."""
+class VerificationJudgeVerdict(BaseModel):
+    """Full result of the verification judge evaluation.
+
+    Named for its REGISTER, not just "verdict". This class and
+    :class:`convergence_gate.JudgeVerdict` were both called ``JudgeVerdict``
+    while meaning different things — a gate's approval
+    (``approve``/``feedback``/``signatures``) versus this evaluation of an
+    issue against its acceptance criteria. One anchored name, two classes, is
+    the ADR-0053 violation `docs/wiki/terms/verdict.md` exists to prevent, and
+    that term file anchors ``convergence_gate.JudgeVerdict`` as the bare word.
+
+    The qualification follows the glossary's own instruction: "Qualify with the
+    register ('gate verdict', 'model-checker verdict', 'adjudication') whenever
+    the three could be confused."
+    """
 
     issue_number: int
     criteria_results: list[CriterionResult] = Field(default_factory=list)

@@ -16,7 +16,7 @@ from models import (
     CriterionResult,
     CriterionVerdict,
     InstructionsQuality,
-    JudgeVerdict,
+    VerificationJudgeVerdict,
 )
 from tests.conftest import PRInfoFactory, ReviewResultFactory, TaskFactory
 from tests.helpers import ConfigFactory, CredentialsFactory
@@ -107,7 +107,7 @@ class TestModels:
         assert InstructionsQuality.NEEDS_REFINEMENT == "needs_refinement"
 
     def test_judge_verdict_defaults(self):
-        v = JudgeVerdict(issue_number=42)
+        v = VerificationJudgeVerdict(issue_number=42)
         assert v.issue_number == 42
         assert v.criteria_results == []
         assert v.all_criteria_pass is False
@@ -474,7 +474,7 @@ class TestSaveJudgeReport:
     def test_creates_directory_and_file(self, tmp_path):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=42,
             criteria_results=[
                 CriterionResult(
@@ -500,7 +500,7 @@ class TestSaveJudgeReport:
     def test_formats_criteria_table(self, tmp_path):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=7,
             criteria_results=[
                 CriterionResult(
@@ -527,7 +527,7 @@ class TestSaveJudgeReport:
     def test_includes_instructions_quality(self, tmp_path):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=5,
             instructions_quality=InstructionsQuality.NEEDS_REFINEMENT,
             instructions_feedback="Steps are vague",
@@ -545,7 +545,7 @@ class TestSaveJudgeReport:
     def test_save_judge_report_handles_oserror_gracefully(self, tmp_path):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
-        verdict = JudgeVerdict(issue_number=42, summary="All good")
+        verdict = VerificationJudgeVerdict(issue_number=42, summary="All good")
 
         with patch.object(
             Path, "write_text", side_effect=OSError("disk full")
@@ -562,20 +562,20 @@ class TestSaveJudgeReport:
 class TestFormatJudgeReport:
     def test_format_judge_report_handles_no_criteria(self):
         judge = _make_judge()
-        verdict = JudgeVerdict(issue_number=1)
+        verdict = VerificationJudgeVerdict(issue_number=1)
         report = judge._format_judge_report(verdict)
         assert "No criteria evaluated" in report
         assert "0/0 criteria passed" in report
 
     def test_includes_summary(self):
         judge = _make_judge()
-        verdict = JudgeVerdict(issue_number=1, summary="All good")
+        verdict = VerificationJudgeVerdict(issue_number=1, summary="All good")
         report = judge._format_judge_report(verdict)
         assert "All good" in report
 
     def test_escapes_pipe_in_reasoning(self):
         judge = _make_judge()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=1,
             criteria_results=[
                 CriterionResult(
@@ -591,7 +591,7 @@ class TestFormatJudgeReport:
     def test_includes_verification_instructions(self):
         """verification_instructions from verdict appear in the report."""
         judge = _make_judge()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=1,
             verification_instructions="1. Open app\n2. Click submit",
         )
@@ -603,7 +603,7 @@ class TestFormatJudgeReport:
     def test_omits_verification_instructions_when_empty(self):
         """When verification_instructions is empty, the section is not rendered."""
         judge = _make_judge()
-        verdict = JudgeVerdict(issue_number=1)
+        verdict = VerificationJudgeVerdict(issue_number=1)
         report = judge._format_judge_report(verdict)
         assert "Verification Instructions" not in report
 
@@ -1190,7 +1190,9 @@ class TestReviewPhaseWiring:
         mock_prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
 
         mock_judge = AsyncMock()
-        mock_judge.judge = AsyncMock(return_value=JudgeVerdict(issue_number=42))
+        mock_judge.judge = AsyncMock(
+            return_value=VerificationJudgeVerdict(issue_number=42)
+        )
 
         # Create worktree dir
         wt_path = config.workspace_path_for_issue(42)
