@@ -1131,10 +1131,19 @@ class TestSetupWorktreePaths:
         result = await loop._setup_worktree("abc123abc123def456")  # type: ignore[attr-defined]
 
         assert result == stale_wt
-        # First call must be `git worktree remove --force`
-        assert git_calls[0][:3] == ["git", "worktree", "remove"]
-        # Second call must be `git worktree add --detach`
-        assert git_calls[1][:4] == ["git", "worktree", "add", "--detach"]
+        # Asserted by ORDER, not by index: #11796 inserted a `git cat-file`
+        # presence probe before the checkout, and index-based assertions here
+        # broke on an insertion that changed nothing they were testing.
+        kinds = [c[:3] for c in git_calls]
+        assert ["git", "worktree", "remove"] in kinds
+        assert ["git", "worktree", "add"] in kinds
+        assert kinds.index(["git", "worktree", "remove"]) < kinds.index(
+            ["git", "worktree", "add"]
+        ), "the stale worktree must be removed before the new one is created"
+        # The sha presence probe must run BEFORE the checkout that needs it.
+        assert kinds.index(["git", "cat-file", "-e"]) < kinds.index(
+            ["git", "worktree", "add"]
+        ), "#11796: the sha must be verified/fetched before `worktree add`"
 
     @pytest.mark.asyncio
     async def test_setup_worktree_raises_on_add_failure(
