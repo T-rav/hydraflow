@@ -161,6 +161,7 @@ graph LR
   charterdriftcaretakerloop -->|depends_on| fitnesscontext
   charterdriftcaretakerloop -->|depends_on| governor
   charterdriftcaretakerloop -->|implements| basebackgroundloop
+  charterdriftcaretakerloop -->|depends_on| charter
   cimonitorloop -->|depends_on| hydraflowconfig
   cimonitorloop -->|depends_on| basebackgroundloop
   cimonitorloop -->|depends_on| prport
