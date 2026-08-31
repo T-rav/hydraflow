@@ -584,6 +584,42 @@ class WikiCompiler:
             reset_timeout=float(config.wiki_compilation_breaker_reset_seconds),
         )
 
+    @staticmethod
+    def _entry_block(entry: WikiEntry) -> str:
+        """The prompt representation of one entry."""
+        return (
+            f"### {entry.title} (id: {entry.id})\n{entry.content}\n"
+            f"Source: #{entry.source_issue or 'N/A'} ({entry.source_type})\n"
+            f"Created: {entry.created_at}"
+        )
+
+    def _batch_entries(self, entries: list[WikiEntry]) -> list[list[WikiEntry]]:
+        """Split *entries* into batches under the per-prompt character budget.
+
+        Budgets by CHARACTERS rather than entry count: entries vary from a
+        line to several paragraphs, so a fixed count still lets one prompt grow
+        without bound — which is the defect (#11819), not a symptom of it.
+
+        A single entry larger than the whole budget still gets its own batch.
+        Dropping it would silently lose wiki content, and a batch of one is the
+        smallest prompt that can carry it; if that one call times out the
+        circuit breaker bounds the cost.
+        """
+        budget = max(self._config.wiki_compilation_batch_chars, 1)
+        batches: list[list[WikiEntry]] = []
+        current: list[WikiEntry] = []
+        used = 0
+        for entry in entries:
+            size = len(self._entry_block(entry))
+            if current and used + size > budget:
+                batches.append(current)
+                current, used = [], 0
+            current.append(entry)
+            used += size
+        if current:
+            batches.append(current)
+        return batches
+
     async def compile_topic(
         self,
         store: RepoWikiStore,
@@ -605,28 +641,43 @@ class WikiCompiler:
         if len(entries) < 2:
             return len(entries)  # nothing to compile
 
-        entries_text = "\n\n".join(
-            f"### {e.title} (id: {e.id})\n{e.content}\n"
-            f"Source: #{e.source_issue or 'N/A'} ({e.source_type})\n"
-            f"Created: {e.created_at}"
-            for e in entries
-        )
-
         if other_topics is None:
             other_topics = [t for t in DEFAULT_TOPICS if t != topic]
 
-        prompt = _COMPILE_TOPIC_PROMPT.format(
-            topic=topic,
-            repo=repo,
-            entries_text=entries_text,
-            other_topics=", ".join(other_topics),
-        )
+        # Batched so ONE prompt never scales with total topic size (#11819).
+        # A failed batch KEEPS ITS ORIGINAL ENTRIES rather than dropping them:
+        # partial compilation must never lose wiki content, and a topic that
+        # half-compiles is still strictly better than one that never can.
+        batches = self._batch_entries(entries)
+        compiled: list[WikiEntry] = []
+        failed_batches = 0
+        for batch in batches:
+            prompt = _COMPILE_TOPIC_PROMPT.format(
+                topic=topic,
+                repo=repo,
+                entries_text="\n\n".join(self._entry_block(e) for e in batch),
+                other_topics=", ".join(other_topics),
+            )
+            raw = await self._call_model(prompt)
+            batch_compiled = self._parse_entries(raw) if raw is not None else []
+            if not batch_compiled:
+                failed_batches += 1
+                compiled.extend(batch)
+                continue
+            compiled.extend(batch_compiled)
 
-        raw = await self._call_model(prompt)
-        if raw is None:
+        if failed_batches:
+            logger.warning(
+                "Wiki compile %s/%s: %d of %d batches failed — their entries "
+                "were kept uncompiled rather than dropped",
+                repo,
+                topic,
+                failed_batches,
+                len(batches),
+            )
+        if failed_batches == len(batches):
             return len(entries)
 
-        compiled = self._parse_entries(raw)
         if not compiled:
             logger.warning(
                 "Wiki compile for %s/%s produced no valid entries — keeping originals",

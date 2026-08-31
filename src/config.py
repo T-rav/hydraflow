@@ -372,6 +372,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
+    ("wiki_compilation_batch_chars", "HYDRAFLOW_WIKI_COMPILATION_BATCH_CHARS", 20_000),
     (
         "wiki_compilation_breaker_failures",
         "HYDRAFLOW_WIKI_COMPILATION_BREAKER_FAILURES",
@@ -4146,6 +4147,24 @@ class HydraFlowConfig(BaseModel):
         ge=30,
         le=600,
         description="Timeout in seconds for wiki compilation LLM calls",
+    )
+    wiki_compilation_batch_chars: int = Field(
+        default=20_000,
+        ge=2_000,
+        le=200_000,
+        description=(
+            "Character budget for ONE wiki-compilation prompt. A topic larger "
+            "than this is compiled in batches so the cost of one call is "
+            "bounded by the budget rather than by total topic size.\n\n"
+            "Why it exists (#11819): `_compile_topic` put EVERY entry of a "
+            "topic into a single prompt, and compile is the only thing that "
+            "compacts a topic. `docs/wiki/patterns.md` grew 28KB -> 83KB and "
+            "the call stopped fitting in the 300s timeout — so the one "
+            "mechanism that could shrink the topic became impossible exactly "
+            "when it was needed, and 71 consecutive timeouts burned ~6h.\n\n"
+            "20k is deliberately well under the 83KB that failed; the point "
+            "is a bound that holds as the wiki grows, not a bigger number."
+        ),
     )
     wiki_compilation_breaker_failures: int = Field(
         default=3,
