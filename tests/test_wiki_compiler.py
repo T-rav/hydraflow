@@ -469,8 +469,8 @@ class TestGateBlockEscalation:
         compiler, bus, runner = self._make(blocked)
 
         with caplog.at_level(logging.ERROR, logger="hydraflow.prompt_gate_alerts"):
-            assert await compiler._call_model("prompt one") is None
-            assert await compiler._call_model("prompt two") is None
+            assert await compiler._call_model("prompt one", "test") is None
+            assert await compiler._call_model("prompt two", "test") is None
 
         runner.run_simple.assert_not_awaited()  # blocked BEFORE any spawn
         errors = [r for r in caplog.records if r.levelno == logging.ERROR]
@@ -489,17 +489,17 @@ class TestGateBlockEscalation:
         blocked, allowed = self._configs(tmp_path)
         compiler, bus, runner = self._make(blocked)
 
-        assert await compiler._call_model("p") is None  # block -> alert #1
+        assert await compiler._call_model("p", "test") is None  # block -> alert #1
         assert bus.publish.await_count == 1
 
         compiler._config = allowed
         runner.run_simple = AsyncMock(
             return_value=SimpleResult(returncode=0, stdout="ok")
         )
-        assert await compiler._call_model("p") == "ok"  # success clears dedup
+        assert await compiler._call_model("p", "test") == "ok"  # success clears dedup
 
         compiler._config = blocked
-        assert await compiler._call_model("p") is None  # new block -> alert #2
+        assert await compiler._call_model("p", "test") is None  # new block -> alert #2
         assert bus.publish.await_count == 2
 
 
@@ -537,7 +537,7 @@ class TestModelCircuitBreaker:
         )
 
         for _ in range(10):
-            assert await compiler._call_model("prompt") is None
+            assert await compiler._call_model("prompt", "test") is None
 
         # 3 failures open the circuit; the remaining 7 cycles must not spawn.
         assert len(calls) == 3, (
@@ -564,5 +564,5 @@ class TestModelCircuitBreaker:
         compiler._model_breaker.record_failure()
         compiler._model_breaker.record_failure()
 
-        assert await compiler._call_model("prompt") == "compiled"
+        assert await compiler._call_model("prompt", "test") == "compiled"
         assert compiler._model_breaker.state == compiler._model_breaker.CLOSED

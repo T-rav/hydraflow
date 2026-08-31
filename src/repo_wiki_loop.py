@@ -610,7 +610,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
         compiler = self._wiki_compiler
 
         async def _ask_llm(prompt: str) -> str:
-            reply = await compiler._call_model(prompt)
+            reply = await compiler._call_model(prompt, "semantic_drift_scan")
             return reply or ""
 
         semantic_findings = 0
