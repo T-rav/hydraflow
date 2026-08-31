@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from adequacy_demand import pin_findings
+from flows import flow_stopped
 
 if TYPE_CHECKING:
     from flows import FlowState
@@ -48,9 +49,10 @@ logger = logging.getLogger("hydraflow.implement_phase")
 # handling has a single source of truth.
 
 
-def _flow_stopped(state: FlowState) -> bool:
-    """Edge guard: a node signalled a fail-closed early exit → route to ``done``."""
-    return bool(state.get("_stop"))
+#: Canonical since #11803 — re-exported under the existing private name so
+#: every call site in this package keeps working unchanged. The three former
+#: copies were byte-identical, so this is a move, not a semantic merge.
+_flow_stopped = flow_stopped
 
 
 def _route_is_zero_commit(state: FlowState) -> bool:

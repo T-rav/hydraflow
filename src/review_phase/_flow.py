@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
+from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook, flow_stopped
 from models import HitlEscalation, ReviewResult, ReviewVerdict
 
 from ._common import PreReviewContext, ReviewGuardContext
@@ -103,9 +103,10 @@ logger = logging.getLogger("hydraflow.review_phase")
 # the method resume the flow rather than duplicating the sequence.
 
 
-def _flow_stopped(state: FlowState) -> bool:
-    """Edge guard: a node signalled a fail-closed early exit → route to ``done``."""
-    return bool(state.get("_stop"))
+#: Canonical since #11803 — re-exported under the existing private name so
+#: every call site in this package keeps working unchanged. The three former
+#: copies were byte-identical, so this is a move, not a semantic merge.
+_flow_stopped = flow_stopped
 
 
 def _approve_path_handled(state: FlowState) -> bool:
