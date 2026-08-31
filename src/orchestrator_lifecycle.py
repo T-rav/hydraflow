@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
+import subprocess
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
@@ -28,7 +31,51 @@ from models import (
     SessionStatus,
     SystemAlertPayload,
 )
+from process_group import descendant_pids
 from runner_utils import reap_all_tracked_processes
+
+
+def _snapshot_descendants() -> set[int]:
+    """Every live descendant of this process, captured before we signal.
+
+    Best-effort: a `ps` that fails must never block a stop, so this degrades to
+    "reap nothing extra" — the behaviour before #11820 — rather than raising.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["/bin/ps", "-eo", "pid,ppid"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("Stop: could not enumerate processes; skipping tree reap")
+        return set()
+    if result.returncode != 0:
+        return set()
+    return descendant_pids(result.stdout, os.getpid())
+
+
+def _reap_surviving_descendants(pids: set[int]) -> int:
+    """SIGKILL any snapshotted descendant still alive; returns how many.
+
+    Signals by PID, deliberately: these are processes we already proved were
+    ours, so no name matching is involved. A pattern match here would be the
+    #11840 defect — on this host `pkill -f` matches agents whose prompts merely
+    mention the command being hunted.
+
+    Deepest-first so a parent cannot fork a replacement after its child dies.
+    """
+    killed = 0
+    for pid in sorted(pids, reverse=True):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            continue
+        killed += 1
+    return killed
+
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -141,6 +188,13 @@ class OrchestratorLifecycleMixin:
         """
         self._stop_event.set()
         logger.info("Stop requested — terminating active processes")
+        # Snapshot the descendant tree BEFORE anything is signalled. Group
+        # reaping cannot cross a `start_new_session` boundary and there are two
+        # below us (agent CLI, then its Bash tool), so the deepest builds are
+        # only reachable by ancestry — and ancestry survives only while the
+        # parents live. Reaping first reparents them to PID 1 and erases the
+        # link this needs (#11820).
+        descendants = _snapshot_descendants()
         self._svc.planners.terminate()
         self._svc.agents.terminate()
         self._svc.reviewers.terminate()
@@ -156,6 +210,14 @@ class OrchestratorLifecycleMixin:
                 "Stop: reaped %d subprocess group(s) beyond the runner-owned sets",
                 reaped,
             )
+        # Now the survivors: anything that WAS our descendant when we started
+        # stopping and is still alive. The group reap above cannot have reached
+        # a great-grandchild in its own session — that is how an 11h53m
+        # `pytest -n auto` outlived a clean stop and manufactured 60 false
+        # failures for everyone else on the host (#11820).
+        left = _reap_surviving_descendants(descendants)
+        if left:
+            logger.info("Stop: reaped %d orphaned descendant(s) by pid", left)
 
         # #11535 stop fence: drop every driver and its ownership claim before
         # the loops are cancelled, so nothing is admitted or advanced after a
