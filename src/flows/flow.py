@@ -42,6 +42,30 @@ from typing import Any, Literal
 # schema per phase.
 FlowState = dict[str, Any]
 
+#: The key a node sets to request a fail-closed early exit.
+FLOW_STOP_KEY = "_stop"
+
+
+def flow_stopped(state: FlowState) -> bool:
+    """Edge guard: a node signalled a fail-closed early exit → route to ``done``.
+
+    Canonical since #11803. Three phase packages each defined a private
+    ``_flow_stopped`` — implement, plan and review — introduced by three
+    separate god-class decompositions (#11628, #11645, #11658). A
+    concept-scatter sensor flagged it as shotgun duplication (#11792).
+
+    All three bodies were **byte-identical** (verified: same md5 across
+    `implement_phase/_common.py`, `plan_phase_common.py`,
+    `review_phase/_flow.py`). There was no per-phase drift to reconcile — so
+    this is a move, not a semantic merge, and the parent epic's
+    "reconciliation" framing does not apply.
+
+    It lives beside :data:`FlowState` because that is the type it guards; a
+    guard in a separate module would be a fourth place to look.
+    """
+    return bool(state.get(FLOW_STOP_KEY))
+
+
 NodeKind = Literal["step", "gate", "loop"]
 
 #: A node body: transforms the shared state and returns it (async).

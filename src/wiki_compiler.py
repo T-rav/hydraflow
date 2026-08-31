@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from circuit_breaker import CircuitBreaker
 from dedup_store import DedupStore
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from knowledge_metrics import metrics as _metrics
@@ -567,6 +568,57 @@ class WikiCompiler:
             "prompt_gate_blocked",
             config.data_root / "dedup" / "prompt_gate_blocked.json",
         )
+        # A REPEATED model failure is not transient. Measured 2026-08-30: the
+        # compile call timed out at 300s, was logged as a warning, swallowed,
+        # and retried on the next cycle — 71 times, ~6 hours of model spend
+        # for zero output, with nothing louder than a WARNING to say so.
+        #
+        # The reasoning is already in this file, one branch below: a
+        # prompt-gate block "is a persistent policy misconfiguration, not a
+        # transient failure: every tick re-blocks, so a soft warn would be a
+        # PERMANENT silent no-op". A recurring timeout is that same class and
+        # was not being treated as it.
+        self._model_breaker = CircuitBreaker(
+            "wiki-compilation-model",
+            max_failures=config.wiki_compilation_breaker_failures,
+            reset_timeout=float(config.wiki_compilation_breaker_reset_seconds),
+        )
+
+    @staticmethod
+    def _entry_block(entry: WikiEntry) -> str:
+        """The prompt representation of one entry."""
+        return (
+            f"### {entry.title} (id: {entry.id})\n{entry.content}\n"
+            f"Source: #{entry.source_issue or 'N/A'} ({entry.source_type})\n"
+            f"Created: {entry.created_at}"
+        )
+
+    def _batch_entries(self, entries: list[WikiEntry]) -> list[list[WikiEntry]]:
+        """Split *entries* into batches under the per-prompt character budget.
+
+        Budgets by CHARACTERS rather than entry count: entries vary from a
+        line to several paragraphs, so a fixed count still lets one prompt grow
+        without bound — which is the defect (#11819), not a symptom of it.
+
+        A single entry larger than the whole budget still gets its own batch.
+        Dropping it would silently lose wiki content, and a batch of one is the
+        smallest prompt that can carry it; if that one call times out the
+        circuit breaker bounds the cost.
+        """
+        budget = max(self._config.wiki_compilation_batch_chars, 1)
+        batches: list[list[WikiEntry]] = []
+        current: list[WikiEntry] = []
+        used = 0
+        for entry in entries:
+            size = len(self._entry_block(entry))
+            if current and used + size > budget:
+                batches.append(current)
+                current, used = [], 0
+            current.append(entry)
+            used += size
+        if current:
+            batches.append(current)
+        return batches
 
     async def compile_topic(
         self,
@@ -589,28 +641,43 @@ class WikiCompiler:
         if len(entries) < 2:
             return len(entries)  # nothing to compile
 
-        entries_text = "\n\n".join(
-            f"### {e.title} (id: {e.id})\n{e.content}\n"
-            f"Source: #{e.source_issue or 'N/A'} ({e.source_type})\n"
-            f"Created: {e.created_at}"
-            for e in entries
-        )
-
         if other_topics is None:
             other_topics = [t for t in DEFAULT_TOPICS if t != topic]
 
-        prompt = _COMPILE_TOPIC_PROMPT.format(
-            topic=topic,
-            repo=repo,
-            entries_text=entries_text,
-            other_topics=", ".join(other_topics),
-        )
+        # Batched so ONE prompt never scales with total topic size (#11819).
+        # A failed batch KEEPS ITS ORIGINAL ENTRIES rather than dropping them:
+        # partial compilation must never lose wiki content, and a topic that
+        # half-compiles is still strictly better than one that never can.
+        batches = self._batch_entries(entries)
+        compiled: list[WikiEntry] = []
+        failed_batches = 0
+        for batch in batches:
+            prompt = _COMPILE_TOPIC_PROMPT.format(
+                topic=topic,
+                repo=repo,
+                entries_text="\n\n".join(self._entry_block(e) for e in batch),
+                other_topics=", ".join(other_topics),
+            )
+            raw = await self._call_model(prompt)
+            batch_compiled = self._parse_entries(raw) if raw is not None else []
+            if not batch_compiled:
+                failed_batches += 1
+                compiled.extend(batch)
+                continue
+            compiled.extend(batch_compiled)
 
-        raw = await self._call_model(prompt)
-        if raw is None:
+        if failed_batches:
+            logger.warning(
+                "Wiki compile %s/%s: %d of %d batches failed — their entries "
+                "were kept uncompiled rather than dropped",
+                repo,
+                topic,
+                failed_batches,
+                len(batches),
+            )
+        if failed_batches == len(batches):
             return len(entries)
 
-        compiled = self._parse_entries(raw)
         if not compiled:
             logger.warning(
                 "Wiki compile for %s/%s produced no valid entries — keeping originals",
@@ -1169,6 +1236,16 @@ class WikiCompiler:
         """
         from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
+        if not self._model_breaker.allow_request():
+            # OPEN: skip the spawn entirely rather than burn another full
+            # timeout. This is the whole point — an open circuit that still
+            # paid for the call would save nothing.
+            logger.debug(
+                "Wiki compilation skipped — circuit breaker is %s",
+                self._model_breaker.state,
+            )
+            return None
+
         try:
             result = await run_lightweight_agent(
                 runner=self._runner,
@@ -1195,20 +1272,40 @@ class WikiCompiler:
                         detail=result.stderr[:200],
                     )
                     return None
-                logger.warning(
-                    "Wiki compilation model failed (rc=%d): %s",
-                    result.returncode,
-                    result.stderr[:200],
+                self._record_model_failure(
+                    f"rc={result.returncode}: {result.stderr[:200]}"
                 )
                 return None
+            self._model_breaker.record_success()
             clear_prompt_gate_block(self._gate_block_dedup, "wiki_compilation")
             return result.stdout if result.stdout else None
         except TimeoutError:
-            logger.warning("Wiki compilation model timed out")
+            self._record_model_failure("timed out")
             return None
         except (OSError, FileNotFoundError, NotImplementedError) as exc:
-            logger.warning("Wiki compilation model unavailable: %s", exc)
+            self._record_model_failure(f"unavailable: {exc}")
             return None
+
+    def _record_model_failure(self, detail: str) -> None:
+        """Log the failure, and escalate to ERROR when the circuit opens.
+
+        Each individual failure stays a WARNING — one slow call is genuinely
+        transient. The ERROR fires exactly once, on the transition to OPEN,
+        because that is the moment the failure stops being transient and
+        becomes a standing condition an operator should see.
+        """
+        was_open = self._model_breaker.state == self._model_breaker.OPEN
+        self._model_breaker.record_failure()
+        if not was_open and self._model_breaker.state == self._model_breaker.OPEN:
+            logger.error(
+                "Wiki compilation model failing persistently (%s) — circuit "
+                "OPEN for %.0fs. The loop will skip its model calls instead of "
+                "spending a full timeout per cycle.",
+                detail,
+                self._model_breaker.reset_timeout,
+            )
+        else:
+            logger.warning("Wiki compilation model failed (%s)", detail)
 
     @staticmethod
     def _dedup_known_ids(ids: list[str], known_ids: set[str]) -> list[str]:

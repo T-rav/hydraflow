@@ -23,6 +23,22 @@ def compiler() -> WikiCompiler:
     config.wiki_compilation_tool = "claude"
     config.wiki_compilation_model = "haiku"
     config.wiki_compilation_timeout = 30
+    # REAL ints, not MagicMock: the circuit breaker compares
+    # `failure_count >= max_failures`, and `int >= MagicMock` returns a truthy
+    # mock — so a mocked config would open the circuit on the FIRST failure
+    # and every test here would silently exercise the wrong path.
+    config.wiki_compilation_breaker_failures = 3
+    config.wiki_compilation_breaker_reset_seconds = 1800
+    # A REAL int: batching compares `used + size > budget`, and EVERY
+    # comparison against a MagicMock raises TypeError (verified: `>`, `>=`,
+    # `<` all raise, in both operand orders). So a mocked value here is a
+    # LATENT CRASH, not a silently-wrong branch — and it stays latent for
+    # exactly as long as no test reaches the comparison, which is why the
+    # existing suite passed until batching put one on the main path.
+    #
+    # Arithmetic is the silent direction: `1 + MagicMock()` returns a truthy
+    # MagicMock and propagates. Comparison fails loudly; arithmetic does not.
+    config.wiki_compilation_batch_chars = 20_000
     runner = MagicMock()
     creds = MagicMock()
     creds.gh_token = "fake-token"
@@ -485,3 +501,68 @@ class TestGateBlockEscalation:
         compiler._config = blocked
         assert await compiler._call_model("p") is None  # new block -> alert #2
         assert bus.publish.await_count == 2
+
+
+class TestModelCircuitBreaker:
+    """A repeated model failure must stop costing a full timeout per cycle."""
+
+    @staticmethod
+    def _failing_agent(calls: list[str]):
+        async def _agent(**kwargs: object):
+            calls.append("spawn")
+            result = MagicMock()
+            result.returncode = -1
+            result.stderr = "timed out after 300s"
+            result.stdout = ""
+            return result
+
+        return _agent
+
+    @pytest.mark.asyncio
+    async def test_open_circuit_stops_spawning_the_model(
+        self, compiler: WikiCompiler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Measured 2026-08-30: 71 consecutive 300s timeouts, each one paid for.
+
+        The circuit must stop the SPAWN, not merely log louder — an open
+        circuit that still called the model would save nothing, which is the
+        whole reason this exists.
+        """
+        calls: list[str] = []
+        monkeypatch.setattr(
+            "runner_utils.run_lightweight_agent", self._failing_agent(calls)
+        )
+        monkeypatch.setattr(
+            "wiki_compiler.is_prompt_gate_blocked", lambda _stderr: False
+        )
+
+        for _ in range(10):
+            assert await compiler._call_model("prompt") is None
+
+        # 3 failures open the circuit; the remaining 7 cycles must not spawn.
+        assert len(calls) == 3, (
+            f"model was spawned {len(calls)} times across 10 cycles; the "
+            "circuit breaker is not preventing the spend"
+        )
+        assert compiler._model_breaker.state == compiler._model_breaker.OPEN
+
+    @pytest.mark.asyncio
+    async def test_a_success_closes_the_circuit_again(
+        self, compiler: WikiCompiler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Anti-vacuity: a breaker that never closes would disable the loop
+        permanently after three unlucky calls, which is its own outage."""
+        ok = MagicMock()
+        ok.returncode = 0
+        ok.stdout = "compiled"
+        ok.stderr = ""
+
+        async def _agent(**kwargs: object):
+            return ok
+
+        monkeypatch.setattr("runner_utils.run_lightweight_agent", _agent)
+        compiler._model_breaker.record_failure()
+        compiler._model_breaker.record_failure()
+
+        assert await compiler._call_model("prompt") == "compiled"
+        assert compiler._model_breaker.state == compiler._model_breaker.CLOSED

@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from config import HydraFlowConfig
 
@@ -52,6 +53,11 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     # Plugin skill registry — verify required plugins are installed.
     # Language detection runs per-repo later; at preflight we only check Tier 1.
     results.append(_check_plugins(config, detected_languages=set()))
+
+    # Strays from a PREVIOUS run, found before this one starts competing
+    # with them for the same CPU (#11820).
+    results.append(_check_stray_quality_processes(config))
+    results.append(_check_contracts_sandbox(config))
 
     return results
 
@@ -146,23 +152,189 @@ def _check_disk_space(path: Path) -> CheckResult:
         )
 
 
+#: A `make quality` run far past the suite's own budget is not slow, it is
+#: abandoned. The suite's own per-test cap is 300s and a full run is ~10-15
+#: minutes; an hour is well beyond anything a live run reaches.
+STRAY_PROCESS_AGE_SECONDS = 3600
+
+#: Command substrings that identify a heavyweight suite run. Deliberately
+#: narrow: this check only ever REPORTS, but a wide pattern would report an
+#: operator's own editor or shell and train everyone to ignore it.
+_STRAY_MARKERS = ("make quality", "make quality-unlocked", "pytest tests/")
+
+
+def _stray_process_lines(ps_output: str, *, min_age_seconds: int) -> list[str]:
+    """Rows from ``ps -eo pid,etime,command`` that look abandoned.
+
+    Pure so it can be tested against recorded output — the alternative is a
+    check that only runs on a host that already has the bug.
+
+    ``etime`` is ``[[DD-]HH:]MM:SS``. A row is stray when it names a suite run
+    AND has outlived :data:`STRAY_PROCESS_AGE_SECONDS`.
+    """
+    stray: list[str] = []
+    for line in ps_output.splitlines()[1:]:
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        _pid, etime, command = parts
+        if not any(marker in command for marker in _STRAY_MARKERS):
+            continue
+        if _etime_seconds(etime) >= min_age_seconds:
+            stray.append(f"{_pid} ({etime}) {command[:90]}")
+    return stray
+
+
+def _etime_seconds(etime: str) -> int:
+    """Parse ps ELAPSED (``[[DD-]HH:]MM:SS``) into seconds; 0 if unparseable."""
+    days = 0
+    rest = etime
+    if "-" in etime:
+        day_part, _, rest = etime.partition("-")
+        if not day_part.isdigit():
+            return 0
+        days = int(day_part)
+    bits = rest.split(":")
+    if not all(b.isdigit() for b in bits) or not 2 <= len(bits) <= 3:
+        return 0
+    nums = [int(b) for b in bits]
+    hours, minutes, seconds = ([0] + nums)[-3:] if len(nums) == 2 else nums
+    return days * 86_400 + hours * 3_600 + minutes * 60 + seconds
+
+
+def _check_contracts_sandbox(config: HydraFlowConfig) -> CheckResult:
+    """The contracts sandbox repo must exist while external recording is on.
+
+    `ContractRefreshLoop` re-records FakeGitHub cassettes against
+    `config.contracts_sandbox_repo`. When that repo does not exist the loop
+    degrades gracefully — `if main_sha is None: return None` — so it completes,
+    the factory reports healthy, and the only trace is a warning per cycle.
+
+    Measured 2026-08-30: `T-rav-Hydra-Ops/hydraflow-contracts-sandbox` returns
+    404 and had been doing so long enough that six `gh: Not Found` warnings in
+    one run read as background noise. A permanent condition wearing a transient
+    failure's clothes — the same shape as the wiki-compilation burn (#11819),
+    where a swallowed warning cost six hours before anyone looked.
+
+    Reported at boot instead, ONCE, where an operator is already reading. A
+    recurring mid-run warning is the one thing guaranteed to be tuned out.
+    """
+    if not getattr(config, "contract_refresh_external_enabled", False):
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.PASS,
+            "external contract recording disabled; sandbox repo not required",
+        )
+
+    slug = getattr(config, "contracts_sandbox_repo", "") or ""
+    if not slug:
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.WARN,
+            "external contract recording is ON but contracts_sandbox_repo is empty",
+        )
+
+    result = _run_fixed_argv(
+        ["gh", "api", f"repos/{slug}", "--jq", ".full_name"], timeout=20, text=True
+    )
+    if result is None:
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.WARN,
+            f"could not reach GitHub to check {slug}",
+        )
+    if result.returncode == 0:
+        return CheckResult("contracts-sandbox", CheckStatus.PASS, f"{slug} reachable")
+    return CheckResult(
+        "contracts-sandbox",
+        CheckStatus.WARN,
+        f"contracts sandbox {slug!r} is unreachable, so ContractRefreshLoop's "
+        "external recorder can never re-record cassettes — it will warn every "
+        "cycle and never succeed (#11821). Create the repo, repoint "
+        "`contracts_sandbox_repo`, or set "
+        "`contract_refresh_external_enabled=false` to stop attempting it.",
+    )
+
+
+def _check_stray_quality_processes(config: HydraFlowConfig) -> CheckResult:
+    """Report suite runs left over from a previous cycle (#11820).
+
+    Measured 2026-08-30: a `make quality` from a factory build survived the
+    factory's own stop, ran for **11h53m** at ``PPID=1`` holding 2.4 GB, and
+    drove load average to 25. A fresh `make quality` on that host produced 60
+    failures across dozens of unrelated files — every one passing standalone,
+    thin enough to read as flakiness rather than starvation.
+
+    So this reports before the new run starts competing with the old one. It
+    does not kill anything: signalling processes at startup is how a shared
+    host loses an operator's work, and the safe action here is to be LOUD.
+    """
+    del config  # host-wide by nature; nothing repo-scoped to consult
+    result = _run_fixed_argv(["ps", "-eo", "pid,etime,command"], timeout=15, text=True)
+    if result is None:
+        return CheckResult(
+            "stray-quality", CheckStatus.WARN, "could not enumerate processes"
+        )
+    if result.returncode != 0:
+        return CheckResult(
+            "stray-quality", CheckStatus.WARN, "ps exited non-zero; skipped"
+        )
+
+    stray = _stray_process_lines(
+        result.stdout, min_age_seconds=STRAY_PROCESS_AGE_SECONDS
+    )
+    if not stray:
+        return CheckResult(
+            "stray-quality", CheckStatus.PASS, "no abandoned suite runs on this host"
+        )
+    listed = "; ".join(stray[:5])
+    return CheckResult(
+        "stray-quality",
+        CheckStatus.WARN,
+        f"{len(stray)} suite run(s) older than "
+        f"{STRAY_PROCESS_AGE_SECONDS // 3600}h still running — they will "
+        f"starve this run and can fail unrelated tests (#11820): {listed}. "
+        "Stop them by PID (never `pkill -f` on a shared host).",
+    )
+
+
+def _run_fixed_argv(
+    argv: list[str], *, timeout: int, text: bool = False
+) -> subprocess.CompletedProcess[Any] | None:
+    """Run a FIXED argv for a preflight probe; ``None`` if it could not run.
+
+    One place in this module invokes a subprocess, so one suppression covers
+    it. Each caller adding its own bandit suppression grows the suppressions
+    ratchet, and that ratchet only shrinks — the `ps` sweep (#11820) hit
+    exactly that.
+
+    ``argv`` is always a literal list built in this file. Nothing here is
+    caller-supplied, which is why the rule is suppressed rather than the input
+    sanitised: there is no input.
+    """
+    try:
+        return subprocess.run(  # noqa: S603, S607
+            argv,
+            check=False,
+            capture_output=True,
+            text=text,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _check_docker() -> CheckResult:
     """Check that Docker is available and responsive."""
     if not shutil.which("docker"):
         return CheckResult("docker", CheckStatus.FAIL, "docker not found on PATH")
 
-    try:
-        result = subprocess.run(  # noqa: S603, S607
-            ["docker", "info"],
-            check=False,
-            capture_output=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            return CheckResult("docker", CheckStatus.PASS, "Docker daemon reachable")
-        return CheckResult("docker", CheckStatus.FAIL, "Docker daemon not reachable")
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return CheckResult("docker", CheckStatus.FAIL, f"Docker check failed: {exc}")
+    result = _run_fixed_argv(["docker", "info"], timeout=10)
+    if result is None:
+        return CheckResult("docker", CheckStatus.FAIL, "Docker check could not run")
+    if result.returncode == 0:
+        return CheckResult("docker", CheckStatus.PASS, "Docker daemon reachable")
+    return CheckResult("docker", CheckStatus.FAIL, "Docker daemon not reachable")
 
 
 def _check_agent_cli(tool: str) -> CheckResult:

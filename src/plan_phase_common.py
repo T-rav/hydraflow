@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from flows import flow_stopped
+
 if TYPE_CHECKING:
-    from flows import FlowState
+    pass
 
 # Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
 # "ADVANCE" = issue moves forward in the pipeline.
@@ -34,6 +36,7 @@ _MIN_ISSUE_BODY_CHARS: int = 50
 _PRIORITY_LABELS: tuple[str, ...] = ("P0", "P1", "P2")
 
 
-def _flow_stopped(state: FlowState) -> bool:
-    """Edge guard: a node signalled a fail-closed early exit → route to ``done``."""
-    return bool(state.get("_stop"))
+#: Canonical since #11803 — re-exported under the existing private name so
+#: every call site in this package keeps working unchanged. The three former
+#: copies were byte-identical, so this is a move, not a semantic merge.
+_flow_stopped = flow_stopped

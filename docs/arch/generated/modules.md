@@ -87,7 +87,7 @@ graph LR
     src_erosion -- "4" --> src_arch
     src_health_monitor_loop -- "3" --> src_state
     src_implement_phase -- "6" --> src_agent
-    src_implement_phase -- "4" --> src_flows
+    src_implement_phase -- "5" --> src_flows
     src_implement_phase -- "8" --> src_state
     src_intervention -- "3" --> src_escape
     src_mockworld -- "1" --> src_preflight
