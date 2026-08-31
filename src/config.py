@@ -372,6 +372,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
+    ("wiki_compilation_batch_chars", "HYDRAFLOW_WIKI_COMPILATION_BATCH_CHARS", 20_000),
+    (
+        "wiki_compilation_breaker_failures",
+        "HYDRAFLOW_WIKI_COMPILATION_BREAKER_FAILURES",
+        3,
+    ),
+    (
+        "wiki_compilation_breaker_reset_seconds",
+        "HYDRAFLOW_WIKI_COMPILATION_BREAKER_RESET_SECONDS",
+        1800,
+    ),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
     (
         "max_troubleshooting_prompt_chars",
@@ -4137,6 +4148,42 @@ class HydraFlowConfig(BaseModel):
         le=600,
         description="Timeout in seconds for wiki compilation LLM calls",
     )
+    wiki_compilation_batch_chars: int = Field(
+        default=20_000,
+        ge=2_000,
+        le=200_000,
+        description=(
+            "Character budget for ONE wiki-compilation prompt. A topic larger "
+            "than this is compiled in batches so the cost of one call is "
+            "bounded by the budget rather than by total topic size.\n\n"
+            "Why it exists (#11819): `_compile_topic` put EVERY entry of a "
+            "topic into a single prompt, and compile is the only thing that "
+            "compacts a topic. `docs/wiki/patterns.md` grew 28KB -> 83KB and "
+            "the call stopped fitting in the 300s timeout — so the one "
+            "mechanism that could shrink the topic became impossible exactly "
+            "when it was needed, and 71 consecutive timeouts burned ~6h.\n\n"
+            "20k is deliberately well under the 83KB that failed; the point "
+            "is a bound that holds as the wiki grows, not a bigger number."
+        ),
+    )
+    wiki_compilation_breaker_failures: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Consecutive wiki-compilation model failures before the circuit "
+            "opens and the loop stops spending a full timeout per cycle."
+        ),
+    )
+    wiki_compilation_breaker_reset_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86_400,
+        description=(
+            "Seconds the wiki-compilation circuit stays OPEN before probing "
+            "with a single call."
+        ),
+    )
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
 
@@ -5590,14 +5637,25 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     contract_refresh_external_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Run ContractRefreshLoop's external recorders (github → "
             "contracts-sandbox repo, claude → api.anthropic.com, docker → "
             "alpine image pull). Disabling skips them so the loop completes "
             "fast in the air-gapped sandbox (only the local git recorder "
             "runs); each external recorder otherwise blocks up to the 120s "
-            "subprocess timeout. Production defaults to True."
+            "subprocess timeout.\n\n"
+            "Defaults to FALSE since #11821. The github recorder targets "
+            "``contracts_sandbox_repo``, whose default "
+            "(``T-rav-Hydra-Ops/hydraflow-contracts-sandbox``) returns 404 — "
+            "so the shipped default sent every install into a recorder that "
+            "could never succeed, warning once per cycle and reading as "
+            "background noise. Operator decision, 2026-08-30: turn it off "
+            "rather than leave it failing.\n\n"
+            "Turning it back ON is supported and safe: the ``contracts-sandbox`` "
+            "preflight check verifies the repo is reachable at boot and names "
+            "the remedy if it is not, so this cannot silently regress to a "
+            "permanently-degraded recorder again."
         ),
     )
 

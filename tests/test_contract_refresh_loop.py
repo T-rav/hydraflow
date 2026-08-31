@@ -602,7 +602,12 @@ async def test_do_work_emits_telemetry_for_each_recorder_and_replay(
 
     emitted = _patch_emit_trace(monkeypatch)
 
-    loop = _loop(tmp_path)
+    # External recorders ON explicitly: #11821 made the production default
+    # False (the github recorder targeted a sandbox repo that 404s), and
+    # this test is specifically about EVERY recorder emitting a trace.
+    # Relying on the default would silently reduce it to the local git
+    # recorder and assert 5 traces against 2.
+    loop = _loop(tmp_path, contract_refresh_external_enabled=True)
     await loop._do_work()
 
     # Four recorder calls + one replay gate = five traces.

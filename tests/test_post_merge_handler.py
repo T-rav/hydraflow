@@ -20,9 +20,9 @@ from events import EventBus
 from models import (
     CriterionResult,
     CriterionVerdict,
-    JudgeVerdict,
     MergeApprovalContext,
     ReviewResult,
+    VerificationJudgeVerdict,
 )
 from post_merge_handler import PostMergeHandler
 from state import StateTracker
@@ -319,7 +319,7 @@ class TestPostMergeHandler:
         handler = _make_handler(config)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=42,
             criteria_results=[
                 CriterionResult(
@@ -418,7 +418,7 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """create_issue should be called when the judge returns a non-None verdict."""
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=1,
             criteria_results=[
                 CriterionResult(
@@ -452,7 +452,7 @@ class TestPostMergeHandler:
         """Verification should write to JSONL, not create GitHub issues."""
         import json
 
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=1,
             criteria_results=[
                 CriterionResult(
@@ -480,7 +480,7 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """Refactor/test-only changes should not generate Verify issues."""
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=1,
             criteria_results=[
                 CriterionResult(
@@ -512,7 +512,7 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """Epic checker should still run when _create_verification_issue raises."""
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=1,
             criteria_results=[
                 CriterionResult(

@@ -18,9 +18,9 @@ from models import (
     CriterionVerdict,
     InstructionsQuality,
     InstructionsQualityResult,
-    JudgeVerdict,
     ParsedCriteria,
     VerificationJudgePayload,
+    VerificationJudgeVerdict,
 )
 from precheck import run_precheck_context
 from runner_utils import StreamConfig, terminate_processes
@@ -59,7 +59,7 @@ class VerificationJudge:
         diff: str,
         *,
         issue_labels: Sequence[str] = (),
-    ) -> JudgeVerdict | None:
+    ) -> VerificationJudgeVerdict | None:
         """Run the verification judge for the given issue.
 
         Returns ``None`` if no criteria file exists (graceful skip).
@@ -80,14 +80,14 @@ class VerificationJudge:
             logger.info(
                 "[dry-run] Would run verification judge for issue #%d", issue_number
             )
-            return JudgeVerdict(issue_number=issue_number)
+            return VerificationJudgeVerdict(issue_number=issue_number)
 
         criteria_list, instructions_text = self._parse_criteria(criteria_text)
         precheck_context = await self._run_precheck_context(
             issue_number, criteria_text, diff, issue_labels=issue_labels
         )
 
-        verdict = JudgeVerdict(
+        verdict = VerificationJudgeVerdict(
             issue_number=issue_number,
             verification_instructions=instructions_text,
         )
@@ -468,7 +468,9 @@ Diff excerpt:
         )
         return match.group(1).strip() if match else ""
 
-    def _save_judge_report(self, issue_number: int, verdict: JudgeVerdict) -> None:
+    def _save_judge_report(
+        self, issue_number: int, verdict: VerificationJudgeVerdict
+    ) -> None:
         """Write the judge report to ``.hydraflow/verification/issue-N-judge.md``."""
         path = self._config.data_path("verification", f"issue-{issue_number}-judge.md")
         try:
@@ -478,7 +480,7 @@ Diff excerpt:
         except OSError:
             logger.warning("Could not save judge report to %s", path, exc_info=True)
 
-    def _format_judge_report(self, verdict: JudgeVerdict) -> str:
+    def _format_judge_report(self, verdict: VerificationJudgeVerdict) -> str:
         """Format the judge verdict as a markdown report."""
         lines = [f"# Verification Judge Report — Issue #{verdict.issue_number}\n"]
 

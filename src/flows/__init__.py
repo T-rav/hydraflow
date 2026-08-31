@@ -10,6 +10,7 @@ from __future__ import annotations
 from .adapters import jsonl_checkpoint
 from .flow import (
     DEFAULT_MAX_STEPS,
+    FLOW_STOP_KEY,
     Edge,
     EdgeCondition,
     Flow,
@@ -22,9 +23,12 @@ from .flow import (
     NodeHook,
     NodeKind,
     NodeRun,
+    flow_stopped,
 )
 
 __all__ = [
+    "FLOW_STOP_KEY",
+    "flow_stopped",
     "DEFAULT_MAX_STEPS",
     "Edge",
     "EdgeCondition",

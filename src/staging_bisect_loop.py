@@ -507,6 +507,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
                 cwd=self._config.repo_root,
                 timeout=60,
             )
+        await self._ensure_sha_present(rc_sha)
         rc, _out, err = await self._run_git(
             [
                 "git",
@@ -524,6 +525,55 @@ class StagingBisectLoop(BaseBackgroundLoop):
                 f"git worktree add failed for {rc_sha}: rc={rc} stderr={err}"
             )
         return worktree_dir
+
+    async def _ensure_sha_present(self, sha: str) -> None:
+        """Fetch *sha* if the local repo does not have it (#11796).
+
+        `git worktree add --detach <dir> <sha>` was called with no fetch, and
+        the only fetch in this loop lives in the auto-revert path much later.
+        RC branches are DELETED after promotion, so an RC sha the loop wants to
+        bisect is routinely absent locally — and git reports that as
+        ``fatal: invalid reference``, which reads like a corrupt argument
+        rather than a missing object. Measured 2026-08-30 (#11796): the loop
+        escalated a bisect-harness-failure to HITL for a sha the repo had
+        simply never fetched.
+
+        Best-effort by design. If the object is still missing afterwards the
+        caller's `worktree add` fails with git's own message — this only
+        removes the *avoidable* half of that failure, and a genuinely
+        unreachable sha (force-pushed away, GC'd upstream) must still surface.
+        """
+        rc, _out, _err = await self._run_git(
+            ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+            cwd=self._config.repo_root,
+            timeout=30,
+        )
+        if rc == 0:
+            return
+
+        logger.info("Bisect: %s not present locally — fetching", sha[:12])
+        # Fetch the object directly. Servers that allow reachable-sha1-in-want
+        # resolve this without pulling every ref.
+        rc, _out, err = await self._run_git(
+            ["git", "fetch", "origin", sha],
+            cwd=self._config.repo_root,
+            timeout=120,
+        )
+        if rc == 0:
+            return
+
+        # Fall back to a normal fetch: the sha may be reachable from a ref the
+        # local repo has not seen yet.
+        logger.info(
+            "Bisect: direct fetch of %s failed (%s) — falling back to a full fetch",
+            sha[:12],
+            err.strip()[:120],
+        )
+        await self._run_git(
+            ["git", "fetch", "origin"],
+            cwd=self._config.repo_root,
+            timeout=300,
+        )
 
     async def _cleanup_worktree(self, worktree_dir: Path) -> None:
         """Best-effort ``git worktree remove --force``."""
