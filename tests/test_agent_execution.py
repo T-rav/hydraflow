@@ -691,37 +691,29 @@ class TestBuildPrompt:
         assert "edge cases" in prompt
         assert "empty inputs" in prompt
 
-    def test_pre_quality_review_checks_logic_errors(
-        self, config, event_bus: EventBus, agent_task
+    @pytest.mark.parametrize(
+        "instruction",
+        [
+            pytest.param("logic errors", id="pre_quality_review_checks_logic_errors"),
+            pytest.param(
+                "failure/error paths", id="pre_quality_review_checks_failure_paths"
+            ),
+            pytest.param(
+                "is anything missing",
+                id="pre_quality_review_checks_missing_implementation",
+            ),
+            pytest.param(
+                "do not refactor, migrate, or rename code that is unrelated",
+                id="pre_quality_review_forbids_unrelated_refactoring",
+            ),
+        ],
+    )
+    def test_pre_quality_review_prompt_carries(
+        self, config, event_bus: EventBus, agent_task, instruction: str
     ) -> None:
-        """Pre-quality review should check for logic errors."""
         runner = AgentRunner(config, event_bus)
         prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
-        assert "logic errors" in prompt
-
-    def test_pre_quality_review_checks_failure_paths(
-        self, config, event_bus: EventBus, agent_task
-    ) -> None:
-        """Pre-quality review should verify failure paths are tested."""
-        runner = AgentRunner(config, event_bus)
-        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
-        assert "failure/error paths" in prompt
-
-    def test_pre_quality_review_checks_missing_implementation(
-        self, config, event_bus: EventBus, agent_task
-    ) -> None:
-        """Pre-quality review should check for gaps vs plan/issue description."""
-        runner = AgentRunner(config, event_bus)
-        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
-        assert "is anything missing" in prompt
-
-    def test_pre_quality_review_forbids_unrelated_refactoring(
-        self, config, event_bus: EventBus, agent_task
-    ) -> None:
-        """Pre-quality review constraints should forbid unrelated refactoring."""
-        runner = AgentRunner(config, event_bus)
-        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
-        assert "do not refactor, migrate, or rename code that is unrelated" in prompt
+        assert instruction in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_includes_test_step(

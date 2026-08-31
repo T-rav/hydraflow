@@ -108,19 +108,35 @@ async def test_needs_human_adds_label() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fatal_adds_paired_label() -> None:
+@pytest.mark.parametrize(
+    ("outcome", "paired_label"),
+    [
+        pytest.param("fatal", "auto-agent-fatal", id="fatal_adds_paired_label"),
+        pytest.param(
+            "cost_exceeded", "cost-exceeded", id="cost_exceeded_pairs_correctly"
+        ),
+        pytest.param(
+            "pr_failed", "auto-agent-pr-failed", id="pr_failed_pairs_correctly"
+        ),
+        pytest.param("timeout", "timeout", id="timeout_pairs_correctly"),
+    ],
+)
+async def test_terminal_outcome_pairs_its_label(
+    outcome: str, paired_label: str
+) -> None:
+    """Every terminal outcome escalates AND names itself, in that order."""
     pr = AsyncMock()
     state = MagicMock()
     state.get_auto_agent_attempts = MagicMock(return_value=1)
     await apply_decision(
         issue_number=42,
         sub_label="x",
-        result=_result("fatal"),
+        result=_result(outcome),
         pr_port=pr,
         state=state,
         max_attempts=3,
     )
-    pr.add_labels.assert_awaited_with(42, ["human-required", "auto-agent-fatal"])
+    pr.add_labels.assert_awaited_with(42, ["human-required", paired_label])
 
 
 @pytest.mark.asyncio
@@ -157,38 +173,6 @@ async def test_resolved_at_cap_does_not_mark_exhausted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cost_exceeded_pairs_correctly() -> None:
-    pr = AsyncMock()
-    state = MagicMock()
-    state.get_auto_agent_attempts = MagicMock(return_value=1)
-    await apply_decision(
-        issue_number=42,
-        sub_label="x",
-        result=_result("cost_exceeded"),
-        pr_port=pr,
-        state=state,
-        max_attempts=3,
-    )
-    pr.add_labels.assert_awaited_with(42, ["human-required", "cost-exceeded"])
-
-
-@pytest.mark.asyncio
-async def test_pr_failed_pairs_correctly() -> None:
-    pr = AsyncMock()
-    state = MagicMock()
-    state.get_auto_agent_attempts = MagicMock(return_value=1)
-    await apply_decision(
-        issue_number=42,
-        sub_label="x",
-        result=_result("pr_failed"),
-        pr_port=pr,
-        state=state,
-        max_attempts=3,
-    )
-    pr.add_labels.assert_awaited_with(42, ["human-required", "auto-agent-pr-failed"])
-
-
-@pytest.mark.asyncio
 async def test_resolved_with_default_sentinel_skips_sub_label_remove() -> None:
     """When sub_label is the '_default' sentinel (no domain routing tag was
     present on the issue), `resolved` removes only hitl-escalation +
@@ -210,22 +194,6 @@ async def test_resolved_with_default_sentinel_skips_sub_label_remove() -> None:
     pr.remove_label.assert_any_await(42, "human-required")
     pr.remove_label.assert_any_await(42, "diagnose-failed")
     assert "_default" not in out["removed"]
-
-
-@pytest.mark.asyncio
-async def test_timeout_pairs_correctly() -> None:
-    pr = AsyncMock()
-    state = MagicMock()
-    state.get_auto_agent_attempts = MagicMock(return_value=1)
-    await apply_decision(
-        issue_number=42,
-        sub_label="x",
-        result=_result("timeout"),
-        pr_port=pr,
-        state=state,
-        max_attempts=3,
-    )
-    pr.add_labels.assert_awaited_with(42, ["human-required", "timeout"])
 
 
 @pytest.mark.asyncio

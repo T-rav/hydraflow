@@ -279,29 +279,37 @@ class TestSelectLatestRuns:
 
 
 class TestShouldDispatchAutoAgent:
-    def test_bot_authored_pr_always_dispatches(self) -> None:
+    @pytest.mark.parametrize(
+        ("is_bot_author", "has_auto_fix_ok_label", "dispatches"),
+        [
+            pytest.param(True, False, True, id="bot_authored_pr_always_dispatches"),
+            pytest.param(
+                False,
+                False,
+                False,
+                id="human_authored_pr_without_label_does_not_dispatch",
+            ),
+            pytest.param(
+                False,
+                True,
+                True,
+                id="human_authored_pr_with_auto_fix_ok_label_dispatches",
+            ),
+            # Redundant but harmless — both signals agree.
+            pytest.param(
+                True, True, True, id="bot_authored_pr_with_label_also_dispatches"
+            ),
+        ],
+    )
+    def test_dispatch_decision(
+        self, is_bot_author: bool, has_auto_fix_ok_label: bool, dispatches: bool
+    ) -> None:
         assert (
-            should_dispatch_auto_agent(is_bot_author=True, has_auto_fix_ok_label=False)
-            is True
-        )
-
-    def test_human_authored_pr_without_label_does_not_dispatch(self) -> None:
-        assert (
-            should_dispatch_auto_agent(is_bot_author=False, has_auto_fix_ok_label=False)
-            is False
-        )
-
-    def test_human_authored_pr_with_auto_fix_ok_label_dispatches(self) -> None:
-        assert (
-            should_dispatch_auto_agent(is_bot_author=False, has_auto_fix_ok_label=True)
-            is True
-        )
-
-    def test_bot_authored_pr_with_label_also_dispatches(self) -> None:
-        """Redundant but harmless — both signals agree."""
-        assert (
-            should_dispatch_auto_agent(is_bot_author=True, has_auto_fix_ok_label=True)
-            is True
+            should_dispatch_auto_agent(
+                is_bot_author=is_bot_author,
+                has_auto_fix_ok_label=has_auto_fix_ok_label,
+            )
+            is dispatches
         )
 
 

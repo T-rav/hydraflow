@@ -118,31 +118,64 @@ class TestHasTestInfrastructure:
 
         assert has_infra is False
 
-    def test_python_tests_dir_without_config(self, tmp_path: Path) -> None:
-        tests_dir = tmp_path / "tests"
-        tests_dir.mkdir()
-        (tests_dir / "test_foo.py").write_text("def test_x(): pass\n")
-        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'foo'\n")
+    @pytest.mark.parametrize(
+        ("language", "files"),
+        [
+            # A tests/ dir with real tests but no pytest configuration.
+            pytest.param(
+                "python",
+                {
+                    "tests/test_foo.py": "def test_x(): pass\n",
+                    "pyproject.toml": "[project]\nname = 'foo'\n",
+                },
+                id="python_tests_dir_without_config",
+            ),
+            # tests/ with only __init__.py is not real test infrastructure.
+            pytest.param(
+                "python",
+                {
+                    "tests/__init__.py": "",
+                    "pyproject.toml": (
+                        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n"
+                    ),
+                },
+                id="python_tests_dir_with_only_init",
+            ),
+            # A mixed repo needs BOTH sides; either alone is incomplete.
+            pytest.param(
+                "mixed",
+                {
+                    "tests/test_foo.py": "def test_x(): pass\n",
+                    "pyproject.toml": (
+                        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n"
+                    ),
+                },
+                id="mixed_returns_false_when_only_python_infra_present",
+            ),
+            pytest.param(
+                "mixed",
+                {
+                    "__tests__/foo.test.js": "test('x', () => {})\n",
+                    "vitest.config.js": "export default {}\n",
+                },
+                id="mixed_returns_false_when_only_js_infra_present",
+            ),
+        ],
+    )
+    def test_incomplete_infrastructure_is_not_infrastructure(
+        self, tmp_path: Path, language: str, files: dict[str, str]
+    ) -> None:
+        for rel, body in files.items():
+            target = tmp_path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body)
 
-        has_infra, _details = has_test_infrastructure(tmp_path, "python")
+        has_infra, _details = has_test_infrastructure(tmp_path, language)
 
         assert has_infra is False
 
     def test_python_no_tests_dir(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'foo'\n")
-
-        has_infra, _details = has_test_infrastructure(tmp_path, "python")
-
-        assert has_infra is False
-
-    def test_python_tests_dir_with_only_init(self, tmp_path: Path) -> None:
-        """tests/ with only __init__.py is not real test infrastructure."""
-        tests_dir = tmp_path / "tests"
-        tests_dir.mkdir()
-        (tests_dir / "__init__.py").write_text("")
-        (tmp_path / "pyproject.toml").write_text(
-            "[tool.pytest.ini_options]\ntestpaths = ['tests']\n"
-        )
 
         has_infra, _details = has_test_infrastructure(tmp_path, "python")
 
@@ -185,34 +218,6 @@ class TestHasTestInfrastructure:
         assert has_infra is False
 
     # --- Mixed ---
-
-    def test_mixed_returns_false_when_only_python_infra_present(
-        self, tmp_path: Path
-    ) -> None:
-        """Mixed repo with only Python infra should NOT be considered complete."""
-        tests_dir = tmp_path / "tests"
-        tests_dir.mkdir()
-        (tests_dir / "test_foo.py").write_text("def test_x(): pass\n")
-        (tmp_path / "pyproject.toml").write_text(
-            "[tool.pytest.ini_options]\ntestpaths = ['tests']\n"
-        )
-
-        has_infra, _details = has_test_infrastructure(tmp_path, "mixed")
-
-        assert has_infra is False
-
-    def test_mixed_returns_false_when_only_js_infra_present(
-        self, tmp_path: Path
-    ) -> None:
-        """Mixed repo with only JS infra should NOT be considered complete."""
-        tests_dir = tmp_path / "__tests__"
-        tests_dir.mkdir()
-        (tests_dir / "foo.test.js").write_text("test('x', () => {})\n")
-        (tmp_path / "vitest.config.js").write_text("export default {}\n")
-
-        has_infra, _details = has_test_infrastructure(tmp_path, "mixed")
-
-        assert has_infra is False
 
     def test_mixed_returns_true_when_both_infra_present(self, tmp_path: Path) -> None:
         """Mixed repo requires both Python and JS infra to return True."""
