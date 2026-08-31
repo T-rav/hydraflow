@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
+from tests.helpers import ConfigFactory
 from trace_collector import TraceCollector  # noqa: E402
 
 FIXTURE_PATH = (
@@ -18,7 +19,7 @@ FIXTURE_PATH = (
 
 
 def _make_config(data_root: Path) -> MagicMock:
-    config = MagicMock()
+    config = ConfigFactory.create()
     config.data_root = data_root
     return config
 

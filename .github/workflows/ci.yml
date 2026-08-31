@@ -23,6 +23,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Changes
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.filter.outputs.python }}
@@ -983,6 +984,7 @@ jobs:
 
   sandbox-fast:
     name: Sandbox (PR→staging fast subset)
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     needs: [changes]
     if: |
@@ -1106,6 +1108,7 @@ jobs:
   # docker sandbox, so shards are fully isolated (no shared ports/state).
   sandbox-shard:
     name: Sandbox shard
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     needs: [changes]
     if: github.base_ref == 'main' && startsWith(github.head_ref, 'rc/')
@@ -1143,6 +1146,7 @@ jobs:
   # the rc-condition keeps it skipped (neutral) on non-RC PRs, as before.
   sandbox-full:
     name: Sandbox (rc/* promotion PR full suite)
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: [sandbox-shard]
     if: always() && github.base_ref == 'main' && startsWith(github.head_ref, 'rc/')
@@ -1163,6 +1167,7 @@ jobs:
 
   sandbox-nightly:
     name: Sandbox (nightly regression)
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     # Workflow-level default is contents:read; the failure step files a
@@ -1299,6 +1304,7 @@ jobs:
   # and must never gate RC auto-merge (#9922) — do not add it to `needs`.
   ci-gate:
     name: CI Gate
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     needs: [changes, lint, typecheck, security, arch, aggregate-ratchets, test, gateway-package-coverage, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
     if: always()
