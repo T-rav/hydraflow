@@ -2,32 +2,38 @@
 
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).parent.parent
 
 
-def test_visual_diff_source_file_is_removed() -> None:
-    """Guard against re-introduction of src/visual_diff.py."""
-    assert not (_REPO_ROOT / "src" / "visual_diff.py").exists(), (
-        "visual_diff.py was re-introduced; delete src/visual_diff.py (superseded by visual_validator.py)."
-    )
-
-
-def test_visual_diff_test_file_is_removed() -> None:
-    """Guard against re-introduction of tests/test_visual_diff.py."""
-    assert not (_REPO_ROOT / "tests" / "test_visual_diff.py").exists(), (
-        "test_visual_diff.py was re-introduced; delete tests/test_visual_diff.py."
-    )
-
-
-def test_scheduler_source_file_is_removed() -> None:
-    """Guard against re-introduction of src/scheduler.py."""
-    assert not (_REPO_ROOT / "src" / "scheduler.py").exists(), (
-        "scheduler.py was re-introduced; delete src/scheduler.py (multi-repo scheduler never integrated)."
-    )
-
-
-def test_pre_issue_tracker_source_file_is_removed() -> None:
-    """Guard against re-introduction of src/pre_issue_tracker.py."""
-    assert not (_REPO_ROOT / "src" / "pre_issue_tracker.py").exists(), (
-        "pre_issue_tracker.py was re-introduced; delete src/pre_issue_tracker.py (local prep issue tracker never integrated)."
+@pytest.mark.parametrize(
+    ("relative_path", "why"),
+    [
+        pytest.param(
+            "src/visual_diff.py",
+            "superseded by visual_validator.py",
+            id="visual_diff_source_file_is_removed",
+        ),
+        pytest.param(
+            "tests/test_visual_diff.py",
+            "the tests of a deleted module",
+            id="visual_diff_test_file_is_removed",
+        ),
+        pytest.param(
+            "src/scheduler.py",
+            "multi-repo scheduler never integrated",
+            id="scheduler_source_file_is_removed",
+        ),
+        pytest.param(
+            "src/pre_issue_tracker.py",
+            "local prep issue tracker never integrated",
+            id="pre_issue_tracker_source_file_is_removed",
+        ),
+    ],
+)
+def test_removed_module_is_not_reintroduced(relative_path: str, why: str) -> None:
+    """Guard against re-introduction of a module that was deliberately deleted."""
+    assert not (_REPO_ROOT / relative_path).exists(), (
+        f"{relative_path} was re-introduced; delete it ({why})."
     )

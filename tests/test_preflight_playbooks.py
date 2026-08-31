@@ -50,38 +50,38 @@ def test_prefixed_escalation_label_routes_to_specialist() -> None:
     assert get_playbook("hydraflow-plan-stuck").persona != DEFAULT_PERSONA
 
 
-def test_implement_stuck_playbook_specialises() -> None:
-    pb = get_playbook("implement-stuck")
-    assert pb.name == "implement-stuck"
+@pytest.mark.parametrize(
+    ("label", "persona_words"),
+    [
+        pytest.param(
+            "implement-stuck",
+            ("implement", "code"),
+            id="implement_stuck_playbook_specialises",
+        ),
+        # Review failures want test-transcript + recent-diff context per ADR-0063.
+        pytest.param(
+            "review-stuck", ("review", "test"), id="review_stuck_playbook_specialises"
+        ),
+        pytest.param(
+            "triage-stuck",
+            ("triage", "classif"),
+            id="triage_stuck_playbook_specialises",
+        ),
+        # `discover-stuck` is the only phase-stuck label currently in production:
+        # when the discover-runner escalates a coherence-evaluator failure,
+        # preflight already routes to a discover-shaped retry.
+        pytest.param(
+            "discover-stuck",
+            ("discover", "research"),
+            id="discover_stuck_playbook_specialises",
+        ),
+    ],
+)
+def test_stuck_playbook_specialises(label: str, persona_words: tuple[str, ...]) -> None:
+    pb = get_playbook(label)
+    assert pb.name == label
     assert pb.persona != DEFAULT_PERSONA
-    assert "implement" in pb.persona.lower() or "code" in pb.persona.lower()
-
-
-def test_review_stuck_playbook_specialises() -> None:
-    pb = get_playbook("review-stuck")
-    assert pb.name == "review-stuck"
-    assert pb.persona != DEFAULT_PERSONA
-    # Review failures want test-transcript + recent-diff context per ADR-0063.
-    assert "review" in pb.persona.lower() or "test" in pb.persona.lower()
-
-
-def test_triage_stuck_playbook_specialises() -> None:
-    pb = get_playbook("triage-stuck")
-    assert pb.name == "triage-stuck"
-    assert pb.persona != DEFAULT_PERSONA
-    assert "triage" in pb.persona.lower() or "classif" in pb.persona.lower()
-
-
-def test_discover_stuck_playbook_specialises() -> None:
-    """`discover-stuck` is the only phase-stuck label currently in production.
-
-    The playbook exists so when the discover-runner escalates a coherence-
-    evaluator failure, preflight already routes to a discover-shaped retry.
-    """
-    pb = get_playbook("discover-stuck")
-    assert pb.name == "discover-stuck"
-    assert pb.persona != DEFAULT_PERSONA
-    assert "discover" in pb.persona.lower() or "research" in pb.persona.lower()
+    assert any(word in pb.persona.lower() for word in persona_words)
 
 
 def test_existing_sublabel_falls_back_to_default_when_unspecialised() -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from human_steering import fenced_steering_guidance
 from shape_coherence import (
     build_shape_coherence_prompt,
@@ -117,49 +119,47 @@ class TestParseShapeCoherenceResult:
         assert "too-few-options" in summary
         assert len(findings) == 1
 
-    def test_retry_keyword_missing_defer(self):
+    @pytest.mark.parametrize(
+        ("keyword", "summary_tail", "finding_tail"),
+        [
+            pytest.param(
+                "missing-defer",
+                "no do-nothing option",
+                "every option proposes action",
+                id="retry_keyword_missing_defer",
+            ),
+            pytest.param(
+                "options-overlap",
+                "A and B both edit src/foo.py",
+                "A and B touch identical files",
+                id="retry_keyword_options_overlap",
+            ),
+            pytest.param(
+                "missing-tradeoffs",
+                "option A lists only upsides",
+                "no cost named for option A",
+                id="retry_keyword_missing_tradeoffs",
+            ),
+            pytest.param(
+                "dropped-discover-question",
+                "SSO question unaddressed",
+                "'What SSO provider?' not resolved",
+                id="retry_keyword_dropped_discover_question",
+            ),
+        ],
+    )
+    def test_retry_keyword_reaches_the_summary(
+        self, keyword: str, summary_tail: str, finding_tail: str
+    ):
         transcript = (
             "SHAPE_COHERENCE_RESULT: RETRY\n"
-            "SUMMARY: missing-defer — no do-nothing option\n"
+            f"SUMMARY: {keyword} — {summary_tail}\n"
             "FINDINGS:\n"
-            "- missing-defer — every option proposes action\n"
+            f"- {keyword} — {finding_tail}\n"
         )
         passed, summary, _ = parse_shape_coherence_result(transcript)
         assert passed is False
-        assert "missing-defer" in summary
-
-    def test_retry_keyword_options_overlap(self):
-        transcript = (
-            "SHAPE_COHERENCE_RESULT: RETRY\n"
-            "SUMMARY: options-overlap — A and B both edit src/foo.py\n"
-            "FINDINGS:\n"
-            "- options-overlap — A and B touch identical files\n"
-        )
-        passed, summary, _ = parse_shape_coherence_result(transcript)
-        assert passed is False
-        assert "options-overlap" in summary
-
-    def test_retry_keyword_missing_tradeoffs(self):
-        transcript = (
-            "SHAPE_COHERENCE_RESULT: RETRY\n"
-            "SUMMARY: missing-tradeoffs — option A lists only upsides\n"
-            "FINDINGS:\n"
-            "- missing-tradeoffs — no cost named for option A\n"
-        )
-        passed, summary, _ = parse_shape_coherence_result(transcript)
-        assert passed is False
-        assert "missing-tradeoffs" in summary
-
-    def test_retry_keyword_dropped_discover_question(self):
-        transcript = (
-            "SHAPE_COHERENCE_RESULT: RETRY\n"
-            "SUMMARY: dropped-discover-question — SSO question unaddressed\n"
-            "FINDINGS:\n"
-            "- dropped-discover-question — 'What SSO provider?' not resolved\n"
-        )
-        passed, summary, _ = parse_shape_coherence_result(transcript)
-        assert passed is False
-        assert "dropped-discover-question" in summary
+        assert keyword in summary
 
     def test_findings_block_parsed_multiline(self):
         transcript = (

@@ -519,6 +519,12 @@ class ConfigFactory:
                 )
             return HydraFlowConfig(
                 config_file=config_file,
+                # No test should pay real auth-retry backoff. Production keeps
+                # 5s (doubling to 10s), which cost `test_A23_auth_retry_...`
+                # 15 of its 16 seconds and made it the slowest scenario in CI
+                # (#11844). Nothing asserts on the delay, so this is invisible
+                # to behaviour and only removes wall-clock.
+                auth_retry_base_delay=0.001,
                 triage_honeypot_enabled=triage_honeypot_enabled,
                 loop_startup_stagger_s=loop_startup_stagger_s,
                 github_cache_issue_list_ttl_s=github_cache_issue_list_ttl_s,

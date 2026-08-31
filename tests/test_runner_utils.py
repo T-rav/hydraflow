@@ -69,16 +69,25 @@ def _default_kwargs(event_bus, **overrides):
 
 class TestStreamClaudeProcessOutput:
     @pytest.mark.asyncio
-    async def test_returns_transcript_from_stdout(self, event_bus) -> None:
-        """stream_claude_process should return stdout content as transcript."""
-        mock_create = make_streaming_proc(
-            returncode=0, stdout="Line one\nLine two\nLine three"
-        )
+    @pytest.mark.parametrize(
+        "stdout",
+        [
+            pytest.param(
+                "Line one\nLine two\nLine three", id="returns_transcript_from_stdout"
+            ),
+            # No result_text: the accumulated display text is used.
+            pytest.param("Display line", id="falls_back_to_accumulated_text"),
+            # No result_text and no display text: the raw lines are.
+            pytest.param("", id="falls_back_to_raw_lines"),
+        ],
+    )
+    async def test_transcript_is_the_streamed_stdout(self, event_bus, stdout) -> None:
+        mock_create = make_streaming_proc(returncode=0, stdout=stdout)
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await stream_claude_process(**_default_kwargs(event_bus))
 
-        assert result == "Line one\nLine two\nLine three"
+        assert result == stdout
 
     @pytest.mark.asyncio
     async def test_returns_result_text_when_available(self, event_bus) -> None:
@@ -90,26 +99,6 @@ class TestStreamClaudeProcessOutput:
             result = await stream_claude_process(**_default_kwargs(event_bus))
 
         assert result == "Final result text"
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_accumulated_text(self, event_bus) -> None:
-        """When no result_text, should use accumulated display text."""
-        mock_create = make_streaming_proc(returncode=0, stdout="Display line")
-
-        with patch("asyncio.create_subprocess_exec", mock_create):
-            result = await stream_claude_process(**_default_kwargs(event_bus))
-
-        assert result == "Display line"
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_raw_lines(self, event_bus) -> None:
-        """When no result_text and no display text, should use raw lines."""
-        mock_create = make_streaming_proc(returncode=0, stdout="")
-
-        with patch("asyncio.create_subprocess_exec", mock_create):
-            result = await stream_claude_process(**_default_kwargs(event_bus))
-
-        assert result == ""
 
     @pytest.mark.asyncio
     async def test_populates_usage_stats_when_provided(self, event_bus) -> None:
