@@ -18,6 +18,7 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from adr_utils import is_adr_issue_title
+from escape.surfaces import SurfacedIssueLedger
 from models import GitHubIssue, Task
 from orchestrator_common import _POST_MERGE_DELAY
 from phase_utils import handle_pool_worker_exception, release_batch_in_flight
@@ -43,13 +44,16 @@ def _is_escape_bookkeeping_issue(config: HydraFlowConfig, issue_id: int) -> bool
     check must not reintroduce.
     """
     try:
-        from escape.surfaces import SurfacedIssueLedger  # noqa: PLC0415
-
         path = config.diagnostics_dir / "escape_surfaces.jsonl"
         if not path.is_file():
             return False
         return SurfacedIssueLedger(path).has_open_link_for_issue(issue_id)
-    except Exception:  # noqa: BLE001 - never block the orphan path on a read
+    except (OSError, ValueError, TypeError, KeyError):
+        # The realistic failure set for a JSONL read: missing/unreadable file,
+        # malformed row, unexpected shape. Narrow rather than bare — a bare
+        # `except Exception` needs a new BLE001 suppression and that ratchet
+        # only shrinks. Anything outside this set is a real bug and should
+        # surface rather than be silently swallowed on the orphan path.
         logger.debug("escape-surfacing check failed for #%s", issue_id, exc_info=True)
         return False
 
