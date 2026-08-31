@@ -129,3 +129,24 @@ class SurfacedIssueLedger(IdentifiedJsonlLedger[SurfacedIssue]):
         return [
             row for row in _latest_by_fingerprint(self.read_all()) if not row.closed_at
         ]
+
+    def has_open_link_for_issue(self, issue_number: int) -> bool:
+        """True while *issue_number* is an OPEN escape-ledger surfacing.
+
+        Such an issue is BOOKKEEPING: its correct resolution is a resolution row
+        appended by ``scripts/resolve_escape.py``, never a PR. The review-orphan
+        requeue (#9815) reads "review-labeled with no open PR" as an interrupted
+        implement attempt — true for code work, false here, where no PR is the
+        EXPECTED terminal state.
+
+        Issue #11787 lost that race: a correct bookkeeping resolution at
+        12:19:10Z was requeued into a fresh implement cycle at 12:21:18Z,
+        because `_reconcile_surfaced_issues` had not ticked yet. A fresh cycle
+        can never produce a PR either, so left alone it burns the whole
+        3-attempt budget and escalates to HITL (#11816).
+
+        Keyed on the OPEN link rather than a label a resolving agent must
+        remember to apply: the link already exists, is written by the loop that
+        filed the issue, and disappears exactly when reconciliation closes it.
+        """
+        return any(link.issue_number == issue_number for link in self.open_links())
