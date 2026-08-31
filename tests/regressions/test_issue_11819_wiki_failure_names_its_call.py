@@ -48,12 +48,48 @@ def _source() -> str:
     return Path(wc.__file__).read_text(encoding="utf-8")
 
 
-def test_no_call_site_omits_its_context_label() -> None:
-    """The signature is required, so a bare call cannot compile — but a call
-    passing an empty or placeholder label would, and that is the same defect
-    wearing a different mask."""
-    assert "self._call_model(prompt)" not in _source()
-    assert 'self._call_model(prompt, "")' not in _source()
+def _wiki_call_sites() -> list[str]:
+    """Every WikiCompiler._call_model call site across src/, by reference.
+
+    Scoping this to wiki_compiler.py is how the first version of this guard
+    missed `repo_wiki_loop.py`, which calls `compiler._call_model(prompt)` on a
+    WikiCompiler it holds. A sweep is only as wide as its predicate: the caller
+    need not live in the callee's module.
+
+    Scoped by WHERE THE METHOD IS DEFINED, not by receiver name:
+    `transcript_summarizer` has its own unrelated `_call_model` (different
+    class, `issue_labels` kwarg) and self-calls it, so a bare `self._call_model`
+    match wrongly flags it. Only `self.` calls inside the module that defines
+    WikiCompiler count, plus any `compiler._call_model` whose receiver names a
+    WikiCompiler explicitly.
+    """
+    root = Path(wc.__file__).parent
+    owner = Path(wc.__file__).name
+    sites: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        for i, line in enumerate(path.read_text("utf-8").splitlines(), 1):
+            if "def _call_model" in line:
+                continue
+            is_owner_self = path.name == owner and "self._call_model(" in line
+            is_explicit = "compiler._call_model(" in line
+            if is_owner_self or is_explicit:
+                sites.append(f"{path.name}:{i}:{line.strip()}")
+    return sites
+
+
+def test_every_call_site_passes_a_context_label() -> None:
+    """Scoped to src/, not one file — the module-scoped version missed one."""
+    bare = [
+        s
+        for s in _wiki_call_sites()
+        if s.endswith("_call_model(prompt)") or '_call_model(prompt, "")' in s
+    ]
+    assert not bare, f"call sites without a context label: {bare}"
+
+
+def test_the_call_site_sweep_is_not_empty() -> None:
+    """Anti-vacuity: the assertion above passes trivially against an empty sweep."""
+    assert len(_wiki_call_sites()) >= 7
 
 
 def test_every_known_caller_is_still_present() -> None:
