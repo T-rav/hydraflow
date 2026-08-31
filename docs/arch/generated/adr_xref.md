@@ -150,6 +150,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0141 | `src.driver_contracts`, `src.route_enforcement` | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | — | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 | ADR-0143 | `src.adr_conformance`, `src.auto_tighten.engine`, `src.charter`, `src.charter_model`, `src.disturbance.baseline`, `src.driver_contracts`, `src.erosion.baseline`, `src.erosion.concentration_baseline`, `src.erosion.mass_baseline`, `src.erosion.scatter_baseline`, `src.erosion.suite_hygiene_baseline`, `src.escape.ledger`, `src.gate_activation_check`, `src.jsonl_ledger`, `src.merge_policy`, `src.onboarding.kernel_lock`, `src.onboarding.kernel_writer`, `src.policy.models`, `src.principle_register`, `src.prompt_gate`, `src.repo_store` | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status` |
+| ADR-0144 | `src.trace_collector` | `pytest:tests/test_retro_findings.py::TestAnchorsAreMandatoryByConstruction::test_every_anchor_field_rejects_blank`, `pytest:tests/test_retro_signals.py::TestSignalsNeverKeyOnSucceeded::test_codex_shaped_span_produces_no_tool_error_signal`, `pytest:tests/test_retro_evidence.py::TestPrefixCoverageIsDerivedNotSpelled::test_every_issue_keyed_prefix_has_a_gather_glob`, `pytest:tests/test_retrospective_evidence_wiring.py::TestTheProsePatternsAreGone::test_retired_machinery_is_absent`, `pytest:tests/regressions/test_issue_11890_retro_loop_reports_real_counts.py::test_filed_findings_reach_the_loop_result` |
 
 ## Module → ADRs
 
@@ -429,7 +430,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.term_proposer_llm` | ADR-0062 |
 | `src.term_proposer_loop` | ADR-0054, ADR-0068 |
 | `src.term_pruner_loop` | ADR-0057, ADR-0068 |
-| `src.trace_collector` | ADR-0044, ADR-0055 |
+| `src.trace_collector` | ADR-0044, ADR-0055, ADR-0144 |
 | `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063, ADR-0096, ADR-0107 |
 | `src.trust_fleet_sanity_loop` | ADR-0045, ADR-0046 |
 | `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0090, ADR-0099 |

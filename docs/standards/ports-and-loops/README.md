@@ -127,7 +127,7 @@ each is responsible for one caretaking concern.
 | `RCBudgetLoop` | `src/rc_budget_loop.py` | 14400 | 0045, 0120 | [rc-budget-loop.md](../../wiki/terms/rc-budget-loop.md) |
 | `RepoWikiLoop` | `src/repo_wiki_loop.py` | 3600 | 0032, 0053, 0061, 0062, 0064 | — |
 | `ReportIssueLoop` | `src/report_issue_loop.py` | 30 | 0013, 0018, 0028, 0045, 0120 | [report-issue-loop.md](../../wiki/terms/report-issue-loop.md) |
-| `RetrospectiveLoop` | `src/retrospective_loop.py` | 86400 | 0074, 0093, 0120 | — |
+| `RetrospectiveLoop` | `src/retrospective_loop.py` | 86400 | 0074, 0093, 0120, 0144 | — |
 | `RunsGCLoop` | `src/runs_gc_loop.py` | 3600 | 0073 | — |
 | `SampledAuditLoop` | `src/sampled_audit_loop.py` | 14400 | 0115, 0120 | — |
 | `SandboxFailureFixerLoop` | `src/sandbox_failure_fixer_loop.py` | 3600 | 0052, 0063, 0097, 0101 | — |
