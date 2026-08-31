@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING
 
 from adr_conformance import CheckOutcome, EnforcementClass
 from adr_conformance_remediation import RemediationAction, classify_remediation_over
-from policy.facts import STANDARD_ADR_CONFORMANCE, STANDARD_ADR_ENFORCEMENT
+from policy.facts import (
+    STANDARD_ADR_CONFORMANCE,
+    STANDARD_ADR_ENFORCEMENT,
+    STANDARD_TEST_PYRAMID,
+)
 from policy.models import Charter, DecisionStatus, StandardDecision
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -66,6 +70,13 @@ _ENFORCEMENT_REQUIRED: tuple[str, ...] = (
     "in_baseline_snapshot",
     "resolved",
     "exempt",
+)
+
+_PYRAMID_REQUIRED = (
+    "touches_source",
+    "has_unit",
+    "has_scenario",
+    "has_sandbox",
 )
 
 #: Facts every ``adr_conformance`` subject must carry. ``rename_match`` is
@@ -112,6 +123,8 @@ class PythonDecisionEngine:
                 decisions.append(self._decide_enforcement(subject, subject_facts))
             elif standard == STANDARD_ADR_CONFORMANCE:
                 decisions.append(self._decide_conformance(subject, subject_facts))
+            elif standard == STANDARD_TEST_PYRAMID:
+                decisions.append(self._decide_test_pyramid(subject, subject_facts))
             else:
                 raise UnsupportedStandardError(
                     f"no ruleset for standard {standard!r} (subject {subject!r}). "
@@ -119,6 +132,73 @@ class PythonDecisionEngine:
                     "return silence that reads as compliance."
                 )
         return decisions
+
+    @staticmethod
+    def _decide_test_pyramid(subject: str, facts: Sequence[Fact]) -> StandardDecision:
+        """Did a load-bearing change ship all three test layers?
+
+        `docs/standards/testing/README.md`: "Every load-bearing feature ships
+        through three layers before it merges. Skipping a layer is a procedural
+        failure — not a judgment call." The standard was prose; nothing checked
+        it, and on 2026-08-31 six load-bearing fixes merged with unit tests only
+        — including #11853, whose whole defect was a call site the unit tests
+        could not see (#11880).
+
+        **Never blocking, by design.** "Load-bearing" is not statically
+        decidable: it depends on what a future change puts on the main path.
+        A blocking gate would false-positive on ordinary refactors, get
+        disabled, and a disabled gate is worse than the defect — the same
+        reasoning that ruled out a pre-commit hook in #11827. This reports so
+        the omission is visible on the PR and deliberate rather than silent.
+        """
+        by_key = _indexed(facts, _PYRAMID_REQUIRED)
+        touches_source = bool(by_key["touches_source"])
+        present = {
+            layer: bool(by_key[f"has_{layer}"])
+            for layer in ("unit", "scenario", "sandbox")
+        }
+
+        if not touches_source:
+            return StandardDecision(
+                standard=STANDARD_TEST_PYRAMID,
+                subject=subject,
+                status=DecisionStatus.EXEMPT,
+                blocking=False,
+                reason=(
+                    "no source change — the pyramid standard does not apply. "
+                    "EXEMPT rather than COMPLIANT: a docs-only PR did not "
+                    "satisfy the standard, it was never subject to it, and "
+                    "collapsing those two would make the compliant count a lie."
+                ),
+                remediation=RemediationAction.NONE,
+                facts=list(facts),
+            )
+
+        missing = [layer for layer, ok in present.items() if not ok]
+        if not missing:
+            return StandardDecision(
+                standard=STANDARD_TEST_PYRAMID,
+                subject=subject,
+                status=DecisionStatus.COMPLIANT,
+                blocking=False,
+                reason="all three layers present: unit, scenario, sandbox",
+                remediation=RemediationAction.NONE,
+                facts=list(facts),
+            )
+
+        return StandardDecision(
+            standard=STANDARD_TEST_PYRAMID,
+            subject=subject,
+            status=DecisionStatus.VIOLATED,
+            blocking=False,
+            reason=(
+                f"source changed with {len(missing)} pyramid layer(s) missing: "
+                f"{', '.join(missing)}. Unit tests are blind to integration and "
+                "wiring defects — #11853 shipped with 20 passing unit tests."
+            ),
+            remediation=RemediationAction.FILE_ISSUE,
+            facts=list(facts),
+        )
 
     @staticmethod
     def _decide_enforcement(subject: str, facts: Sequence[Fact]) -> StandardDecision:
