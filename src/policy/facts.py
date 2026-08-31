@@ -28,6 +28,7 @@ from adr_conformance import (
 from policy.models import Fact
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Sequence
     from datetime import datetime
     from pathlib import Path
 
@@ -42,14 +43,31 @@ STANDARD_ADR_ENFORCEMENT = "adr_enforcement"
 #: ``AdrConformanceLoop`` (ADR-0100).
 STANDARD_ADR_CONFORMANCE = "adr_conformance"
 
+#: Test-pyramid coverage: does a change to a load-bearing source module carry
+#: all three layers? ``docs/standards/testing/README.md`` calls skipping one
+#: "a procedural failure — not a judgment call", but nothing checked it, and
+#: six load-bearing fixes merged on 2026-08-31 with unit tests only (#11880).
+STANDARD_TEST_PYRAMID = "test_pyramid"
+
 #: Every standard this module can collect for — the default charter.
 COLLECTED_STANDARDS: tuple[str, ...] = (
     STANDARD_ADR_ENFORCEMENT,
     STANDARD_ADR_CONFORMANCE,
+    STANDARD_TEST_PYRAMID,
 )
 
 _ENFORCEMENT_SOURCE = "policy.facts.collect_adr_enforcement_facts"
 _CONFORMANCE_SOURCE = "policy.facts.conformance_facts"
+_PYRAMID_SOURCE = "policy.facts.collect_test_pyramid_facts"
+
+#: Where each layer lives. Derived from the standard's own diagram
+#: rather than re-stated: `tests/regressions/` and flat `tests/` are the
+#: unit layer, `tests/scenarios/` is MockWorld, `tests/sandbox_scenarios/`
+#: is e2e. A path that matches none of these is not a test.
+_LAYER_PREFIXES: dict[str, str] = {
+    "scenario": "tests/scenarios/",
+    "sandbox": "tests/sandbox_scenarios/",
+}
 
 
 def adr_subject(number: int) -> str:
@@ -137,4 +155,60 @@ def conformance_facts(
             source=_CONFORMANCE_SOURCE,
         )
         for key, value in observations
+    ]
+
+
+def _layer_of(path: str) -> str | None:
+    """Which pyramid layer a changed path belongs to, or None if not a test.
+
+    Order matters: `tests/scenarios/` and `tests/sandbox_scenarios/` are checked
+    before the generic `tests/` prefix, or every scenario would also count as a
+    unit test and the standard would be trivially satisfied.
+    """
+    for layer, prefix in _LAYER_PREFIXES.items():
+        if path.startswith(prefix):
+            return layer
+    if path.startswith("tests/"):
+        return "unit"
+    return None
+
+
+def collect_test_pyramid_facts(
+    changed_paths: Sequence[str],
+    *,
+    observed_at: datetime,
+    load_bearing_prefixes: Sequence[str] = ("src/",),
+) -> list[Fact]:
+    """Observe which pyramid layers a change touched. No judgement.
+
+    Pure over a path list — the caller supplies a PR's changed files (the same
+    merge-base diff P10.6 already uses), so this is testable without a git
+    repository and deterministic under replay.
+
+    The subject is the CHANGE as a whole, not a module: the standard asks
+    whether a load-bearing change ships three layers, and layers do not
+    correspond one-to-one with modules. Naming a single module as subject would
+    force an arbitrary choice among the changed ones.
+    """
+    layers = {layer for p in changed_paths if (layer := _layer_of(p)) is not None}
+    touches_source = any(
+        p.startswith(tuple(load_bearing_prefixes)) and not p.startswith("tests/")
+        for p in changed_paths
+    )
+    subject = "change"
+    return [
+        Fact(
+            standard=STANDARD_TEST_PYRAMID,
+            subject=subject,
+            key=key,
+            value=value,
+            observed_at=observed_at,
+            source=_PYRAMID_SOURCE,
+        )
+        for key, value in (
+            ("touches_source", touches_source),
+            ("has_unit", "unit" in layers),
+            ("has_scenario", "scenario" in layers),
+            ("has_sandbox", "sandbox" in layers),
+        )
     ]
