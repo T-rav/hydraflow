@@ -534,15 +534,14 @@ def _changes_ship_the_layers_the_standard_requires(ctx: CheckContext) -> Finding
         return finding("P10.8", Status.INERT, "engine returned no decision")
     d = decisions[0]
 
-    # One exit: a blocking verdict FAILs, a non-blocking violation WARNs, and
-    # compliant/exempt PASS. Expressed as a lookup rather than four returns —
-    # PLR0911 caps them at six and the suppressions ratchet only shrinks.
-    if d.blocking:
-        status = Status.FAIL
-    elif d.status.value == "violated":
-        status = Status.WARN
-    else:
-        status = Status.PASS
+    # PASS or FAIL, never WARN. `overall_exit_code` treats WARN as a red audit
+    # unless the check is allow-listed as telemetry or advisory, and P10.8 is
+    # neither — it judges the PR under test. So a WARN here would redden CI for
+    # every `conditional` cell and every ambiguous `feat(`, which is precisely
+    # the false positive the design set out to avoid: the standard's own word
+    # for "it depends" would become a hard stop, and the gate would be turned
+    # off within a week. The unmet-but-not-required detail rides in the reason.
+    status = Status.FAIL if d.blocking else Status.PASS
     return finding("P10.8", status, d.reason)
 
 

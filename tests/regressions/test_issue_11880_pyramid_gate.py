@@ -171,7 +171,7 @@ def test_the_pr_title_decides_the_shape_not_the_branch_commits() -> None:
                 ctx
             ).status.name
 
-    assert _status("feat(x): the actual change") != "FAIL", (
+    assert _status("feat(x): the actual change") == "PASS", (
         "the fixup commit still decided the shape — the gate blocks a PR that "
         "lands as feat("
     )
@@ -204,6 +204,37 @@ def test_a_titled_bug_fix_still_blocks() -> None:
         ctx = type("C", (), {"root": Path(".")})()
         got = p10_tdd._changes_ship_the_layers_the_standard_requires(ctx)
     assert got.status.name == "FAIL", "a fix( title with no scenario must block"
+
+
+def test_the_check_never_emits_a_blocking_warn() -> None:
+    """WARN reddens this audit, so a non-blocking verdict must PASS.
+
+    `overall_exit_code` counts WARN as a red audit unless the check is
+    allow-listed as telemetry (a history scan that cannot blame the PR) or
+    advisory (a corpus scan). P10.8 is neither — it judges the change under
+    test. Emitting WARN for a `conditional` cell or an ambiguous `feat(` would
+    turn the standard's own "it depends" into a hard CI stop, which is the
+    false positive that gets a gate disabled.
+    """
+    import os
+    from unittest.mock import patch
+
+    from hydraflow_audit.checks import p10_tdd
+
+    src = ["src/a.py", "tests/regressions/t.py"]
+    seen = set()
+    for title in ("feat(x): y", "refactor(x): y", "fix(x): y", "docs(x): y"):
+        with (
+            patch.dict(os.environ, {p10_tdd._PR_TITLE_ENV: title}, clear=False),
+            patch.object(p10_tdd, "_pr_gate_preflight", return_value=("base", None)),
+            patch.object(p10_tdd, "_changed_paths_since", return_value=src),
+            patch.object(p10_tdd, "_pr_commit_subjects", return_value=[title]),
+        ):
+            ctx = type("C", (), {"root": Path(".")})()
+            seen.add(p10_tdd._changes_ship_the_layers_the_standard_requires(ctx).status)
+    names = {s.name for s in seen}
+    assert "WARN" not in names, f"P10.8 emitted a CI-reddening WARN: {names}"
+    assert names == {"PASS", "FAIL"}, f"expected only PASS/FAIL, got {names}"
 
 
 @pytest.mark.parametrize(

@@ -21,11 +21,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 from adr_conformance import (
     enforcement_classification,
     load_enforcement_baseline,
     parse_exemptions,
 )
+from package_resources import ResourceNotFoundError, checkout_path
 from policy.models import Fact
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -225,15 +228,12 @@ def collect_test_pyramid_facts(
     req: dict[str, str] = {}
     if shape:
         try:
-            std = (
-                Path(__file__).resolve().parents[2]
-                / "docs"
-                / "standards"
-                / "testing"
-                / "standard.yaml"
-            )
+            # checkout_path, not a walk up from __file__: docs/standards/ is
+            # deliberately absent from the wheel, and parents[2] resolves
+            # inside site-packages there (#11589).
+            std = checkout_path("docs", "standards", "testing", "standard.yaml")
             req = requirement_matrix(std.read_text("utf-8")).get(shape, {})
-        except (OSError, ValueError):
+        except (OSError, ValueError, ResourceNotFoundError):
             req = {}
     touches_source = any(
         p.startswith(tuple(load_bearing_prefixes)) and not p.startswith("tests/")
@@ -294,7 +294,6 @@ def requirement_matrix(standard_yaml: str) -> dict[str, dict[str, str]]:
     drift-checked against it. A second copy in this module would be a third
     writer for one table.
     """
-    import yaml  # noqa: PLC0415 - optional at import time, present in the venv
 
     doc = yaml.safe_load(standard_yaml) or {}
     out: dict[str, dict[str, str]] = {}
