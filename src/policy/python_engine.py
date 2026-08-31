@@ -192,7 +192,7 @@ class PythonDecisionEngine:
             status=DecisionStatus.VIOLATED,
             blocking=False,
             reason=(
-                f"source changed with {len(missing)} pyramid layer(s) missing: "
+                "source changed with pyramid layer(s) missing: "
                 f"{', '.join(missing)}. Unit tests are blind to integration and "
                 "wiring defects — #11853 shipped with 20 passing unit tests."
             ),
