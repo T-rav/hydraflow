@@ -2077,3 +2077,38 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
     from pr_manager import PRManager
 
     return PRManager(config=config, event_bus=event_bus)
+
+
+def wiki_compiler_mock(
+    *,
+    compile_topic: int | None = None,
+    compile_topic_tracked: int | None = None,
+    accepted: int | None = None,
+    rejected: list[str] | None = None,
+) -> Any:
+    """A ``WikiCompiler`` stand-in that answers the loop's WHOLE contract.
+
+    ``RepoWikiLoop`` reads ``last_anchor_gate_verdict`` after every compile to
+    feed the barren ledger (#11888). A bare ``MagicMock()`` returns a Mock for
+    that property, which unpacks to zero values and raises inside the loop's
+    broad ``except`` — reported as "Wiki compile failed" while the compile
+    actually succeeded. Configure the verdict here so the next stand-in cannot
+    reintroduce it.
+
+    *accepted* defaults to whichever compile count the caller supplied, so the
+    stand-in is self-consistent: a compile that returned entries did not also
+    have every entry rejected.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    compiler = MagicMock()
+    if compile_topic is not None:
+        compiler.compile_topic = AsyncMock(return_value=compile_topic)
+    if compile_topic_tracked is not None:
+        compiler.compile_topic_tracked = AsyncMock(return_value=compile_topic_tracked)
+    if accepted is None:
+        accepted = (
+            compile_topic_tracked if compile_topic_tracked is not None else 0
+        ) or (compile_topic or 0)
+    compiler.last_anchor_gate_verdict = (rejected or [], accepted)
+    return compiler

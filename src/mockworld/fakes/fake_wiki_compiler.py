@@ -38,6 +38,11 @@ class FakeWikiCompiler:
 
     compile_calls: list[CompileCall] = field(default_factory=list)
     compiled_entries_per_call: int = 1
+    #: What the anchor gate "said" about the last compile (#11888). Defaults
+    #: to "nothing rejected", so an ordinary scenario can never trip the
+    #: barren gate by accident; a scenario testing that gate sets these.
+    rejected_digests: list[str] = field(default_factory=list)
+    accepted_entries_per_call: int | None = None
 
     async def compile_topic_tracked(
         self,
@@ -53,6 +58,20 @@ class FakeWikiCompiler:
     async def compile_topic(self, *args, **kwargs) -> int:
         """Legacy topic-page compile — return 0 to indicate no change."""
         return 0
+
+    @property
+    def last_anchor_gate_verdict(self) -> tuple[list[str], int]:
+        """Anchor-gate verdict of the last compile (#11888).
+
+        Configurable rather than fixed: a scenario that wants the barren path
+        must be able to say "this compile rejected X and wrote nothing", which
+        is the whole shape under test. The DEFAULT is "rejected nothing", so
+        every scenario that does not care cannot trip the gate by accident.
+        """
+        accepted = self.accepted_entries_per_call
+        if accepted is None:
+            accepted = self.compiled_entries_per_call
+        return list(self.rejected_digests), accepted
 
     async def detect_contradictions(self, *args, **kwargs):
         """Ingest-time contradiction detector — never flags anything in fakes."""

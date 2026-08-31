@@ -30,6 +30,7 @@ from mockworld.fakes.fake_wiki_compiler import FakeWikiCompiler
 from repo_wiki import DEFAULT_TOPICS
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports
+from wiki_synthesis_ledger import synthesis_digest
 
 pytestmark = pytest.mark.scenario_loops
 
@@ -184,4 +185,89 @@ async def test_fingerprint_gate_skips_unchanged_topic_across_ticks(
     assert calls_after_tick == [1, 1, 2], (
         "expected compile → skip → recompile across ticks, got cumulative "
         f"compile_topic_tracked counts {calls_after_tick}"
+    )
+
+
+async def test_barren_topic_stops_recompiling_even_as_its_content_changes(
+    tmp_path: Path,
+) -> None:
+    """#11888 across real ticks: the barren gate holds where #11373's cannot.
+
+    The fingerprint gate above skips an UNCHANGED topic. This one covers the
+    shape that actually burned the factory: the topic changes every tick — an
+    ingest, or this loop's own stale-marking lint pass immediately before —
+    so the fingerprint gate opens every time, and synthesis re-proposes the
+    same entries the anchor gate already rejected. Measured 2026-08-30/31:
+    ``patterns`` compiled seven times, the same twelve titles dropped each
+    time, ``entries_compiled: 0`` on all 27 maintenance runs in the log.
+
+    Tick 1 compiles and its whole output is rejected. Tick 2 changes the
+    content (so the input gate opens), compiles, and is rejected identically —
+    that is the repeat the ledger needs. Tick 3 changes the content again and
+    must NOT spawn.
+    """
+    from repo_wiki import RepoWikiStore
+
+    topic = DEFAULT_TOPICS[0]
+    tracked_root = tmp_path / "tracked_wiki"
+    entries = [
+        _write_active_tracked_entry(
+            tracked_root, _SLUG, topic, entry_id=f"e{i}", source_issue=i
+        )
+        for i in range(5)
+    ]
+    store = RepoWikiStore(
+        wiki_root=tmp_path / "wiki_root_unused",
+        tracked_root=tracked_root,
+        self_slug=None,
+    )
+
+    wiki_store = MagicMock()
+    wiki_store.list_repos.return_value = [_SLUG]
+
+    # Every compile rejects the same single platitude and writes nothing —
+    # the measured shape, held constant so the ledger sees a true repeat.
+    compiler = FakeWikiCompiler(
+        rejected_digests=[
+            synthesis_digest("Use is None for sentinels", "generic advice")
+        ],
+        accepted_entries_per_call=0,
+    )
+
+    world = MockWorld(tmp_path)
+    seed_ports(world, wiki_store=wiki_store, wiki_compiler=compiler)
+
+    ticks = {"n": 0}
+    calls_after_tick: list[int] = []
+
+    async def _heal(self, closed_issues, stats):
+        ticks["n"] += 1
+        # Mutate BEFORE every compile from tick 2 on, so the #11373
+        # fingerprint gate is open on every tick and cannot be what stops
+        # tick 3. Only the barren ledger can.
+        if ticks["n"] > 1:
+            entries[0].write_text(
+                entries[0].read_text(encoding="utf-8")
+                + f"\nTick {ticks['n']} evidence: `src/foo.py:Baz{ticks['n']}`.\n",
+                encoding="utf-8",
+            )
+        result = await self._lint_and_compile_repos(
+            [_SLUG], tracked_root, closed_issues, store=store
+        )
+        stats.update(result)
+        calls_after_tick.append(len(compiler.compile_calls))
+
+    with patch("repo_wiki_loop.RepoWikiLoop._heal_and_open_maintenance_pr", _heal):
+        await world.run_with_loops(["repo_wiki"], cycles=3)
+
+    assert ticks["n"] == 3, (
+        f"only {ticks['n']} of 3 ticks reached the compile phase — the "
+        "call-count assertion below cannot distinguish 'gate skipped it' "
+        "from 'the tick never ran'"
+    )
+    assert calls_after_tick == [1, 2, 2], (
+        "expected compile → compile (the repeat) → SKIPPED, got cumulative "
+        f"compile_topic_tracked counts {calls_after_tick}. [1, 2, 3] means the "
+        "barren gate never fired and the loop is still re-buying a rejection "
+        "it already paid for."
     )

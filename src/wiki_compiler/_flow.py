@@ -62,9 +62,8 @@ class WikiCompilerFlowMixin:
             self, prompt: str, context: str
         ) -> str | None: ...  # provided by _model_io
 
-        @staticmethod
         def _filter_anchored_entries(
-            entries: list[WikiEntry], *, repo: str, topic: str, context: str
+            self, entries: list[WikiEntry], *, repo: str, topic: str, context: str
         ) -> list[WikiEntry]: ...  # provided by _compiler
 
         @staticmethod

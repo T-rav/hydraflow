@@ -38,6 +38,7 @@ from wiki_drift_detector import (
     scan_semantic_drift,
 )
 from wiki_maint_queue import MaintenanceQueue, MaintenanceTask
+from wiki_synthesis_ledger import WikiSynthesisLedger
 
 if TYPE_CHECKING:
     from events import EventBus
@@ -324,6 +325,17 @@ class RepoWikiLoop(BaseBackgroundLoop):
         compile_state = WikiCompileState(
             Path(self._config.data_path("wiki_compile_state.json"))
         )
+        # #11888: the fingerprint gate above keys on a topic's INPUT, which
+        # churns for reasons unrelated to whether synthesis can progress (an
+        # ingest, this tick's own stale-marking lint pass, a landed
+        # maintenance PR). This one keys on the OUTPUT: a topic whose every
+        # synthesis was already rejected, and which wrote nothing, is skipped
+        # until the cooldown elapses.
+        synthesis_ledger = WikiSynthesisLedger(
+            Path(self._config.data_path("wiki_synthesis_ledger.json")),
+            cooldown_hours=self._config.wiki_barren_compile_cooldown_hours,
+        )
+        now = datetime.now(UTC)
 
         for slug in repos:
             # Phase 1: Active lint — self-healing pass
@@ -389,9 +401,17 @@ class RepoWikiLoop(BaseBackgroundLoop):
                         )
                         if not compile_state.should_compile(gate_key, fingerprint):
                             continue
+                        if not synthesis_ledger.should_compile(slug, topic, now=now):
+                            continue
                         try:
                             after = await self._wiki_compiler.compile_topic(
                                 store, slug, topic
+                            )
+                            rejected, accepted = (
+                                self._wiki_compiler.last_anchor_gate_verdict
+                            )
+                            synthesis_ledger.record_compile(
+                                slug, topic, rejected=rejected, wrote=accepted, now=now
                             )
                             if after < len(entries):
                                 total_compiled += len(entries) - after
@@ -436,6 +456,8 @@ class RepoWikiLoop(BaseBackgroundLoop):
                         )
                         if not compile_state.should_compile(gate_key, fingerprint):
                             continue
+                        if not synthesis_ledger.should_compile(slug, topic, now=now):
+                            continue
                         try:
                             synthesized = (
                                 await self._wiki_compiler.compile_topic_tracked(
@@ -449,6 +471,12 @@ class RepoWikiLoop(BaseBackgroundLoop):
                             # here (pre-synthesis) would inflate the stat
                             # roughly 5-10× because synthesis typically
                             # collapses many entries into one or two.
+                            rejected, accepted = (
+                                self._wiki_compiler.last_anchor_gate_verdict
+                            )
+                            synthesis_ledger.record_compile(
+                                slug, topic, rejected=rejected, wrote=accepted, now=now
+                            )
                             if synthesized:
                                 total_compiled += synthesized
                             compile_state.record(
@@ -470,6 +498,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
                             )
 
         compile_state.save()
+        synthesis_ledger.save()
 
         stats = {
             "repos": len(repos),

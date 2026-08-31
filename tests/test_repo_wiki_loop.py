@@ -11,6 +11,7 @@ import pytest
 from base_background_loop import LoopDeps
 from repo_wiki import RepoWikiStore, WikiEntry
 from repo_wiki_loop import RepoWikiLoop
+from tests.helpers import wiki_compiler_mock
 
 
 def _make_deps() -> LoopDeps:
@@ -249,7 +250,6 @@ class TestHeal:
 
     @pytest.mark.asyncio
     async def test_compilation_runs_when_compiler_present(self, tmp_path: Path) -> None:
-        from unittest.mock import AsyncMock
 
         wiki_root = tmp_path / "wiki"
         store = RepoWikiStore(wiki_root)
@@ -266,8 +266,7 @@ class TestHeal:
             ],
         )
 
-        compiler = MagicMock()
-        compiler.compile_topic = AsyncMock(return_value=3)  # 5 → 3
+        compiler = wiki_compiler_mock(compile_topic=3, accepted=3)  # 5 → 3
 
         loop = RepoWikiLoop(
             config=_make_config(wiki_root),
