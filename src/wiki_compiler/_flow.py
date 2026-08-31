@@ -29,10 +29,6 @@ from repo_wiki import (
 
 from ._prompts import _COMPILE_TOPIC_PROMPT
 
-if TYPE_CHECKING:
-    pass
-
-
 logger = logging.getLogger("hydraflow.wiki_compiler")
 
 

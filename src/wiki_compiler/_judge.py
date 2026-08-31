@@ -12,7 +12,6 @@ kept beside the judge that scores it.
 from __future__ import annotations
 
 import json
-import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -37,9 +36,6 @@ from ._prompts import (
 
 if TYPE_CHECKING:
     from tribal_wiki import TribalWikiStore
-
-
-logger = logging.getLogger("hydraflow.wiki_compiler")
 
 
 _ADR_DRAFT_HEADER_RE = re.compile(r"^ADR_DRAFT_SUGGESTION:\s*$", re.MULTILINE)

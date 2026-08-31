@@ -9,17 +9,10 @@ methods that build the prompts, because ``src/`` imports them by name
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    pass
-
-
-logger = logging.getLogger("hydraflow.wiki_compiler")
 
 
 class ContradictedEntry(BaseModel):

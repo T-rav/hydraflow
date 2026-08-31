@@ -9,16 +9,6 @@ synthesis-anchor gate has one file to read.
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
-
-
-logger = logging.getLogger("hydraflow.wiki_compiler")
-
-
 _COMPILE_TOPIC_PROMPT = """\
 You are a technical knowledge librarian maintaining a per-repository wiki.
 
