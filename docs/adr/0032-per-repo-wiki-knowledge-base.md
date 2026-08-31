@@ -23,7 +23,7 @@ Andrej Karpathy's "LLM Knowledge Base" pattern proposes an alternative: instead 
 ### Related
 
 - `src/repo_wiki.py:RepoWikiStore` — core store (ingest, query, active_lint, dedup)
-- `src/wiki_compiler.py:WikiCompiler` — LLM synthesis (compile_topic, synthesize_ingest)
+- `src/wiki_compiler/_compiler.py:WikiCompiler` — LLM synthesis (compile_topic, synthesize_ingest); the tracked-compile flow, the pairwise judgements and the model seam are mixins under `src/wiki_compiler/`
 - `src/repo_wiki_loop.py:RepoWikiLoop` — background maintenance loop
 - `src/base_runner.py:BaseRunner._inject_repo_wiki` — prompt injection into all runners
 - Hindsight (`src/hindsight*`) — existing vector-search memory (complementary, not replaced; external integration, no first-party module)

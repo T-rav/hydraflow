@@ -41,9 +41,6 @@ classes:
   src/staging_promotion_loop.py:StagingPromotionLoop:
     loc: 977
     methods: 32
-  src/wiki_compiler.py:WikiCompiler:
-    loc: 773
-    methods: 23
   src/wiki_rot_detector_loop.py:WikiRotDetectorLoop:
     loc: 803
     methods: 20
@@ -52,8 +49,7 @@ comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC o
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: batch 7: PRUnsticker and EpicManager decomposed into mixin packages\
-  \ (Refs #11547)"
+  \ PR. Last moved: batch 8: WikiCompiler decomposed into a mixin package (Refs #11547)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109
