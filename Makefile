@@ -329,7 +329,7 @@ gateway-coverage: deps
 
 test: deps
 	@echo "$(BLUE)Running HydraFlow unit tests (parallel; scenarios serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) -q
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) -q
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -q
 	@echo "$(GREEN)All tests passed$(RESET)"
 
