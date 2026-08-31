@@ -254,5 +254,5 @@ source = ["src"]
 omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "src/hydraflow_resources/*"]
 
 [tool.coverage.report]
-fail_under = 91.3
+fail_under = 91.6
 show_missing = true
