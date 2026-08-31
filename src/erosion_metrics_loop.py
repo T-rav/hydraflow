@@ -747,11 +747,14 @@ def _render_mass(candidate: dict[str, Any]) -> tuple[str, str]:
         if largest
         else f"{finding.god_files[0].path}"
     )
-    title = (
-        f"Erosion: {classes} god class{'' if classes == 1 else 'es'}, "
-        f"{files} god file{'' if files == 1 else 's'} above the mass threshold "
-        f"(largest: {largest_text})"
-    )
+    # No metrics in the title: the loop refreshes the BODY of a class issue
+    # (`update_issue_body`) and has no way to edit the title, so any number
+    # here is frozen at filing time and silently rots. #11547's title still
+    # said "4898 LOC" while its body said 5278; #11548's said "784 copies /
+    # 19936 tests" against a body reading 401 / 23080. A stale number in the
+    # first thing a triager reads is worse than no number — the live values
+    # are in the evidence table below, which IS refreshed.
+    title = "Erosion: god classes and god files above the mass threshold"
     marker = render_marker(compute_class_key(_CLASS_SOURCE, _CLASS_NEEDLES["mass"]))
     grown_lines = "\n".join(_growth_line(g) for g in growth)
     only_flags = " ".join(f"--only {g.key}" for g in growth)
@@ -804,11 +807,8 @@ def _render_suite_hygiene(candidate: dict[str, Any]) -> tuple[str, str]:
     finding = candidate["finding"]
     copies = finding.parametrize_copies
     dups = len(finding.cross_file_duplicates)
-    title = (
-        f"Erosion: test suite carries {copies} parametrize "
-        f"{'copy' if copies == 1 else 'copies'} and {dups} cross-file duplicate "
-        f"test{'' if dups == 1 else 's'} ({finding.total_tests} tests)"
-    )
+    # See _render_mass: metrics belong in the refreshed body, not the frozen title.
+    title = "Erosion: test suite carries parametrize copies and cross-file duplicates"
     marker = render_marker(
         compute_class_key(_CLASS_SOURCE, _CLASS_NEEDLES["suite_hygiene"])
     )
