@@ -939,6 +939,10 @@ jobs:
           # P10.6 per-PR regression gate: empty on push builds, so the gate
           # is NA there and only the telemetry history scan runs (#9902).
           HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
+          # P10.8 keys the test-pyramid shape on what LANDS. The repo
+          # squash-merges, so the PR title becomes the commit subject and
+          # in-branch fixups never ship.
+          HYDRAFLOW_AUDIT_PR_TITLE: ${{ github.event.pull_request.title }}
         run: make audit
       - name: Council conformance (ledger immutability)
         # #11110 (sampled-audit upheld): ARCH-0001 declares ledger
