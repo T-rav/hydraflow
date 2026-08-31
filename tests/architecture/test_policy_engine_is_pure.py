@@ -152,7 +152,11 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
         ),
         "collections.abc": frozenset({"Sequence"}),
         "policy.facts": frozenset(
-            {"STANDARD_ADR_CONFORMANCE", "STANDARD_ADR_ENFORCEMENT"}
+            {
+                "STANDARD_ADR_CONFORMANCE",
+                "STANDARD_ADR_ENFORCEMENT",
+                "STANDARD_TEST_PYRAMID",
+            }
         ),
         "policy.models": frozenset(
             {"Charter", "DecisionStatus", "Fact", "FactValue", "StandardDecision"}

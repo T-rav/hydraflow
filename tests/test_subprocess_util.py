@@ -1489,20 +1489,37 @@ class TestIsCreditExhaustion:
             "You reached your usage limits set in the test config."
         )
 
-    def test_matches_claude_code_session_limit(self) -> None:
-        """Claude Code subscription session-cap message (2026-06-13 incident).
-
-        The overnight 2026-06-13 run hit this exact phrasing on every agent;
-        because 'session' sits between 'hit your' and 'limit', none of the
-        legacy substrings matched and the credit-pause never fired.
-        """
-        assert is_credit_exhaustion(
-            "You've hit your session limit · resets 5:50am (America/Denver)"
-        )
-
-    def test_matches_session_limit_reached_phrasing(self) -> None:
-        """The alternate 'Session limit reached' rendering must also match."""
-        assert is_credit_exhaustion("Session limit reached. Try again later.")
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # The overnight 2026-06-13 run hit this exact phrasing on every
+            # agent; because 'session' sits between 'hit your' and 'limit',
+            # none of the legacy substrings matched and the credit-pause
+            # never fired.
+            pytest.param(
+                "You've hit your session limit · resets 5:50am (America/Denver)",
+                id="matches_claude_code_session_limit",
+            ),
+            pytest.param(
+                "Session limit reached. Try again later.",
+                id="matches_session_limit_reached_phrasing",
+            ),
+            # 2026-06-17: 'weekly' sits between 'hit your' and 'limit', so it
+            # slipped past every substring and the factory burned its whole
+            # attempt budget into HITL.
+            pytest.param(
+                "You've hit your weekly limit · resets Jun 18 at 5pm",
+                id="matches_claude_code_weekly_limit",
+            ),
+            pytest.param(
+                "Weekly limit reached. Try again later.",
+                id="matches_weekly_limit_reached_phrasing",
+            ),
+        ],
+    )
+    def test_matches_subscription_cap_phrasings(self, message: str) -> None:
+        """Every Claude Code subscription-cap rendering is an exhaustion signal."""
+        assert is_credit_exhaustion(message)
 
     def test_does_not_false_match_configured_session_count(self) -> None:
         """A config statement about the session count is NOT an exhaustion
@@ -1511,19 +1528,6 @@ class TestIsCreditExhaustion:
         assert not is_credit_exhaustion(
             "The session limit is configured to 10 sessions per repo."
         )
-
-    def test_matches_claude_code_weekly_limit(self) -> None:
-        """Claude Code subscription *weekly*-cap message (2026-06-17 incident).
-
-        'weekly' sits between 'hit your' and 'limit', so it slipped past every
-        substring and the factory burned its whole attempt budget into HITL.
-        """
-        assert is_credit_exhaustion(
-            "You've hit your weekly limit · resets Jun 18 at 5pm"
-        )
-
-    def test_matches_weekly_limit_reached_phrasing(self) -> None:
-        assert is_credit_exhaustion("Weekly limit reached. Try again later.")
 
     @pytest.mark.parametrize(
         "msg",
@@ -1606,12 +1610,26 @@ class TestParseCreditResumeTime:
         assert resume is not None
         assert resume.minute == 50
 
-    def test_rejects_out_of_range_minutes(self) -> None:
-        """A bogus minute value must fail-to-parse, not roll over into the hour."""
-        assert parse_credit_resume_time("resets 5:99am") is None
-
-    def test_returns_none_for_non_matching_text(self) -> None:
-        assert parse_credit_resume_time("no date here") is None
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A bogus minute value must fail-to-parse, not roll over into the hour.
+            pytest.param("resets 5:99am", id="rejects_out_of_range_minutes"),
+            pytest.param("no date here", id="returns_none_for_non_matching_text"),
+            pytest.param(
+                "resets Feb 30 at 5pm", id="weekly_invalid_month_day_returns_none"
+            ),
+            # Weekly detection still fires (tested elsewhere); with no parseable
+            # reset clause the caller falls back to its default pause.
+            pytest.param(
+                "You've hit your weekly limit",
+                id="weekly_detected_but_no_reset_clause_returns_none",
+            ),
+        ],
+    )
+    def test_unparseable_reset_clause_returns_none(self, text: str) -> None:
+        """Fail-to-parse, never a guess: the caller's default pause is safer."""
+        assert parse_credit_resume_time(text) is None
 
     def test_requires_utc_suffix_on_iso_format(self) -> None:
         """If UTC is absent or replaced (e.g. PST), we must NOT silently
@@ -1707,15 +1725,6 @@ class TestParseCreditResumeTime:
             )
             is None
         )
-
-    def test_weekly_invalid_month_day_returns_none(self) -> None:
-        assert parse_credit_resume_time("resets Feb 30 at 5pm") is None
-
-    def test_weekly_detected_but_no_reset_clause_returns_none(self) -> None:
-        """Detection still fires (tested elsewhere); with no parseable reset the
-        caller falls back to its default pause, so parse returns None.
-        """
-        assert parse_credit_resume_time("You've hit your weekly limit") is None
 
 
 # --- probe_auth_availability (#9621) ---

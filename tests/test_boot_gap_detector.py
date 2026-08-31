@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from boot_gap_detector import compute_boot_gap_alert, last_event_timestamp
 
 
@@ -26,16 +28,34 @@ class TestLastEventTimestamp:
         path = _write_events(tmp_path, [])
         assert last_event_timestamp(path) is None
 
-    def test_reads_timestamp_of_last_line(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("last_line", "expected_day"),
+        [
+            pytest.param(
+                '{"id": 2, "timestamp": "2026-07-02T00:00:00+00:00"}',
+                2,
+                id="reads_timestamp_of_last_line",
+            ),
+            pytest.param(
+                "not json at all {{{", 1, id="falls_back_past_corrupt_trailing_line"
+            ),
+            pytest.param(
+                '{"id": 2, "no_timestamp": true}',
+                1,
+                id="falls_back_past_line_missing_timestamp_field",
+            ),
+            pytest.param("[1, 2, 3]", 1, id="json_non_dict_line_skipped"),
+        ],
+    )
+    def test_reads_back_to_the_last_usable_line(
+        self, tmp_path: Path, last_line: str, expected_day: int
+    ) -> None:
+        """Day 2 when the trailing line is usable, day 1 when it must be skipped."""
         path = _write_events(
             tmp_path,
-            [
-                '{"id": 1, "timestamp": "2026-07-01T00:00:00+00:00"}',
-                '{"id": 2, "timestamp": "2026-07-02T00:00:00+00:00"}',
-            ],
+            ['{"id": 1, "timestamp": "2026-07-01T00:00:00+00:00"}', last_line],
         )
-        ts = last_event_timestamp(path)
-        assert ts == datetime(2026, 7, 2, tzinfo=UTC)
+        assert last_event_timestamp(path) == datetime(2026, 7, expected_day, tzinfo=UTC)
 
     def test_naive_timestamp_is_treated_as_utc(self, tmp_path: Path) -> None:
         path = _write_events(
@@ -43,28 +63,6 @@ class TestLastEventTimestamp:
         )
         ts = last_event_timestamp(path)
         assert ts == datetime(2026, 7, 2, tzinfo=UTC)
-
-    def test_falls_back_past_corrupt_trailing_line(self, tmp_path: Path) -> None:
-        path = _write_events(
-            tmp_path,
-            [
-                '{"id": 1, "timestamp": "2026-07-01T00:00:00+00:00"}',
-                "not json at all {{{",
-            ],
-        )
-        ts = last_event_timestamp(path)
-        assert ts == datetime(2026, 7, 1, tzinfo=UTC)
-
-    def test_falls_back_past_line_missing_timestamp_field(self, tmp_path: Path) -> None:
-        path = _write_events(
-            tmp_path,
-            [
-                '{"id": 1, "timestamp": "2026-07-01T00:00:00+00:00"}',
-                '{"id": 2, "no_timestamp": true}',
-            ],
-        )
-        ts = last_event_timestamp(path)
-        assert ts == datetime(2026, 7, 1, tzinfo=UTC)
 
     def test_blank_trailing_lines_skipped(self, tmp_path: Path) -> None:
         path = _write_events(
@@ -81,17 +79,6 @@ class TestLastEventTimestamp:
     def test_all_lines_unparseable_returns_none(self, tmp_path: Path) -> None:
         path = _write_events(tmp_path, ["{{{ broken", "also broken"])
         assert last_event_timestamp(path) is None
-
-    def test_json_non_dict_line_skipped(self, tmp_path: Path) -> None:
-        path = _write_events(
-            tmp_path,
-            [
-                '{"id": 1, "timestamp": "2026-07-01T00:00:00+00:00"}',
-                "[1, 2, 3]",
-            ],
-        )
-        ts = last_event_timestamp(path)
-        assert ts == datetime(2026, 7, 1, tzinfo=UTC)
 
 
 class TestComputeBootGapAlert:

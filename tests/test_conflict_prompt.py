@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from conflict_prompt import build_conflict_prompt, build_rebuild_prompt
@@ -130,23 +132,24 @@ class TestBuildRebuildPrompt:
         assert "-old" in prompt
         assert "+new" in prompt
 
-    def test_includes_make_quality(self) -> None:
+    @pytest.mark.parametrize(
+        "fragment",
+        [
+            pytest.param("make quality", id="includes_make_quality"),
+            pytest.param("Fixes #42", id="includes_commit_message_with_issue_number"),
+            pytest.param("Do not push", id="includes_do_not_push"),
+            # The {context} substitution renders as "most rebuild runs...".
+            pytest.param(
+                "most rebuild runs should correctly produce no block",
+                id="memory_suggestion_uses_rebuild_context",
+            ),
+        ],
+    )
+    def test_prompt_carries(self, fragment: str) -> None:
         prompt = build_rebuild_prompt(
             ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
         )
-        assert "make quality" in prompt
-
-    def test_includes_commit_message_with_issue_number(self) -> None:
-        prompt = build_rebuild_prompt(
-            ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
-        )
-        assert "Fixes #42" in prompt
-
-    def test_includes_do_not_push(self) -> None:
-        prompt = build_rebuild_prompt(
-            ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
-        )
-        assert "Do not push" in prompt
+        assert fragment in prompt
 
     def test_truncates_long_diff(self) -> None:
         long_diff = "+" + "x" * 20_000
@@ -199,10 +202,3 @@ class TestBuildRebuildPrompt:
         assert "MEMORY_SUGGESTION_START" in prompt
         assert "MEMORY_SUGGESTION_END" in prompt
         assert "## Optional: Tribal-Knowledge Suggestion" in prompt
-
-    def test_memory_suggestion_uses_rebuild_context(self) -> None:
-        prompt = build_rebuild_prompt(
-            ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
-        )
-        # The {context} substitution appears as "most rebuild runs..."
-        assert "most rebuild runs should correctly produce no block" in prompt

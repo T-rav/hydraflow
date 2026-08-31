@@ -30,6 +30,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.trace_collector")
 
+# Cap on any single captured error string written into a trace.
+_MAX_ERROR_CHARS = 500
+# Cap on retained stream-level error events — a failing subprocess can emit
+# them indefinitely, and the newest are the diagnostic ones.
+_MAX_STREAM_ERRORS = 20
+
 
 class TraceCollector:
     """Accumulate spans for one `claude -p` subprocess and write the trace."""
@@ -65,7 +71,12 @@ class TraceCollector:
             cache_hit_rate=0.0,
         )
         self.tool_counts: dict[str, int] = {}
+        # Keyed strictly by tool NAME. Stream-level failures go to
+        # `stream_errors` instead: this dict previously only ever received the
+        # literal key "__stream__", so trace_rollup.py's per-tool error
+        # breakdown was structurally empty for every trace ever written.
         self.tool_errors: dict[str, int] = {}
+        self.stream_errors: list[str] = []
         self.tool_calls: list[ToolCallSpan] = []
         self.skill_results: list[SkillResultRecord] = []
         self.inference_count: int = 0
@@ -154,13 +165,39 @@ class TraceCollector:
                     # Match by tool_use_id so out-of-order results from
                     # concurrent tool calls are attributed to the correct
                     # span instead of the most-recent pending one.
+                    error_text = self._result_error_text(block)
                     for idx in range(len(self.tool_calls) - 1, -1, -1):
                         span = self.tool_calls[idx]
                         if span.tool_use_id == tool_use_id and not span.succeeded:
                             self.tool_calls[idx] = span.model_copy(
-                                update={"duration_ms": duration_ms, "succeeded": True}
+                                update={
+                                    "duration_ms": duration_ms,
+                                    "succeeded": error_text is None,
+                                    "error": error_text,
+                                }
                             )
+                            if error_text is not None:
+                                self.tool_errors[span.tool_name] = (
+                                    self.tool_errors.get(span.tool_name, 0) + 1
+                                )
                             break
+
+    @staticmethod
+    def _result_error_text(block: dict[str, Any]) -> str | None:
+        """Error text for a failed ``tool_result``, else ``None``.
+
+        ``is_error`` is authoritative — the same rule ``director_sandbox``
+        applies to result frames. ``content`` arrives either as a plain string
+        or as a list of content blocks.
+        """
+        if not block.get("is_error"):
+            return None
+        content = block.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                str(part.get("text", "")) for part in content if isinstance(part, dict)
+            )
+        return str(content)[:_MAX_ERROR_CHARS] or "(no error text)"
 
     def _handle_result(self, event: dict[str, Any]) -> None:
         self._extract_tokens(event.get("usage"))
@@ -215,8 +252,10 @@ class TraceCollector:
                     break
 
     def _handle_error(self, event: dict[str, Any]) -> None:
-        msg = event.get("message", "unknown error")
-        self.tool_errors["__stream__"] = self.tool_errors.get("__stream__", 0) + 1
+        msg = str(event.get("message", "unknown error"))
+        self.stream_errors.append(msg[:_MAX_ERROR_CHARS])
+        if len(self.stream_errors) > _MAX_STREAM_ERRORS:
+            del self.stream_errors[:-_MAX_STREAM_ERRORS]
         logger.debug("Stream error event recorded: %s", msg)
 
     def _add_tool_call(self, block: dict[str, Any]) -> None:
@@ -315,7 +354,12 @@ class TraceCollector:
             return None
 
     def _finalize_inner(self, *, success: bool) -> SubprocessTrace | None:
-        if self.inference_count == 0 and not self.tool_calls and not self.skill_results:
+        if (
+            self.inference_count == 0
+            and not self.tool_calls
+            and not self.skill_results
+            and not self.stream_errors
+        ):
             return None
 
         if self._ended_at is None:
@@ -332,7 +376,7 @@ class TraceCollector:
             ended_at=self._ended_at,
             success=success,
             crashed=not success,
-            error=None,
+            error="; ".join(self.stream_errors)[:_MAX_ERROR_CHARS] or None,
             tokens=self.tokens,
             tools=TraceToolProfile(
                 tool_counts=dict(self.tool_counts),

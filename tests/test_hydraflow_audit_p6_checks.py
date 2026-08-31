@@ -30,12 +30,41 @@ def test_all_na_for_non_orchestration_repo(check_id: str, tmp_path: Path) -> Non
     assert _run(check_id, _ctx(tmp_path, orchestration=False)).status is Status.NA
 
 
-def test_orchestrator_with_concurrent_loops_passes(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "orchestrator.py",
-        "import asyncio\n\nasync def main():\n    await asyncio.gather(a(), b())\n",
-    )
-    assert _run("P6.1", _ctx(tmp_path)).status is Status.PASS
+@pytest.mark.parametrize(
+    ("check_id", "relative_path", "source"),
+    [
+        pytest.param(
+            "P6.1",
+            "src/orchestrator.py",
+            "import asyncio\n\nasync def main():\n    await asyncio.gather(a(), b())\n",
+            id="orchestrator_with_concurrent_loops_passes",
+        ),
+        pytest.param(
+            "P6.3",
+            "src/base_background_loop.py",
+            "class BaseBackgroundLoop:\n    async def run(self): ...\n",
+            id="base_background_loop_class_detected",
+        ),
+        pytest.param(
+            "P6.4",
+            "tests/test_loop_wiring_completeness.py",
+            "# covers service_registry, orchestrator, constants.js, _common.py, _interval\n"
+            "def test_wiring(): pass\n",
+            id="wiring_test_covers_five_checkpoints",
+        ),
+        pytest.param(
+            "P6.5",
+            "src/pr_manager.py",
+            "async def swap_pipeline_labels(issue, to): ...\n",
+            id="atomic_swap_helper_detected",
+        ),
+    ],
+)
+def test_check_passes_on_its_positive_case(
+    tmp_path: Path, check_id: str, relative_path: str, source: str
+) -> None:
+    _write(tmp_path / relative_path, source)
+    assert _run(check_id, _ctx(tmp_path)).status is Status.PASS
 
 
 def test_orchestrator_without_gather_fails(tmp_path: Path) -> None:
@@ -57,41 +86,14 @@ def test_labels_scattered_fails(tmp_path: Path) -> None:
     assert _run("P6.2", _ctx(tmp_path)).status is Status.FAIL
 
 
-def test_base_background_loop_class_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "base_background_loop.py",
-        "class BaseBackgroundLoop:\n    async def run(self): ...\n",
-    )
-    assert _run("P6.3", _ctx(tmp_path)).status is Status.PASS
-
-
 def test_base_background_loop_missing_fails(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     assert _run("P6.3", _ctx(tmp_path)).status is Status.FAIL
 
 
-def test_wiring_test_covers_five_checkpoints(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "tests" / "test_loop_wiring_completeness.py",
-        (
-            "# covers service_registry, orchestrator, constants.js, _common.py, _interval\n"
-            "def test_wiring(): pass\n"
-        ),
-    )
-    assert _run("P6.4", _ctx(tmp_path)).status is Status.PASS
-
-
 def test_wiring_test_missing_fails(tmp_path: Path) -> None:
     (tmp_path / "tests").mkdir()
     assert _run("P6.4", _ctx(tmp_path)).status is Status.FAIL
-
-
-def test_atomic_swap_helper_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "pr_manager.py",
-        "async def swap_pipeline_labels(issue, to): ...\n",
-    )
-    assert _run("P6.5", _ctx(tmp_path)).status is Status.PASS
 
 
 def test_atomic_swap_helper_missing_fails(tmp_path: Path) -> None:

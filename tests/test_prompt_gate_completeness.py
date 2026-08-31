@@ -338,7 +338,7 @@ _LIGHTWEIGHT_LABEL_FREE_CALLERS = frozenset(
 # facades (``synthesize_ingest`` and six sibling ``_call_model`` flows).
 # Named follow-up, not a silent exemption — mirrors
 # ``_AGENTPORT_CALLER_FOLLOWUPS`` above.
-_LIGHTWEIGHT_LABEL_FOLLOWUPS = frozenset({"wiki_compiler.py"})
+_LIGHTWEIGHT_LABEL_FOLLOWUPS = frozenset({"wiki_compiler/_model_io.py"})
 
 
 def test_every_run_lightweight_agent_call_passes_issue_labels() -> None:

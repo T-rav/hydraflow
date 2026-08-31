@@ -183,15 +183,21 @@ class TestParseCreditResumeTime:
         # 12pm should remain hour 12
         assert result.astimezone(UTC).minute == 0
 
-    def test_handles_12hr_format_12am(self) -> None:
-        text = "reset at 12am"
-        result = parse_credit_resume_time(text)
-        assert result is not None
-
-    def test_handles_12hr_format_1am(self) -> None:
-        text = "reset at 1am"
-        result = parse_credit_resume_time(text)
-        assert result is not None
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("reset at 12am", id="handles_12hr_format_12am"),
+            pytest.param("reset at 1am", id="handles_12hr_format_1am"),
+            # 'resets' + 'at', not just 'reset at'.
+            pytest.param("resets at 5am", id="extracts_resets_at_format"),
+            # An unknown timezone must not crash — it falls back to local time.
+            pytest.param(
+                "reset at 3pm (Invalid/Timezone)", id="invalid_timezone_falls_back"
+            ),
+        ],
+    )
+    def test_parses_a_resume_time(self, text: str) -> None:
+        assert parse_credit_resume_time(text) is not None
 
     def test_reset_time_in_past_assumes_tomorrow(self) -> None:
         """If the parsed time is already past, assume tomorrow."""
@@ -226,19 +232,6 @@ class TestParseCreditResumeTime:
         assert result is not None
         denver = result.astimezone(ZoneInfo("America/Denver"))
         assert denver.hour == 5
-
-    def test_extracts_resets_at_format(self) -> None:
-        """Matches 'resets at 5am' — 'resets' + 'at'."""
-        text = "resets at 5am"
-        result = parse_credit_resume_time(text)
-        assert result is not None
-
-    def test_invalid_timezone_falls_back(self) -> None:
-        """Unknown timezone should not crash, falls back to local time."""
-        text = "reset at 3pm (Invalid/Timezone)"
-        result = parse_credit_resume_time(text)
-        # Should still parse (with fallback timezone)
-        assert result is not None
 
 
 # ===========================================================================

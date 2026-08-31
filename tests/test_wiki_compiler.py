@@ -258,28 +258,26 @@ def test_parse_contradiction_output_valid():
     assert result.contradicts[0].reason == "replaced"
 
 
-def test_parse_contradiction_output_empty_list():
-    raw = '{"contradicts":[]}'
-    result = WikiCompiler._parse_contradiction_output(raw)
-    assert result.contradicts == []
-
-
-def test_parse_contradiction_output_with_markdown_fence():
-    raw = '```json\n{"contradicts":[]}\n```'
-    result = WikiCompiler._parse_contradiction_output(raw)
-    assert result.contradicts == []
-
-
-def test_parse_contradiction_output_invalid_json_returns_empty():
-    raw = "not json"
-    result = WikiCompiler._parse_contradiction_output(raw)
-    assert result.contradicts == []
-
-
-def test_parse_contradiction_output_missing_key_returns_empty():
-    raw = '{"other":"shape"}'
-    result = WikiCompiler._parse_contradiction_output(raw)
-    assert result.contradicts == []
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param('{"contradicts":[]}', id="parse_contradiction_output_empty_list"),
+        pytest.param(
+            '```json\n{"contradicts":[]}\n```',
+            id="parse_contradiction_output_with_markdown_fence",
+        ),
+        pytest.param(
+            "not json", id="parse_contradiction_output_invalid_json_returns_empty"
+        ),
+        pytest.param(
+            '{"other":"shape"}',
+            id="parse_contradiction_output_missing_key_returns_empty",
+        ),
+    ],
+)
+def test_parse_contradiction_output_degrades_to_empty(raw: str):
+    """Malformed or empty output must yield the neutral verdict, never raise."""
+    assert WikiCompiler._parse_contradiction_output(raw).contradicts == []
 
 
 class TestDetectContradictions:
@@ -534,7 +532,7 @@ class TestModelCircuitBreaker:
             "runner_utils.run_lightweight_agent", self._failing_agent(calls)
         )
         monkeypatch.setattr(
-            "wiki_compiler.is_prompt_gate_blocked", lambda _stderr: False
+            "wiki_compiler._model_io.is_prompt_gate_blocked", lambda _stderr: False
         )
 
         for _ in range(10):

@@ -20,6 +20,7 @@ model, one budget), so the fix is to name the operation, not to split it.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import sys
 from pathlib import Path
@@ -30,6 +31,11 @@ import pytest
 
 import wiki_compiler as wc
 from circuit_breaker import CircuitBreaker
+
+#: ``src/``. Not derived from ``wc.__file__``: that is the package ``__init__``
+#: since #11547 batch 8, and ``parents[N]`` would silently change depth the day
+#: the module becomes a package (or stops being one).
+_SRC = Path(__file__).resolve().parents[2] / "src"
 
 #: Every caller of `_call_model`, by reference rather than by hand-copied list:
 #: a new caller that forgets its label should fail this, which a literal list
@@ -44,8 +50,25 @@ _EXPECTED_CALLERS = (
 )
 
 
+def _owner_files() -> list[Path]:
+    """Every file that defines a piece of ``WikiCompiler``, from its own MRO.
+
+    By reference, not by filename: #11547 batch 8 split the class across a
+    package, moving ``_call_model`` and four of its six callers out of the file
+    ``wc.__file__`` names. A guard anchored to that one filename would have gone
+    on passing while seeing almost none of its subject.
+    """
+    return sorted(
+        {
+            Path(inspect.getfile(base)).resolve()
+            for base in wc.WikiCompiler.__mro__
+            if base is not object
+        }
+    )
+
+
 def _source() -> str:
-    return Path(wc.__file__).read_text(encoding="utf-8")
+    return "\n".join(p.read_text(encoding="utf-8") for p in _owner_files())
 
 
 def _wiki_call_sites() -> list[str]:
@@ -63,14 +86,13 @@ def _wiki_call_sites() -> list[str]:
     WikiCompiler count, plus any `compiler._call_model` whose receiver names a
     WikiCompiler explicitly.
     """
-    root = Path(wc.__file__).parent
-    owner = Path(wc.__file__).name
+    owners = set(_owner_files())
     sites: list[str] = []
-    for path in sorted(root.rglob("*.py")):
+    for path in sorted(_SRC.rglob("*.py")):
         for i, line in enumerate(path.read_text("utf-8").splitlines(), 1):
             if "def _call_model" in line:
                 continue
-            is_owner_self = path.name == owner and "self._call_model(" in line
+            is_owner_self = path.resolve() in owners and "self._call_model(" in line
             is_explicit = "compiler._call_model(" in line
             if is_owner_self or is_explicit:
                 sites.append(f"{path.name}:{i}:{line.strip()}")

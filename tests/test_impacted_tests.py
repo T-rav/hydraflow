@@ -98,8 +98,23 @@ def test_changed_shared_test_infra_triggers_full_suite(
     assert reason is not None and "full suite" in reason
 
 
-def test_changed_test_package_init_maps_to_nothing(fs: InMemoryFileIndex) -> None:
-    tests, reason = classify_path("tests/__init__.py", fs)
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param(
+            "tests/__init__.py", id="changed_test_package_init_maps_to_nothing"
+        ),
+        pytest.param("src/assets/logo.svg", id="non_python_src_asset_maps_to_nothing"),
+        pytest.param(
+            "scripts/some_tool_without_test.py",
+            id="unmapped_script_maps_to_nothing_not_full_suite",
+        ),
+        pytest.param("   ", id="blank_paths_are_ignored"),
+    ],
+)
+def test_maps_to_nothing(fs: InMemoryFileIndex, path: str) -> None:
+    """No mapping is NOT the full suite — an unmapped path selects zero tests."""
+    tests, reason = classify_path(path, fs)
     assert tests == frozenset()
     assert reason is None
 
@@ -139,12 +154,6 @@ def test_unmapped_src_triggers_full_suite(fs: InMemoryFileIndex) -> None:
     tests, reason = classify_path("src/orphan_module.py", fs)
     assert tests == frozenset()
     assert reason is not None and "full suite" in reason
-
-
-def test_non_python_src_asset_maps_to_nothing(fs: InMemoryFileIndex) -> None:
-    tests, reason = classify_path("src/assets/logo.svg", fs)
-    assert tests == frozenset()
-    assert reason is None
 
 
 # ── rule (e): high-fanout fallback -> sentinel ──────────────────────────────
@@ -270,14 +279,6 @@ def test_scripts_change_maps_to_its_test_not_full_suite(
     assert tests == frozenset({"tests/test_impacted_tests.py"})
 
 
-def test_unmapped_script_maps_to_nothing_not_full_suite(
-    fs: InMemoryFileIndex,
-) -> None:
-    tests, reason = classify_path("scripts/some_tool_without_test.py", fs)
-    assert tests == frozenset()
-    assert reason is None
-
-
 # ── rules (c)+(d): always-on floor + full end-to-end selection ──────────────
 
 
@@ -310,12 +311,6 @@ def test_empty_diff_still_runs_the_floor(fs: InMemoryFileIndex) -> None:
     assert result.full_suite is False
     assert "tests/architecture/test_guard_one.py" in result.test_files
     assert set(impacted_tests.SMOKE_TESTS).issubset(set(result.test_files))
-
-
-def test_blank_paths_are_ignored(fs: InMemoryFileIndex) -> None:
-    tests, reason = classify_path("   ", fs)
-    assert tests == frozenset()
-    assert reason is None
 
 
 # ── in-memory glob parity guard ─────────────────────────────────────────────

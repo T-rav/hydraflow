@@ -162,20 +162,36 @@ class TestTrackedReportTransition:
         report.transition("queued", action="retry", detail="Attempt 1/3 failed")
         assert report.status == "queued"
 
-    def test_invalid_transition_queued_to_fixed(self) -> None:
-        report = self._make_report("queued")
-        with pytest.raises(ValueError, match="Invalid transition: queued -> fixed"):
-            report.transition("fixed", action="fixed")
-
-    def test_invalid_transition_closed_to_filed(self) -> None:
-        report = self._make_report("closed")
-        with pytest.raises(ValueError, match="Invalid transition: closed -> filed"):
-            report.transition("filed", action="filed")
-
-    def test_invalid_transition_fixed_to_queued(self) -> None:
-        report = self._make_report("fixed")
-        with pytest.raises(ValueError, match="Invalid transition: fixed -> queued"):
-            report.transition("queued", action="retry")
+    @pytest.mark.parametrize(
+        ("start", "target", "action"),
+        [
+            pytest.param(
+                "queued", "fixed", "fixed", id="invalid_transition_queued_to_fixed"
+            ),
+            pytest.param(
+                "closed", "filed", "filed", id="invalid_transition_closed_to_filed"
+            ),
+            pytest.param(
+                "fixed", "queued", "retry", id="invalid_transition_fixed_to_queued"
+            ),
+            # The no-op guard returns early on start == target; a DISTINCT
+            # invalid pair must still reach the raise behind it.
+            pytest.param(
+                "in-progress",
+                "fixed",
+                "fixed",
+                id="invalid_distinct_transition_still_raises_after_noop_guard",
+            ),
+        ],
+    )
+    def test_invalid_transition_raises(
+        self, start: str, target: str, action: str
+    ) -> None:
+        report = self._make_report(start)
+        with pytest.raises(
+            ValueError, match=f"Invalid transition: {start} -> {target}"
+        ):
+            report.transition(target, action=action)
 
     def test_transition_updates_timestamp(self) -> None:
         report = self._make_report("queued")
@@ -209,13 +225,6 @@ class TestTrackedReportTransition:
         report.transition("closed", action="confirm_fixed")
         assert report.status == "closed"
         assert report.history == []
-
-    def test_invalid_distinct_transition_still_raises_after_noop_guard(self) -> None:
-        report = self._make_report("in-progress")
-        with pytest.raises(
-            ValueError, match="Invalid transition: in-progress -> fixed"
-        ):
-            report.transition("fixed", action="fixed")
 
 
 # ---------------------------------------------------------------------------

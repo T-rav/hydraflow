@@ -369,11 +369,32 @@ class TestLLMEvaluation:
 
 
 class TestParseVerdict:
-    def test_direct_json(self) -> None:
-        transcript = '{"ready": true, "reasons": []}'
+    @pytest.mark.parametrize(
+        ("transcript", "ready"),
+        [
+            pytest.param('{"ready": true, "reasons": []}', True, id="direct_json"),
+            pytest.param(
+                'Here is my verdict: {"ready": true, "reasons": []} based on analysis',
+                True,
+                id="json_embedded_in_text",
+            ),
+            # bool("false") is True in Python; _coerce_ready must handle this.
+            pytest.param(
+                '{"ready": "false", "reasons": ["Missing detail"]}',
+                False,
+                id="ready_as_string_false_coerced_correctly",
+            ),
+            pytest.param(
+                '{"ready": "true", "reasons": []}',
+                True,
+                id="ready_as_string_true_coerced_correctly",
+            ),
+        ],
+    )
+    def test_parses_ready(self, transcript: str, ready: bool) -> None:
         result = TriageRunner._parse_verdict(transcript, 1)
         assert result is not None
-        assert result.ready is True
+        assert result.ready is ready
 
     def test_json_in_code_fence(self) -> None:
         transcript = (
@@ -383,14 +404,6 @@ class TestParseVerdict:
         assert result is not None
         assert result.ready is False
         assert result.reasons == ["Vague"]
-
-    def test_json_embedded_in_text(self) -> None:
-        transcript = (
-            'Here is my verdict: {"ready": true, "reasons": []} based on analysis'
-        )
-        result = TriageRunner._parse_verdict(transcript, 1)
-        assert result is not None
-        assert result.ready is True
 
     def test_unparseable_returns_none(self) -> None:
         transcript = "This is just plain text with no JSON"
@@ -449,21 +462,6 @@ class TestParseVerdict:
         assert result.reasons == [
             "Missing specificity"
         ]  # string preserved as single-item list
-
-    def test_ready_as_string_false_coerced_correctly(self) -> None:
-        """LLM returns ready as string 'false' — must NOT be coerced to True."""
-        # bool("false") == True in Python; _coerce_ready must handle this.
-        transcript = '{"ready": "false", "reasons": ["Missing detail"]}'
-        result = TriageRunner._parse_verdict(transcript, 1)
-        assert result is not None
-        assert result.ready is False  # string "false" → bool False, not True
-
-    def test_ready_as_string_true_coerced_correctly(self) -> None:
-        """LLM returns ready as string 'true' — should be coerced to True."""
-        transcript = '{"ready": "true", "reasons": []}'
-        result = TriageRunner._parse_verdict(transcript, 1)
-        assert result is not None
-        assert result.ready is True
 
     def test_system_init_lines_stripped_before_parsing(self) -> None:
         """Claude Code system/init JSON lines should be filtered out."""
