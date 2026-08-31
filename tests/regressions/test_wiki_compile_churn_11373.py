@@ -23,6 +23,13 @@ def _config(tmp_path: Path) -> MagicMock:
     config.repo_wiki_interval = 3600
     config.repo_wiki_git_backed = False
     config.wiki_anchor_prune_enabled = False
+    # A real number, not a MagicMock: every numeric knob the loop compares
+    # is a latent crash otherwise (a bare Mock RAISES on comparison).
+    # 0 = 'every topic has work', which DISABLES the #11898 compaction
+    # pre-check. Deliberate: these tests' subject is a different gate,
+    # and a test for gate A must not be silently short-circuited by
+    # gate B — that would leave it green while testing nothing.
+    config.wiki_compaction_similarity_threshold = 0.0
     data_dir = tmp_path / "data"
     data_dir.mkdir(exist_ok=True)
     config.data_path = data_dir.joinpath

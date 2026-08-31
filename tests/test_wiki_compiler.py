@@ -40,6 +40,9 @@ def compiler() -> WikiCompiler:
     # Arithmetic is the silent direction: `1 + MagicMock()` returns a truthy
     # MagicMock and propagates. Comparison fails loudly; arithmetic does not.
     config.wiki_compilation_batch_chars = 20_000
+    # 0 = 'always has work', so the #11898 compaction pre-check cannot
+    # short-circuit these tests before they reach the model call under test.
+    config.wiki_compaction_similarity_threshold = 0.0
     runner = MagicMock()
     creds = MagicMock()
     creds.gh_token = "fake-token"

@@ -768,6 +768,11 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
     ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
     ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
+    (
+        "wiki_compaction_similarity_threshold",
+        "HYDRAFLOW_WIKI_COMPACTION_SIMILARITY_THRESHOLD",
+        0.8,
+    ),
 ]
 
 # Formal give-up window thresholds (#10735) — one N-in-T pair per child-class.
@@ -4224,6 +4229,18 @@ class HydraFlowConfig(BaseModel):
             "Batching alone bounds each CALL but not the tick: a 4089-entry "
             "topic would buy its whole backlog at once. The remainder stays "
             "active and is compiled on later ticks. 0 disables the cap."
+        ),
+    )
+    wiki_compaction_similarity_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Body-similarity score at or above which two active wiki entries "
+            "count as a merge candidate. A topic with no candidate pair has "
+            "nothing for synthesis to merge, so its spawn is skipped entirely. "
+            "0 disables the check (every topic compiles, the pre-#11898 "
+            "behaviour)."
         ),
     )
     wiki_barren_compile_cooldown_hours: float = Field(
