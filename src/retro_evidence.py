@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.retro_evidence")
 
+# Cap on how much of ONE transcript is held in memory. Agent transcripts run to
+# megabytes and a tick gathers `retrospective_window` issues' worth, so an
+# unbounded read is a background loop holding the whole window at once. The
+# TAIL is kept for the same reason transcript_summarizer keeps it: failures and
+# final decisions land at the end.
+MAX_TRANSCRIPT_CHARS = 40_000
+
 # Transcript filenames keyed by ISSUE number. `review-pr` / `review-fix` are
 # deliberately absent: reviewer/_fixes.py keys those by PR number, a different
 # entity. Coverage of this tuple against the live `_save_transcript` call sites
@@ -73,6 +80,15 @@ def _load_traces(issue_dir: Path) -> list[SubprocessTrace]:
     return traces
 
 
+def _read_tail(path: Path) -> str:
+    """Read at most ``MAX_TRANSCRIPT_CHARS`` from the END of *path*."""
+    size = path.stat().st_size
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        if size > MAX_TRANSCRIPT_CHARS:
+            handle.seek(max(0, size - MAX_TRANSCRIPT_CHARS))
+        return handle.read()[-MAX_TRANSCRIPT_CHARS:]
+
+
 def _load_transcripts(log_dir: Path, issue_number: int) -> dict[str, str]:
     if not log_dir.is_dir():
         return {}
@@ -80,7 +96,7 @@ def _load_transcripts(log_dir: Path, issue_number: int) -> dict[str, str]:
     for template in TRANSCRIPT_GLOBS:
         for path in sorted(log_dir.glob(template.format(n=issue_number))):
             try:
-                transcripts[path.stem] = path.read_text(encoding="utf-8")
+                transcripts[path.stem] = _read_tail(path)
             except OSError:
                 logger.debug("Could not read transcript: %s", path)
     return transcripts
