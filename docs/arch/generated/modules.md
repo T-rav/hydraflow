@@ -52,7 +52,7 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "9" --> src_epic
     src -- "24" --> src_erosion
-    src -- "9" --> src_escape
+    src -- "10" --> src_escape
     src -- "5" --> src_flows
     src -- "1" --> src_health_monitor_loop
     src -- "26" --> src_hydraflow_gateway
