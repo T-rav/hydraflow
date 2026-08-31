@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10801
 source_phase: plan
 created_at: 2026-07-28T10:16:18.732722+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: drift_detected: src/health_monitor_loop.py
 ---
 
 # Use Skip-ADR trailer when behavior stays within ADR contract
