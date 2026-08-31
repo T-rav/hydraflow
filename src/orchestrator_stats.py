@@ -95,6 +95,32 @@ class OrchestratorStatsMixin:
         ) -> None: ...  # provided by OrchestratorBGWorkersMixin
 
     @property
+    def current_session_uptime_seconds(self) -> float:
+        """Seconds since the active session started; 0.0 when there is none.
+
+        One writer for a value two consumers need. ``build_pipeline_stats``
+        computed this inline, and ``/api/runtimes`` computed nothing at all —
+        `RepoRuntimeInfo.uptime_seconds` fell through to its 0.0 default and
+        reported a healthy runtime as having never started (#11836).
+
+        That is not cosmetic: uptime is what distinguishes a running factory
+        from a crashlooping one, since `status: idle` reads identically for
+        both (#11786). A restart shows up as uptime RESETTING — pinned at 0.0
+        the two are indistinguishable.
+
+        Never raises: the dashboard serialises this on every poll, so a bad
+        ``started_at`` returns 0.0 rather than 500-ing the status endpoint.
+        """
+        session = self._current_session
+        if not (session and session.started_at):
+            return 0.0
+        try:
+            started = datetime.fromisoformat(session.started_at)
+        except (ValueError, TypeError):
+            return 0.0
+        return (datetime.now(UTC) - started).total_seconds()
+
+    @property
     def run_status(self) -> str:
         """Return the current lifecycle status: idle, running, stopping, auth_failed, credits_paused, or done."""
         if self._auth_failed:
@@ -139,14 +165,7 @@ class OrchestratorStatsMixin:
         queue_stats = cast("IssueStore", self._svc.store).get_queue_stats()
         lifetime = self._state.get_lifetime_stats()
 
-        # Compute uptime from session start
-        uptime = 0.0
-        if self._current_session and self._current_session.started_at:
-            try:
-                started = datetime.fromisoformat(self._current_session.started_at)
-                uptime = (datetime.now(UTC) - started).total_seconds()
-            except (ValueError, TypeError):
-                pass
+        uptime = self.current_session_uptime_seconds
 
         # Map stage keys to config worker caps
         stage_caps: dict[str, int] = {

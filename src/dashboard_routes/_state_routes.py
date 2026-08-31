@@ -115,6 +115,12 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         session_id=rt.orchestrator.current_session_id
                         if rt.running
                         else None,
+                        # 0.0 for a stopped runtime is truthful; for a RUNNING
+                        # one it made a crashloop look like a healthy factory
+                        # (#11836).
+                        uptime_seconds=rt.orchestrator.current_session_uptime_seconds
+                        if rt.running
+                        else 0.0,
                         last_error=rt.last_error,
                         provider=_effective_repo_provider(rt.config),
                     ).model_dump()
@@ -136,6 +142,9 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             repo=rt.config.repo,
             running=rt.running,
             session_id=rt.orchestrator.current_session_id if rt.running else None,
+            uptime_seconds=rt.orchestrator.current_session_uptime_seconds
+            if rt.running
+            else 0.0,
             last_error=rt.last_error,
             provider=_effective_repo_provider(rt.config),
         )
