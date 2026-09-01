@@ -194,12 +194,14 @@ def parse_findings(raw: str) -> tuple[list[RetroFinding], int]:
     The unparseable count matters: a finding rejected here (wrong shape, no
     anchor) used to vanish at debug level, so a model emitting structurally
     broken output was indistinguishable from one with nothing to report. The
-    whole design promises drops are counted, not silent.
+    whole design promises drops are counted, not silent. A response with no
+    JSON array at all — full confabulation, prose instead of the requested
+    shape — is the same failure mode and counts as one, not zero.
     """
     payload = _extract_array(raw)
     if payload is None:
         logger.warning("Retro finder returned no parseable JSON array")
-        return [], 0
+        return [], 1
 
     findings: list[RetroFinding] = []
     unparseable = 0

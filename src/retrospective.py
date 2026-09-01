@@ -301,7 +301,12 @@ class RetrospectiveCollector:
         findings = await self._finder.find(signals, issue_labels=labels)
         counts["unparseable"] = getattr(self._finder, "unparseable", 0)
         kept, dropped = validate(findings, signals, Path(self._config.repo_root))
-        counts["dropped"] = len(dropped)
+        # A response that never parsed into a finding is the same failure
+        # mode as one that parsed and got rejected: both must show up in the
+        # drop rate the loop reports, or a confabulating model is
+        # indistinguishable from a tick that legitimately found nothing
+        # (ADR-0144's "rising drop rate rather than board spam" guarantee).
+        counts["dropped"] = len(dropped) + counts["unparseable"]
         for drop in dropped:
             logger.info("Retro finding dropped (%s): %s", drop.kind, drop.reason)
 
