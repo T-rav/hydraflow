@@ -514,3 +514,41 @@ _Source: #11547 review of #11696_
 ```json:entry
 {"id":"TEST-PATCH-TARGET-CONSULTED-001","source_type":"manual","topic":"testing","tags":["mocking","patch-target","vacuous-test","regression-guard","workspace","mutation-testing"],"rule":"Patch the module that BINDS the symbol (the one whose method is under test), never the package or a sibling slice, and assert the mock was consulted. tests/conftest.py::_workspace_patches_must_be_consulted fails any test that installs a workspace.* mock and never calls it; a deliberate non-call is declared with tests.workspace_patch.expect_unconsulted(mock, reason). patch.object on module-level DATA rebinds a name and does not mutate the object, so a re-exported registry makes a stale target resolve silently instead of raising AttributeError.","anti_pattern":"Resolving a patch target empirically — try each module until the test passes. A wrong target lets the real callee run, its failure is swallowed by the production code's broad except, and a weak assertion (assert result is None / assert not any(...) / assert not path.exists()) passes while testing nothing.","code_refs":["tests/workspace_patch.py","tests/conftest.py","tests/architecture/test_workspace_patch_targets.py","src/workspace/__init__.py"],"source_issue":11547,"added":"2026-08-24"}
 ```
+
+
+## Probe the producer over a recorded fixture; do not sweep the source for it
+
+For the defect class "a model field is declared, consumed downstream, and never
+actually populated", static analysis is the wrong instrument. Measured on this
+repo, both attempted against the same code:
+
+- An **AST sweep** for "container attribute initialised empty and never
+  mutated" across all of `src/` returned **one hit, and it was a false
+  positive**: `OrchestratorLifecycleMixin._session_issue_results` *is* written,
+  by a different mixin on the same object. Class-scoped analysis cannot see
+  cross-mixin writes. It was also structurally blind to the defect that
+  prompted it — `TraceToolProfile.tool_errors` **was** mutated, just always
+  with the literal key `"__stream__"` instead of the tool name. "Never written"
+  is strictly narrower than "never written with the value the consumer
+  expects."
+- A **behavioural probe** — drive the real producer over a real recorded
+  fixture, finalize, then diff every field against its default — found
+  `SubprocessTrace.turn_count` in one run. Never incremented, summed into a
+  field the diagnostics API serves, zero for every trace ever written.
+
+Twenty lines of probe beat a hundred of sweep, because the defect is defined by
+runtime behaviour and only runtime observation sees it.
+
+Two cautions. Check each hit for fixture artefacts first: `duration_ms` read
+zero only because replaying a fixture elapses ~0 ms, which is not a defect. And
+if you delete the population a sweep finds, **keep one specimen** — removing all
+26 stale worktrees before testing the collector against one of them destroyed
+the evidence for why they had accumulated.
+
+**Why:** every one of these fields was pinned at the *model* level by tests
+that constructed the model by hand, and never at the *producer* level — so
+deleting the producer's write would have kept the suite green.
+
+```json:entry
+{"id":"01MA8AA915EC9584BCC95B8E24","title":"Probe the producer over a recorded fixture; do not sweep the source for it","topic":null,"source_type":"manual","source_issue":11891,"source_repo":null,"created_at":"2026-08-31T00:00:00+00:00","updated_at":"2026-08-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
