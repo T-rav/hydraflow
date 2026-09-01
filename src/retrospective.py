@@ -301,7 +301,14 @@ class RetrospectiveCollector:
         findings = await self._finder.find(signals, issue_labels=labels)
         counts["unparseable"] = getattr(self._finder, "unparseable", 0)
         kept, dropped = validate(findings, signals, Path(self._config.repo_root))
-        counts["dropped"] = len(dropped)
+        # Both kinds of loss, in the one number a caller reads. `unparseable`
+        # counts items the finder could not turn into a Finding at all
+        # (#11903); `dropped` counted only the ones that parsed and then failed
+        # `validate`. It was computed and surfaced nowhere, so a tick that
+        # confabulated every item reported `findings_dropped: 0` — indis-
+        # tinguishable from a clean tick, which is the #11965 audit escape.
+        # The breakdown stays available as `counts["unparseable"]`.
+        counts["dropped"] = len(dropped) + counts["unparseable"]
         for drop in dropped:
             logger.info("Retro finding dropped (%s): %s", drop.kind, drop.reason)
 
