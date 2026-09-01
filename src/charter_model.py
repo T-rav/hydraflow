@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
-from data_class_vocabulary import is_valid_data_class
+from data_class_vocabulary import is_regulated_class, is_valid_data_class
 
 CHARTER_FILENAME = "charter.yaml"
 CHARTER_SCHEMA_VERSION = 1
@@ -472,3 +472,14 @@ class Charter:
             or self.rails.domain_gate_scripts
             or self.rails.coverage_floor > 0
         )
+
+    @property
+    def is_regulated(self) -> bool:
+        """True when ``articles.assurance`` is a ``regulated-*`` class.
+
+        ADR-0143's assurance scale, reused (never a second scale, #11748); a
+        decision rule reads this to ask whether the repo's charter puts it
+        under a regulated assurance discipline (ADR-0123's factory-binding
+        composition probe, #11869).
+        """
+        return is_regulated_class(self.articles.assurance)

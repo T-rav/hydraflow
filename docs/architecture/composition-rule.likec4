@@ -1,0 +1,88 @@
+specification {
+  element system
+  element container
+  element component
+  element datastore
+  relationship reads
+  relationship emits
+}
+
+model {
+  seam11869 = system 'Decision Seam (#11869 composition rule)' {
+    description 'Facts in, StandardDecisions out. The first cross-standard rule joins a SUBJECT fact (binds) to a REPO fact (articles.assurance).'
+
+    c11869Vocab = container 'data_class_vocabulary.py' {
+      description 'PURE. public-code | internal | regulated-<name>. One scale, no second (#11748).'
+      technology 'Python (pure, pinned)'
+      c11869IsValid = component 'is_valid_data_class()'
+      c11869IsReg = component 'is_regulated_class()  [NEW]'
+    }
+
+    c11869CharterModel = container 'charter_model.py' {
+      description 'PURE charter shape. Imported by the seam; must not touch the world.'
+      technology 'Python (pure, pinned)'
+      c11869Articles = component 'Articles.assurance'
+      c11869IsRegulated = component 'Charter.is_regulated  [NEW]'
+    }
+
+    c11869AdrIndex = container 'adr_index.py' {
+      description 'ADR corpus parser. ADR.binds = work | factory | both | unknown (ADR-0123).'
+      technology 'Python (reads docs/adr)'
+      c11869Binds = component 'ADR.binds'
+    }
+
+    c11869Facts = container 'policy/facts.py' {
+      description 'The ONLY half allowed to read the world. Emits primitive observations, never verdicts.'
+      technology 'Python (collector)'
+      c11869Collect = component 'collect_adr_enforcement_facts()'
+    }
+
+    c11869Engine = container 'policy/python_engine.py' {
+      description 'PURE. Reads no file, opens no socket. Fail-closed on thin evidence.'
+      technology 'Python (pure, pinned)'
+      c11869Decide = component 'PythonDecisionEngine.decide()'
+      c11869DecideEnf = component '_decide_enforcement(subject, facts, charter)  [SIGNATURE CHANGE]'
+      c11869Probe = component 'composition rule: regulated AND binds in {factory,both} AND WEAK  [NEW]'
+    }
+
+    c11869Ledger = datastore 'facts.jsonl' {
+      description 'Snapshot ledger, one row per (standard, subject, key). Offline replay target.'
+    }
+
+    c11869Charter = datastore 'charter.yaml' {
+      description 'articles.assurance: internal (HydraFlow) / regulated-demo (#11863 demo repo).'
+    }
+
+    c11869Verdicts = container 'standards-decisions.md (#11862 / #11863)' {
+      description 'The verdicts page. Where the blocking row must be visible on camera.'
+    }
+  }
+
+  c11869CharterModel -> c11869Vocab 'validates + classifies assurance' 
+  c11869Collect -> c11869AdrIndex 'reads ADR.binds'
+  c11869Collect -> c11869Ledger 'emits binds fact'
+  c11869Decide -> c11869DecideEnf 'threads the active charter'
+  c11869DecideEnf -> c11869Probe 'after exempt, before grandfathered'
+  c11869Probe -> c11869IsRegulated 'asks the repo fact'
+  c11869Engine -> c11869Ledger 'replays recorded facts'
+  c11869Charter -> c11869CharterModel 'loaded by charter.py'
+  c11869Engine -> c11869Verdicts 'blocking row'
+}
+
+views {
+  view c11869Context {
+    title 'Composition rule — subject fact x repo fact'
+    include *
+  }
+
+  view c11869Ladder {
+    title 'Enforcement ladder with the composition rule inserted'
+    include
+      c11869Decide,
+      c11869DecideEnf,
+      c11869Probe,
+      c11869IsRegulated,
+      c11869Collect,
+      c11869Binds
+  }
+}

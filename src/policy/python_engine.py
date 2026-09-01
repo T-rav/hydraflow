@@ -63,14 +63,25 @@ _DEBT_CLASSES: frozenset[str] = frozenset(
     {EnforcementClass.WEAK.value, EnforcementClass.MISSING.value}
 )
 
-#: Facts every ``adr_enforcement`` subject must carry. All four are load-bearing:
-#: dropping ``resolved`` alone turns a paid debt back into a grandfathered one.
+#: Facts every ``adr_enforcement`` subject must carry. All five are load-bearing:
+#: dropping ``resolved`` alone turns a paid debt back into a grandfathered one;
+#: dropping ``binds`` would silently exempt every factory-binding ADR from the
+#: composition probe below.
 _ENFORCEMENT_REQUIRED: tuple[str, ...] = (
     "enforcement_class",
     "in_baseline_snapshot",
     "resolved",
     "exempt",
+    "binds",
 )
+
+#: ADR-0123 ``Binds:`` values that claim the ADR governs the factory itself
+#: (its loops, gates, instruments, authority path), not only what it builds —
+#: the values the composition probe below reads. ``both`` belongs here exactly
+#: as much as ``factory``: the OPA pilot's one recorded bug (#11750) was a probe
+#: that checked only ``binds == "factory"`` and silently let ``Binds: both``
+#: through.
+_BINDS_FACTORY: frozenset[str] = frozenset({"factory", "both"})
 
 _PYRAMID_REQUIRED = (
     "touches_source",
@@ -125,7 +136,9 @@ class PythonDecisionEngine:
         for standard, subject in sorted(grouped):
             subject_facts = grouped[(standard, subject)]
             if standard == STANDARD_ADR_ENFORCEMENT:
-                decisions.append(self._decide_enforcement(subject, subject_facts))
+                decisions.append(
+                    self._decide_enforcement(subject, subject_facts, active)
+                )
             elif standard == STANDARD_ADR_CONFORMANCE:
                 decisions.append(self._decide_conformance(subject, subject_facts))
             elif standard == STANDARD_TEST_PYRAMID:
@@ -238,7 +251,9 @@ class PythonDecisionEngine:
         )
 
     @staticmethod
-    def _decide_enforcement(subject: str, facts: Sequence[Fact]) -> StandardDecision:
+    def _decide_enforcement(
+        subject: str, facts: Sequence[Fact], charter: Charter
+    ) -> StandardDecision:
         """The ADR-enforcement ratchet's rule, re-derived from primitive facts.
 
         The ladder below is deliberately NOT a call into
@@ -249,12 +264,21 @@ class PythonDecisionEngine:
         evidence — which is the only arrangement under which
         ``test_policy_adr_enforcement_parity`` can fail, and therefore the only
         one under which it means anything.
+
+        One arm joins a fact about a DIFFERENT subject: the repo's own charter.
+        An ADR that binds the factory itself (``binds`` — ``factory``/``both``,
+        ADR-0123) and classifies ``WEAK`` is blocking even when the baseline
+        would otherwise grandfather it, once the charter declares a regulated
+        assurance class (``Charter.is_regulated``, ADR-0143). Under the default
+        (``internal``) charter this arm can never fire — ``charter.is_regulated``
+        is False — so HydraFlow's own decisions are unchanged (#11869).
         """
         by_key = _indexed(facts, _ENFORCEMENT_REQUIRED)
         cls = str(by_key["enforcement_class"])
         exempt = bool(by_key["exempt"])
         in_snapshot = bool(by_key["in_baseline_snapshot"])
         resolved = bool(by_key["resolved"])
+        binds = str(by_key["binds"])
 
         if cls not in _DEBT_CLASSES:
             return StandardDecision(
@@ -277,6 +301,24 @@ class PythonDecisionEngine:
                     "docs/standards/adr_enforcement/exemptions.md"
                 ),
                 remediation=RemediationAction.NONE,
+                facts=list(facts),
+            )
+        if (
+            charter.is_regulated
+            and binds in _BINDS_FACTORY
+            and cls == EnforcementClass.WEAK.value
+        ):
+            return StandardDecision(
+                standard=STANDARD_ADR_ENFORCEMENT,
+                subject=subject,
+                status=DecisionStatus.VIOLATED,
+                blocking=True,
+                reason=(
+                    f"WEAK enforcement on a Binds:{binds} decision under a "
+                    "regulated charter — the ratchet does not carry "
+                    "factory-binding debt in a regulated repo"
+                ),
+                remediation=RemediationAction.FILE_ISSUE,
                 facts=list(facts),
             )
         if in_snapshot and not resolved:

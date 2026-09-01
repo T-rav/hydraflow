@@ -32,9 +32,17 @@ DATA_CLASS_INTERNAL = "internal"
 #: Where classification uncertainty collapses to. Never downward (spec #9734).
 FAIL_CLOSED_DATA_CLASS = "regulated-unclassified"
 
+#: Every class more restrictive than ``internal`` carries this prefix.
+REGULATED_PREFIX = "regulated-"
+
 _VALID_CLASS_RE = _compile(r"^(?:public-code|internal|regulated-[a-z0-9][a-z0-9-]*)$")
 
 
 def is_valid_data_class(raw: str) -> bool:
     """True when *raw* is a well-formed data class string."""
     return bool(_VALID_CLASS_RE.fullmatch(raw.strip()))
+
+
+def is_regulated_class(raw: str) -> bool:
+    """True for ``regulated-*`` classes (including the fail-closed class)."""
+    return raw.startswith(REGULATED_PREFIX)

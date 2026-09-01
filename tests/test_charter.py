@@ -234,6 +234,15 @@ def test_assurance_defaults_to_internal() -> None:
     assert Charter.from_dict({}).articles.assurance == "internal"
 
 
+def test_is_regulated_true_for_a_regulated_assurance_class() -> None:
+    charter = Charter.from_dict({"articles": {"assurance": "regulated-hipaa"}})
+    assert charter.is_regulated is True
+
+
+def test_is_regulated_false_for_internal_assurance() -> None:
+    assert Charter.from_dict({}).is_regulated is False
+
+
 # --------------------------------------------------------------------------- #
 # Load / write                                                                 #
 # --------------------------------------------------------------------------- #
