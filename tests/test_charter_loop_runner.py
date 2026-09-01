@@ -378,6 +378,41 @@ class TestReceipts:
         assert receipts[0].window == _NOW.isoformat()
         assert receipts[0].trigger == "0 9 * * *"
 
+    async def test_tick_returns_only_its_own_receipts_for_a_ran_loop(
+        self, tmp_path: Path
+    ) -> None:
+        """A long-lived runner's second tick must not re-report the first
+        tick's receipts — including a loop that actually ran, not just the
+        skip path the regression pin covers (#11962). This exercises the
+        `_receipt` call site inside `_run_one`, which the skip-only pin
+        never reaches."""
+        agents = tmp_path / "agents"
+        agents.mkdir()
+        (agents / "a.md").write_text("contract")
+
+        async def _dispatch(**kw):  # noqa: ARG001
+            return {}
+
+        runner = CharterLoopRunner(
+            repo="o/r",
+            repo_root=tmp_path,
+            receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
+            dispatch=_dispatch,
+        )
+        charter = _charter(a={"enabled": True, "trigger": [{"cron": "0 9 * * *"}]})
+
+        first = await runner.tick(charter, now=_NOW, last_fired={"a": _YESTERDAY})
+        second = await runner.tick(
+            charter, now=_NOW + timedelta(hours=1), last_fired={"a": _YESTERDAY}
+        )
+
+        assert [r.outcome for r in first] == [OUTCOME_RAN]
+        assert [r.outcome for r in second] == [OUTCOME_RAN]
+        assert [r.observed_at for r in second] == [
+            (_NOW + timedelta(hours=1)).isoformat()
+        ], "the second tick re-reported the first tick's receipt (#11962)"
+
 
 class TestTheRunnerHasNoWritePathToTheCharter:
     """ADR-0143 Ruling 6 guard 4, structurally rather than by convention."""

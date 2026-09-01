@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -217,10 +217,9 @@ class CharterLoopRunner:
     #: Raised to the operator; never a filed issue. A refusal that files an
     #: issue looks like work in progress rather than a stop.
     alert: Any = None
-    _written: list[RunReceipt] = field(default_factory=list)
 
-    def _receipt(self, receipt: RunReceipt) -> None:
-        self._written.append(receipt)
+    def _receipt(self, written: list[RunReceipt], receipt: RunReceipt) -> None:
+        written.append(receipt)
         try:
             self.receipts_path.parent.mkdir(parents=True, exist_ok=True)
             self.receipt_writer(self.receipts_path, receipt.to_json())
@@ -249,9 +248,17 @@ class CharterLoopRunner:
         actors_dir = self.repo_root / charter.actors
         by_name = charter.loops.by_name()
 
+        # Per-tick, deliberately not instance state: `tick()` reports what THIS
+        # pass decided, and the durable history is the JSONL stream. An
+        # instance accumulator would make every return value over-report
+        # monotonically and retain the receipts for the process lifetime
+        # (#11962).
+        written: list[RunReceipt] = []
+
         for decision in decisions:
             if not decision.should_run:
                 self._receipt(
+                    written,
                     RunReceipt(
                         repo=self.repo,
                         loop=decision.loop,
@@ -259,13 +266,18 @@ class CharterLoopRunner:
                         outcome=decision.outcome,
                         observed_at=stamped.isoformat(),
                         detail=decision.detail,
-                    )
+                    ),
                 )
                 continue
             await self._run_one(
-                by_name[decision.loop], decision, stamped, overrides, actors_dir
+                by_name[decision.loop],
+                decision,
+                stamped,
+                overrides,
+                actors_dir,
+                written,
             )
-        return list(self._written)
+        return written
 
     async def _run_one(
         self,
@@ -274,6 +286,7 @@ class CharterLoopRunner:
         stamped: datetime,
         overrides: Mapping[str, str],
         actors_dir: Path,
+        written: list[RunReceipt],
     ) -> None:
         contract = resolve_actor_contract(actors_dir, loop.actor)
         if contract is None:
@@ -287,6 +300,7 @@ class CharterLoopRunner:
             if self.alert is not None:
                 await self.alert(repo=self.repo, loop=loop.name, detail=detail)
             self._receipt(
+                written,
                 RunReceipt(
                     repo=self.repo,
                     loop=loop.name,
@@ -296,7 +310,7 @@ class CharterLoopRunner:
                     window=decision.window.isoformat() if decision.window else "",
                     trigger=decision.trigger,
                     detail=detail,
-                )
+                ),
             )
             return
 
@@ -321,6 +335,7 @@ class CharterLoopRunner:
 
         refused = bool(result.get("budget_refused"))
         self._receipt(
+            written,
             RunReceipt(
                 repo=self.repo,
                 loop=loop.name,
@@ -338,5 +353,5 @@ class CharterLoopRunner:
                 pr_url=str(result.get("pr_url", "")),
                 cost_usd=result.get("cost_usd"),
                 detail=str(result.get("detail", "")),
-            )
+            ),
         )
