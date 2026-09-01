@@ -127,6 +127,8 @@ from erosion.scatter import DEFAULT_SCATTER_THRESHOLD, added_symbols_for_range
 from erosion.scatter import compute as scatter_compute
 from erosion.scatter_baseline import diff as scatter_diff
 from erosion.scatter_baseline import load_scatter_baseline
+from erosion.slowness import collect_durations
+from erosion.slowness import compute as slowness_compute
 from erosion.spread import changed_files_for_range
 from erosion.spread import compute as spread_compute
 from erosion.suite_hygiene import collect_tests
@@ -210,9 +212,14 @@ def scatter_finding_fingerprint(commit_range: str, symbol: str) -> str:
 # ``find_class_key`` marker + a ``## Folded sites`` roster so human finders and
 # ``scripts/find_class_check.py`` fold into it rather than filing siblings.
 _MASS_BASELINE_REL = Path("disturbance") / "baselines" / "mass.yaml"
+#: Written by ``tests/conftest.py`` when ``HYDRAFLOW_DURATIONS_OUT`` is set.
+#: Absent on a repo whose suite has never been measured, which is why the
+#: slowness reading is skipped rather than reported empty (#11910).
+_DURATIONS_REL = Path(".hydraflow") / "test_durations.json"
 _CLASS_SOURCE = "erosion_metrics"
 _CLASS_NEEDLES: dict[str, str] = {
     "mass": "god class god file mass decomposition oversized",
+    "slowness": "slow test suite duration timeout budget performance",
     "suite_hygiene": "test suite structural redundancy parametrize duplicate tests",
 }
 #: Roster lines per class issue body — bounded so a body can never approach
@@ -451,6 +458,35 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
                         },
                     }
                 )
+        # Suite time (#11910). The ONE reading that needs a measurement rather
+        # than a parse: duration cannot be derived from source the way mass and
+        # suite-hygiene are, so an unmeasured repo is SKIPPED, never reported
+        # as a fast one. `total_tests == 0` is the difference between "nothing
+        # slow" and "nothing measured", and only the first deserves a roster.
+        durations = collect_durations(repo_root / _DURATIONS_REL)
+        if durations:
+            slowness = slowness_compute(durations)
+            if not slowness.is_empty:
+                roster = [
+                    _site_line(f"{s.nodeid} — {s.seconds:.1f}s", s.nodeid)
+                    for s in slowness.slow_tests
+                ]
+                candidates.append(
+                    {
+                        "kind": "slowness",
+                        "class_issue": True,
+                        "finding": slowness,
+                        "roster": roster,
+                        "digest": _roster_digest(roster),
+                        "summary": {
+                            "digest": _roster_digest(roster),
+                            "slow_tests": len(slowness.slow_tests),
+                            "slow_share_pct": round(slowness.share * 100, 1),
+                            "total_seconds": round(slowness.total_seconds, 1),
+                            "measured_tests": slowness.total_tests,
+                        },
+                    }
+                )
         tests_dir = repo_root / "tests"
         if tests_dir.is_dir():
             suite = suite_compute(collect_tests(tests_dir))
@@ -643,12 +679,50 @@ def _short(sha: str) -> str:
     return sha[:7]
 
 
+def _render_slowness(candidate: dict[str, Any]) -> tuple[str, str]:
+    """Title + body for the suite-time roster (#11910)."""
+    finding = candidate["finding"]
+    title = (
+        f"Erosion: {len(finding.slow_tests)} test(s) hold "
+        f"{finding.share:.0%} of the suite's runtime "
+        f"(slowest: {finding.slow_tests[0].seconds:.0f}s)"
+    )
+    body = (
+        "## Evidence (ErosionMetricsLoop, automated)\n\n"
+        "| metric | value |\n|---|---|\n"
+        f"| tests over {finding.threshold_seconds:.0f}s | "
+        f"{len(finding.slow_tests)} |\n"
+        f"| their share of runtime | {finding.share:.1%} |\n"
+        f"| measured tests | {finding.total_tests} |\n"
+        f"| measured runtime | {finding.total_seconds:.0f}s |\n"
+        f"| slowest | {finding.slow_tests[0].nodeid} "
+        f"({finding.slow_tests[0].seconds:.1f}s) |\n\n"
+        "A **measured** reading, unlike every other erosion sensor: duration "
+        "cannot be derived from source, so this is only ever true of the run "
+        "that produced it. A contended host inflates every number together, "
+        "which is why the share (a ratio) is the figure to trust and the raw "
+        "seconds are context.\n\n"
+        "The 60s budget in `tests/conftest.py` is a GATE — it stops the worst "
+        "case and says nothing about the trend. This roster is the trend: it "
+        "names tests climbing toward that budget while they are still cheap "
+        "to fix. Two tests reached 90s under load and blew the 300s timeout on "
+        "two separate branches before anyone looked, and neither was slow in "
+        "the 'does a lot of work' sense — each had one accidentally-quadratic "
+        "call worth 4-5x (#11910).\n\n"
+        "Profile before optimising. A test near the top of this roster is "
+        "usually one bad call, not accumulated work.\n"
+    )
+    return title, body
+
+
 def _render_finding(candidate: dict[str, Any]) -> tuple[str, str]:
     """Render (title, body) for one erosion finding, evidence table included."""
     if candidate["kind"] == "mass":
         return _render_mass(candidate)
     if candidate["kind"] == "suite_hygiene":
         return _render_suite_hygiene(candidate)
+    if candidate["kind"] == "slowness":
+        return _render_slowness(candidate)
     if candidate["kind"] == TOKEN_DRIFT_KIND:
         return render_token_drift(candidate)
 

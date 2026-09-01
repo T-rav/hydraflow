@@ -186,6 +186,48 @@ class GodClass:
 
 
 @dataclass(frozen=True)
+class SlowTest:
+    """One test whose CALL phase is slow enough to be worth naming.
+
+    ``seconds`` is the call phase only — setup and teardown are a fixture's
+    cost, not the test's, and a session-scoped fixture would otherwise charge
+    its whole price to whichever test happened to run first.
+    """
+
+    nodeid: str
+    seconds: float
+
+
+@dataclass(frozen=True)
+class SlownessFinding:
+    """The suite's time reading: which tests cost the most, and how concentrated.
+
+    The mass sensor's question, asked of the test suite's clock instead of its
+    line counts. ``share`` is what makes it a roster rather than a list: a
+    suite where the slowest 20 tests hold 5% of the runtime has no problem to
+    burn down, and one where they hold 60% has exactly one.
+    """
+
+    slow_tests: tuple[SlowTest, ...]
+    total_seconds: float
+    total_tests: int
+    threshold_seconds: float
+
+    @property
+    def slow_seconds(self) -> float:
+        return sum(t.seconds for t in self.slow_tests)
+
+    @property
+    def share(self) -> float:
+        """Fraction of total runtime held by the slow tests (0.0 when empty)."""
+        return self.slow_seconds / self.total_seconds if self.total_seconds else 0.0
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.slow_tests
+
+
+@dataclass(frozen=True)
 class MassFinding:
     """The repo-wide size reading: god files and god classes, largest first."""
 
