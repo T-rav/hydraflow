@@ -158,6 +158,9 @@ probe is now answered once per engine instance.
 
 ## Measurement 4 — the composition probe: **cheaper in Rego, and not by enough**
 
+**Landed in Python** by #11869, `Binds: both` regression included — the pilot's OPA policy stays a
+measurement, not the shipped implementation.
+
 The rule, chosen because it cannot be expressed by a per-subject ladder without new plumbing:
 
 > An ADR that binds the **factory** (ADR-0123 `**Binds:** factory | both`) and is only weakly

@@ -49,6 +49,8 @@ from data_class_vocabulary import (
     DATA_CLASS_INTERNAL,
     DATA_CLASS_PUBLIC_CODE,
     FAIL_CLOSED_DATA_CLASS,
+    REGULATED_PREFIX,
+    is_regulated_class,
     is_valid_data_class,
 )
 from file_util import append_jsonl
@@ -61,9 +63,6 @@ logger = logging.getLogger("hydraflow.prompt_gate")
 
 #: The two unregulated data classes (in ascending restriction order).
 
-
-#: Every class more restrictive than ``internal`` carries this prefix.
-REGULATED_PREFIX = "regulated-"
 
 #: Fail-closed class assigned on ANY classification uncertainty (unknown or
 #: malformed class string, conflicting regulated issue labels). It is
@@ -124,7 +123,7 @@ def restriction_rank(data_class: str) -> int:
 
 def is_regulated(data_class: str) -> bool:
     """True for ``regulated-*`` classes (including the fail-closed class)."""
-    return data_class.startswith(REGULATED_PREFIX)
+    return is_regulated_class(data_class)
 
 
 def effective_data_class(repo_class: str, issue_labels: Sequence[str] = ()) -> str:

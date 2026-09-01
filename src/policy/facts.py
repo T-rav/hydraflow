@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING
 import yaml
 
 from adr_conformance import (
-    enforcement_classification,
+    accepted_adrs,
+    classify_adr_enforcement,
     load_enforcement_baseline,
     parse_exemptions,
 )
@@ -83,20 +84,27 @@ def collect_adr_enforcement_facts(
 ) -> list[Fact]:
     """Observe the enforcement-debt evidence for every Accepted ADR.
 
-    Four facts per ADR, all primitive:
+    Five facts per ADR, all primitive:
 
     * ``enforcement_class`` — ``REAL`` / ``WEAK`` / ``MISSING``
       (``adr_conformance.classify_adr_enforcement``).
     * ``in_baseline_snapshot`` — is the ADR in the frozen landing snapshot?
     * ``resolved`` — has its debt been claimed paid in the baseline JSON?
     * ``exempt`` — is it allow-listed as process-only?
+    * ``binds`` — ``work`` / ``factory`` / ``both`` / ``unknown``
+      (``adr_index.ADR.binds``, ADR-0123): which direction the ADR's rule
+      constrains. A fact about the SUBJECT, joined at decision time to a fact
+      about the repo (``Charter.is_regulated``, ADR-0143) by the composition
+      probe in ``PythonDecisionEngine._decide_enforcement``.
 
     The engine derives ``grandfathered`` from the middle two; see the module
     docstring for why that derivation is not done here.
     """
-    classes = enforcement_classification(repo_root)
+    adrs = accepted_adrs(repo_root)
+    classes = {adr.number: classify_adr_enforcement(adr, repo_root) for adr in adrs}
     snapshot, resolved = load_enforcement_baseline(repo_root)
     exempted = frozenset(parse_exemptions(repo_root))
+    binds_by_number = {adr.number: adr.binds for adr in adrs}
 
     facts: list[Fact] = []
     for number in sorted(classes):
@@ -106,6 +114,7 @@ def collect_adr_enforcement_facts(
             ("in_baseline_snapshot", number in snapshot),
             ("resolved", number in resolved),
             ("exempt", number in exempted),
+            ("binds", binds_by_number.get(number, "unknown")),
         ]
         facts.extend(
             Fact(

@@ -1,0 +1,38 @@
+specification {
+  element actor
+  element step
+  relationship flow
+}
+
+model {
+  a11869Ratchet = actor 'ADR enforcement ratchet / demo verdicts page'
+
+  s11869Scan = step 'collect_adr_enforcement_facts(repo_root)'
+  s11869Binds = step 'emit binds (work|factory|both|unknown) as a 5th primitive fact'
+  s11869Write = step 'facts_to_jsonl -> facts.jsonl'
+  s11869Replay = step 'facts_from_jsonl'
+  s11869Group = step 'decide(): group by (standard, subject), charter.governs()'
+  s11869Class = step 'class not in {WEAK,MISSING} -> COMPLIANT'
+  s11869Exempt = step 'exempt -> EXEMPT (still wins over the composition rule)'
+  s11869Probe = step 'charter.is_regulated AND binds in {factory,both} AND class == WEAK -> VIOLATED + blocking'
+  s11869Grand = step 'in_baseline_snapshot AND NOT resolved -> GRANDFATHERED'
+  s11869Viol = step 'otherwise -> VIOLATED + blocking'
+
+  a11869Ratchet -> s11869Scan 'per tick / per CI run'
+  s11869Scan -> s11869Binds 'reads ADR.binds from adr_index'
+  s11869Binds -> s11869Write 'primitive observation, no verdict'
+  s11869Write -> s11869Replay 'offline reproducibility'
+  s11869Replay -> s11869Group 'MissingFactError if binds absent (fail-closed)'
+  s11869Group -> s11869Class 'ordered ladder'
+  s11869Class -> s11869Exempt 'not compliant'
+  s11869Exempt -> s11869Probe 'not exempt'
+  s11869Probe -> s11869Grand 'rule did not fire (e.g. assurance: internal)'
+  s11869Grand -> s11869Viol 'not grandfathered'
+}
+
+views {
+  view c11869Flow {
+    title 'Fact collection -> ladder -> verdict (composition rule inserted after EXEMPT)'
+    include *
+  }
+}

@@ -21,6 +21,12 @@ Seeded corpus:
 * ``ADR-0100`` — ``enforced`` against a real asserting node. REAL, compliant,
   and its check passes: the anti-vacuity third ADR that keeps the scenario from
   agreeing over a corpus where nothing is ever fine.
+* ``ADR-0500`` — ``manual``, ``**Binds:** both``, carried in the frozen
+  baseline. WEAK and grandfathered under ``internal``; MANUAL at runtime, so
+  it files nothing either way. The composition rule (#11869) fixture: joining
+  the SUBJECT fact (``binds``) to the REPO fact (``charter.is_regulated``)
+  flips this one ADR from GRANDFATHERED to VIOLATED+blocking with no change
+  to the corpus, only to the charter passed to ``decide()``.
 
 Note what is NOT claimed: the exempt ADR files no issue because its *runtime*
 outcome is ``MANUAL``, not because the enforcement exemption suppresses the
@@ -45,7 +51,7 @@ from dedup_store import DedupStore
 from events import EventBus
 from mockworld.fakes import FakeConformanceRunner
 from policy.facts import collect_adr_enforcement_facts
-from policy.models import DecisionStatus
+from policy.models import Articles, Charter, DecisionStatus
 from policy.python_engine import PythonDecisionEngine
 from policy.store import facts_path, read_facts
 from state import StateTracker
@@ -60,10 +66,20 @@ OBSERVED_AT = datetime(2026, 8, 28, 9, 30, tzinfo=UTC)
 _REAL_ADR = "ADR-0100"
 _BLOCKING_ADR = "ADR-0200"
 _EXEMPT_ADR = "ADR-0400"
+_GRANDFATHERED_FACTORY_BINDING_ADR = "ADR-0500"
+
+
+def _regulated_charter() -> Charter:
+    return Charter(articles=Articles(assurance="regulated-demo"))
 
 
 def _write_adr(
-    adr_dir: Path, number: int, *, enforcement: str, enforced_by: str | None
+    adr_dir: Path,
+    number: int,
+    *,
+    enforcement: str,
+    enforced_by: str | None,
+    binds: str | None = None,
 ) -> None:
     lines = [
         f"# ADR-{number:04d}: Seam Fixture {number}",
@@ -74,6 +90,8 @@ def _write_adr(
     ]
     if enforced_by is not None:
         lines.append(f"**Enforced by:** {enforced_by}")
+    if binds is not None:
+        lines.append(f"**Binds:** {binds}")
     lines.extend(["", "## Context", "", "Fixture body.", ""])
     (adr_dir / f"{number:04d}-seam-fixture-{number}.md").write_text("\n".join(lines))
 
@@ -107,11 +125,18 @@ def _seed_repo(tmp_path: Path) -> Path:
     _write_adr(
         adr_dir, 400, enforcement="manual", enforced_by="prose:reviewer checklist"
     )
+    _write_adr(
+        adr_dir,
+        500,
+        enforcement="manual",
+        enforced_by="prose:another reviewer checklist",
+        binds="both",
+    )
 
     baseline_dir = root / "tests" / "architecture"
     baseline_dir.mkdir(parents=True)
     (baseline_dir / "adr_enforcement_baseline.json").write_text(
-        json.dumps({"baseline_snapshot": [], "resolved": []})
+        json.dumps({"baseline_snapshot": [500], "resolved": []})
     )
 
     standards_dir = root / "docs" / "standards" / "adr_enforcement"
@@ -263,3 +288,40 @@ class TestStandardDecisionSeamScenario:
         assert decisions[_BLOCKING_ADR].blocking is True
         assert decisions[_EXEMPT_ADR].remediation.value == "none"
         assert decisions[_REAL_ADR].remediation.value == "none"
+
+    async def test_grandfathered_factory_binding_adr_stays_grandfathered_under_internal(
+        self, tmp_path
+    ) -> None:
+        """The composition rule (#11869) is gated on the charter, not on
+        ``binds`` alone: under the default ``internal`` charter this WEAK,
+        ``Binds: both`` ADR reads exactly like any other grandfathered debt."""
+        repo_root = _seed_repo(tmp_path)
+
+        statuses = _enforcement_status(repo_root)
+
+        assert statuses[_GRANDFATHERED_FACTORY_BINDING_ADR] is (
+            DecisionStatus.GRANDFATHERED
+        )
+        assert _GRANDFATHERED_FACTORY_BINDING_ADR not in _enforcement_blocking(
+            repo_root
+        )
+
+    async def test_grandfathered_factory_binding_adr_blocks_under_a_regulated_charter(
+        self, tmp_path
+    ) -> None:
+        """The same corpus as the previous test, only the charter passed to
+        ``decide()`` changes: a WEAK ADR that binds the factory (ADR-0123) no
+        longer carries its baseline grandfathering once the repo declares a
+        regulated assurance class (ADR-0143). One seeded repo, one blocking
+        row surfaced with no change to the ADR corpus itself."""
+        repo_root = _seed_repo(tmp_path)
+        facts = collect_adr_enforcement_facts(repo_root, observed_at=OBSERVED_AT)
+
+        decisions = {
+            d.subject: d
+            for d in PythonDecisionEngine().decide(facts, _regulated_charter())
+        }
+
+        decision = decisions[_GRANDFATHERED_FACTORY_BINDING_ADR]
+        assert decision.status is DecisionStatus.VIOLATED
+        assert decision.blocking is True
