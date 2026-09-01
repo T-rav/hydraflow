@@ -1717,7 +1717,6 @@ class TraceSkillProfile(BaseModel):
     """Skill and subagent invocation profile from a trace."""
 
     skill_counts: dict[str, int]
-    subagent_counts: dict[str, int]
     total_skills: int
     total_subagents: int
 
@@ -1728,7 +1727,6 @@ class TraceSummary(BaseModel):
     issue_number: int
     phase: str
     harvested_at: str
-    trace_ids: list[str]
     spans: TraceSpanStats
     tokens: TraceTokenStats
     tools: TraceToolProfile
