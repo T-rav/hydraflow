@@ -63,3 +63,29 @@ requirements:
     unit: not_required
     scenario: not_required
     sandbox: not_required
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: every-loop-has-a-scenario
+    claim: Every registered loop is driven by at least one MockWorld scenario
+    enforced_by: tests/architecture/test_mockworld_loop_scenario_ratchet.py::test_every_loop_is_driven_by_a_mockworld_scenario
+  - id: scenario-coverage-only-shrinks
+    claim: The count of loops with no scenario is ratcheted shrink-only
+    enforced_by: tests/architecture/test_mockworld_loop_scenario_ratchet.py::test_the_ratchet_only_shrinks
+  - id: the-needle-rejects-an-undriven-loop
+    claim: The coverage needle genuinely rejects a loop nothing drives, so the ratchet is not vacuous
+    enforced_by: tests/architecture/test_mockworld_loop_scenario_ratchet.py::test_the_coverage_needle_rejects_a_loop_nothing_drives
+  - id: layer-table-matches-the-declaration
+    claim: The README layer table lists exactly the declared layers, in the declared order
+    enforced_by: tests/architecture/test_testing_standard_drift.py::test_the_table_lists_exactly_the_declared_layers_in_order
+
+unenforced:
+  - id: no-raw-mocks-for-fakegithub-side-effects
+    claim: A MockWorld scenario does not replace FakeGitHub side effects with raw mocks
+    why: >-
+      Stated in the README as a Pattern A rule. No check exists: detecting a
+      raw mock standing in for a Fake needs the same call-site analysis the
+      ports-and-loops `tests-stand-in-with-the-fake` gap needs, and the two
+      should be solved together rather than twice.

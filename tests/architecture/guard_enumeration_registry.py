@@ -43,6 +43,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Callable, Iterable, Mapping
 
@@ -583,6 +585,15 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_path_membership_registry as membership
     from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_producer_probe_gate as probe_gate
+    from tests.architecture import test_standards_rules_are_wired as rules_wired
+
+    def _standard_declares_rules(member: str) -> bool:
+        """Does this standard still carry a `rules:` block? False if it is gone."""
+        path = rules_wired.STANDARDS / member / "standard.yaml"
+        if not path.is_file():
+            return False
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return bool(data.get("rules"))
 
     def _probe_drop_is_caught(member: str) -> bool:
         """Dropping a probe breaches the shrink-only unprobed-producer ratchet.
@@ -935,7 +946,39 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "ADR-0137 B5's counter. Order IS the contract here."
             ),
         ),
-        # --- SUBJECTS with no detector yet (ratcheted shrink-only) -------
+        GuardedEnumeration(
+            name="test_standards_rules_are_wired.ALL",
+            members=tuple(name for name, _data in rules_wired.ALL),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=lambda member: (
+                rules_wired.STANDARDS / member / "standard.yaml"
+            ).is_file(),
+            why=(
+                "Every standard is asked whether its normative rules name a "
+                "check. A dropped member stops being asked and keeps looking "
+                "governed — the shape that let ports-and-loops state 'Must "
+                "satisfy the Protocol structurally' in prose with nothing "
+                "checking it (#11908). The drop is caught against the "
+                "directory tree itself: a member can only leave this tuple by "
+                "its standard.yaml ceasing to exist, which "
+                "test_standards_registry.test_every_standard_directory_declares_a_standard_yaml "
+                "reddens on independently."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_standards_rules_are_wired.WITH_RULES",
+            members=tuple(name for name, _data in rules_wired.WITH_RULES),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_standard_declares_rules,
+            why=(
+                "The wired subset, whose rule citations are checked for "
+                "resolution. A dropped member stops having its citations "
+                "verified while the standard still advertises them. The drop "
+                "is caught by the shrink-only UNWIRED_STANDARDS_BASELINE in "
+                "the same module: un-wiring a standard raises the unwired "
+                "count past its mark."
+            ),
+        ),
         GuardedEnumeration(
             name="test_producer_probe_gate.PROBES",
             members=tuple(probe.name for probe in probe_gate.PROBES),

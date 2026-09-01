@@ -13,3 +13,20 @@
 id: adr_enforcement
 enforced_by:
   - tests/architecture/test_adr_enforcement_ratchet.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: no-new-unenforced-accepted-adr
+    claim: A new Accepted ADR ships real enforcement or is explicitly exempted; it may never grow the debt
+    enforced_by: tests/architecture/test_adr_enforcement_ratchet.py::test_no_new_or_ungrandfathered_debt
+  - id: debt-only-shrinks
+    claim: The grandfathered enforcement debt count is monotonically non-increasing
+    enforced_by: tests/architecture/test_adr_enforcement_ratchet.py::test_debt_count_is_monotonically_non_increasing
+  - id: exemptions-name-real-adrs
+    claim: Every exemption references an existing Accepted ADR that is not already enforced
+    enforced_by: tests/architecture/test_adr_enforcement_ratchet.py::test_exemptions_reference_existing_accepted_adrs
+  - id: resolved-debt-is-really-resolved
+    claim: An ADR removed from the baseline genuinely has a check that asserts it now
+    enforced_by: tests/architecture/test_adr_enforcement_ratchet.py::test_resolved_adrs_are_genuinely_real_now

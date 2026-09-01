@@ -4,3 +4,20 @@ id: vitals_conformance
 enforced_by:
   - tests/architecture/test_vitals_conformance_seam.py
   - tests/architecture/test_conformance_egress_lane.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: registered-claims-resolve
+    claim: Every registered conformance claim resolves to a real artefact on disk
+    enforced_by: tests/architecture/test_vitals_conformance_seam.py::test_every_registered_claim_resolves_on_disk
+  - id: conformance-runs-offline
+    claim: A conformance check runs offline; none imports a remote client
+    enforced_by: tests/architecture/test_vitals_conformance_seam.py::test_no_conformance_check_imports_a_remote_client
+  - id: the-egress-guard-actually-blocks
+    claim: The egress lane fails a run that opens a remote connection
+    enforced_by: tests/architecture/test_conformance_egress_lane.py::test_the_guard_fails_a_run_that_opens_a_remote_connection
+  - id: the-egress-guard-spares-local-work
+    claim: The egress lane leaves local machinery alone rather than failing everything
+    enforced_by: tests/architecture/test_conformance_egress_lane.py::test_the_guard_leaves_local_machinery_alone
