@@ -37,22 +37,26 @@ and this standard is satisfied either way.
 
 1. **The sensor is off without a target.** No DSN means the no-op adapter. Tests,
    CI and the air-gapped sandbox must never report.
-2. **Reporting never fails the work.** A sensor that raises into the code it
+2. **The operator can turn it off with a target configured.** A live checkout
+   keeps its DSN in `.env`, so "unset the DSN" is an edit to a credentials file,
+   not an off-switch. `HYDRAFLOW_SENTRY_DISABLED` overrides a present DSN, and
+   the override direction is always OFF.
+3. **Reporting never fails the work.** A sensor that raises into the code it
    observes has made reliability worse. Transport errors are swallowed.
-3. **A broken target does not stop boot.** An unreachable endpoint degrades to
+4. **A broken target does not stop boot.** An unreachable endpoint degrades to
    the no-op; the factory keeps running blind rather than not at all.
-4. **The sensor does not trace.** Errors only. Spans remain OTel's (ADR-0118 §1).
-5. **Payloads carry no PII by default.** No local variables, no request bodies.
-6. **The target is resolved from the environment.** DSN from the environment or
+5. **The sensor does not trace.** Errors only. Spans remain OTel's (ADR-0118 §1).
+6. **Payloads carry no PII by default.** No local variables, no request bodies.
+7. **The target is resolved from the environment.** DSN from the environment or
    the repo `.env`, never from code.
-7. **Sensor issues declare their provenance.** They carry the sensor label
+8. **Sensor issues declare their provenance.** They carry the sensor label
    (`bugsink` by default) so an operator reading the board can tell an observed
    failure from an authored finding.
-8. **Triage routes them as incoming system exceptions.** A sensor issue that
+9. **Triage routes them as incoming system exceptions.** A sensor issue that
    fails triage is a transient, not a bug report, and is auto-closed rather than
    parked for clarification that no author will ever supply.
 
-Rules 7 and 8 are why the label matters more than it looks: the label is what
+Rules 8 and 9 are why the label matters more than it looks: the label is what
 makes an error a routable piece of work rather than a notification.
 
 <!-- standard:enforced-by -->

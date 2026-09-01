@@ -12,6 +12,9 @@ rules:
   - id: the-sensor-is-off-without-a-target
     claim: With no DSN configured the sensor is inert, so tests, CI and the air-gapped sandbox never report
     enforced_by: tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op
+  - id: the-operator-can-turn-it-off
+    claim: HYDRAFLOW_SENTRY_DISABLED overrides a configured DSN, always toward off
+    enforced_by: tests/test_sentry_observability_adapter.py::TestTheKillSwitch::test_the_flag_beats_a_present_dsn
   - id: reporting-never-fails-the-work
     claim: A reporting failure is swallowed rather than raised into the code being observed
     enforced_by: tests/test_sentry_observability_adapter.py::TestReportingNeverRaises::test_a_transport_failure_is_swallowed

@@ -62,6 +62,16 @@ The DSN is the switch. Absent, the composition root returns the no-op, so tests,
 CI and the air-gapped sandbox never report. A DSN that fails to initialise also
 degrades to the no-op: a broken reporter must not stop the factory booting.
 
+`HYDRAFLOW_SENTRY_DISABLED` overrides a present DSN, always toward off. This ADR
+first argued against a second switch — one setting cannot contradict the other —
+and two facts overrode that. A live checkout keeps its DSN in `.env`, so
+unsetting it is a credentials edit rather than an off-switch. And the flag was
+already half-alive: `tests/conftest.py` sets it at import time and three
+regressions (#10876, #11580, #11589) pin it surviving fixture clobbering, all
+citing an `_init_sentry` that ADR-0118 deleted. A flag the suite defends and no
+production code reads is this ADR's own dead-consumer shape, pointing the other
+way.
+
 ### Inbound: the tracker integration, not a loop
 
 Bugsink files GitHub issues itself, deduplicated per error group. **We do not

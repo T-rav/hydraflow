@@ -21,12 +21,87 @@ from observability.sentry_adapter import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _opt_back_in(monkeypatch) -> None:
+    """Clear the suite-wide kill switch so these tests can exercise the builder.
+
+    ``tests/conftest.py`` sets ``HYDRAFLOW_SENTRY_DISABLED=1`` at import time so
+    no fixture noise can ever reach a real project. That is exactly right for
+    the suite and fatal for this file, which is the one place that must watch
+    the builder return a live adapter — without this every assertion below would
+    pass against the no-op and prove nothing. The opt-back-in is per-test and
+    monkeypatched, so it cannot leak into another module.
+    """
+    monkeypatch.delenv("HYDRAFLOW_SENTRY_DISABLED", raising=False)
+
+
+class TestTheKillSwitch:
+    """``HYDRAFLOW_SENTRY_DISABLED`` overrides a present DSN, always toward OFF.
+
+    ADR-0118 deleted ``_init_sentry``, the only code that read this flag, and
+    left conftest plus three regressions (#10876, #11580, #11589) defending it.
+    These are what make it real again.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("1", id="one"),
+            pytest.param("true", id="true"),
+            pytest.param("TRUE", id="upper"),
+            pytest.param("yes", id="yes"),
+        ],
+    )
+    def test_the_flag_beats_a_present_dsn(self, monkeypatch, value: str) -> None:
+        monkeypatch.setattr("sentry_sdk.init", MagicMock(), raising=True)
+        monkeypatch.setenv("HYDRAFLOW_SENTRY_DISABLED", value)
+
+        adapter = build_observability_adapter(
+            Credentials(sentry_dsn="https://k@o.ingest.sentry.io/1")
+        )
+
+        assert isinstance(adapter, NoOpObservabilityAdapter)
+
+    def test_init_is_never_called_when_disabled(self, monkeypatch) -> None:
+        """Not just the return type — the SDK must not be touched at all."""
+        init = MagicMock()
+        monkeypatch.setattr("sentry_sdk.init", init, raising=True)
+        monkeypatch.setenv("HYDRAFLOW_SENTRY_DISABLED", "1")
+
+        build_observability_adapter(
+            Credentials(sentry_dsn="https://k@o.ingest.sentry.io/1")
+        )
+
+        init.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("0", id="zero"),
+            pytest.param("false", id="false"),
+            pytest.param("no", id="no"),
+        ],
+    )
+    def test_an_off_value_does_not_disable(self, monkeypatch, value: str) -> None:
+        """The decoy: a flag that disabled on any value would break `=0`."""
+        monkeypatch.setattr("sentry_sdk.init", MagicMock(), raising=True)
+        monkeypatch.setenv("HYDRAFLOW_SENTRY_DISABLED", value)
+
+        adapter = build_observability_adapter(
+            Credentials(sentry_dsn="https://k@o.ingest.sentry.io/1")
+        )
+
+        assert isinstance(adapter, SentryObservabilityAdapter)
+
+
 class TestTheDsnIsTheSwitch:
     def test_no_dsn_gets_the_no_op(self) -> None:
         """Tests, CI and the air-gapped sandbox carry no DSN.
 
-        This is why there is no separate enable flag: one setting cannot
-        disagree with the other, and a test run cannot page a human.
+        The DSN is the primary switch; HYDRAFLOW_SENTRY_DISABLED overrides it
+        toward OFF (see TestTheKillSwitch), so the two cannot disagree about
+        anything that matters, and a test run cannot page a human.
         """
         adapter = build_observability_adapter(Credentials())
 

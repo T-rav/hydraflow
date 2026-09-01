@@ -122,14 +122,37 @@ class SentryObservabilityAdapter:
 
 
 def build_observability_adapter(credentials: Credentials) -> ObservabilityPort:
-    """The adapter this deployment should use: Sentry when a DSN is set.
+    """The adapter this deployment should use: the sensor when a DSN is set.
 
-    Presence of the DSN IS the switch (ADR-0146). No separate enable flag: one
-    setting cannot disagree with the other, and an environment without a DSN —
-    tests, CI, the air-gapped sandbox — silently gets the no-op instead of
-    reaching for a network that is not there.
+    Presence of the DSN is the primary switch (ADR-0146): an environment without
+    one — tests, CI, the air-gapped sandbox — gets the no-op instead of reaching
+    for a network that is not there.
+
+    ``HYDRAFLOW_SENTRY_DISABLED`` overrides it, and the override direction is
+    always OFF, so the two settings cannot disagree about anything that matters.
+    An earlier draft of this function argued for the DSN alone on exactly that
+    "one switch cannot contradict the other" ground. Two facts overrode it.
+    First, ``.env`` in a live checkout already carries a ``SENTRY_DSN``, so
+    "unset the DSN" is an edit to a credentials file rather than an off-switch
+    an operator can reach for. Second, the repo already behaves as though this
+    flag works: ``tests/conftest.py`` sets it at import time and three
+    regressions (#10876, #11580, #11589) pin it surviving fixture clobbering —
+    guards ADR-0118 left behind when it deleted the code that read it. A flag
+    that the test suite defends and no production code honours is the same
+    dead-consumer shape this ADR exists to fix, pointing the other way.
     """
+    import os  # noqa: PLC0415
+
     from observability.noop_adapter import NoOpObservabilityAdapter  # noqa: PLC0415
+
+    if os.environ.get("HYDRAFLOW_SENTRY_DISABLED", "").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    ):
+        logger.info("observability: disabled by HYDRAFLOW_SENTRY_DISABLED")
+        return NoOpObservabilityAdapter()
 
     dsn = (credentials.sentry_dsn or "").strip()
     if not dsn:
@@ -141,5 +164,5 @@ def build_observability_adapter(credentials: Credentials) -> ObservabilityPort:
             "sentry init failed — falling back to the no-op adapter", exc_info=True
         )
         return NoOpObservabilityAdapter()
-    logger.info("observability: Sentry adapter active (errors only)")
+    logger.info("observability: exception sensor active (errors only)")
     return adapter
