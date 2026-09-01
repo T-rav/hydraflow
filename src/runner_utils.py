@@ -1044,6 +1044,8 @@ async def resolve_harness_env(
     gateway_client: GatewayControlClient | None = None,
     issue_number: int | None = None,
     pr_number: int | None = None,
+    driver_id: str | None = None,
+    parent_spawn_id: str | None = None,
     route: EnforcedRoute | None = None,
 ) -> dict[str, str]:
     """Per-spawn env overrides that point the Claude CLI at a harness backend.
@@ -1119,6 +1121,8 @@ async def resolve_harness_env(
                 ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
                 issue_number=issue_number,
                 pr_number=pr_number,
+                driver_id=driver_id,
+                parent_spawn_id=parent_spawn_id,
             )
         else:
             billing_provider = harness_billing_provider(provider, model)
@@ -1136,6 +1140,8 @@ async def resolve_harness_env(
                 ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
                 issue_number=issue_number,
                 pr_number=pr_number,
+                driver_id=driver_id,
+                parent_spawn_id=parent_spawn_id,
             )
         client = gateway_client or _HttpGatewayControlClient()
         credential = await client.mint_key(
@@ -1226,6 +1232,9 @@ async def _claude_cli_complete(
     config: HydraFlowConfig | None = None,
     source: str = "unknown",
     session_id: str | None = None,
+    spawn_id: str | None = None,
+    driver_id: str | None = None,
+    parent_spawn_id: str | None = None,
     gateway_client: GatewayControlClient | None = None,
     usage_out: dict[str, object] | None = None,
     served_out: dict[str, object] | None = None,
@@ -1263,8 +1272,11 @@ async def _claude_cli_complete(
                 model=model,
                 source=source,
                 session_id=session_id,
+                spawn_id=spawn_id,
                 timeout_seconds=timeout,
                 gateway_client=gateway_client,
+                driver_id=driver_id,
+                parent_spawn_id=parent_spawn_id,
                 route=route,
             )
             if provider == _GATEWAY:
@@ -1447,6 +1459,9 @@ async def run_lightweight_agent(
     issue_number: int | None = None,
     pr_number: int | None = None,
     session_id: str | None = None,
+    spawn_id: str | None = None,
+    driver_id: str | None = None,
+    parent_spawn_id: str | None = None,
     isolate_user_settings: bool = True,
     issue_labels: Sequence[str] = (),
     provider: str | None = None,
@@ -1695,6 +1710,9 @@ async def run_lightweight_agent(
                     config=config,
                     source=source,
                     session_id=session_id,
+                    spawn_id=spawn_id,
+                    driver_id=driver_id,
+                    parent_spawn_id=parent_spawn_id,
                     gateway_client=gateway_client,
                     usage_out=usage_stats,
                     served_out=spawn_out,
