@@ -41,6 +41,18 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
+#: Every counter a retrospective tick reports. The empty-queue path and the
+#: did-work path both build their result from this, so a new counter cannot be
+#: added to one and forgotten in the other (#11890).
+_RESULT_COUNTERS = (
+    "processed",
+    "patterns_filed",
+    "stale_proposals",
+    "findings_dropped",
+    "signals_seen",
+)
+
+
 class RetrospectiveLoop(BaseBackgroundLoop):
     """Polls the retrospective durable queue and runs analysis.
 
@@ -78,7 +90,13 @@ class RetrospectiveLoop(BaseBackgroundLoop):
             return {"status": "config_disabled"}
         items = self._queue.load()
         if not items:
-            return {"processed": 0, "patterns_filed": 0, "stale_proposals": 0}
+            # The SAME counter vocabulary as a tick that did work (#11890).
+            # A partial dict here is the defect this loop's result shape was
+            # rebuilt to remove: a reader of `details` cannot distinguish
+            # "counted, and it was zero" from "never counted" when the key is
+            # simply absent. Derived from the full result below so the two can
+            # never drift apart again.
+            return dict.fromkeys(_RESULT_COUNTERS, 0)
 
         acknowledged: list[str] = []
         patterns_filed = 0
@@ -116,6 +134,10 @@ class RetrospectiveLoop(BaseBackgroundLoop):
             "findings_dropped": findings_dropped,
             "signals_seen": signals_seen,
         }
+
+    # NOTE: kept next to the return above deliberately — the empty-queue path
+    # builds its result from this tuple, so adding a counter to one without the
+    # other is not possible.
 
     async def _process_item(self, item: QueueItem) -> dict[str, int]:
         """Dispatch a single queue item to the appropriate handler."""

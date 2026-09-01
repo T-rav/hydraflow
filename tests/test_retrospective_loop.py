@@ -87,12 +87,24 @@ def _make_loop(
 class TestDoWorkEmptyQueue:
     @pytest.mark.asyncio
     async def test_returns_zero_counts(self, tmp_path: Path) -> None:
+        """Every counter, at zero — not a subset of them.
+
+        This asserted a THREE-key dict until #11890's follow-up, which is how
+        `findings_dropped` and `signals_seen` came to be missing from the exit
+        an idle factory takes on almost every tick. Compared against the loop's
+        declared vocabulary rather than a literal, so a counter added later
+        cannot pass here while being absent from the published details.
+        """
+        from retrospective_loop import _RESULT_COUNTERS
+
         loop, _, _, queue, _ = _make_loop(tmp_path)
         queue.load.return_value = []
 
         result = await loop._do_work()
 
-        assert result == {"processed": 0, "patterns_filed": 0, "stale_proposals": 0}
+        assert result == dict.fromkeys(_RESULT_COUNTERS, 0)
+        assert "findings_dropped" in result
+        assert "signals_seen" in result
 
     @pytest.mark.asyncio
     async def test_does_not_acknowledge_anything(self, tmp_path: Path) -> None:

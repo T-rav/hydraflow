@@ -415,8 +415,27 @@ def _union_scope(
     return aliases, funcs_by_name
 
 
+def build_unit_scope(
+    trees: Sequence[ast.Module],
+) -> tuple[dict[str, str], dict[str, bool]]:
+    """``(aliases, reaches-spawn map)`` for a whole unit, computed once.
+
+    Both depend only on the SET of trees, not on which one is being reported.
+    ``find_violations_in_unit`` used to let each file recompute them over the
+    same set, so a unit of N modules built the identical map N times — the
+    quadratic that made this audit 30s+ and put
+    ``test_no_src_module_swallows_credit_in_a_broad_except`` near the suite's
+    per-test budget (#11910).
+    """
+    scope_aliases, funcs_by_name = _union_scope(trees)
+    return scope_aliases, _build_reaches_spawn_map(funcs_by_name, scope_aliases)
+
+
 def find_unprotected_credit_swallows(
-    tree: ast.Module, *, siblings: Sequence[ast.Module] = ()
+    tree: ast.Module,
+    *,
+    siblings: Sequence[ast.Module] = (),
+    scope: tuple[dict[str, str], dict[str, bool]] | None = None,
 ) -> list[UnprotectedSwallow]:
     """Return every ``try`` in *tree* that reaches an LLM spawn and can swallow credit.
 
@@ -424,9 +443,14 @@ def find_unprotected_credit_swallows(
     their helpers to the call graph but their own ``try`` blocks are NOT
     reported here — each file is reported against its own path so a violation
     points at the file that must be edited.
+
+    *scope* is the unit's precomputed :func:`build_unit_scope`. Passing it is
+    an optimisation only: omitted, it is derived from ``[tree, *siblings]``,
+    which is the same value.
     """
-    scope_aliases, funcs_by_name = _union_scope([tree, *siblings])
-    reaches_map = _build_reaches_spawn_map(funcs_by_name, scope_aliases)
+    scope_aliases, reaches_map = (
+        scope if scope is not None else build_unit_scope([tree, *siblings])
+    )
     # The file's own imports win over a sibling's alias for the same name.
     aliases = {**scope_aliases, **_alias_map(tree)}
     violations: list[UnprotectedSwallow] = []
@@ -484,10 +508,12 @@ def find_violations_in_unit(unit: Path) -> dict[Path, list[UnprotectedSwallow]]:
         path: ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for path in loop_sources(unit)
     }
+    # Once per UNIT, not once per file: the scope is the same for every file
+    # in it, and rebuilding it per file is quadratic in the unit's size.
+    scope = build_unit_scope(list(trees.values()))
     found: dict[Path, list[UnprotectedSwallow]] = {}
     for path, tree in trees.items():
-        siblings = [t for p, t in trees.items() if p != path]
-        violations = find_unprotected_credit_swallows(tree, siblings=siblings)
+        violations = find_unprotected_credit_swallows(tree, scope=scope)
         if violations:
             found[path] = violations
     return found
