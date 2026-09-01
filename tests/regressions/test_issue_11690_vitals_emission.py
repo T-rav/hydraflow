@@ -34,34 +34,40 @@ _NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 class TestTheFloor:
     """The floor is what makes a quiet factory distinguishable from a dead one."""
 
-    def test_a_factory_that_never_reported_is_due_immediately(self) -> None:
-        """Never-emitted is the case the floor exists to surface.
-
-        Waiting a further day before the first reading would leave a brand-new
-        or just-recovered factory invisible for exactly as long as it is most
-        worth watching.
-        """
-        assert floor_elapsed(None, _NOW, 24.0) is True
-
-    def test_a_recent_reading_does_not_re_emit(self) -> None:
-        assert floor_elapsed(_NOW - timedelta(hours=1), _NOW, 24.0) is False
-
-    def test_an_old_reading_is_due(self) -> None:
-        assert floor_elapsed(_NOW - timedelta(hours=25), _NOW, 24.0) is True
-
-    def test_a_zero_floor_disables_the_heartbeat(self) -> None:
-        """A real configuration, not an accident of arithmetic.
-
-        A factory cutting RCs often needs no separate heartbeat. Without the
-        explicit guard, `0` would make every tick "due" and emit continuously —
-        the opposite of what setting it to zero reads like.
-        """
-        assert floor_elapsed(None, _NOW, 0.0) is False
-        assert floor_elapsed(_NOW - timedelta(days=99), _NOW, 0.0) is False
-
-    def test_a_naive_timestamp_is_not_a_crash(self) -> None:
-        """Stamps are written by us, but read back from disk after upgrades."""
-        assert floor_elapsed(_NOW - timedelta(hours=25), _NOW, 24.0) is True
+    @pytest.mark.parametrize(
+        ("last_emit", "floor_hours", "expected", "why"),
+        [
+            (
+                None,
+                24.0,
+                True,
+                "never emitted is the case the floor exists to surface — waiting "
+                "a further day leaves a new or just-recovered factory invisible "
+                "for exactly as long as it is most worth watching",
+            ),
+            (_NOW - timedelta(hours=1), 24.0, False, "a recent reading stands"),
+            (_NOW - timedelta(hours=25), 24.0, True, "an old reading is due"),
+            (
+                None,
+                0.0,
+                False,
+                "a zero floor DISABLES the heartbeat — a real configuration for "
+                "a factory that cuts RCs often, not an accident of arithmetic. "
+                "Without the explicit guard, 0 makes every tick due and emits "
+                "continuously, the opposite of what setting it to zero reads like",
+            ),
+            (_NOW - timedelta(days=99), 0.0, False, "zero floor, however stale"),
+        ],
+        ids=["never", "recent", "old", "zero-floor-never", "zero-floor-stale"],
+    )
+    def test_floor_elapsed(
+        self,
+        last_emit: datetime | None,
+        floor_hours: float,
+        expected: bool,
+        why: str,
+    ) -> None:
+        assert floor_elapsed(last_emit, _NOW, floor_hours) is expected, why
 
 
 class TestTheEmitterIsActuallyWired:
