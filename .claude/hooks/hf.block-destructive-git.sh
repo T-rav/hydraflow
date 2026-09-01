@@ -13,8 +13,19 @@ if [ -z "$COMMAND" ]; then
 fi
 
 # Block destructive git commands
-if echo "$COMMAND" | grep -qE 'git\s+(push\s+.*--force|push\s+.*-f\b|reset\s+--hard|checkout\s+\.|restore\s+\.|clean\s+-f|branch\s+-D)' && \
-   ! echo "$COMMAND" | grep -qF -- '--force-with-lease'; then
+# `--force-with-lease` is a deliberate carve-out: it refuses to overwrite a ref
+# that moved, so it is the SAFE force-push a rebase needs. But the exemption
+# must excuse only the flag it names. It used to be tested against the whole
+# command, so mentioning the string anywhere disarmed every check below —
+# `git reset --hard HEAD~1 && echo --force-with-lease` was ALLOWED, and so was
+# a bare `--force` to main sitting beside a legitimate leased push.
+#
+# Removing the leased flags FIRST, then looking for what is left, keeps the
+# carve-out narrow: a leased push has nothing to match, and anything else still
+# does.
+SANITIZED=$(printf '%s' "$COMMAND" | sed 's/--force-with-lease\(=[^[:space:]]*\)\{0,1\}//g')
+
+if echo "$SANITIZED" | grep -qE 'git\s+(push\s+.*--force|push\s+.*-f\b|reset\s+--hard|checkout\s+\.|restore\s+\.|clean\s+-f|branch\s+-D)'; then
   echo "BLOCKED: Destructive git command detected." >&2
   echo "" >&2
   echo "The following are forbidden without explicit user approval:" >&2
