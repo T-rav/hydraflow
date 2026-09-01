@@ -273,7 +273,12 @@ jobs:
       - name: Deletions are in scope, or declared
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=200 origin "${{ github.base_ref }}"
+          # Explicit refspec: `git fetch origin <branch>` updates FETCH_HEAD
+          # only — it does NOT create refs/remotes/origin/<branch>, so the
+          # three-dot diff below had no base and the gate went green on a
+          # branch that deleted a file.
+          git fetch --no-tags --depth=200 origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
           python3 scripts/check_deletion_scope.py \
             --base "origin/${{ github.base_ref }}" \
             --head HEAD \

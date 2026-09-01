@@ -45,10 +45,30 @@ import sys
 _TRAILER = re.compile(r"^\s*Removes:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
 
 
+class BaseUnresolvable(RuntimeError):
+    """The base ref is not present, so no honest comparison can be made."""
+
+
 def _git(*args: str) -> str:
-    return subprocess.run(
-        ["git", *args], capture_output=True, text=True, check=False
-    ).stdout.strip()
+    """Run git, FAILING LOUDLY on a non-zero exit.
+
+    This was ``check=False`` and returned stdout, which is how the first
+    version of this gate shipped broken: on a shallow CI checkout
+    ``git diff origin/staging...HEAD`` exits non-zero, stdout is empty, and an
+    empty deletion list reads exactly like "this PR deletes nothing". The gate
+    reported ``[deletion-scope OK] no files deleted`` on a branch that deleted a
+    file, and went green.
+
+    A gate for silent deletions that itself fails silently is worse than no
+    gate: it occupies the slot a working one would have.
+    """
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        raise BaseUnresolvable(
+            f"`git {' '.join(args)}` exited {done.returncode}: "
+            f"{done.stderr.strip() or '(no stderr)'}"
+        )
+    return done.stdout.strip()
 
 
 def _names(base: str, head: str, diff_filter: str) -> list[str]:
@@ -96,6 +116,23 @@ def main(argv: list[str] | None = None) -> int:
         help="extra text scanned for Removes: trailers (e.g. the PR body)",
     )
     args = ap.parse_args(argv)
+
+    # Resolve the base BEFORE diffing. A missing ref is the shallow-checkout
+    # case, and it must be loud: silently comparing against nothing is how this
+    # gate first shipped green while a file was being deleted.
+    try:
+        _git("rev-parse", "--verify", "--quiet", f"{args.base}^{{commit}}")
+    except BaseUnresolvable:
+        print(
+            f"[deletion-scope FAILED] base ref {args.base!r} is not present in "
+            "this checkout, so no deletion comparison is possible. On a shallow "
+            "CI clone, fetch it explicitly:\n"
+            f"    git fetch --no-tags origin "
+            f"+refs/heads/{args.base.removeprefix('origin/')}:"
+            f"refs/remotes/origin/{args.base.removeprefix('origin/')}",
+            file=sys.stderr,
+        )
+        return 1
 
     deleted = _names(args.base, args.head, "D")
     if not deleted:
