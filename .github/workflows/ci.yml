@@ -263,6 +263,24 @@ jobs:
       - name: Scan tracked files for git conflict markers
         run: python3 scripts/check_conflict_markers.py --tracked
 
+      # #11902: a `git reset --soft` onto a NEWER ref followed by `git add -A`
+      # records every file that ref ADDED as a deletion. One such commit removed
+      # 16 files from two already-merged PRs and passed every gate, because they
+      # all ask "is what is here correct?" and a deleted file is not around to
+      # be incorrect. Only deletions OUTSIDE the subtree the branch otherwise
+      # works in need a `Removes:` trailer — measured over the last 14 deletion
+      # commits on staging, that is 6, every one a deliberate removal PR.
+      - name: Deletions are in scope, or declared
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=200 origin "${{ github.base_ref }}"
+          python3 scripts/check_deletion_scope.py \
+            --base "origin/${{ github.base_ref }}" \
+            --head HEAD \
+            --declaration "$PR_BODY"
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+
   # Universal backstop (#9599): reject git-tracked runtime caches on EVERY
   # PR/push, ungated by `changes`. docs/wiki/{log.jsonl,ingest_dedup.json,
   # index.json} were tracked runtime caches the RepoWikiLoop rewrote every tick,
