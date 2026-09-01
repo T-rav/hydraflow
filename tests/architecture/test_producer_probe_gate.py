@@ -132,10 +132,12 @@ PROBES: tuple[ProbeSpec, ...] = (
         module="trace_rollup.py",
         produce=_produce_trace_summary,
         excused={
-            "trace_ids": "reserved; the rollup keys traces by file path, not id",
+            # `trace_ids` and `skills.subagent_counts` were excused here until
+            # #11911 deleted them outright for the same reason this gate
+            # exists. Their removal from this list is the gate's second
+            # direction working: an excuse must not outlive its field.
             "crashed": "aggregates SubprocessTrace.crashed, correct for a clean run",
             "skills.skill_counts": "no skills in the stream — see skill_results above",
-            "skills.subagent_counts": "subagents are counted in tool_counts as the Task tool",
             "skills.total_skills": "no skills in the stream",
             "skills.total_subagents": "no Task invocations in the stream",
         },
