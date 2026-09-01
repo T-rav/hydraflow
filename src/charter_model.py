@@ -20,6 +20,7 @@ and it must stay that way: the decision seam imports it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
@@ -366,6 +367,308 @@ def _parse_actors(raw: Any) -> str:
     raise CharterError(msg)
 
 
+# ---------------------------------------------------------------------------
+# schema_version 2: the `loops:` block (ADR-0145)
+# ---------------------------------------------------------------------------
+
+CHARTER_SCHEMA_VERSION_V2 = 2
+"""The version that may carry a `loops:` block. v1 charters load unchanged."""
+
+#: Files under `agents/` that are documents, not actors.
+_NON_ACTOR_FILES = frozenset({"README.md", "runtime.md"})
+#: Directories under `agents/` that hold governance records, not actors.
+_GOVERNANCE_DIRS = frozenset({"council", "board", "operator"})
+
+#: The only `output.gate` value at v1.1.0. Names what already happens rather
+#: than inventing policy (ADR-0145).
+_GATE_PR = "pr"
+
+
+def enumerate_actors(entries: Sequence[str]) -> tuple[str, ...]:
+    """Actor names visible in an `agents/` listing. **Pure** over *entries*.
+
+    The predicate is part of the contract, not an implementation detail
+    (ADR-0145 guard 1). It accepts BOTH layouts — top-level ``x.md`` and
+    ``x/README.md`` — because a narrower "top-level ``*.md`` minus README"
+    silently stops seeing an actor the day it moves into a package, and a
+    membership test that matches nothing simply returns False while nothing
+    reddens. That is this repo's ten-instance path-membership class (#11669),
+    and it is why the module→package move has a mutation test.
+
+    *entries* are repo-relative POSIX paths under the actors directory, e.g.
+    ``["finance.md", "records/README.md", "council/decisions/0001.md"]``.
+    Taking a listing rather than reading a directory keeps this pure and
+    keeps enumeration out of the decision half of the seam (ADR-0143 Ruling 5).
+    """
+    names: list[str] = []
+    for entry in entries:
+        parts = PurePosixPath(entry).parts
+        if not parts or parts[0] in _GOVERNANCE_DIRS:
+            continue
+        if len(parts) == 1:
+            if parts[0].endswith(".md") and parts[0] not in _NON_ACTOR_FILES:
+                names.append(parts[0][: -len(".md")])
+        elif len(parts) == 2 and parts[1] == "README.md":
+            names.append(parts[0])
+    return tuple(sorted(set(names)))
+
+
+def ambiguous_actors(entries: Sequence[str]) -> tuple[str, ...]:
+    """Actors declared BOTH as ``x.md`` and ``x/README.md``.
+
+    Two files for one key is the two-tables defect at file granularity
+    (ADR-0145). Reported separately from :func:`enumerate_actors` so the
+    enumeration stays total and the caller decides that this is fatal.
+    """
+    flat: set[str] = set()
+    packaged: set[str] = set()
+    for entry in entries:
+        parts = PurePosixPath(entry).parts
+        if not parts or parts[0] in _GOVERNANCE_DIRS:
+            continue
+        if len(parts) == 1 and parts[0].endswith(".md"):
+            if parts[0] not in _NON_ACTOR_FILES:
+                flat.add(parts[0][: -len(".md")])
+        elif len(parts) == 2 and parts[1] == "README.md":
+            packaged.add(parts[0])
+    return tuple(sorted(flat & packaged))
+
+
+@dataclass(frozen=True)
+class TriggerClause:
+    """One clause of a loop's trigger. A loop fires when ANY clause fires.
+
+    ``on:`` is reserved in the schema and REJECTED by the validator at v1.1.0
+    (ADR-0145 Ruling 3): it is aspirational even in the evidence repo, whose
+    own `loops.yml` header concedes the Operator is the event detector for all
+    of them. Shipping a field that looks automatic but needs a human is
+    silence-as-failure one field over.
+    """
+
+    cron: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"cron": self.cron}
+
+
+@dataclass(frozen=True)
+class LoopOutput:
+    """Where a loop's work lands and what gates it."""
+
+    branch_prefix: str = ""
+    gate: str = _GATE_PR
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"branch_prefix": self.branch_prefix, "gate": self.gate}
+
+
+@dataclass(frozen=True)
+class LoopSpec:
+    """One declared loop: an actor, when it runs, and its envelope."""
+
+    name: str
+    actor: str
+    goal: str = ""
+    enabled: bool = False
+    triggers: tuple[TriggerClause, ...] = ()
+    budget_usd: float | None = None
+    timeout_s: int | None = None
+    model: str = ""
+    output: LoopOutput = field(default_factory=LoopOutput)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "actor": self.actor,
+            "enabled": self.enabled,
+            "trigger": [clause.to_dict() for clause in self.triggers],
+            "goal": self.goal,
+            "budget_usd": self.budget_usd,
+            "timeout_s": self.timeout_s,
+            "model": self.model,
+            "output": self.output.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class LoopsBlock:
+    """The declared loops, and whether the block was there at all.
+
+    ``present`` is the whole point (ADR-0145 guard 3). A present-but-empty
+    ``loops: {}`` declares that NOTHING runs and is valid; a missing block
+    means an unmigrated repo. The caretaker skips the second and must not skip
+    the first, and a bare tuple cannot tell them apart.
+    """
+
+    present: bool = False
+    loops: tuple[LoopSpec, ...] = ()
+
+    def by_name(self) -> dict[str, LoopSpec]:
+        return {loop.name: loop for loop in self.loops}
+
+    def actors_named(self) -> tuple[str, ...]:
+        return tuple(sorted({loop.actor for loop in self.loops}))
+
+
+_CRON_FIELDS = 5
+
+
+def _parse_trigger(loop_name: str, raw: Any) -> tuple[TriggerClause, ...]:
+    """Parse a loop's `trigger:` clause list. Cron-only at v1.1.0."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        msg = (
+            f"charter `loops.{loop_name}.trigger` must be a LIST of clauses "
+            f'(each `- cron: "..."`), not a {type(raw).__name__}. A loop '
+            "fires when ANY clause fires, and prose triggers like "
+            "'weekly · and on each candidate' are unschedulable as a scalar "
+            "(ADR-0145)."
+        )
+        raise CharterError(msg)
+    clauses: list[TriggerClause] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            msg = (
+                f"charter `loops.{loop_name}.trigger[{index}]` must be a "
+                f"mapping, not a {type(entry).__name__}"
+            )
+            raise CharterError(msg)
+        if "on" in entry:
+            msg = (
+                f"charter `loops.{loop_name}.trigger[{index}]` uses `on:`, "
+                "which is RESERVED but not supported at schema_version 2. "
+                "ADR-0145 Ruling 3 defers event triggers to a release that "
+                "ships a detector: `on:` is aspirational even in the evidence "
+                "repo, whose loops.yml header concedes the Operator is the "
+                "event detector for all of them. A field that looks automatic "
+                "but requires a human is silence-as-failure. Use a `cron:` "
+                "clause and record the event trigger as a documented manual "
+                "one until a detector exists."
+            )
+            raise CharterError(msg)
+        cron = entry.get("cron")
+        if not isinstance(cron, str) or not cron.strip():
+            msg = (
+                f"charter `loops.{loop_name}.trigger[{index}]` has no `cron:` "
+                "expression; every clause at schema_version 2 must carry one"
+            )
+            raise CharterError(msg)
+        fields = cron.split()
+        if len(fields) != _CRON_FIELDS:
+            msg = (
+                f"charter `loops.{loop_name}.trigger[{index}].cron` is "
+                f"{len(fields)}-field ({cron!r}); a 5-field cron expression is "
+                "required. An unparseable schedule is a loop that silently "
+                "never fires."
+            )
+            raise CharterError(msg)
+        clauses.append(TriggerClause(cron=cron.strip()))
+    return tuple(clauses)
+
+
+def _parse_output(loop_name: str, raw: Any) -> LoopOutput:
+    if raw is None:
+        return LoopOutput()
+    if not isinstance(raw, dict):
+        msg = (
+            f"charter `loops.{loop_name}.output` must be a mapping, not a "
+            f"{type(raw).__name__}"
+        )
+        raise CharterError(msg)
+    gate = str(raw.get("gate", _GATE_PR)).strip() or _GATE_PR
+    if gate != _GATE_PR:
+        msg = (
+            f"charter `loops.{loop_name}.output.gate` is {gate!r}; `pr` is the "
+            "only value at v1.1.0 (ADR-0145). It names what already happens "
+            "rather than inventing policy."
+        )
+        raise CharterError(msg)
+    return LoopOutput(branch_prefix=str(raw.get("branch_prefix", "") or ""), gate=gate)
+
+
+def _parse_loop(name: str, raw: Any) -> LoopSpec:
+    if not isinstance(raw, dict):
+        msg = f"charter `loops.{name}` must be a mapping, not a {type(raw).__name__}"
+        raise CharterError(msg)
+    # `actor` defaults to the KEY. Many-to-one is legal: two loops may name one
+    # actor, which is how the evidence repo runs `records` and
+    # `records-quarterly` over one contract (ADR-0145).
+    actor = str(raw.get("actor") or name).strip()
+    if not actor:
+        msg = f"charter `loops.{name}.actor` is empty"
+        raise CharterError(msg)
+    enabled = raw.get("enabled", False)
+    if not isinstance(enabled, bool):
+        msg = (
+            f"charter `loops.{name}.enabled` must be true or false, not "
+            f"{type(enabled).__name__}. Dormancy is a VALUE here, not a "
+            "second list (ADR-0145)."
+        )
+        raise CharterError(msg)
+    budget = raw.get("budget_usd")
+    timeout = raw.get("timeout_s")
+    return LoopSpec(
+        name=name,
+        actor=actor,
+        goal=str(raw.get("goal", "") or "").strip(),
+        enabled=enabled,
+        triggers=_parse_trigger(name, raw.get("trigger")),
+        budget_usd=float(budget) if isinstance(budget, int | float) else None,
+        timeout_s=int(timeout) if isinstance(timeout, int) else None,
+        model=str(raw.get("model", "") or "").strip(),
+        output=_parse_output(name, raw.get("output")),
+    )
+
+
+def parse_loops(raw: Any, *, present: bool) -> LoopsBlock:
+    """Parse the `loops:` block. Raises :class:`CharterError` on a mis-parse.
+
+    A mis-parse fails LOUD (ADR-0145 guard 2). `src/charter.py` already draws
+    this line one level up — ``load_charter`` returns None only for a repo with
+    NO charter — and the same rule holds here: an unparseable block is an
+    error, never an absence, because an absence is indistinguishable from a
+    repo that declared nothing runs.
+    """
+    if not present:
+        return LoopsBlock(present=False)
+    if raw is None:
+        # `loops:` with nothing under it is an empty declaration, not a
+        # mis-parse: the author wrote the key.
+        return LoopsBlock(present=True)
+    if not isinstance(raw, dict):
+        msg = (
+            f"charter `loops` must be a mapping keyed by LOOP name, not a "
+            f"{type(raw).__name__}. Keying by loop (with `actor:` defaulting "
+            "to the key) is what lets two loops share one actor (ADR-0145)."
+        )
+        raise CharterError(msg)
+    return LoopsBlock(
+        present=True,
+        loops=tuple(_parse_loop(name, body) for name, body in sorted(raw.items())),
+    )
+
+
+def unresolved_actors(block: LoopsBlock, actors: Sequence[str]) -> tuple[str, ...]:
+    """Loop actors that resolve to no enumerated actor file. FATAL side."""
+    known = set(actors)
+    return tuple(
+        sorted({loop.actor for loop in block.loops if loop.actor not in known})
+    )
+
+
+def actors_without_a_loop(block: LoopsBlock, actors: Sequence[str]) -> tuple[str, ...]:
+    """Enumerated actors that no loop names. NON-FATAL side.
+
+    Bidirectional binding is guard 1, and the two sides are deliberately not
+    symmetric in severity: a loop naming a missing actor cannot run, while an
+    actor no loop names is a repo mid-migration. One-way binding is how
+    `standard.yaml` and its README drifted until #11751; making the second
+    side fatal would make migration impossible.
+    """
+    named = {loop.actor for loop in block.loops}
+    return tuple(sorted(name for name in set(actors) if name not in named))
+
+
 @dataclass(frozen=True)
 class CharterFinding:
     """One drift finding.
@@ -394,6 +697,11 @@ class Charter:
     #: fallback). Carried on the charter so the drift report surfaces them
     #: without the loader needing a second return value.
     load_findings: tuple[CharterFinding, ...] = ()
+    #: The `loops:` block (schema_version 2, ADR-0145). `present=False` means
+    #: an unmigrated repo; `present=True` with no loops means the repo declares
+    #: that nothing runs. The caretaker skips the first and must not skip the
+    #: second, which is why this is not a bare tuple.
+    loops: LoopsBlock = field(default_factory=LoopsBlock)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Charter:
@@ -414,6 +722,10 @@ class Charter:
             schema_version=_as_int(
                 "schema_version", data.get("schema_version"), CHARTER_SCHEMA_VERSION
             ),
+            # `"loops" in data` is the absent-vs-empty distinction (guard 3):
+            # a v1 charter has no key at all, while `loops:` with nothing under
+            # it is a repo declaring that nothing runs.
+            loops=parse_loops(data.get("loops"), present="loops" in data),
         )
 
     @classmethod

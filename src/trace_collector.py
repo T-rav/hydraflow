@@ -23,10 +23,18 @@ from models import (
     TraceTokenStats,
     TraceToolProfile,
 )
+from tool_outcome import read_failure
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from events import EventBus
+
+#: Codex item types that terminate a previously-announced call. Enumerated
+#: rather than guessed at one name — see `tool_outcome` for why the table is
+#: the guess and a miss must be observable.
+_CODEX_COMPLETION_TYPES = frozenset(
+    {"function_call_output", "tool_call_output", "command_execution"}
+)
 
 logger = logging.getLogger("hydraflow.trace_collector")
 
@@ -223,6 +231,47 @@ class TraceCollector:
                     "id": item.get("id", ""),
                 }
             )
+            # A `function_call` item that ALSO carries a terminal status is
+            # both the start and the end — Codex reports some tools that way.
+            if item.get("status"):
+                self._close_codex_span(item)
+        elif item_type in _CODEX_COMPLETION_TYPES:
+            self._close_codex_span(item)
+
+    def _close_codex_span(self, item: dict[str, Any]) -> None:
+        """Close a Codex tool span (#11889).
+
+        `_handle_codex_item` had no completion branch at all, so every Codex
+        span stayed ``succeeded=False, duration_ms=0`` forever. That is "never
+        closed", not "failed" — and it is why `retro_signals` had to key on
+        ``error is not None``: `succeeded` meant a different thing per backend,
+        so nothing downstream could read it.
+        """
+        call_id = str(item.get("call_id") or item.get("id") or "")
+        if not call_id:
+            return
+        started = self._open_tool_starts.pop(call_id, None)
+        duration_ms = (
+            max(0, int((time.monotonic() - started) * 1000))
+            if started is not None
+            else 0
+        )
+        error = read_failure(item)
+        for idx in range(len(self.tool_calls) - 1, -1, -1):
+            span = self.tool_calls[idx]
+            if span.tool_use_id == call_id and not span.succeeded:
+                self.tool_calls[idx] = span.model_copy(
+                    update={
+                        "duration_ms": duration_ms,
+                        "succeeded": error is None,
+                        "error": error,
+                    }
+                )
+                if error is not None:
+                    self.tool_errors[span.tool_name] = (
+                        self.tool_errors.get(span.tool_name, 0) + 1
+                    )
+                break
 
     def _handle_pi_message(self, event: dict[str, Any]) -> None:
         if event.get("type") == "message_end":
@@ -238,16 +287,33 @@ class TraceCollector:
         )
 
     def _handle_pi_tool_end(self, event: dict[str, Any]) -> None:
+        """Close a Pi tool span, reading the event body for failure (#11889).
+
+        This used to flip the span to ``succeeded=True`` on ANY
+        ``tool_execution_end`` and read the body for nothing but
+        ``invocationId``, so a real Pi tool failure produced no error text, no
+        `tool_errors` entry, and no retro signal — while looking identical to a
+        success.
+        """
         invocation_id = event.get("invocationId", "")
         if invocation_id in self._open_tool_starts:
             started = self._open_tool_starts.pop(invocation_id)
             duration_ms = max(0, int((time.monotonic() - started) * 1000))
+            error = read_failure(event)
             for idx in range(len(self.tool_calls) - 1, -1, -1):
                 span = self.tool_calls[idx]
                 if span.tool_use_id == invocation_id and not span.succeeded:
                     self.tool_calls[idx] = span.model_copy(
-                        update={"duration_ms": duration_ms, "succeeded": True}
+                        update={
+                            "duration_ms": duration_ms,
+                            "succeeded": error is None,
+                            "error": error,
+                        }
                     )
+                    if error is not None:
+                        self.tool_errors[span.tool_name] = (
+                            self.tool_errors.get(span.tool_name, 0) + 1
+                        )
                     break
 
     def _handle_error(self, event: dict[str, Any]) -> None:

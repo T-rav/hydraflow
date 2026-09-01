@@ -121,6 +121,11 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
     },
     "src/charter_model.py": {
         "__future__": frozenset({"annotations"}),
+        # Sequence only, for the actor-enumeration predicate: it takes a
+        # LISTING rather than reading a directory, which is what keeps
+        # enumeration on the observation side of the seam (ADR-0143 Ruling 5)
+        # and this module pure.
+        "collections.abc": frozenset({"Sequence"}),
         # The data-governance vocabulary, extracted to its own pure module so
         # this one need not import prompt_gate (which writes audit records).
         "data_class_vocabulary": frozenset({"is_valid_data_class"}),
@@ -180,12 +185,16 @@ _PURE_BUILTINS: dict[str, frozenset[str]] = {
             "bytes",
             "classmethod",
             "dict",
+            "enumerate",
             "float",
             "frozenset",
             "int",
             "isinstance",
+            "len",
             "list",
             "property",
+            "set",
+            "sorted",
             "str",
             "tuple",
             "type",
@@ -231,14 +240,20 @@ _PURE_ANNOTATIONS: dict[str, frozenset[str]] = {
             "Charter",
             "CharterFinding",
             "LocalArticle",
+            "LoopOutput",
+            "LoopSpec",
+            "LoopsBlock",
             "Purpose",
             "RailsBlock",
+            "Sequence",
+            "TriggerClause",
             "bool",
             "dict",
             "float",
             "frozenset",
             "int",
             "list",
+            "set",
             "str",
             "tuple",
         }
