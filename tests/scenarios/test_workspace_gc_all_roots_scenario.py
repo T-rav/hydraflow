@@ -15,17 +15,34 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import workspace_gc_loop
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
 from tests.scenarios.builders import IssueBuilder
 from tests.scenarios.fakes.mock_world import MockWorld
+from workspace_gc_landed_safety import parse_git_worktrees
 from workspace_gc_loop import WorkspaceGCLoop
 
 
-def _workspace_mock() -> MagicMock:
-    """A WorkspacePort double that answers the async surface (#11908)."""
+def _workspace_mock(repo_root: Path) -> MagicMock:
+    """A WorkspacePort double that answers the async surface (#11908, #11931).
+
+    Worktree enumeration moved behind the Port, so the double stands in for the
+    real adapter: it reads the same `git worktree list` porcelain this scenario
+    already scripts through `patch("workspace_gc_loop.run_subprocess")`.
+    Resolved at call time, so the scenario's own fake still decides what comes
+    back — including raising.
+    """
     mock = MagicMock()
     mock.prune_dead_registrations = AsyncMock(return_value=[])
+
+    async def _list() -> list[tuple[Path, str | None]]:
+        output = await workspace_gc_loop.run_subprocess(
+            "git", "worktree", "list", "--porcelain", cwd=repo_root
+        )
+        return [(e.path, e.branch) for e in parse_git_worktrees(output)]
+
+    mock.list_project_worktrees = _list
     return mock
 
 
@@ -81,7 +98,7 @@ class TestWorkspaceGCAllRootsScenario:
         )
         loop = WorkspaceGCLoop(
             config=deps.config,
-            workspaces=_workspace_mock(),
+            workspaces=_workspace_mock(deps.config.repo_root),
             prs=world.github,
             state=StateTracker(deps.config.state_file),
             deps=deps.loop_deps,
