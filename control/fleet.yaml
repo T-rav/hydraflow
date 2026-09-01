@@ -134,6 +134,13 @@ human_steering:
   notes: "judgment: feeder"
 
 # --- plumbing / actuators: infrastructure ---
+# charter_loop_worker dispatches on a SCHEDULE the target repo declares, so its
+# rate is an input rather than a controlled variable — there is no error signal
+# to regulate and no setpoint that would mean anything. Classified explicitly
+# rather than left out: an unclassified loop is one nobody DECIDED has no
+# setpoint (ADR-0120 Ruling 1).
+charter_loop_worker:
+  class: infrastructure
 pr_unsticker:
   class: infrastructure
 merge_state_watcher:
