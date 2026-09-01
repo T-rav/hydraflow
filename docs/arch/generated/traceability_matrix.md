@@ -21,9 +21,9 @@ Adoption ratchet: the fraction of window commits carrying no `Req-ID:`
 line. Pinned by the `traceability` disturbance dimension (`disturbance/baselines/traceability.yaml`) — it may only shrink. Raw counts are
 omitted on purpose; see the module docstring.
 
-<!-- untraced-pct: 100 -->
+<!-- untraced-pct: 0 -->
 
 | Scope | Untraced |
 |---|---|
-| (untraced) — PR-merge commits in the window (≤500) without a `Req-ID:` line | 100% |
+| (untraced) — PR-merge commits in the window (≤500) without a `Req-ID:` line | 0% |
 <!-- arch:generated -->
