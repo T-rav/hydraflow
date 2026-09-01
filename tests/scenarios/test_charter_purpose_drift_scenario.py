@@ -102,3 +102,70 @@ class TestPurposeDrift:
 
         issues = await world.github.list_issues_by_label("hydraflow-charter-drift")
         assert len(issues) == 1
+
+
+class TestTheActuatorIsWiredInMockWorld:
+    """#11856 — the collaborator has to reach the loop, not just exist.
+
+    `test_collaborator_wiring` caught this: `purpose_auditor` was forwarded at
+    the production composition root and NOT in the scenario catalog builder, so
+    every scenario would have run the loop with the actuator absent and its
+    tests would have passed on a loop that could not file anything.
+
+    Seeded through `charter_purpose_audit`, which is the seam a scenario uses
+    to say what the seam decided.
+    """
+
+    async def test_an_unanchored_goal_files_an_issue_through_the_loop(
+        self, tmp_path
+    ) -> None:
+        from policy.models import DecisionStatus, StandardDecision
+
+        world = MockWorld(tmp_path)
+        _seed_ports(
+            world,
+            charter_drift_audit=AsyncMock(return_value=[]),
+            charter_purpose_audit=AsyncMock(
+                return_value=[
+                    StandardDecision(
+                        standard="purpose",
+                        subject="a_goal",
+                        status=DecisionStatus.VIOLATED,
+                        blocking=False,
+                        reason="cited by nothing",
+                    )
+                ]
+            ),
+        )
+
+        await world.run_with_loops(["charter_drift_caretaker"], cycles=1)
+
+        issues = await world.github.list_issues_by_label("hydraflow-charter-drift")
+        assert len(issues) == 1
+        assert "a_goal" in world.github.issue(issues[0]["number"]).title
+
+    async def test_a_compliant_goal_files_nothing(self, tmp_path) -> None:
+        # The decoy: a loop that filed on every decision would open an issue
+        # for every goal that IS cited.
+        from policy.models import DecisionStatus, StandardDecision
+
+        world = MockWorld(tmp_path)
+        _seed_ports(
+            world,
+            charter_drift_audit=AsyncMock(return_value=[]),
+            charter_purpose_audit=AsyncMock(
+                return_value=[
+                    StandardDecision(
+                        standard="purpose",
+                        subject="a_goal",
+                        status=DecisionStatus.COMPLIANT,
+                        blocking=False,
+                        reason="cited",
+                    )
+                ]
+            ),
+        )
+
+        await world.run_with_loops(["charter_drift_caretaker"], cycles=1)
+
+        assert await world.github.list_issues_by_label("hydraflow-charter-drift") == []
