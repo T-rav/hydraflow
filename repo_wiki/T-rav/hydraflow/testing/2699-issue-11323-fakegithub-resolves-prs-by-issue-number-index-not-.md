@@ -5,7 +5,7 @@ source_issue: 11323
 source_phase: plan
 created_at: 2026-08-16T09:14:32.110001+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # FakeGitHub resolves PRs by issue-number index, not branch

@@ -72,8 +72,10 @@ graph LR
     src -- "10" --> src_wiki_compiler
     src -- "5" --> src_workspace
     src_arch -- "1" --> src_disturbance
+    src_arch -- "3" --> src_policy
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "16" --> src_arch
+    src_arch_generators -- "1" --> src_policy
     src_arch_generators -- "1" --> src_vitals
     src_audit -- "1" --> src_escape
     src_dashboard_routes -- "2" --> src_audit
