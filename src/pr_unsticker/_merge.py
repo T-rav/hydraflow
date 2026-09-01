@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from approval_records import FACTORY_AUTONOMY_CLAUSE
 from merge_policy import ROLE_OPERATOR, MergeApproval, enforce_merge_policy
 
+from ._scope import out_of_scope
+
 if TYPE_CHECKING:
     import asyncio
 
@@ -99,6 +101,12 @@ class PRUnstickerMergeMixin:
                 f"CI failed after fix: {summary}",
                 pr_number=pr_number,
             )
+            return False
+
+        # The standing grant speaks for the LANE, not for this PR (#11970).
+        blocked = await self._outside_standing_grant(pr_number)
+        if blocked:
+            await self._release_back_to_hitl(issue_number, blocked, pr_number=pr_number)
             return False
 
         # CH-3 (#9731): consult the factory-autonomy policy before the
@@ -199,6 +207,36 @@ class PRUnstickerMergeMixin:
         self._state.reset_issue_attempts(issue_number)
         if merged:
             self._state.record_pr_merged()
+
+    async def _outside_standing_grant(self, pr_number: int) -> str | None:
+        """Why this PR is beyond what the lane grant covers, or None.
+
+        The packaged policy cannot answer this: every class declares
+        `paths: []`, so `has_change_matchers` is False, the merge gate never
+        fetches the diff, and `classify_change` returns the `default: true`
+        class. `high-blast-radius` — the only class with `required_approvals` —
+        can never match. Green CI was the entire test (#11970).
+
+        Fails CLOSED on an unreadable diff: being unable to see the change is
+        not evidence that it is mechanical, and merging what it has not looked
+        at is this lane's whole risk.
+        """
+        try:
+            changed = await self._prs.get_pr_diff_names(pr_number)
+        except (RuntimeError, OSError):
+            return (
+                "Could not read the PR diff, so the unsticker cannot tell "
+                "whether its standing grant covers this change"
+            )
+        governance = out_of_scope(changed)
+        if not governance:
+            return None
+        return (
+            "Outside the unsticker's standing grant — this PR changes the "
+            f"rules themselves: {', '.join(governance[:5])}. A lane-level "
+            "grant is evidence about the lane, not about this change; merge it "
+            "with a real review or a `policy-override:<reason-slug>` label."
+        )
 
     async def _release_back_to_hitl(
         self, issue_number: int, reason: str, *, pr_number: int | None = None

@@ -290,6 +290,20 @@ class FakeGitHub(
             pr.closed = True
         return True
 
+    #: This board is simulated: its issue numbers come from a counter, not
+    #: from GitHub. Loops that COMMIT tracked repo files read this and refuse,
+    #: because a sandbox run pointed at a live checkout persisted twenty fake
+    #: numbers (#25-#44) into `docs/wiki/memory-feedback/` and merged them in
+    #: PR #8989 (#11969/#11972).
+    #:
+    #: Declared BY the fake rather than detected by the loop: production code
+    #: asking "is my board simulated?" is a port describing itself, where a
+    #: loop importing test doubles to sniff for them would invert the
+    #: dependency. Absent on the real adapter, so the check is a strict
+    #: `is True` — an AsyncMock answers every attribute with a truthy Mock, and
+    #: a loose check would call every mock-based test a simulation.
+    is_simulated = True
+
     async def merge_pr(self, pr_number: int, **_kw: Any) -> bool:
         self._maybe_rate_limit()
         if pr_number in self._prs:

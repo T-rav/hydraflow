@@ -3,8 +3,8 @@ source: feedback_review_before_merge.md
 name: Always review PRs for bugs before merging
 description: Run audit agents on PRs to catch bugs, missing tests, and gaps before
   merge — don't just merge blindly
-status: issue-open
-issue: 38
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-03-28'
