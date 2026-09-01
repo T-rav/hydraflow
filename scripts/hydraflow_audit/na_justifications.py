@@ -137,6 +137,14 @@ NA_JUSTIFICATIONS: dict[str, str] = {
         "(HYDRAFLOW_AUDIT_PR_BASE unset) there is no diff to judge, and the "
         "merged-history equivalent is P10.3/P10.7"
     ),
+    "P10.8": (
+        "the test-pyramid gate is scoped to PR CI by design: it judges the "
+        "shape of the change under review against the standard's matrix, and "
+        "reuses P10.6's merge-base diff. Run outside a PR context "
+        "(HYDRAFLOW_AUDIT_PR_BASE unset) there is no change to judge. Without "
+        "this entry the check reports NA and the audit correctly downgrades it "
+        "to INERT — a check advertising work it did not do"
+    ),
     "P10.7": (
         "the false-close detector reads merged history; a non-git checkout has "
         "none. (A git command that FAILS is INERT, not NA.)"
