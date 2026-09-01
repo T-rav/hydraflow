@@ -6,17 +6,17 @@ bounded_context: "shared-kernel"
 code_anchor: "src/charter_model.py:Articles"
 aliases: []
 related: []
-evidence: []
+evidence: ["01M15ZNNP35TN5FRW5093MN2Z1"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-08-28T00:00:00+00:00"
-updated_at: "2026-08-28T00:00:00+00:00"
+updated_at: "2026-09-01T07:13:20.888566+00:00"
 ---
 
 ## Definition
 
-The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo charter of ADR-0121 as amended by #11748 (`charter.yaml`, whose `articles:` block is `charter.Articles`) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered / blocking, and HydraFlow acts on the verdict.
+The second layer of the PAAA governance model (ADR-0143): what must remain true of a repository — standards, architectural constraints, security and compliance rules, and local policy. It answers "what rules apply to it?". Articles are carried today by `docs/standards/`, by ADRs that declare an `**Enforced by:**` block, by `control/principles.yaml`, by `docs/standards/factory_autonomy/policy.yaml`, by `docs/standards/branch_protection/gates.toml`, and by the per-repo charter of ADR-0121 as amended by #11748 (`charter.yaml`, whose `articles:` block is `charter.Articles`) — the surface a repository uses to declare which of them apply to it. Enforcement of Articles splits three ways: the declaration declares, a decision layer classifies normalized facts as compliant / violated / exempt / grandfathered, and HydraFlow acts on the verdict. `blocking` is not a fifth verdict but an orthogonal flag on the decision: the four classify what is TRUE of a subject, `blocking` decides what to DO about it, and they vary independently — "violated but not gating" is a real and common state (ADR-0143 Ruling 4 as amended 2026-08-31; `policy.models.DecisionStatus` has exactly four members and carries `blocking` as a separate field on `StandardDecision`).
 
 ## Invariants
 

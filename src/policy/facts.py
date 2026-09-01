@@ -29,6 +29,7 @@ from adr_conformance import (
     load_enforcement_baseline,
     parse_exemptions,
 )
+from charter import CharterDriftReport
 from package_resources import ResourceNotFoundError, checkout_path
 from policy.models import Fact
 
@@ -53,11 +54,21 @@ STANDARD_ADR_CONFORMANCE = "adr_conformance"
 #: six load-bearing fixes merged on 2026-08-31 with unit tests only (#11880).
 STANDARD_TEST_PYRAMID = "test_pyramid"
 
+#: The repo's own governing declaration, judged through the seam (#11862).
+#: `compute_charter_drift` stays the pure REFERENCE implementation and the
+#: caretaker keeps filing from its current path this cycle; this exists so the
+#: decisions EXIST and can be rendered, and so a parity test can pin the two
+#: against each other. Two derivations reaching the same verdict by different
+#: routes is what makes the parity test meaningful — a collector that handed
+#: the engine the answer would make it tautological (ADR-0143 Ruling 4).
+STANDARD_CHARTER = "charter"
+
 #: Every standard this module can collect for — the default charter.
 COLLECTED_STANDARDS: tuple[str, ...] = (
     STANDARD_ADR_ENFORCEMENT,
     STANDARD_ADR_CONFORMANCE,
     STANDARD_TEST_PYRAMID,
+    STANDARD_CHARTER,
 )
 
 _ENFORCEMENT_SOURCE = "policy.facts.collect_adr_enforcement_facts"
@@ -314,3 +325,47 @@ def requirement_matrix(standard_yaml: str) -> dict[str, dict[str, str]]:
                 for layer in ("unit", "scenario", "sandbox")
             }
     return out
+
+
+_CHARTER_SOURCE = "policy.facts.collect_charter_facts"
+
+
+def collect_charter_facts(
+    report: CharterDriftReport, *, observed_at: datetime
+) -> list[Fact]:
+    """One fact per drift finding, plus the shape of the report itself.
+
+    **Primitive observations only.** The finding's CLASS and its check id are
+    recorded; whether that class is fatal is NOT — that is the engine's to
+    re-derive from `NON_FATAL_FINDING_CLASSES`. A collector that emitted
+    `fatal: true` would hand the engine its answer and make the parity test
+    tautological: both sides would be reading one helper's output rather than
+    reaching the same verdict by different routes (ADR-0143 Ruling 4).
+
+    ``has_charter`` is emitted even when there are no findings, because
+    "ungoverned by the charter contract" and "governed and clean" are different
+    answers and an empty fact list cannot tell them apart.
+    """
+    subject = report.repo
+    facts = [
+        Fact(
+            standard=STANDARD_CHARTER,
+            subject=subject,
+            key="has_charter",
+            value=report.has_charter,
+            observed_at=observed_at,
+            source=_CHARTER_SOURCE,
+        )
+    ]
+    for finding in report.findings:
+        facts.append(
+            Fact(
+                standard=STANDARD_CHARTER,
+                subject=subject,
+                key=f"finding:{finding.check_id}",
+                value=finding.finding_class,
+                observed_at=observed_at,
+                source=_CHARTER_SOURCE,
+            )
+        )
+    return facts

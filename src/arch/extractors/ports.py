@@ -188,11 +188,20 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
                 )
             )
 
-        # Fake: prefer Fake<PortStem>; fall back to any Fake* with superset methods.
+        # Fake: prefer Fake<PortStem>, but a NAME IS A HINT, NOT EVIDENCE —
+        # the preferred class must still satisfy the Port, exactly like the
+        # fallback scan below. Without that check the name branch won
+        # unconditionally and `PRPort` resolved to `FakePR`, which is a PR
+        # RECORD dataclass with zero methods, not an adapter (#11939). The
+        # wrong pairing was then rendered into the generated port registry
+        # that `docs/standards/ports-and-loops` cites as its enforcer, so the
+        # standard documented a fake nothing had ever checked.
         port_stem = cls.name[: -len("Port")]
         fake: PortAdapterInfo | None = None
         for fpath, fcls in fake_classes:
-            if fcls.name == f"Fake{port_stem}":
+            if fcls.name == f"Fake{port_stem}" and port_methods.issubset(
+                _methods_with_bases(fcls, fake_class_by_name)
+            ):
                 fake = PortAdapterInfo(
                     name=fcls.name,
                     module=_repo_relative_module(fpath, repo_root),

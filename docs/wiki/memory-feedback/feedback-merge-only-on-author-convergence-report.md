@@ -1,9 +1,12 @@
 ---
 source: feedback_merge_only_on_author_convergence_report.md
 name: feedback_merge_only_on_author_convergence_report
-description: A substantial PR merges ONLY on an explicit convergence report from its author. Green CI, a stable head, a clean worktree, and an idle process count are all indistinguishable from a builder pausing between review passes. Cost three corrective PRs in one night (2026-08-22/23).
-status: pending
-issue: null
+description: A substantial PR merges ONLY on an explicit convergence report from its
+  author. Green CI, a stable head, a clean worktree, and an idle process count are
+  all indistinguishable from a builder pausing between review passes. Cost three corrective
+  PRs in one night (2026-08-22/23).
+status: issue-open
+issue: 11948
 promoted_in: null
 wontfix_reason: null
 created: '2026-08-23'

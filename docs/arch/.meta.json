@@ -19,7 +19,7 @@
       "content_sha": "c66690cb591449331ac9e4ec76b75df5e64c1a126850e9b14a3b6e5bd59b5398"
     },
     "coverage_matrix.md": {
-      "content_sha": "6731e360fa8c020896da96ab9bff3cade00c982fdf6bd22409340de122bc63bb"
+      "content_sha": "3fb71e2b75163bebef6d79ef955777da4c87574b7e1097a79707668f57cdb4e2"
     },
     "events.md": {
       "content_sha": "b7fff31d940305ba7ae0b4da94f077dc63cce097efec10707b97936df10b69a2"
@@ -43,17 +43,17 @@
       "content_sha": "6229d39b9aaf379f232cb10e8d8c4fbf0bff95b7b628834726b78489563673d2"
     },
     "ports.md": {
-      "content_sha": "fcf533a4eac4787759a41faa71ab611fdb670e70b10c3f436263eaed6c1f7907"
+      "content_sha": "c111898c805c3f6970e550c472e0a0c6c2325f56beb48ee25bc76820fae464a1"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "62e3a2e8c54c8641e5527040a4f5fefd06a7596060aa7bb02950aa1f73324c09"
     },
     "ubiquitous-language.md": {
-      "content_sha": "ee35e64d3f0c278ffd22c1f2bc21124ff19d436477e4f21b75f5e5603090b554"
+      "content_sha": "5d4f65895a5e0813430a789aaa06c6db12d41ae880878133c2215c3df15dda60"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "8c49ef417fe657268ee14bbbfe85f362a4093468f3773f7a341ab93a04e5f814"
+  "content_sha": "e547ad512f8950d6c1eee9535c857bc448ce5f88c97015403e563e8050accd60"
 }

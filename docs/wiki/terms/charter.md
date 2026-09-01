@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/charter_model.py:Charter"
 aliases: []
 related: []
-evidence: []
+evidence: ["01M15ZNNP35TN5FRW5093MN2Z1", "OPA-REGO-MEASURED-NOT-ADOPTED-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-08-28T00:00:00+00:00"
-updated_at: "2026-08-28T00:00:00+00:00"
+updated_at: "2026-09-01T07:13:20.888566+00:00"
 ---
 
 ## Definition
