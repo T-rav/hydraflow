@@ -16,16 +16,37 @@ from workspace_gc_landed_safety import (
     PRProbe,
     active_workspace_snapshot,
     landed_proof,
+    parse_git_worktrees,
     parse_issue_from_branch,
 )
 from workspace_gc_loop import WorkspaceGCLoop
 
 
-def _workspace_mock() -> MagicMock:
-    """A WorkspacePort double that answers the async surface (#11908)."""
+def _workspace_mock(repo_root: Path | None = None) -> MagicMock:
+    """A WorkspacePort double that answers the async surface (#11908, #11931).
+
+    These tests drive REAL git repositories, and worktree enumeration moved
+    behind the Port (#11931), so the double enumerates for real rather than
+    returning a canned list — otherwise the landed-work proof would be judged
+    against a world the test never built.
+    """
     mock = MagicMock()
     mock.prune_dead_registrations = AsyncMock(return_value=[])
+
+    async def _list() -> list[tuple[Path, str | None]]:
+        if repo_root is None:
+            return []
+        output = subprocess.run(
+            ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        return [(e.path, e.branch) for e in parse_git_worktrees(output)]
+
+    mock.list_project_worktrees = _list
     return mock
+
 
 _BRANCH = "fix/reused-workspace-gc"
 _MOVED_BRANCH = "fix/moved-worktree-11507"
@@ -141,7 +162,7 @@ def _loop(tmp_path: Path, github: FakeGitHub) -> WorkspaceGCLoop:
     )
     return WorkspaceGCLoop(
         config=deps.config,
-        workspaces=_workspace_mock(),
+        workspaces=_workspace_mock(deps.config.repo_root),
         prs=github,
         state=StateTracker(deps.config.state_file),
         deps=deps.loop_deps,
@@ -328,7 +349,7 @@ async def test_full_cycle_authorizes_legitimate_exact_head_worktree(
     )
     loop = WorkspaceGCLoop(
         config=deps.config,
-        workspaces=_workspace_mock(),
+        workspaces=_workspace_mock(deps.config.repo_root),
         prs=github,
         state=state,
         deps=deps.loop_deps,
@@ -337,7 +358,12 @@ async def test_full_cycle_authorizes_legitimate_exact_head_worktree(
 
     result = await loop._do_work()
 
-    assert result == {"collected": 1, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+    assert result == {
+        "collected": 1,
+        "skipped": 0,
+        "errors": 0,
+        "pruned_registrations": 0,
+    }
     assert not worktree.exists()
     assert _git(repo, "branch", "--list", _BRANCH) == ""
     assert state.get_active_workspaces() == {}

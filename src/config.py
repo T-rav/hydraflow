@@ -1172,6 +1172,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_WORKTREE_GC_ALL_ROOTS_ENABLED",
         True,
     ),
+    (
+        "worktree_gc_sibling_clones_enabled",
+        "HYDRAFLOW_WORKTREE_GC_SIBLING_CLONES_ENABLED",
+        True,
+    ),
     ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
     ("issue_refinement_enabled", "HYDRAFLOW_ISSUE_REFINEMENT_ENABLED", True),
 ]
@@ -6756,6 +6761,19 @@ class HydraFlowConfig(BaseModel):
             "enumerate-and-reap phase (#10698). When False the loop keeps its "
             "legacy state/orphan-dir/branch phases but does NOT enumerate "
             "worktrees across every root."
+        ),
+    )
+
+    worktree_gc_sibling_clones_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for enumerating worktrees that live in a "
+            "SIBLING CLONE of this project (#11931). `git worktree list` "
+            "reports only the repo it runs in, so a factory workspace could "
+            "never see the dev checkout's worktrees at any predicate width — "
+            "4.5 GB across 15 of them, with no collector. Scoped by remote: "
+            "every clone of THIS project, never another. When False the loop "
+            "enumerates only `repo_root`, which is the pre-#11931 behaviour."
         ),
     )
 

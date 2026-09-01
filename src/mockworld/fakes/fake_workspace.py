@@ -19,6 +19,8 @@ class FakeWorkspace:
         self.destroyed: list[int] = []
         self._next_fault: _WorkspaceFaultKind | None = None
         self._dead_registrations: list[Path] = []
+        #: Seeded by scenarios that exercise sibling-clone collection (#11931).
+        self.project_worktrees: list[tuple[Path, str | None]] = []
 
     def fail_next_create(self, *, kind: _WorkspaceFaultKind) -> None:
         """Inject a single-shot fault into the next create() call."""
@@ -43,6 +45,15 @@ class FakeWorkspace:
 
     async def destroy_all(self) -> None:
         """Remove all managed worktrees (no-op stub)."""
+
+    async def list_project_worktrees(self) -> list[tuple[Path, str | None]]:
+        """Whatever the scenario seeded. Empty by default.
+
+        A fake that shelled out to git would defeat the reason this sits behind
+        the Port: the sandbox injects this class precisely so no real spawn
+        happens there (#11931).
+        """
+        return list(self.project_worktrees)
 
     async def prune_dead_registrations(self) -> list[Path]:
         """Report the registrations a test declared dead via ``set_dead_registrations``."""

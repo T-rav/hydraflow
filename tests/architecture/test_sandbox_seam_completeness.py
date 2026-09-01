@@ -121,7 +121,6 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     # (see mockworld.sandbox_main._apply_sandbox_config_overrides), so no spawn
     # is reachable there. Cannot be a module-level SANDBOX_SEAMS config_disable
     # because Phases 1-4 of the same module still run in the sandbox (s46/s65).
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._list_git_worktrees::run_subprocess": 1,
     # #11502/#11503/#11507: one HEAD-aware landed predicate now owns every
     # worktree-destruction decision. It still uses one lexical local-git seam;
     # the loop executes status/rev-list/two-rev-diff through that call site.
