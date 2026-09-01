@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11949
 source_phase: plan
 created_at: 2026-09-01T09:56:43.594592+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Sibling subagents share orchestrator scratchpad dir
