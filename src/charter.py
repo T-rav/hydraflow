@@ -57,6 +57,8 @@ finding class                fatal?     meaning
 ``missing-standard``         yes        declared standard this factory
                                         ships, absent from the repo
 ``missing-artifact``         yes        declared required path is absent
+``missing-purpose``          yes        charter states no product, or names
+                                        no goals
 ``uncheckable-charter``      yes        the check has nothing to check, or
                                         could not be performed
 ``unknown-layer``            no         future/unrecognised layer name
@@ -96,6 +98,7 @@ from charter_model import (
     FINDING_MISSING_ARTIFACT,
     FINDING_MISSING_GATE_SCRIPT,
     FINDING_MISSING_LAYER,
+    FINDING_MISSING_PURPOSE,
     FINDING_MISSING_STANDARD,
     FINDING_UNCHECKABLE_CHARTER,
     FINDING_UNKNOWN_LAYER,
@@ -140,6 +143,7 @@ __all__ = [
     "FINDING_MISSING_ARTIFACT",
     "FINDING_MISSING_GATE_SCRIPT",
     "FINDING_MISSING_LAYER",
+    "FINDING_MISSING_PURPOSE",
     "FINDING_MISSING_STANDARD",
     "FINDING_UNCHECKABLE_CHARTER",
     "FINDING_UNKNOWN_LAYER",
@@ -289,6 +293,66 @@ def _standard_findings(
     return findings
 
 
+def _purpose_findings(charter: Charter) -> list[CharterFinding]:
+    """Is intent STATED? Never whether the repo serves it.
+
+    ADR-0143 Ruling 3 refused a Purpose check until a ruling said what checking
+    intent could mean; the operator ruled on 2026-08-31 and this is the half
+    that lands in drift (#11856). It is deliberately the weakest possible
+    reading — presence and shape — because it is the only one that is
+    observation-grade and needs no facts.
+
+    Fatal, and the reason is sequence rather than severity: Purpose is the
+    precondition for goal referential integrity. A charter with no goals hands
+    that check an empty subject list, which passes silently and reads as
+    coverage — the ``uncheckable-charter`` failure, one layer up. Tolerating an
+    unstated purpose would let the stronger check quietly disable itself.
+
+    The two halves are reported separately rather than as one finding: a
+    charter naming goals under an empty product and one stating a product with
+    no goals are different mistakes, and a single ``missing-purpose`` check_id
+    would leave the caretaker's issue saying which only in prose.
+    """
+    if any(
+        f.finding_class == FINDING_LEGACY_RAILS_MANIFEST for f in charter.load_findings
+    ):
+        # A legacy `rails.yaml` has nowhere to PUT a purpose — the format
+        # predates the Purpose layer entirely. Demanding one would make every
+        # un-migrated repo fatally drifted over a key it cannot express, which
+        # would turn ADR-0121's deliberately non-fatal `legacy-rails-manifest`
+        # tolerance into a hard failure by the side door. The migration to
+        # `charter.yaml` is what surfaces the requirement, and that is already
+        # its own reported finding.
+        return []
+
+    findings: list[CharterFinding] = []
+    if not charter.purpose.product.strip():
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_MISSING_PURPOSE}:product",
+                finding_class=FINDING_MISSING_PURPOSE,
+                detail=(
+                    f"`{CHARTER_FILENAME}` states no `purpose.product` — a "
+                    "factory arriving cold cannot answer what this repo is "
+                    "trying to do"
+                ),
+            )
+        )
+    if not charter.purpose.goals:
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_MISSING_PURPOSE}:goals",
+                finding_class=FINDING_MISSING_PURPOSE,
+                detail=(
+                    f"`{CHARTER_FILENAME}` names no `purpose.goals` — goal "
+                    "referential integrity would have nothing to resolve and "
+                    "would pass silently on an empty subject list"
+                ),
+            )
+        )
+    return findings
+
+
 def _uncheckable_findings(
     charter: Charter, observed: ObservedRepo
 ) -> list[CharterFinding]:
@@ -342,6 +406,8 @@ def compute_charter_drift(
 
     Rules:
 
+    * a charter that states **no purpose** — no product, or no goals — is
+      drift (#11856), each half reported separately;
     * a **missing declared layer / standard / required artifact / gate
       script** is drift, and so is observed coverage below the declared floor
       (evaluated only when coverage is known);
@@ -353,6 +419,7 @@ def compute_charter_drift(
     """
     findings: list[CharterFinding] = list(charter.load_findings)
     findings.extend(_uncheckable_findings(charter, observed))
+    findings.extend(_purpose_findings(charter))
     findings.extend(_layer_findings(charter, observed))
     findings.extend(_standard_findings(charter, observed))
 
