@@ -207,14 +207,18 @@ def test_a_titled_bug_fix_still_blocks() -> None:
 
 
 def test_the_check_never_emits_a_blocking_warn() -> None:
-    """WARN reddens this audit, so a non-blocking verdict must PASS.
+    """No verdict of this check may redden the audit except a real FAIL.
 
-    `overall_exit_code` counts WARN as a red audit unless the check is
-    allow-listed as telemetry (a history scan that cannot blame the PR) or
-    advisory (a corpus scan). P10.8 is neither — it judges the change under
-    test. Emitting WARN for a `conditional` cell or an ambiguous `feat(` would
-    turn the standard's own "it depends" into a hard CI stop, which is the
-    false positive that gets a gate disabled.
+    The property this test names has always been the right one; the assertion
+    under it was not. It forbade WARN outright, on the premise that WARN always
+    reddens the audit — true when written, and it made "reports the omission"
+    unachievable, so the check collapsed those cases into PASS and
+    `format_terminal` threw the reason away (#11937).
+
+    P10.8 now sits in `CONDITIONAL_WARN_CHECKS`, so its WARN is visible and
+    non-blocking, and the test asserts the CONSEQUENCE — the exit code — rather
+    than the spelling. That is strictly stronger: forbidding WARN never proved
+    the audit stayed green, it only proved one status was absent.
     """
     import os
     from unittest.mock import patch
@@ -233,8 +237,28 @@ def test_the_check_never_emits_a_blocking_warn() -> None:
             ctx = type("C", (), {"root": Path(".")})()
             seen.add(p10_tdd._changes_ship_the_layers_the_standard_requires(ctx).status)
     names = {s.name for s in seen}
-    assert "WARN" not in names, f"P10.8 emitted a CI-reddening WARN: {names}"
-    assert names == {"PASS", "FAIL"}, f"expected only PASS/FAIL, got {names}"
+    assert names == {"PASS", "FAIL"}, f"unexpected verdicts: {names}"
+
+    # The real property: only a genuine FAIL may redden the audit. A WARN from
+    # this check must leave the exit code green, and a WARN from any other
+    # check must not — otherwise the fix would have disarmed the whole suite.
+    from hydraflow_audit.models import Finding, Severity, Status
+    from hydraflow_audit.runner import overall_exit_code
+
+    def _finding(check_id: str, status: Status) -> Finding:
+        return Finding(
+            check_id=check_id,
+            status=status,
+            severity=Severity.STRUCTURAL,
+            principle="P10",
+            source="s",
+            what="w",
+            remediation="r",
+        )
+
+    assert overall_exit_code([_finding("P10.8", Status.WARN)]) == 0
+    assert overall_exit_code([_finding("P10.8", Status.FAIL)]) == 1
+    assert overall_exit_code([_finding("P1.1", Status.WARN)]) == 1
 
 
 def test_a_written_waiver_opens_the_gate_and_names_itself() -> None:
@@ -276,7 +300,7 @@ def test_a_written_waiver_opens_the_gate_and_names_itself() -> None:
     )
 
     waived = _run("pure Pydantic constraint; a scenario observes nothing extra")
-    assert waived.status.name == "PASS"
+    assert waived.status.name == "WARN"
     assert "waived by" in waived.message and "Pydantic" in waived.message, (
         "the waiver must name itself in the finding — a silent bypass is "
         f"indistinguishable from the check not running: {waived.message}"
