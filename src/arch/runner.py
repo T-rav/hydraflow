@@ -129,6 +129,9 @@ def _render_standards_decisions(repo_root: Path) -> str:
     Never raises: this feeds the arch pipeline, and a repo without a charter
     must still regenerate every other artifact.
     """
+    from charter_model import CharterError
+    from policy.python_engine import UnsupportedStandardError
+
     declared: tuple[str, ...] = ()
     decisions: list = []
     try:
@@ -150,7 +153,12 @@ def _render_standards_decisions(repo_root: Path) -> str:
         # renders identically from any checkout of the same SHA.
         facts = collect_adr_enforcement_facts(repo_root, observed_at=datetime.now(UTC))
         decisions = PythonDecisionEngine().decide(facts, charter=charter)
-    except Exception:  # noqa: BLE001 - arch-regen must never be stopped by this page
+    except (CharterError, UnsupportedStandardError, OSError, ValueError):
+        # Narrow, not bare: the suppressions ratchet only shrinks, and a bare
+        # except here would also swallow a genuine bug in the engine. These
+        # four are the real failure modes — a broken charter, a standard with
+        # no ruleset, an unreadable ADR tree, a malformed baseline — and none
+        # of them should stop arch-regen from producing every other artifact.
         pass
     return render_standards_decisions(decisions, declared_standards=declared)
 
