@@ -76,14 +76,42 @@ FINDING_UNCHECKABLE_CHARTER = "uncheckable-charter"
 FINDING_UNKNOWN_LAYER = "unknown-layer"
 FINDING_UNKNOWN_STANDARD = "unknown-standard"
 FINDING_LEGACY_RAILS_MANIFEST = "legacy-rails-manifest"
+#: A declared loop names an actor with no contract file. FATAL: the loop
+#: cannot run, and a kernel worker handed an unreadable actor would either
+#: refuse or — worse — fall back to a default prompt (ADR-0145 Ruling 2).
+FINDING_LOOP_WITHOUT_ACTOR = "loop-without-actor"
+#: An enumerated actor that no loop names. NON-FATAL: a repo mid-migration
+#: looks exactly like this, and enlarging the mandate is a human's ENACT
+#: (ADR-0143 Ruling 6 guard 4) — so this files for a person rather than
+#: failing a load.
+FINDING_ACTOR_WITHOUT_LOOP = "actor-without-loop"
 
 NON_FATAL_FINDING_CLASSES: frozenset[str] = frozenset(
     {
         FINDING_UNKNOWN_LAYER,
         FINDING_UNKNOWN_STANDARD,
         FINDING_LEGACY_RAILS_MANIFEST,
+        # Deliberately non-fatal, and the asymmetry with its twin is the
+        # point: one-way binding is how `standard.yaml` and its README drifted
+        # (#11751), but making BOTH sides fatal would make migration
+        # impossible — which is how a guard gets deleted rather than met.
+        FINDING_ACTOR_WITHOUT_LOOP,
     }
 )
+
+#: Non-fatal classes that must still reach a HUMAN as a filed issue.
+#:
+#: `NON_FATAL_FINDING_CLASSES` was answering two different questions at once:
+#: "does this count as drift?" (it governs `clean`) and "do we file it?" (the
+#: caretaker only logs the tolerated ones). Every member until now wanted the
+#: same answer to both, so the conflation was invisible.
+#:
+#: `actor-without-loop` is the first that does not. A repo mid-migration is not
+#: broken — failing it would make migration impossible — but enlarging the
+#: mandate is a human's ENACT (ADR-0143 Ruling 6 guard 4), so the caretaker's
+#: whole job is to put the question in front of one. Logging it would leave the
+#: decision with nobody.
+ADVISORY_FINDING_CLASSES: frozenset[str] = frozenset({FINDING_ACTOR_WITHOUT_LOOP})
 
 #: check_id suffixes for :data:`FINDING_UNCHECKABLE_CHARTER`.
 UNCHECKABLE_NOTHING_DECLARED = "nothing-declared"
@@ -763,6 +791,15 @@ class Charter:
             "actors": self.actors,
             "artifacts": self.artifacts.to_dict(),
             "rails": self.rails.to_dict(),
+            # Emitted only when the block is PRESENT, so a round-trip of a v1
+            # charter does not silently migrate it (guard 3: absent and empty
+            # are different claims, and rendering `loops: {}` for an unmigrated
+            # repo would make the second one for it).
+            **(
+                {"loops": {loop.name: loop.to_dict() for loop in self.loops.loops}}
+                if self.loops.present
+                else {}
+            ),
         }
 
     @classmethod
