@@ -5,7 +5,7 @@ source_issue: 11465
 source_phase: plan
 created_at: 2026-08-20T06:26:27.905979+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # Mutation-kill new test pins before shipping green
