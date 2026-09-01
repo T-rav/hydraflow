@@ -583,6 +583,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_kernel_documents_live_in_files as kernel_docs
     from tests.architecture import test_mockworld_loop_scenario_ratchet as mockworld
     from tests.architecture import test_path_membership_registry as membership
+    from tests.architecture import test_policy_charter_parity as charter_parity
     from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_producer_probe_gate as probe_gate
     from tests.architecture import test_standards_rules_are_wired as rules_wired
@@ -1071,6 +1072,25 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             ),
         ),
         # --- CORPORA ----------------------------------------------------
+        GuardedEnumeration(
+            name="test_policy_charter_parity._CASES",
+            members=tuple(name for name, _ in charter_parity._CASES),  # noqa: SLF001
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "Drift-report shapes the charter arm must decide the same way "
+                "`compute_charter_drift` does."
+            ),
+            undetected_reason=(
+                "Evidence, not subject: each member is one report shape fed to "
+                "both derivations. The SUBJECT is `NON_FATAL_FINDING_CLASSES` "
+                "— which classes are fatal — and that set is guarded where it "
+                "is declared, not here. Dropping a case narrows the proof that "
+                "the two agree on that shape, which is a coverage question; "
+                "the parity invariant itself is asserted per case rather than "
+                "over the list, so a drop cannot silently weaken it into "
+                "vacuity."
+            ),
+        ),
         GuardedEnumeration(
             name="test_audit_src_layout_ratchet._FORBIDDEN_SHAPES",
             members=tuple(param.id or "" for param in src_layout._FORBIDDEN_SHAPES),  # noqa: SLF001
