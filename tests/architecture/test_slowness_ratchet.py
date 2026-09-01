@@ -28,8 +28,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from erosion.slowness import collect_durations, compute
 from erosion.slowness_baseline import (
     SlownessBaseline,
@@ -117,12 +115,18 @@ class TestTheCommittedBaseline:
         )
 
 
-@pytest.mark.skipif(
-    not _DURATIONS.exists(), reason="no measurement — run `make test` to produce one"
-)
 def test_the_live_reading_is_within_the_mark() -> None:
-    """The gate proper. Skipped rather than failed when nothing measured it —
-    CI lanes that do not run the full suite must not be told the suite regressed.
+    """The gate proper.
+
+    No ``skipif``: ``exceeded`` already returns nothing for an unmeasured
+    reading, so the "CI did not run the full suite" case is handled by the
+    predicate rather than by hiding the test. A skip marker here would be
+    deferred coverage in the sense ``test_no_ignored_active_tests`` polices,
+    and it would also be redundant.
+
+    That does make this assertion quiet on an unmeasured checkout — which is
+    why the gate's teeth are in ``TestTheGateItself`` above, on synthetic
+    readings that run everywhere.
     """
     finding = compute(collect_durations(_DURATIONS))
     breaches = exceeded(finding, load_slowness_baseline(_BASELINE))
