@@ -20,3 +20,7 @@ rules:
   - id: exemptions-name-a-mechanism
     claim: Every member exemption names the mechanism that protects it instead
     enforced_by: tests/architecture/test_guard_enumeration_gate.py::test_every_member_exemption_names_a_mechanism
+
+readme_mentions_not_enforcers:
+  - path: tests/architecture/test_director_no_authority.py
+    why: Cited in the F-case table as a worked EXAMPLE of a guard whose subject was too narrow, not as an enforcer of this standard.

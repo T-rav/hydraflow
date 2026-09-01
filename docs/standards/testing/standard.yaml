@@ -83,3 +83,7 @@ rules:
   - id: scenarios-do-not-swap-fakes-for-raw-mocks
     claim: A MockWorld scenario asserts GitHub side effects through FakeGitHub state, not raw mocks
     enforced_by: tests/architecture/test_mockworld_scenario_fake_boundaries.py::test_mockworld_scenarios_assert_github_side_effects_through_fake_state
+
+readme_mentions_not_enforcers:
+  - path: tests/scenarios/test_caretaker_loops_part2.py
+    why: Cited as the canonical EXAMPLE of a Pattern B direct-instantiation scenario, not as an enforcer of this standard.
