@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING
 
 from flows import Edge, Flow, Node
 from implement_failure_class import classify_implement_failure
-from models import WorkerResult
+from implement_phase._existing_pr import find_open_pr_declaring
+from models import PRInfo, WorkerResult
 
 from ._common import (
     _flow_stopped,
@@ -260,9 +261,7 @@ class ImplementFlowMixin:
         state["review_feedback"] = review_feedback
         state["is_retry"] = bool(review_feedback)
         if not review_feedback:
-            existing_pr = await self._prs.find_open_pr_for_branch(
-                branch, issue_number=issue.id
-            )
+            existing_pr = await self._existing_open_pr(issue.id, branch)
             if existing_pr and existing_pr.number > 0 and not existing_pr.draft:
                 logger.info(
                     "Issue #%d already has open PR #%d — skipping to review",
@@ -291,6 +290,45 @@ class ImplementFlowMixin:
             state["result"] = cap_result
             state["_stop"] = True
         return state
+
+    async def _existing_open_pr(self, issue_number: int, branch: str) -> PRInfo | None:
+        """An open, non-draft PR for this issue — by branch name, then by what
+        PRs DECLARE they close.
+
+        The branch name is the FACTORY's convention, not the repo's (#11981).
+        `agent/issue-{N}` is what this runner creates; a PR opened by a human or
+        by an agent in a worktree uses a conventional-commit name, which is most
+        of what merges. Such a PR was invisible here, so the auto-agent
+        re-implemented work that already existed.
+
+        The declaration is the evidence. `false_close.closing_issue_refs` parses
+        exactly that, and is the same predicate P10.7 uses to detect false
+        closes, so the two cannot drift apart.
+
+        Draft PRs are excluded from BOTH paths: the caller's own rule is that a
+        draft does not count as completed work, and a fallback that ignored it
+        would skip implementation on a PR nobody finished.
+        """
+        found = await self._prs.find_open_pr_for_branch(
+            branch, issue_number=issue_number
+        )
+        if found and found.number > 0:
+            return found
+
+        declared = await find_open_pr_declaring(
+            issue_number,
+            list_open_prs=self._prs.list_all_open_prs,
+            read_title_and_body=self._prs.get_pr_title_and_body,
+        )
+        if not declared:
+            return None
+        logger.info(
+            "Issue #%d has open PR #%d declaring it closes the issue, under a "
+            "branch the name check could not see",
+            issue_number,
+            declared,
+        )
+        return PRInfo(number=declared, issue_number=issue_number, branch="")
 
     async def _flow_no_progress_abort(self, state: FlowState) -> FlowState:
         """No-progress early-abort node (P2 of #10682; #10659/#10616).
