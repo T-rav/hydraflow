@@ -1,0 +1,35 @@
+# See docs/standards/adr_enforcement/standard.yaml for what these keys mean.
+# Properties: tests/architecture/test_standards_registry.py
+id: purpose
+enforced_by:
+  - tests/test_charter_purpose_presence.py
+  - tests/test_policy_purpose_standard.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: intent-is-stated
+    claim: A governed charter carries a non-empty product and at least one goal
+    enforced_by: tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift
+  - id: an-unstated-purpose-is-fatal
+    claim: missing-purpose is fatal, so goal referential integrity cannot disable itself on an empty subject list
+    enforced_by: tests/test_charter_purpose_presence.py::TestItIsFatalOnPurpose::test_missing_purpose_is_not_tolerated
+  - id: the-legacy-format-is-not-asked
+    claim: A legacy rails.yaml is not asked for a purpose it has nowhere to put
+    enforced_by: tests/test_charter_purpose_presence.py::TestTheLegacyFormatIsNotAskedForWhatItCannotExpress::test_a_legacy_manifest_is_not_asked_for_a_purpose
+  - id: every-goal-is-cited
+    claim: Each declared goal is cited by some standard README, ADR, or local article
+    enforced_by: tests/test_policy_purpose_standard.py::TestWhereACitationCounts::test_an_uncited_goal_is_decoration
+  - id: the-charter-does-not-anchor-itself
+    claim: Declaring a goal in charter.yaml does not count as citing it
+    enforced_by: tests/test_policy_purpose_standard.py::TestTheDecoys::test_the_charter_declaring_the_goal_does_not_anchor_it
+  - id: a-goal-never-blocks-a-merge
+    claim: An unanchored goal is reported for a human and never gates a merge
+    enforced_by: tests/test_policy_purpose_standard.py::test_an_unanchored_goal_never_blocks_a_merge
+  - id: the-mandate-is-the-operators-act
+    claim: A repo not declaring the purpose standard produces no purpose decision
+    enforced_by: tests/test_policy_purpose_standard.py::TestTheMandateIsTheOperatorsAct::test_a_charter_not_declaring_purpose_produces_no_decision
+  - id: this-repo-obeys-its-own-rule
+    claim: Every goal this repo declares is itself cited
+    enforced_by: tests/test_policy_purpose_standard.py::TestThisRepoObeysItsOwnRule::test_every_declared_goal_is_anchored
