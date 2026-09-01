@@ -416,6 +416,63 @@ def standard_ids_under(root: Path) -> frozenset[str]:
     return frozenset(p.name for p in standards.iterdir() if p.is_dir())
 
 
+class _NoDuplicateKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that REFUSES duplicate mapping keys.
+
+    `yaml.safe_load` silently keeps the LAST duplicate. Two `finance-close:`
+    entries — one `enabled: true`, one `false` — load clean, schema-validate
+    clean, and the first vanishes. That is not hypothetical: the evidence repo
+    hit it and fixed it in its own loader (ADR-0145 guard 4).
+
+    Applied to the WHOLE charter load, not just `loops:`. The same hole exists
+    for every block, and a guard scoped to the one place it was noticed is how
+    the next instance goes unnoticed.
+    """
+
+
+def _no_duplicates(loader: yaml.SafeLoader, node: yaml.MappingNode) -> dict[Any, Any]:
+    seen: set[Any] = set()
+    for key_node, _value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            msg = (
+                f"duplicate key {key!r} in the charter at line "
+                f"{key_node.start_mark.line + 1}. A duplicate silently "
+                "overwrites the first declaration, so one of these two is "
+                "invisible — including its `enabled` value (ADR-0145 guard 4)."
+            )
+            raise CharterError(msg)
+        seen.add(key)
+    # `dict[Any, Any]`, not `dict[str, Any]`: YAML mapping keys are Hashable,
+    # and narrowing them here would be a claim this function cannot make. The
+    # caller's `isinstance(raw, dict)` check is where the charter's
+    # string-keyed shape is actually established.
+    return loader.construct_mapping(node, deep=True)
+
+
+_NoDuplicateKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates
+)
+
+
+def _load_yaml_rejecting_duplicates(text: str) -> Any:
+    """`yaml.safe_load` semantics with guard 4 applied.
+
+    Drives the loader directly rather than calling ``yaml.load(...,
+    Loader=...)``. That call is what `yaml.load` does internally, but bandit
+    flags the *spelling* `yaml.load` as B506 regardless of the loader passed,
+    and silencing it would need a suppression the ratchet only lets shrink.
+    Registering the constructor on `SafeLoader` itself was the other option and
+    is worse: it would change every `safe_load` in the process, including
+    callers that have nothing to do with the charter.
+    """
+    loader = _NoDuplicateKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
 def _read_mapping(path: Path) -> dict[str, Any] | None:
     """Parse *path* as a YAML mapping; ``None`` only when the file is absent.
 
@@ -427,7 +484,7 @@ def _read_mapping(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = _load_yaml_rejecting_duplicates(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         msg = f"{path.name} is not valid YAML: {exc}"
         raise CharterError(msg) from exc

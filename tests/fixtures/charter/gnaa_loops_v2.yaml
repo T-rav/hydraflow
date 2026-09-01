@@ -1,0 +1,130 @@
+# A v2 rendering of the evidence repo's `loops.yml` (GNAA): 15 loops over 11
+# actors, including the four entries whose original triggers are conjunctive
+# ("weekly · and on each telemetry candidate"). This is a LOADER STRESS TEST,
+# not a demo step — it belongs where schema defects surface days earlier.
+#
+# The `on:` halves are rendered as documented manual triggers in `goal`,
+# because ADR-0145 Ruling 3 defers `on:` until a detector exists and the
+# evidence repo's own header concedes the Operator is that detector today.
+# If any entry here cannot be expressed, the schema is still wrong.
+schema_version: 2
+actors: agents/
+
+loops:
+  finance-close:
+    actor: finance
+    enabled: true
+    trigger:
+      - cron: "0 9 1 * *"
+    goal: Produce the monthly close per your output contract from the ledger.
+    budget_usd: 4.00
+    timeout_s: 900
+    model: sonnet
+    output:
+      branch_prefix: "finance/"
+      gate: pr
+
+  records-docket:
+    actor: records
+    enabled: true
+    trigger:
+      - cron: "0 9 * * MON"
+    goal: >
+      Produce the docket: every open request with custodian, statutory due
+      date, state and next action. MANUAL TRIGGER (deferred `on:`): also run
+      when a records request response arrives — the Operator is the detector.
+
+  records-quarterly:
+    actor: records
+    enabled: true
+    trigger:
+      - cron: "0 9 1 */3 *"
+    goal: Stage ONE records request per airport, rotating through the set.
+
+  telemetry-sweep:
+    actor: telemetry
+    enabled: true
+    trigger:
+      - cron: "0 8 * * TUE"
+    goal: >
+      Sweep telemetry candidates. MANUAL TRIGGER (deferred `on:`): also run on
+      each new candidate.
+
+  press-moment:
+    actor: pr
+    enabled: false
+    trigger:
+      - cron: "0 10 * * MON"
+    goal: As dispatched. MANUAL TRIGGER (deferred `on:`) on a press moment.
+
+  grants-cycle:
+    actor: grants
+    enabled: true
+    trigger:
+      - cron: "0 9 15 * *"
+    goal: Review the grant pipeline and stage the next application.
+
+  compliance-review:
+    actor: compliance
+    enabled: true
+    trigger:
+      - cron: "0 9 1 */6 *"
+    goal: Re-read the filings against current obligations.
+
+  board-pack:
+    actor: board-secretary
+    enabled: true
+    trigger:
+      - cron: "0 9 20 * *"
+    goal: Assemble the board pack from the month's artifacts.
+
+  volunteer-roster:
+    actor: volunteers
+    enabled: false
+    trigger:
+      - cron: "0 9 * * FRI"
+    goal: Refresh the roster and flag lapsed clearances.
+
+  outreach-digest:
+    actor: outreach
+    enabled: true
+    trigger:
+      - cron: "0 9 * * WED"
+    goal: >
+      Digest the week's outreach. MANUAL TRIGGER (deferred `on:`): also on a
+      significant inbound.
+
+  legal-watch:
+    actor: legal
+    enabled: true
+    trigger:
+      - cron: "0 7 * * MON"
+    goal: Watch the docket for filings that touch our obligations.
+
+  archive-sweep:
+    actor: archive
+    enabled: false
+    trigger:
+      - cron: "0 2 1 * *"
+    goal: Sweep the archive for items past their retention window.
+
+  finance-forecast:
+    actor: finance
+    enabled: false
+    trigger:
+      - cron: "0 9 1 */3 *"
+    goal: Re-forecast against the close.
+
+  legal-quarterly:
+    actor: legal
+    enabled: false
+    trigger:
+      - cron: "0 9 5 */3 *"
+    goal: Quarterly review of standing agreements.
+
+  archive-audit:
+    actor: archive
+    enabled: false
+    trigger:
+      - cron: "0 3 1 1 *"
+    goal: Annual audit of archive integrity.
