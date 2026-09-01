@@ -154,3 +154,85 @@ class TestMemoryBacklogScenario:
         assert result["status"] == "ok"
         assert result["filed"] == 1
         assert len(github._issues) == 1
+
+
+class TestARecloneDoesNotReFile:
+    """#11963 — the guard has to survive losing the local frontmatter.
+
+    Unit tests see the loop's decision against a mocked board. Only this layer
+    replays the sequence that actually happened: file an issue, lose the
+    write-back (the commit went into a workspace nothing pushes), come back on
+    a checkout that still reads `pending`, and tick again.
+
+    `FakeGitHub` is the board here, not a mock — the second tick has to find the
+    first tick's own issue through the same port a live run would.
+    """
+
+    async def test_a_second_tick_on_a_reset_checkout_files_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        first = await loop._do_work()
+        assert first["filed"] == 1
+
+        # The re-clone: frontmatter back to `pending`, dedup gone. The issue
+        # the first tick filed is still open on the board.
+        _write_entry(mirror, "feedback-alpha", status="pending")
+        loop._dedup.set_all(set())
+
+        second = await loop._do_work()
+
+        assert second["filed"] == 0
+
+    async def test_the_reset_checkout_heals_its_own_frontmatter(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        path = _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        await loop._do_work()
+        _write_entry(mirror, "feedback-alpha", status="pending")
+        loop._dedup.set_all(set())
+
+        await loop._do_work()
+
+        assert "status: issue-open" in path.read_text()
+
+    async def test_only_one_issue_exists_on_the_board_afterwards(
+        self, tmp_path: Path
+    ) -> None:
+        # The symptom a human would have seen: a duplicate of an issue that was
+        # never closed.
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        await loop._do_work()
+        _write_entry(mirror, "feedback-alpha", status="pending")
+        loop._dedup.set_all(set())
+        await loop._do_work()
+
+        issues = await github.list_issues_by_label("hydraflow-memory-backlog")
+        assert len(issues) == 1
+
+    async def test_a_genuinely_new_entry_still_files(self, tmp_path: Path) -> None:
+        # The decoy: a guard that skipped everything after the first tick would
+        # pass all three tests above and file nothing again, ever.
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        await loop._do_work()
+        _write_entry(mirror, "feedback-beta")
+
+        second = await loop._do_work()
+
+        assert second["filed"] == 1

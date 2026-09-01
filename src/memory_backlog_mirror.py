@@ -8,6 +8,8 @@ status state-machine.
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -34,6 +36,49 @@ class MirrorEntry:
     promoted_in: str | None
     wontfix_reason: str | None
     body: str
+
+
+#: The mirror reference every filed issue carries in its body, written by
+#: :func:`render_issue_body`. This is what makes the ISSUE the authority on
+#: whether an entry has been filed: it survives a re-clone, a reset workspace
+#: and a lost DedupStore, none of which the frontmatter does (#11963).
+_MIRROR_REF = re.compile(r"memory-feedback/([a-z0-9][a-z0-9._-]*)\.md")
+
+
+def slug_from_issue_body(body: str) -> str | None:
+    """The mirror slug an issue was filed for, or None if it names none.
+
+    Reads the `Mirror:` line `render_issue_body` writes, so the two are one
+    format with two readers rather than a convention. An issue a human wrote by
+    hand under the same label simply names no mirror and is ignored, which is
+    the right answer — it is not evidence that any entry was filed.
+    """
+    match = _MIRROR_REF.search(body or "")
+    return match.group(1) if match else None
+
+
+def filed_slugs(issues: Iterable[Mapping[str, object]]) -> dict[str, int]:
+    """Map mirror slug -> open issue number, from the filed issues themselves.
+
+    The authoritative re-filing guard. ADR-0089 made the mirror frontmatter the
+    guard, which put it in whichever checkout happened to be running: the loop
+    filed #11947-#11949, wrote `status: issue-open` and committed it into a
+    workspace nothing pushes, so `staging` still read `pending` and a re-clone
+    would have re-filed all three as duplicates of issues that were still open
+    (#11963).
+
+    Lowest number wins on a duplicate so healing is deterministic and points at
+    the original rather than whichever row the API returned last.
+    """
+    found: dict[str, int] = {}
+    for issue in issues:
+        slug = slug_from_issue_body(str(issue.get("body", "")))
+        number = issue.get("number")
+        if slug is None or not isinstance(number, int):
+            continue
+        if slug not in found or number < found[slug]:
+            found[slug] = number
+    return found
 
 
 def dedup_key_for(slug: str) -> str:
