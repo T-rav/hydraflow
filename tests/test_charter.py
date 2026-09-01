@@ -426,7 +426,12 @@ def test_purpose_and_local_articles_alone_do_not_make_a_charter_checkable() -> N
 
 
 def test_one_declared_layer_is_enough_to_be_checkable() -> None:
-    charter = Charter(rails=RailsBlock(layers=("universal",)))
+    # Purpose is stated so `missing-purpose` (#11856) cannot be what makes
+    # this report unclean — the subject here is layer checkability.
+    charter = Charter(
+        purpose=Purpose(product="a factory", goals=("lights_off",)),
+        rails=RailsBlock(layers=("universal",)),
+    )
     observed = ObservedRepo(present_layers=frozenset({"universal"}))
     report = compute_charter_drift(charter, observed, repo="o/r")
     assert report.clean

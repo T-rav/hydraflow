@@ -11,8 +11,12 @@
 
 schema_version: 1
 
-# Purpose is the one layer nothing checks (ADR-0143 Ruling 3). It is declared
-# so the repo states its intent in one place; no drift check reads it.
+# Purpose is checked for PRESENCE and SHAPE only (ADR-0143 Amendment
+# 2026-09-01, #11856): `missing-purpose` in `compute_charter_drift` requires a
+# non-empty product and at least one goal, and goal referential integrity —
+# each goal id cited by some Article or standard — is decided through the
+# policy seam. Whether the work SERVES these goals is not checked and is not
+# checkable; ADR-0143 refuses a judge-model conformance check outright.
 purpose:
   product: "Intent in. Software out. Multi-agent orchestration that automates the full GitHub issue lifecycle."
   goals:

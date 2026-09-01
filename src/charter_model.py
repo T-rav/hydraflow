@@ -59,6 +59,13 @@ FINDING_COVERAGE_FLOOR = "coverage-floor"
 FINDING_MISSING_GATE_SCRIPT = "missing-gate-script"
 FINDING_MISSING_STANDARD = "missing-standard"
 FINDING_MISSING_ARTIFACT = "missing-artifact"
+
+#: A governed charter states no intent: `purpose.product` is empty, or it
+#: names no goals. Fatal, because Purpose is a precondition rather than a
+#: decoration — goal referential integrity has nothing to resolve against an
+#: empty goal list, so an unstated purpose silently disables the check above
+#: it (#11856, ADR-0143 Amendment 2026-09-01).
+FINDING_MISSING_PURPOSE = "missing-purpose"
 #: The check itself has no teeth — nothing declared to check, or the shipped
 #: standards registry could not be enumerated. Fatal by design: a silent
 #: drift check reads as coverage.
@@ -155,10 +162,22 @@ def _as_float(field: str, value: Any) -> float:
 class Purpose:
     """The Purpose layer: what the repo is trying to do.
 
-    ADR-0143 Ruling 3 names Purpose the one layer nothing checks. The charter
-    carries it so it has a declaration surface at all; **no drift check reads
-    it**, and none should be added without a ruling that says what checking
-    intent would even mean.
+    ADR-0143 Ruling 3 left Purpose unchecked and required a ruling before any
+    check was added, because "does this repo serve its purpose" is not
+    decidable. The operator ruled on 2026-08-31 (ADR-0143 Amendment
+    2026-09-01, #11856) and the condition is now satisfied: two *structural*
+    claims about Purpose are checkable without pretending to read intent.
+
+    * **Stated** — a governed charter carries a non-empty ``product`` and at
+      least one goal. Checked here, as ``missing-purpose`` in
+      :func:`charter.compute_charter_drift`.
+    * **Anchored** — each goal id is cited by some Article or standard, so a
+      goal cannot be pure decoration. That is a cross-surface judgement over
+      facts and belongs to the policy seam, not to drift.
+
+    **Semantic conformance stays refused.** Whether the work serves the goals
+    is not deterministically decidable, and a judge-model check would rest a
+    conformance claim on an external service (#11687). Do not re-propose it.
     """
 
     product: str = ""
@@ -773,9 +792,14 @@ class Charter:
     def declares_nothing_checkable(self) -> bool:
         """True when no declaration in this charter has a check behind it.
 
-        Purpose and ``articles.local`` are deliberately excluded: nothing
-        checks intent (ADR-0143 Ruling 3), and a local article is prose. A
-        charter of only those is a charter the drift check cannot speak to.
+        Purpose and ``articles.local`` are deliberately excluded, and Purpose
+        stays excluded now that ``missing-purpose`` reads it (#11856). The
+        reason changed: it is no longer "nothing checks intent" but that
+        *stating* intent is not evidence the repo does anything. A charter
+        carrying only a purpose block satisfies ``missing-purpose`` and would
+        then report clean while no live subject was ever compared — the exact
+        silent pass this property exists to refuse. A local article is prose,
+        for the same reason.
         """
         return not (
             self.articles.standards
