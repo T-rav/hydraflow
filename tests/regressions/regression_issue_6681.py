@@ -70,6 +70,8 @@ def _make_gc_loop(
         state.set_workspace(num, path)
 
     workspaces = MagicMock()
+
+    workspaces.prune_dead_registrations = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
 

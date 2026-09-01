@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -28,6 +28,13 @@ from mockworld.fakes.fake_github import FakeGitHub
 from state import StateTracker
 from tests.helpers import BgLoopDeps, make_bg_loop_deps
 from workspace_gc_loop import WorkspaceGCLoop
+
+
+def _workspace_mock() -> MagicMock:
+    """A WorkspacePort double that answers the async surface (#11908)."""
+    mock = MagicMock()
+    mock.prune_dead_registrations = AsyncMock(return_value=[])
+    return mock
 
 _ISSUE = 11503
 _BRANCH = f"fix/closed-issue-landed-{_ISSUE}"  # attributes to _ISSUE via fix/*-N
@@ -103,7 +110,7 @@ def _make_loop(
     github.issue(_ISSUE).state_reason = state_reason
     return WorkspaceGCLoop(
         config=deps.config,
-        workspaces=MagicMock(),
+        workspaces=_workspace_mock(),
         prs=github,
         state=StateTracker(deps.config.state_file),
         deps=deps.loop_deps,

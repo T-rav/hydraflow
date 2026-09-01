@@ -37,13 +37,13 @@
       "content_sha": "92f12fd28f25d7f06b092109ac7e82fbcc680cbb342e726e46befebda10607ee"
     },
     "mockworld.md": {
-      "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
+      "content_sha": "ad73b417d35edc412353d5898aac27f9efe687d9ff7b2c4148260da1f6f1e40f"
     },
     "modules.md": {
       "content_sha": "6229d39b9aaf379f232cb10e8d8c4fbf0bff95b7b628834726b78489563673d2"
     },
     "ports.md": {
-      "content_sha": "67fc7b123d0d9952a7dcfd7e0ba0eb2979fd95b97d27e950655b05a71147689f"
+      "content_sha": "fcf533a4eac4787759a41faa71ab611fdb670e70b10c3f436263eaed6c1f7907"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "62e3a2e8c54c8641e5527040a4f5fefd06a7596060aa7bb02950aa1f73324c09"
@@ -55,5 +55,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "dc219d37f5af8d916435321fa8fbbc857e7794ffdbe93ea32b8db417c492fe9b"
+  "content_sha": "b489db2f8bb3af58c5d9560349c3dcf789b71cb725be3694f6e5488aa5fdad17"
 }

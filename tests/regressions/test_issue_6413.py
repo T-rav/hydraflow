@@ -39,6 +39,8 @@ def _make_gc_loop(tmp_path: Path) -> tuple[WorkspaceGCLoop, MagicMock, MagicMock
     deps = make_bg_loop_deps(tmp_path, enabled=True)
 
     workspaces = MagicMock()
+
+    workspaces.prune_dead_registrations = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
 
     prs = MagicMock()

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,6 +25,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from tests.helpers import make_bg_loop_deps
+
+
+def _workspace_mock() -> MagicMock:
+    """A WorkspacePort double that answers the async surface (#11908)."""
+    mock = MagicMock()
+    mock.prune_dead_registrations = AsyncMock(return_value=[])
+    return mock
 
 # ---------------------------------------------------------------------------
 # Helper: build a loop instance with the static gate disabled
@@ -428,7 +435,7 @@ def _workspace_gc_loop(tmp_path: Path):
     d = _deps(tmp_path, "workspace_gc_loop_enabled")
     return WorkspaceGCLoop(
         config=d.config,
-        workspaces=MagicMock(),
+        workspaces=_workspace_mock(),
         prs=MagicMock(),
         state=MagicMock(),
         deps=d.loop_deps,

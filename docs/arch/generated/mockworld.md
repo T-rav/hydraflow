@@ -25,7 +25,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_repo_wiki_compile_scenario.py` |
-| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
+| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_workspace_gc_dead_registration_scenario.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 
 ## Wiring
 
@@ -75,6 +75,7 @@ graph LR
     tests_scenarios_test_repo_wiki_compile_scenario_py([tests/scenarios/test_repo_wiki_compile_scenario.py]) --> FakeWikiCompiler
     FakeWorkspace -.-> WorkspacePort
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
+    tests_scenarios_test_workspace_gc_dead_registration_scenario_py([tests/scenarios/test_workspace_gc_dead_registration_scenario.py]) --> FakeWorkspace
     tests_scenarios_test_workspace_gc_landed_guard_scenario_py([tests/scenarios/test_workspace_gc_landed_guard_scenario.py]) --> FakeWorkspace
 ```
 
