@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/execution.py:SubprocessRunner"
 aliases: ["subprocess execution port", "host/docker execution abstraction"]
 related: []
-evidence: ["BUILD-PREFLIGHT-SIX-CI-REDS-001"]
+evidence: ["01M0K5AREKCQMM12BWRNEC6KJW", "BUILD-PREFLIGHT-SIX-CI-REDS-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-22T10:58:15.024800+00:00"
-updated_at: "2026-07-24T05:34:07.706352+00:00"
+updated_at: "2026-09-01T07:13:20.888566+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-22T10:58:15.024751+00:00"
 proposal_signals: ["S1", "S2"]
