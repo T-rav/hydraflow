@@ -55,7 +55,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 
-## Background loops (64)
+## Background loops (65)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -65,6 +65,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `auto_tighten` | `AutoTightenLoop` | Repo Health | — | — | — | Locks in coverage-floor gains |
 | `branch_protection_auditor` | `BranchProtectionAuditorLoop` | Governance & Audit | — | — | — | Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082. |
 | `charter_drift_caretaker` | `CharterDriftCaretakerLoop` | Governance & Audit | — | — | — | Audits each managed repo's live state against its charter.yaml (declared standards / required artifacts / template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121, ADR-0143. |
+| `charter_loop_worker` | `CharterLoopWorkerLoop` | Governance & Audit | — | — | — | Runs a repo's charter-declared loops (charter.yaml schema_version 2): selects due loops from their cron clauses, dispatches one brokered worker per loop inside its budget/timeout envelope, and receipts every decision including skips. Ships disabled — arming it is an operator ENACT. See ADR-0145. |
 | `ci_monitor` | `CIMonitorLoop` | Repo Health | — | — | — | Detects failing CI on main and files/auto-closes issues. |
 | `contract_refresh` | `ContractRefreshLoop` | Governance & Audit | — | — | HITL escalation; PR review + merge gate | Re-records fake-adapter cassettes and opens refresh PRs when committed cassettes drift from live behavior. |
 | `convergence_oscillation` | `ConvergenceOscillationLoop` | Autonomy | — | — | HITL escalation | Scans issue convergence ledgers for cross-boundary oscillation (repeated LOOP_BACK across triage/shape/plan or recurring review-lap findings) and escalates stuck issues to HITL, once each. See ADR-0098. |

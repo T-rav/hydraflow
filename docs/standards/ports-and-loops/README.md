@@ -87,6 +87,7 @@ each is responsible for one caretaking concern.
 | `BranchProtectionAuditorLoop` | `src/branch_protection_auditor_loop.py` | 604800 | 0082 | — |
 | `CIMonitorLoop` | `src/ci_monitor_loop.py` | 300 | 0029, 0065 | [ci-monitor-loop.md](../../wiki/terms/ci-monitor-loop.md) |
 | `CharterDriftCaretakerLoop` | `src/charter_drift_caretaker_loop.py` | 86400 | 0121 | [charter-drift-caretaker-loop.md](../../wiki/terms/charter-drift-caretaker-loop.md) |
+| `CharterLoopWorkerLoop` | `src/charter_loop_worker_loop.py` | 3600 | — | — |
 | `ContractRefreshLoop` | `src/contract_refresh_loop.py` | 604800 | 0045, 0047 | [contract-refresh-loop.md](../../wiki/terms/contract-refresh-loop.md) |
 | `ConvergenceOscillationLoop` | `src/convergence_oscillation_loop.py` | 3600 | 0096, 0097, 0098 | — |
 | `CorpusLearningLoop` | `src/corpus_learning_loop.py` | 3600 | 0045 | [corpus-learning-loop.md](../../wiki/terms/corpus-learning-loop.md) |

@@ -45,6 +45,7 @@ flowchart LR
         governance_AdrConformanceLoop([AdrConformanceLoop])
         governance_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
         governance_CharterDriftCaretakerLoop([CharterDriftCaretakerLoop])
+        governance_CharterLoopWorkerLoop([CharterLoopWorkerLoop])
         governance_ContractRefreshLoop([ContractRefreshLoop])
         governance_DiagramLoop([DiagramLoop])
         governance_FitnessScorecardLoop([FitnessScorecardLoop])
@@ -173,6 +174,7 @@ Audit, compliance, and drift workers that hold the factory to its own declared r
 - `AdrConformanceLoop` — `src.adr_conformance_loop`
 - `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
 - `CharterDriftCaretakerLoop` — `src.charter_drift_caretaker_loop`
+- `CharterLoopWorkerLoop` — `src.charter_loop_worker_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `DiagramLoop` — `src.diagram_loop`
 - `FitnessScorecardLoop` — `src.fitness_scorecard_loop`

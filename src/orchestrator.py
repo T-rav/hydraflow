@@ -246,6 +246,7 @@ class HydraFlowOrchestrator(
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
             "goal_supervisor": svc.goal_supervisor_loop,
             "charter_drift_caretaker": svc.charter_drift_caretaker_loop,
+            "charter_loop_worker": svc.charter_loop_worker_loop,
             "gate_activator": svc.gate_activator_loop,
             "security_patch": svc.security_patch_loop,
             "repo_wiki": svc.repo_wiki_loop,
@@ -527,6 +528,10 @@ class HydraFlowOrchestrator(
                 self._svc.branch_protection_auditor_loop.run,
             ),
             ("goal_supervisor", self._svc.goal_supervisor_loop.run),
+            (
+                "charter_loop_worker",
+                self._svc.charter_loop_worker_loop.run,
+            ),
             (
                 "charter_drift_caretaker",
                 self._svc.charter_drift_caretaker_loop.run,
