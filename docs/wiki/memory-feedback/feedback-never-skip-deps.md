@@ -3,8 +3,8 @@ source: feedback_never_skip_deps.md
 name: Never silently skip dependencies
 description: Required dependencies must fail hard, never degrade gracefully or skip
   with a warning
-status: issue-open
-issue: 34
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-03-27'
