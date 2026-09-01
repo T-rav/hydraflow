@@ -27,4 +27,7 @@ rules:
   - id: the-aggregator-gates-every-matrix-job
     claim: The aggregator job gates every matrix job and still runs when an upstream fails
     enforced_by: tests/regressions/test_stamped_required_check_aggregator_11715.py::test_aggregator_gates_every_matrix_job
+  - id: required-checks-are-producible
+    claim: Every required status check is producible by a job that really exists in the workflow
+    enforced_by: tests/architecture/test_required_matrix_contexts.py::test_required_quality_matrix_contexts_are_producible
 
