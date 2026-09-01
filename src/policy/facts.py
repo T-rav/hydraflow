@@ -25,7 +25,7 @@ import yaml
 
 from adr_conformance import (
     accepted_adrs,
-    enforcement_classification,
+    classify_adr_enforcement,
     load_enforcement_baseline,
     parse_exemptions,
 )
@@ -100,10 +100,11 @@ def collect_adr_enforcement_facts(
     The engine derives ``grandfathered`` from the middle two; see the module
     docstring for why that derivation is not done here.
     """
-    classes = enforcement_classification(repo_root)
+    adrs = accepted_adrs(repo_root)
+    classes = {adr.number: classify_adr_enforcement(adr, repo_root) for adr in adrs}
     snapshot, resolved = load_enforcement_baseline(repo_root)
     exempted = frozenset(parse_exemptions(repo_root))
-    binds_by_number = {adr.number: adr.binds for adr in accepted_adrs(repo_root)}
+    binds_by_number = {adr.number: adr.binds for adr in adrs}
 
     facts: list[Fact] = []
     for number in sorted(classes):
