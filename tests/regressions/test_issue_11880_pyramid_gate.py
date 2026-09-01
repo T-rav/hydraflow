@@ -237,6 +237,80 @@ def test_the_check_never_emits_a_blocking_warn() -> None:
     assert names == {"PASS", "FAIL"}, f"expected only PASS/FAIL, got {names}"
 
 
+def test_a_written_waiver_opens_the_gate_and_names_itself() -> None:
+    """The escape hatch, added after the gate's first real false positive.
+
+    #11921 changed one Pydantic annotation — `min_length=1` to
+    `strip_whitespace=True`, so `" "` stops counting as content. The defect is
+    entirely in model validation: a MockWorld scenario observes nothing a unit
+    test cannot, and demanding one produces a ceremonial scenario, which is
+    worse than none because nobody believes it.
+
+    Modelled on P10.6's `Skip-Regression:` rather than invented. The obligation
+    stays the default; opting out costs a written sentence that survives into
+    the squash-merge body and that a reviewer can disagree with.
+    """
+    import os
+    from unittest.mock import patch
+
+    from hydraflow_audit.checks import p10_tdd
+
+    src = ["src/a.py", "tests/regressions/t.py"]
+
+    def _run(waiver: str | None):
+        with (
+            patch.dict(os.environ, {p10_tdd._PR_TITLE_ENV: "fix(x): y"}, clear=False),
+            patch.object(p10_tdd, "_pr_gate_preflight", return_value=("base", None)),
+            patch.object(p10_tdd, "_changed_paths_since", return_value=src),
+            patch.object(p10_tdd, "_pr_commit_subjects", return_value=["fix(x): y"]),
+            patch.object(p10_tdd, "_skip_scenario_reason", return_value=waiver),
+        ):
+            ctx = type("C", (), {"root": Path(".")})()
+            return p10_tdd._changes_ship_the_layers_the_standard_requires(ctx)
+
+    blocked = _run(None)
+    assert blocked.status.name == "FAIL"
+    assert "Skip-Scenario" in blocked.message, (
+        "a gate that blocks without naming its escape hatch is a gate people "
+        "route around instead of using"
+    )
+
+    waived = _run("pure Pydantic constraint; a scenario observes nothing extra")
+    assert waived.status.name == "PASS"
+    assert "waived by" in waived.message and "Pydantic" in waived.message, (
+        "the waiver must name itself in the finding — a silent bypass is "
+        f"indistinguishable from the check not running: {waived.message}"
+    )
+
+
+def test_the_waiver_cannot_open_a_gate_that_was_not_closed() -> None:
+    """Anti-vacuity: a waiver on a compliant change must not mask anything.
+
+    Without this, `_skip_scenario_reason` returning a truthy value for every
+    PR would satisfy the test above while disabling the gate entirely.
+    """
+    import os
+    from unittest.mock import patch
+
+    from hydraflow_audit.checks import p10_tdd
+
+    with (
+        patch.dict(os.environ, {p10_tdd._PR_TITLE_ENV: "docs(x): y"}, clear=False),
+        patch.object(p10_tdd, "_pr_gate_preflight", return_value=("base", None)),
+        patch.object(p10_tdd, "_changed_paths_since", return_value=["docs/x.md"]),
+        patch.object(p10_tdd, "_pr_commit_subjects", return_value=["docs(x): y"]),
+        patch.object(p10_tdd, "_skip_scenario_reason", return_value="unused"),
+    ):
+        ctx = type("C", (), {"root": Path(".")})()
+        got = p10_tdd._changes_ship_the_layers_the_standard_requires(ctx)
+
+    assert got.status.name == "PASS"
+    assert "waived" not in got.message, (
+        "an exempt change reported itself as waived — the waiver is being read "
+        "before the verdict"
+    )
+
+
 @pytest.mark.parametrize(
     ("subject", "expected"),
     [
