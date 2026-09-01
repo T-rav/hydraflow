@@ -20,11 +20,6 @@ rules:
   - id: break-glass-is-documented
     claim: The README documents the break-glass path and the kill switch
     enforced_by: tests/architecture/test_factory_autonomy_policy_drift.py::test_readme_documents_break_glass_and_kill_switch
-
-unenforced:
   - id: never-commit-to-the-default-branch
-    claim: Full autonomy still never permits committing to the default branch
-    why: >-
-      Stated in the README and in CLAUDE.md, and enforced at runtime by the
-      hf.block-destructive-git.sh PreToolUse hook, but no test asserts the hook
-      is wired or that the rule holds. The hook's own coverage is the gap.
+    claim: Full autonomy never permits landing on the default branch; every change goes through a PR
+    enforced_by: tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_both_rulesets_are_active_and_block_deletion_forcepush_and_direct_push
