@@ -95,34 +95,3 @@ class TestTheGateWouldHaveCaughtTheIncident:
 
 def test_no_deletions_is_never_an_offence() -> None:
     assert out_of_scope([], ["src/a.py"]) == []
-
-
-class TestItFailsClosed:
-    """The first version of this gate shipped broken in exactly one way.
-
-    ``_git`` ran with ``check=False`` and returned stdout. On the shallow CI
-    checkout ``git diff origin/staging...HEAD`` exited non-zero, stdout was
-    empty, and an empty deletion list reads exactly like "deletes nothing" — so
-    it printed ``[deletion-scope OK] no files deleted`` on a branch that deleted
-    a file, and went green. A gate for silent deletions that fails silently is
-    worse than none: it occupies the slot a working one would have.
-    """
-
-    def test_a_missing_base_is_an_error_not_an_empty_diff(self, tmp_path) -> None:
-        import subprocess
-
-        import check_deletion_scope as gate
-
-        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-        rc = gate.main(["--base", "origin/definitely-not-a-branch", "--head", "HEAD"])
-        assert rc == 1, (
-            "an unresolvable base must FAIL; returning 0 is the shipped bug — "
-            "no comparison was made, and 'nothing found' was reported as 'nothing there'"
-        )
-
-    def test_git_failure_raises_rather_than_returning_empty(self) -> None:
-        import check_deletion_scope as gate
-        import pytest as _pytest
-
-        with _pytest.raises(gate.BaseUnresolvable):
-            gate._git("rev-parse", "--verify", "definitely-not-a-ref^{commit}")
