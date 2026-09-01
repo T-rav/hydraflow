@@ -130,16 +130,55 @@ class TestStreamErrorText:
         assert "connection reset" in c.stream_errors
 
 
-class TestUnverifiedBackendsAreExplicitGaps:
-    """Pi and Codex error shapes are not authoritative anywhere in-repo.
+class TestPiAndCodexNowRecordToolErrors:
+    """Flipped from `TestUnverifiedBackendsAreExplicitGaps` (#11889).
 
-    `_parse_pi_tool_end` reads only ``result``; `_parse_codex_item` reads only
-    ``type``/``text``; `tests/fixtures/stream_json/` holds a Claude sample and
-    nothing else. Guessing a field name would ship a sentinel that silently
-    never matches. These pin the gap so the follow-up has a target to flip.
+    These pinned the GAP — Pi captured no errors and Codex had no completion
+    handler at all — so the follow-up had a target. Both landed, and the
+    conditions the old tests carried ("flip this test") are met.
+
+    They now pin the two properties that replaced the gap, and the second one
+    is as important as the first: capture reads an ENUMERATED set of failure
+    markers, so an event with no marker is UNKNOWN and must not be promoted to
+    "failed". A capture that called every completion a failure would satisfy
+    "errors are recorded" while being useless.
     """
 
-    def test_pi_tool_end_does_not_yet_record_errors(self, tmp_path: Path):
+    def test_a_marked_pi_failure_is_captured(self, tmp_path: Path):
+        c = _make_collector(tmp_path)
+        c.record(
+            json.dumps(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "Bash",
+                    "args": {},
+                    "invocationId": "p1",
+                }
+            )
+        )
+        c.record(
+            json.dumps(
+                {
+                    "type": "tool_execution_end",
+                    "toolName": "Bash",
+                    "invocationId": "p1",
+                    "isError": True,
+                    "result": "boom",
+                }
+            )
+        )
+
+        assert c.tool_errors == {"Bash": 1}
+        assert c.tool_calls[0].succeeded is False
+        assert c.tool_calls[0].error is not None
+
+    def test_an_unmarked_pi_result_is_not_assumed_to_have_failed(self, tmp_path: Path):
+        """`result: "boom"` is output text, not a failure marker.
+
+        Promoting unmarked completions to failures would make `tool_errors`
+        count every Pi tool call, which is the mirror-image defect of the one
+        this fixed: a signal that is always on carries no information.
+        """
         c = _make_collector(tmp_path)
         c.record(
             json.dumps(
@@ -162,9 +201,48 @@ class TestUnverifiedBackendsAreExplicitGaps:
             )
         )
 
-        assert c.tool_errors == {}, "pi error capture landed — flip this test"
+        assert c.tool_errors == {}
+        assert c.tool_calls[0].succeeded is True
 
-    def test_codex_function_call_has_no_completion_handler(self, tmp_path: Path):
+    def test_a_codex_completion_closes_the_span(self, tmp_path: Path):
+        c = _make_collector(tmp_path)
+        c.record(
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "function_call",
+                        "name": "shell",
+                        "arguments": "{}",
+                        "id": "c1",
+                    },
+                }
+            )
+        )
+        c.record(
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "function_call_output",
+                        "call_id": "c1",
+                        "output": "boom",
+                        "is_error": True,
+                    },
+                }
+            )
+        )
+
+        assert c.tool_errors == {"shell": 1}
+        assert c.tool_calls[0].error is not None
+
+    def test_an_unterminated_codex_call_stays_open(self, tmp_path: Path):
+        """A `function_call` with no completion is "never closed", not "failed".
+
+        Preserved from the gap tests deliberately: `retro_signals` keys on
+        `error is not None` precisely because an open span reports
+        `succeeded=False`, and that must keep meaning "no verdict yet".
+        """
         c = _make_collector(tmp_path)
         c.record(
             json.dumps(
@@ -180,8 +258,9 @@ class TestUnverifiedBackendsAreExplicitGaps:
             )
         )
 
-        assert c.tool_calls[0].succeeded is False, "codex completion landed"
-        assert c.tool_errors == {}, "codex error capture landed — flip this test"
+        assert c.tool_calls[0].succeeded is False
+        assert c.tool_calls[0].error is None
+        assert c.tool_errors == {}
 
 
 class TestStreamErrorsReachTheTrace:
