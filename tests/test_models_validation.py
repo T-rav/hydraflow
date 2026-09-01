@@ -443,20 +443,26 @@ class TestPipelineIssueStatusEnum:
 
 
 class TestBGWorkerHealthEnum:
-    @pytest.mark.parametrize(
-        "member, expected",
-        [
-            (BGWorkerHealth.OK, "ok"),
-            (BGWorkerHealth.ERROR, "error"),
-            (BGWorkerHealth.DISABLED, "disabled"),
-        ],
-        ids=[m.name for m in BGWorkerHealth],
-    )
-    def test_member_values(self, member: BGWorkerHealth, expected: str) -> None:
-        assert member == expected
+    @pytest.mark.parametrize("member", list(BGWorkerHealth), ids=lambda m: m.name)
+    def test_member_value_is_its_lowercase_name(self, member: BGWorkerHealth) -> None:
+        """Derived from the enum, not a hand-listed triple.
 
-    def test_member_count(self) -> None:
-        assert len(BGWorkerHealth) == 3
+        The hand-written list carried `ids=[m.name for m in BGWorkerHealth]`
+        alongside three literal params, so adding RUNNING made the ids longer
+        than the params and the class failed to COLLECT — a member addition
+        breaking an unrelated test by arithmetic rather than by meaning.
+        """
+        assert member.value == member.name.lower()
+
+    def test_every_member_round_trips_from_its_wire_value(self) -> None:
+        """`_normalise_worker_health` coerces unknown values to DISABLED.
+
+        A member whose value does not round-trip renders as a disabled worker
+        in the dashboard rather than as itself — which is how RUNNING would
+        have hidden a busy loop from the panel.
+        """
+        for member in BGWorkerHealth:
+            assert BGWorkerHealth(member.value) is member
 
 
 # ---------------------------------------------------------------------------
