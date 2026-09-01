@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","session_id":"sess_probe","model":"claude-opus-4-6"}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Running the quality gate."}]},"usage":{"input_tokens":200,"output_tokens":30,"cache_creation_input_tokens":64,"cache_read_input_tokens":16}}
+{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"make quality"}}]},"usage":{"input_tokens":210,"output_tokens":12}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","is_error":true,"content":"make: *** [quality] Error 1"}]}}
+{"type":"assistant","message":{"id":"msg_3","content":[{"type":"tool_use","id":"tu_2","name":"Read","input":{"file_path":"src/config.py"}}]},"usage":{"input_tokens":220,"output_tokens":10}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_2","is_error":false,"content":"ok"}]}}
+{"type":"error","message":"upstream connection reset"}
+{"type":"result","subtype":"success","is_error":false,"usage":{"input_tokens":400,"output_tokens":90,"cache_creation_input_tokens":64,"cache_read_input_tokens":16}}

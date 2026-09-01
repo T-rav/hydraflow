@@ -582,6 +582,20 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_mockworld_loop_scenario_ratchet as mockworld
     from tests.architecture import test_path_membership_registry as membership
     from tests.architecture import test_policy_engine_is_pure as policy_purity
+    from tests.architecture import test_producer_probe_gate as probe_gate
+
+    def _probe_drop_is_caught(member: str) -> bool:
+        """Dropping a probe breaches the shrink-only unprobed-producer ratchet.
+
+        Independent of the gate's own populated/excused check: the subject is
+        derived from the modules that actually serialise a model to disk, and
+        removing a probe raises the unprobed count past its baseline.
+        """
+        spec = next((p for p in probe_gate.PROBES if p.name == member), None)
+        if spec is None:
+            return False
+        return spec.module in probe_gate.persisting_producers()
+
     from tests.architecture import test_ratchet_baseline_keys_resolve as baselines
     from tests.architecture import test_runtime_caches_not_tracked as caches
     from tests.architecture import test_shell_spawn_lint_rules as shell_lint
@@ -922,6 +936,22 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             ),
         ),
         # --- SUBJECTS with no detector yet (ratcheted shrink-only) -------
+        GuardedEnumeration(
+            name="test_producer_probe_gate.PROBES",
+            members=tuple(probe.name for probe in probe_gate.PROBES),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_probe_drop_is_caught,
+            why=(
+                "Each row drives one real producer over a recorded fixture and "
+                "requires every field of what it emits to be populated or "
+                "explicitly excused. A dropped row stops that producer being "
+                "asked, and its model keeps sitting in src/ looking covered — "
+                "the #11891 shape, where TraceToolProfile.tool_errors and "
+                "SubprocessTrace.turn_count were pinned at the model level by "
+                "hand-built tests and never at the producer level, so both "
+                "shipped structurally empty for the life of the code."
+            ),
+        ),
         GuardedEnumeration(
             name="test_path_membership_registry.MEMBERSHIPS",
             members=tuple(m.name for m in membership.MEMBERSHIPS),
