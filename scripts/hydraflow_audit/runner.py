@@ -99,8 +99,24 @@ TELEMETRY_CHECKS = frozenset({"P10.3", "P10.7"})
 # (empty) as the seam the next advisory-then-escalated corpus check plugs into.
 ADVISORY_CHECKS: frozenset[str] = frozenset()
 
+# CONDITIONAL checks DO judge the change under test and DO gate on FAIL — what
+# is non-blocking is their WARN, because the standard they enforce says "it
+# depends" for that cell. P10.8 is the case: the test-pyramid matrix marks some
+# layers `required` for a change shape and `conditional` for others, so an unmet
+# conditional must be REPORTED (the omission visible and deliberate) without
+# becoming a hard stop.
+#
+# This is a third concept, not a stretch of the two above. Telemetry measures
+# the codebase and cannot blame the PR; advisory measures the doc corpus and
+# starts non-blocking on the way to becoming structural. Neither describes a
+# check that gates on FAIL in the same run. Filing P10.8 under either would make
+# the vocabulary say something untrue about it (ADR-0053), and the previous
+# attempt to avoid that mislabel collapsed its WARN into PASS instead — where
+# `format_terminal` discarded the message entirely (#11937).
+CONDITIONAL_WARN_CHECKS = frozenset({"P10.8"})
+
 # Checks whose WARN is reported but never fails the audit gate.
-_NON_BLOCKING_WARN_CHECKS = TELEMETRY_CHECKS | ADVISORY_CHECKS
+_NON_BLOCKING_WARN_CHECKS = TELEMETRY_CHECKS | ADVISORY_CHECKS | CONDITIONAL_WARN_CHECKS
 
 
 def overall_exit_code(findings: list[Finding]) -> int:
