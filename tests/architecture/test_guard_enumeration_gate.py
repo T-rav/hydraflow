@@ -47,6 +47,7 @@ from pytest_collection import collected_test_globs, is_collected_test_file
 from tests.architecture.guard_enumeration_registry import (
     DENY_LIST_FLOORS,
     DERIVED_SUBJECT_NAMES,
+    GRANDFATHERED_UNCLASSIFIED,
     EnumerationKind,
     GuardedEnumeration,
     call_witness,
@@ -351,19 +352,40 @@ def test_every_parametrised_arch_sequence_is_classified() -> None:
     cover all N".
     """
     classified = {row.name for row in ENUMERATIONS}
-    scanned = parametrised_module_sequences()
-    unclassified = sorted(
+    new = sorted(
         f"{sequence.name} ({sequence.path})"
-        for sequence in scanned
+        for sequence in parametrised_module_sequences()
         if sequence.name not in classified
+        and sequence.name not in GRANDFATHERED_UNCLASSIFIED
     )
 
-    assert not unclassified, (
+    assert not new, (
         "these module-level sequences are fed to @pytest.mark.parametrize under "
-        f"tests/architecture/ and are classified nowhere: {unclassified}. "
+        f"tests/ and are classified nowhere: {new}. "
         "Register them in tests/architecture/guard_enumeration_registry.py as a "
         "SUBJECT with a drop-detector, or as a CORPUS with a reason. See "
         "docs/standards/parametrised_guards/README.md."
+    )
+
+
+def test_the_grandfathered_backlog_only_shrinks() -> None:
+    """A ratchet has to fire in BOTH directions or it stops being one.
+
+    Adding a row would let a new hand-typed guarded set in through the front
+    door. Leaving a row whose sequence is now classified — or gone — is the
+    quieter failure: the exemption keeps standing, so if that name ever comes
+    back unclassified it is pre-approved. Both are refused here.
+    """
+    classified = {row.name for row in ENUMERATIONS}
+    scanned = {sequence.name for sequence in parametrised_module_sequences()}
+    unclassified = scanned - classified
+
+    stale = sorted(GRANDFATHERED_UNCLASSIFIED - unclassified)
+
+    assert not stale, (
+        f"these entries are grandfathered but no longer unclassified: {stale}. "
+        "Remove them — a standing exemption for a name that is now registered, "
+        "or no longer exists, silently pre-approves it coming back."
     )
 
 

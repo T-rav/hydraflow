@@ -45,6 +45,8 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from pytest_collection import collected_test_globs, is_collected_test_file
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Callable, Iterable, Mapping
 
@@ -60,6 +62,7 @@ __all__ = [
     "import_boundary_denials",
     "os_witness",
     "GuardedEnumeration",
+    "GRANDFATHERED_UNCLASSIFIED",
     "SCAN_ROOT",
     "GateSequence",
     "parametrised_module_sequences",
@@ -486,6 +489,132 @@ class GateSequence:
 SCAN_EXEMPT_MODULES: frozenset[str] = frozenset({"test_guard_enumeration_gate"})
 
 
+#: Sequences still unclassified after the scan was widened from
+#: ``tests/architecture`` (120 files) to every test file pytest collects (1955).
+#:
+#: The widening surfaced 94. Fifty were classified in the same change, because
+#: their answer was mechanical and therefore honest to give in bulk: 28 corpora
+#: (synthetic inputs fed to a detector) and 22 sequences that are COMPUTED at
+#: import rather than typed out, which cannot lose a member to an omission.
+#:
+#: The 44 left are the ones that actually matter — hand-typed literal
+#: collections, which is the exact shape that failed here. Each needs a
+#: drop-detector reasoned about on its own, and generating 44 of those at once
+#: would produce 44 justifications nobody read, which is the failure this
+#: registry exists to prevent. They shrink as they are worked, one at a time.
+#:
+#: Shrink-only in BOTH directions: nothing may be added, and an entry that
+#: becomes classified or disappears must be removed —
+#: ``test_the_grandfathered_backlog_only_shrinks`` refuses a standing exemption
+#: for a name that no longer needs one.
+GRANDFATHERED_UNCLASSIFIED: frozenset[str] = frozenset(
+    {
+        "regression_issue_6668.OFFENDING_FILES",
+        "regression_issue_6752.KNOWN_UNGUARDED_SITES",
+        "regression_issue_6766.KNOWN_UNGUARDED_SITES",
+        "regression_issue_6809.KNOWN_UNGUARDED_SITES",
+        "regression_issue_6814.KNOWN_UNGUARDED_SITES",
+        "regression_issue_6855.KNOWN_UNGUARDED_SITES",
+        "test_async_subprocess_timeouts._ASYNC_SUBPROCESS_MODULES",
+        "test_audit_packaged_src_layout_11709._NOT_UI_TEST_PATHS",
+        "test_audit_packaged_src_layout_11709._ORCHESTRATION_MARKERS",
+        "test_audit_packaged_src_layout_11709._UI_TEST_PATHS",
+        "test_auto_agent_decompose_terminal._LANDED_FIX_READS",
+        "test_collaborator_wiring._COLLABORATOR_WIRING_TABLE",
+        "test_composition_root_runner_seams_11602.SEAMED_LOOPS",
+        "test_config_validation._BOUNDED_INT_FIELDS",
+        "test_dashboard_routes_scheduling._STATUS_FLAGS",
+        "test_director_turn_runner_env._EXPECTED_ENV",
+        "test_exception_chaining.BUG_EXCEPTIONS",
+        "test_factory_image_trigger_scope._PROTECTED",
+        "test_fake_docker_contract.list_cassettes()",
+        "test_fake_git_contract.list_cassettes()",
+        "test_fake_github_contract.list_cassettes()",
+        "test_fake_workspace_contract._PORT_METHODS",
+        "test_hydraflow_audit_layout._BUILD_BACKENDS",
+        "test_issue_11004_agent_image_extras._AGENT_DOCKERFILES",
+        "test_issue_11533_stale_driver_states.RETIRED_STATES",
+        "test_issue_11691_beads_runtime_ignored._RUNTIME_PATHS",
+        "test_issue_6438._KNOWN_VIOLATIONS",
+        "test_issue_6513.AFFECTED_FILES",
+        "test_issue_6983.KNOWN_UNGUARDED_SITES",
+        "test_issue_9454._UNHARDENED_COMMUNICATE_MODULES",
+        "test_issue_9540._SPAWN_CONTRACT_FILES",
+        "test_issue_9579._GROUP_REAP_SITES",
+        "test_issue_9579._HEAVY_SPAWN_SITES",
+        "test_issue_store_queue_strategy._ALL_STAGES",
+        "test_mockworld_fakes_conformance._PORT_FAKE_PAIRS",
+        "test_mockworld_fakes_conformance._REAL_RUNNER_FAKE_ATTRS",
+        "test_mockworld_fakes_conformance._REAL_RUNNER_PORT_PAIRS",
+        "test_mockworld_fakes_marker._FAKE_CLASSES",
+        "test_nodesource_fetch_retry_10740._AGENT_DOCKERFILES",
+        "test_self_repair_on_by_default.EXCLUDED_OFF_FLAGS",
+        "test_self_repair_on_by_default.OPT_IN_AFTER_CACHE_FLAGS",
+        "test_self_repair_on_by_default.SELF_REPAIR_FLAGS",
+        "test_shape_dispatchers.COVERED_ARGS",
+        "test_shape_dispatchers.UNCOVERED_ARGS",
+    }
+)
+
+
+#: Why a CORPUS needs no drop-detector, stated once instead of twenty-eight
+#: times. Taken from the standard's own definition: a corpus is the guard's
+#: EVIDENCE — synthetic inputs fed to a detector to prove it sees each shape.
+#: Dropping a member drops a test case, which narrows a proof; it does not
+#: narrow what the gate is asked about. That is a coverage question, and it is
+#: a different question from a SUBJECT losing a member, where the gate silently
+#: stops covering something that is still there.
+_CORPUS_IS_EVIDENCE = (
+    "Evidence, not subject: each member is one input shape fed to the "
+    "detector under test, and the assertion is made per case rather than "
+    "over the list, so dropping one narrows the proof without weakening the "
+    "property into a vacuous pass."
+)
+
+
+#: Why a sequence produced by a CALL needs no drop-detector. It is computed at
+#: import from the tree or the filesystem, so it cannot lose a member by
+#: somebody forgetting to add one — the failure mode this registry exists for.
+#: Losing a member here means the producer stopped finding something, which the
+#: producer's own anti-vacuity check is responsible for.
+_DERIVED_CANNOT_GO_STALE = (
+    "Derived, not typed: the members are computed at import rather than "
+    "listed, so a member cannot go missing through an omission. A shrinking "
+    "result means the producer stopped seeing its source, which is a question "
+    "for the producer's own floor, not for a hand-maintained row here."
+)
+
+
+def _scanned_test_files(root: Path) -> tuple[Path, ...]:
+    """Every test file pytest collects under ``tests/``, not one directory of them.
+
+    This scan used to be ``(root / "tests/architecture").glob("test_*.py")`` —
+    120 of the 1955 files pytest actually collects, about six per cent. The gate
+    whose entire purpose is catching a guarded set narrower than its subject was
+    itself the narrowest kind: one directory, non-recursive, and one filename
+    spelling.
+
+    It cost something real. ``tests/regressions/test_issue_11803_one_flow_stopped.py``
+    parametrised a hand-typed tuple of three phase modules; ``src/triage_phase.py``
+    held a fourth copy of the guard for months, outside the list and therefore
+    outside the gate. 637 of the unscanned files were under ``tests/regressions/``.
+
+    The membership predicate is ``pytest_collection``'s, the same one
+    ``test_every_test_the_standard_names_exists`` already uses, so this cannot
+    drift from what pytest collects — and it does not repeat that module's
+    mistake of a second hardcoded ``test_*.py``, which would still be blind to
+    the ``regression_*.py`` files this repo really does collect.
+    """
+    globs = collected_test_globs(root)
+    return tuple(
+        sorted(
+            path
+            for path in (root / "tests").rglob("*.py")
+            if is_collected_test_file(path.name, globs)
+        )
+    )
+
+
 def parametrised_module_sequences() -> tuple[GateSequence, ...]:
     """Every module-level sequence an arch test feeds to ``parametrize``.
 
@@ -501,7 +630,7 @@ def parametrised_module_sequences() -> tuple[GateSequence, ...]:
     """
     found: list[GateSequence] = []
     root = repo_root()
-    for path in sorted((root / SCAN_ROOT).glob("test_*.py")):
+    for path in _scanned_test_files(root):
         if path.stem in SCAN_EXEMPT_MODULES:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -572,6 +701,20 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     """Every classified enumeration under the drop-detection gate."""
     import plan_broker
     import review_worker_runner as rwr
+    from tests import (
+        test_adequacy_demand,
+        test_claude_hook_shell_tests,
+        test_events,
+        test_gateway_conformance,
+        test_hydraflow_audit_layout,
+        test_loops_smoke,
+        test_no_screenshot_regression_tests,
+        test_no_shadow_imports,
+        test_provider_dial_parity_baseline,
+        test_review_insights,
+        test_sandbox_scenario_contract,
+        test_worker_receipts,
+    )
     from tests.architecture import aggregate_gate_registry as aggregate_lane
     from tests.architecture import canary_registry
     from tests.architecture import test_admission_rule_tables as admission
@@ -592,6 +735,36 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     )
     from tests.architecture import (
         test_worker_lineage_reaches_the_mint as worker_lineage,
+    )
+    from tests.auto_agent.adversarial import test_corpus
+    from tests.evals import test_term_proposer_evals, test_triage_honeypot_evals
+    from tests.regressions import (
+        regression_issue_6494,
+        regression_issue_10094,
+        test_anchor_whitespace_is_not_content,
+        test_audit_packaged_src_layout_11709,
+        test_container_images_are_multi_arch,
+        test_issue_9566,
+        test_issue_10440,
+        test_issue_10870,
+        test_issue_11180,
+        test_issue_11481_closing_verb_class,
+        test_issue_11669_self_mod_veto_follows_package,
+        test_issue_11803_one_flow_stopped,
+        test_issue_11891_fields_reach_their_producer,
+        test_issue_11939_port_fake_name_is_a_hint,
+        test_issue_11969_mirror_pins_are_real,
+    )
+    from tests.sandbox_scenarios.runner import test_scenarios
+    from tests.scenarios import (
+        test_auto_agent_playbook_routing,
+        test_loop_health,
+        test_sandbox_parity,
+    )
+    from tests.trust.adversarial import test_adversarial_corpus
+    from tests.trust.contracts import (
+        test_cassette_surface_parity,
+        test_fake_llm_contract,
     )
 
     def _standard_declares_rules(member: str) -> bool:
@@ -780,6 +953,441 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "is swept from the tree by AST, so the drop is caught by "
                 "re-running that sweep."
             ),
+        ),
+        GuardedEnumeration(
+            name="regression_issue_6494.MALFORMED_PAYLOADS",
+            members=tuple(
+                str(item) for item in regression_issue_6494.MALFORMED_PAYLOADS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases regression_issue_6494 feeds its detector: malformed payloads.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_adequacy_demand.ANCHORED_CORPUS",
+            members=tuple(str(item) for item in test_adequacy_demand.ANCHORED_CORPUS),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_adequacy_demand feeds its detector: anchored corpus.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_adequacy_demand.UNANCHORED_CORPUS",
+            members=tuple(str(item) for item in test_adequacy_demand.UNANCHORED_CORPUS),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_adequacy_demand feeds its detector: unanchored corpus.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_anchor_whitespace_is_not_content.ANCHORS",
+            members=tuple(
+                str(item) for item in test_anchor_whitespace_is_not_content.ANCHORS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_anchor_whitespace_is_not_content feeds its detector: anchors.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_anchor_whitespace_is_not_content.BLANKS",
+            members=tuple(
+                str(item) for item in test_anchor_whitespace_is_not_content.BLANKS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_anchor_whitespace_is_not_content feeds its detector: blanks.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_audit_packaged_src_layout_11709._CONFORMANT_EXPECTATIONS",
+            members=tuple(
+                str(item)
+                for item in test_audit_packaged_src_layout_11709._CONFORMANT_EXPECTATIONS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_audit_packaged_src_layout_11709 feeds its detector: conformant expectations.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_audit_packaged_src_layout_11709._CONTENT_VERDICTS",
+            members=tuple(
+                str(item)
+                for item in test_audit_packaged_src_layout_11709._CONTENT_VERDICTS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_audit_packaged_src_layout_11709 feeds its detector: content verdicts.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_audit_packaged_src_layout_11709._CONTENT_VERDICT_MESSAGES",
+            members=tuple(
+                str(item)
+                for item in test_audit_packaged_src_layout_11709._CONTENT_VERDICT_MESSAGES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_audit_packaged_src_layout_11709 feeds its detector: content verdict messages.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_audit_packaged_src_layout_11709._MULTI_CANDIDATE_PROBES",
+            members=tuple(
+                str(item)
+                for item in test_audit_packaged_src_layout_11709._MULTI_CANDIDATE_PROBES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_audit_packaged_src_layout_11709 feeds its detector: multi candidate probes.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_audit_packaged_src_layout_11709._PROBE_EXIT_MESSAGES",
+            members=tuple(
+                str(item)
+                for item in test_audit_packaged_src_layout_11709._PROBE_EXIT_MESSAGES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_audit_packaged_src_layout_11709 feeds its detector: probe exit messages.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_audit_packaged_src_layout_11709._SINGLE_CANDIDATE_CASES",
+            members=tuple(
+                str(item)
+                for item in test_audit_packaged_src_layout_11709._SINGLE_CANDIDATE_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_audit_packaged_src_layout_11709 feeds its detector: single candidate cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_auto_agent_playbook_routing._W1_ROUTING_CASES",
+            members=tuple(
+                str(item) for item in test_auto_agent_playbook_routing._W1_ROUTING_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_auto_agent_playbook_routing feeds its detector: w1 routing cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_events._EVENT_STRING_CASES",
+            members=tuple(str(item) for item in test_events._EVENT_STRING_CASES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_events feeds its detector: event string cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_gateway_conformance._CASES",
+            members=tuple(str(item) for item in test_gateway_conformance._CASES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_gateway_conformance feeds its detector: cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_hydraflow_audit_layout._DECLARED_NAME_CASES",
+            members=tuple(
+                str(item) for item in test_hydraflow_audit_layout._DECLARED_NAME_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_hydraflow_audit_layout feeds its detector: declared name cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11180._FATES",
+            members=tuple(str(item) for item in test_issue_11180._FATES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_issue_11180 feeds its detector: fates.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11481_closing_verb_class.CLOSING_VERBS",
+            members=tuple(
+                str(item) for item in test_issue_11481_closing_verb_class.CLOSING_VERBS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_issue_11481_closing_verb_class feeds its detector: closing verbs.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11939_port_fake_name_is_a_hint._SELECTION_CASES",
+            members=tuple(
+                str(item)
+                for item in test_issue_11939_port_fake_name_is_a_hint._SELECTION_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_issue_11939_port_fake_name_is_a_hint feeds its detector: selection cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_9566._FALSE_MATCH_CASES",
+            members=tuple(str(item) for item in test_issue_9566._FALSE_MATCH_CASES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_issue_9566 feeds its detector: false match cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_review_insights._BENIGN_NO_MATCH_CASES",
+            members=tuple(
+                str(item) for item in test_review_insights._BENIGN_NO_MATCH_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_review_insights feeds its detector: benign no match cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_review_insights._DEFICIENCY_MATCH_CASES",
+            members=tuple(
+                str(item) for item in test_review_insights._DEFICIENCY_MATCH_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_review_insights feeds its detector: deficiency match cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_review_insights._NEUTRAL_PRAISE_CORPUS",
+            members=tuple(
+                str(item) for item in test_review_insights._NEUTRAL_PRAISE_CORPUS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_review_insights feeds its detector: neutral praise corpus.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_term_proposer_evals.EDGE_CASES",
+            members=tuple(str(item) for item in test_term_proposer_evals.EDGE_CASES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_term_proposer_evals feeds its detector: edge cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_term_proposer_evals.HAPPY_CASES",
+            members=tuple(str(item) for item in test_term_proposer_evals.HAPPY_CASES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_term_proposer_evals feeds its detector: happy cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_term_proposer_evals.SAD_CASES",
+            members=tuple(str(item) for item in test_term_proposer_evals.SAD_CASES),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_term_proposer_evals feeds its detector: sad cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_triage_honeypot_evals.BENIGN_CASES",
+            members=tuple(
+                str(item) for item in test_triage_honeypot_evals.BENIGN_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_triage_honeypot_evals feeds its detector: benign cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_triage_honeypot_evals.INJECTION_CASES",
+            members=tuple(
+                str(item) for item in test_triage_honeypot_evals.INJECTION_CASES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_triage_honeypot_evals feeds its detector: injection cases.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_worker_receipts.BUCKETS",
+            members=tuple(str(item) for item in test_worker_receipts.BUCKETS),
+            kind=EnumerationKind.CORPUS,
+            why="Cases test_worker_receipts feeds its detector: buckets.",
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="regression_issue_10094._generated_seed_files()",
+            members=tuple(
+                str(item) for item in regression_issue_10094._generated_seed_files()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by regression_issue_10094._generated_seed_files().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_adversarial_corpus.discover_cases()",
+            members=tuple(
+                str(item) for item in test_adversarial_corpus.discover_cases()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_adversarial_corpus.discover_cases().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_container_images_are_multi_arch._image_workflows()",
+            members=tuple(
+                str(item)
+                for item in test_container_images_are_multi_arch._image_workflows()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_container_images_are_multi_arch._image_workflows().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_corpus._entries()",
+            members=tuple(str(item) for item in test_corpus._entries()),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_corpus._entries().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_fake_llm_contract._list_streams()",
+            members=tuple(str(item) for item in test_fake_llm_contract._list_streams()),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_fake_llm_contract._list_streams().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_10440._adr_files()",
+            members=tuple(str(item) for item in test_issue_10440._adr_files()),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_issue_10440._adr_files().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_10870._render_prompt_stems()",
+            members=tuple(
+                str(item) for item in test_issue_10870._render_prompt_stems()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_issue_10870._render_prompt_stems().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_loops_smoke._all_loop_fields()",
+            members=tuple(str(item) for item in test_loops_smoke._all_loop_fields()),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_loops_smoke._all_loop_fields().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_no_screenshot_regression_tests._candidate_files()",
+            members=tuple(
+                str(item)
+                for item in test_no_screenshot_regression_tests._candidate_files()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_no_screenshot_regression_tests._candidate_files().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_sandbox_scenario_contract._scenario_module_names()",
+            members=tuple(
+                str(item)
+                for item in test_sandbox_scenario_contract._scenario_module_names()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Discovered at import by test_sandbox_scenario_contract._scenario_module_names().",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_cassette_surface_parity._FAKES",
+            members=tuple(str(item) for item in test_cassette_surface_parity._FAKES),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_cassette_surface_parity, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_claude_hook_shell_tests._HOOK_TESTS",
+            members=tuple(
+                str(item) for item in test_claude_hook_shell_tests._HOOK_TESTS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_claude_hook_shell_tests, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11669_self_mod_veto_follows_package.PACKAGE_MEMBERS",
+            members=tuple(
+                str(item)
+                for item in test_issue_11669_self_mod_veto_follows_package.PACKAGE_MEMBERS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_issue_11669_self_mod_veto_follows_package, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11803_one_flow_stopped.PHASE_MODULES",
+            members=tuple(
+                str(item) for item in test_issue_11803_one_flow_stopped.PHASE_MODULES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_issue_11803_one_flow_stopped, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11891_fields_reach_their_producer._GUARDED_SUMMARY_FIELDS",
+            members=tuple(
+                str(item)
+                for item in test_issue_11891_fields_reach_their_producer._GUARDED_SUMMARY_FIELDS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_issue_11891_fields_reach_their_producer, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11891_fields_reach_their_producer._GUARDED_TRACE_FIELDS",
+            members=tuple(
+                str(item)
+                for item in test_issue_11891_fields_reach_their_producer._GUARDED_TRACE_FIELDS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_issue_11891_fields_reach_their_producer, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_loop_health._INJECT_NAMES",
+            members=tuple(str(item) for item in test_loop_health._INJECT_NAMES),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_loop_health, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_loop_health._TICK_NAMES",
+            members=tuple(str(item) for item in test_loop_health._TICK_NAMES),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_loop_health, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_no_shadow_imports._FIXED_PATHS",
+            members=tuple(str(item) for item in test_no_shadow_imports._FIXED_PATHS),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_no_shadow_imports, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_provider_dial_parity_baseline._DIALS",
+            members=tuple(
+                str(item) for item in test_provider_dial_parity_baseline._DIALS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_provider_dial_parity_baseline, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_sandbox_parity._IN_PROCESS_SCENARIOS",
+            members=tuple(
+                str(item) for item in test_sandbox_parity._IN_PROCESS_SCENARIOS
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_sandbox_parity, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_scenarios._SCENARIOS",
+            members=tuple(str(item) for item in test_scenarios._SCENARIOS),
+            kind=EnumerationKind.CORPUS,
+            why="Computed at import by test_scenarios, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11969_mirror_pins_are_real._mirrors()",
+            members=tuple(
+                str(item)
+                for item in test_issue_11969_mirror_pins_are_real._mirrors()  # noqa: SLF001
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Mirror files discovered on disk by frontmatter shape.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
         GuardedEnumeration(
             name="test_mockworld_loop_scenario_ratchet.LOOP_CLASS_NAMES",

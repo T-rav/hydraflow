@@ -20,7 +20,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook, flow_stopped
+from flows import (
+    FLOW_STOP_KEY,
+    Edge,
+    Flow,
+    FlowState,
+    KillSwitch,
+    Node,
+    NodeHook,
+    flow_stopped,
+)
 from models import HitlEscalation, ReviewResult, ReviewVerdict
 
 from ._common import PreReviewContext, ReviewGuardContext
@@ -357,7 +366,7 @@ class ReviewFlowMixin:
         guards = await self._run_initial_guards(idx, pr, issue_map)
         if isinstance(guards, ReviewResult):
             state["result"] = guards
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
         state["task"] = guards.task
         state["workspace_path"] = guards.workspace_path
@@ -374,7 +383,7 @@ class ReviewFlowMixin:
         pre_review = await self._run_pre_review_checks(pr, task)
         if isinstance(pre_review, ReviewResult):
             state["result"] = pre_review
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
         state["pre_review"] = pre_review
         return state

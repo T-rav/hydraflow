@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from convergence_recording import record_stage_verdict, signatures_from_concerns
 from exception_classify import reraise_on_credit_or_bug
-from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
+from flows import FLOW_STOP_KEY, Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from harness_insights import FailureCategory
 from models import DiscoverResult, PlanResult, Task
 from pending_concerns import AdversarialState
@@ -390,7 +390,7 @@ class PlanFlowMixin:
                             why,
                         )
                         state["result"] = PlanResult(issue_number=issue.id, error=error)
-                        state["_stop"] = True
+                        state[FLOW_STOP_KEY] = True
                         state["_skip_tail"] = True
                         return state
                     try:
@@ -424,7 +424,7 @@ class PlanFlowMixin:
                     state["result"] = PlanResult(
                         issue_number=issue.id, error="shape_escalated"
                     )
-                    state["_stop"] = True
+                    state[FLOW_STOP_KEY] = True
                     state["_skip_tail"] = True
                     return state
                 # Finalized on this turn — fold the selected
@@ -637,7 +637,7 @@ class PlanFlowMixin:
                     category=FailureCategory.PLAN_VALIDATION,
                 )
                 state["ts_status"] = "escalated"
-                state["_stop"] = True
+                state[FLOW_STOP_KEY] = True
                 return state
             closed = await self._handle_already_satisfied(issue, result)
             if closed:
@@ -648,7 +648,7 @@ class PlanFlowMixin:
                     decision="ADVANCE",
                     signatures=signatures_from_concerns(adv.pending_concerns),
                 )
-                state["_stop"] = True
+                state[FLOW_STOP_KEY] = True
                 state["_skip_tail"] = True
                 return state
             # Evidence validation failed — escalate directly to HITL (do NOT
@@ -664,7 +664,7 @@ class PlanFlowMixin:
                 category=FailureCategory.PLAN_VALIDATION,
             )
             state["ts_status"] = "escalated"
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         if result.success and result.plan:
@@ -689,7 +689,7 @@ class PlanFlowMixin:
             issue.id,
         )
         state["ts_status"] = "failed"
-        state["_stop"] = True
+        state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_write_records(self, state: FlowState) -> FlowState:
@@ -721,7 +721,7 @@ class PlanFlowMixin:
         """
         issue = state["issue"]
         if await self._route_to_hitl_if_design_decision(issue):
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_ready(self, state: FlowState) -> FlowState:
