@@ -2676,6 +2676,62 @@ class TestCollectOrphanedWorktrees:
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
 
+    # A configured root that discovery can never produce a candidate from
+    # logs exactly like a clean one (#11931). Phase 5 says so now.
+
+    @pytest.mark.asyncio
+    async def test_a_root_it_cannot_enumerate_is_named_with_its_size(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        unreachable = tmp_path / "other-clone"
+        for name in ("wtA", "wtB"):
+            (unreachable / name).mkdir(parents=True)
+        mine = tmp_path / "roots" / "live"
+        mine.mkdir(parents=True)
+        loop, _s, _e = _make_loop(
+            tmp_path, worktree_gc_roots=[str(tmp_path / "roots"), str(unreachable)]
+        )
+        self._real_phase5(loop)
+        porcelain = f"worktree {mine}\nHEAD {'a' * 40}\nbranch refs/heads/main\n"
+        with (
+            caplog.at_level(logging.WARNING, logger="workspace_gc_loop"),
+            patch(
+                "workspace_gc_loop.run_subprocess",
+                self._dispatch(worktrees=porcelain),
+            ),
+        ):
+            await loop._collect_orphaned_worktrees()
+
+        warnings = [r.getMessage() for r in caplog.records]
+        assert [w for w in warnings if str(unreachable) in w and "2 directories" in w]
+
+    @pytest.mark.asyncio
+    async def test_the_root_that_did_enumerate_is_not_named(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        # The decoy. A root that produced a worktree is reachable, and naming
+        # it would put a warning on every cycle of a healthy factory — the
+        # same silence inverted.
+        root = tmp_path / "roots"
+        mine = root / "live"
+        mine.mkdir(parents=True)
+        (root / "also-here").mkdir()
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        porcelain = f"worktree {mine}\nHEAD {'a' * 40}\nbranch refs/heads/main\n"
+        with (
+            caplog.at_level(logging.WARNING, logger="workspace_gc_loop"),
+            patch(
+                "workspace_gc_loop.run_subprocess",
+                self._dispatch(worktrees=porcelain),
+            ),
+        ):
+            await loop._collect_orphaned_worktrees()
+
+        assert [
+            r.getMessage() for r in caplog.records if str(root) in r.getMessage()
+        ] == []
+
 
 class TestPhase3BranchLandedGuard:
     """#11571: phase 3 deletes a branch only when its exact tip provably landed."""
