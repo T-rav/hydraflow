@@ -14,8 +14,11 @@ Migrating 174 sites is the work; refusing the 175th is cheap. So this is a
 shrink-only ratchet, and the claim it enforces is exactly that — the count only
 goes down.
 
-The subject is DERIVED, never spelled: parameter names annotated with a
-``*Port`` type anywhere in ``src/``.
+The subject is DERIVED, never spelled — and derived per CALL SITE, not per
+parameter NAME. Matching on the name alone was too wide: ``state`` is annotated
+``_StatePort`` in one preflight module, so a name-based predicate flagged every
+``state=MagicMock()`` on loops where ``state`` is a ``StateTracker`` — 48 false
+positives out of 105. A sweep is only as narrow as its predicate too.
 """
 
 from __future__ import annotations
@@ -28,28 +31,52 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
 TESTS = REPO_ROOT / "tests"
 
-#: Bare-mock stand-ins at Port parameters. SHRINK-ONLY: pass the Port's Fake
-#: (or `MagicMock(spec=...)`) in new tests and lower this. Never raise it.
-BARE_MOCK_BASELINE = 105
+#: Bare-mock stand-ins at Port parameters. SHRINK-ONLY, and now at ZERO: any
+#: new one reddens immediately. Pass the Port's Fake or `MagicMock(spec=Port)`.
+#:
+#: Known limit: a call site is judged where its parameter is DECLARED, so a
+#: bare mock handed to a LOCAL test helper that forwards it to a Port is not
+#: seen. Closing that needs dataflow, not an index. Precision was the right
+#: trade — the name-only predicate this replaced reported 105, of which ~104
+#: were parameters that merely SHARE a name with a Port parameter elsewhere.
+BARE_MOCK_BASELINE = 0
 
 _BARE_MOCK_NAMES = {"MagicMock", "Mock", "NonCallableMock"}
 
 
-def port_parameter_names() -> frozenset[str]:
-    """Parameter names annotated with a ``*Port`` type anywhere in ``src/``."""
-    names: set[str] = set()
+def port_parameters_by_callee() -> dict[str, set[str]]:
+    """``{callee name: {parameter names it declares as a Port}}``.
+
+    Keyed by callee so a parameter is judged where it is DECLARED. The
+    name-only version of this counted 48 sites where ``state`` is a
+    ``StateTracker``, because one preflight module annotates a ``state``
+    parameter ``_StatePort``.
+    """
+    by_callee: dict[str, set[str]] = {}
+
+    def _record(owner: str, fn: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        for arg in [*fn.args.args, *fn.args.kwonlyargs]:
+            if arg.annotation and "Port" in ast.unparse(arg.annotation):
+                by_callee.setdefault(owner, set()).add(arg.arg)
+
     for path in SRC.rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             continue
-        for fn in ast.walk(tree):
-            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            for arg in [*fn.args.args, *fn.args.kwonlyargs]:
-                if arg.annotation and "Port" in ast.unparse(arg.annotation):
-                    names.add(arg.arg)
-    return frozenset(names)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
+                        _record(node.name, item)
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                _record(node.name, node)
+    return by_callee
+
+
+def port_parameter_names() -> frozenset[str]:
+    """Every parameter name any callee declares as a Port (diagnostics only)."""
+    return frozenset().union(*port_parameters_by_callee().values())
 
 
 def _is_bare_mock(node: ast.expr) -> bool:
@@ -65,7 +92,7 @@ def _is_bare_mock(node: ast.expr) -> bool:
 
 def bare_mock_stand_ins() -> Counter[str]:
     """``{test file: count}`` of bare mocks passed at a Port parameter."""
-    params = port_parameter_names()
+    by_callee = port_parameters_by_callee()
     found: Counter[str] = Counter()
     for path in TESTS.rglob("*.py"):
         try:
@@ -75,8 +102,12 @@ def bare_mock_stand_ins() -> Counter[str]:
         for call in ast.walk(tree):
             if not isinstance(call, ast.Call):
                 continue
+            callee = ast.unparse(call.func).split(".")[-1]
+            declared = by_callee.get(callee)
+            if not declared:
+                continue
             for kw in call.keywords:
-                if kw.arg in params and _is_bare_mock(kw.value):
+                if kw.arg in declared and _is_bare_mock(kw.value):
                     found[str(path.relative_to(REPO_ROOT))] += 1
     return found
 
@@ -93,6 +124,16 @@ class TestTheScanHasASubject:
     def test_a_known_port_parameter_is_in_the_derived_set(self):
         """Feed the sweep a known positive before believing its verdict."""
         assert "prs" in port_parameter_names()
+
+    def test_a_parameter_is_judged_where_it_is_declared(self):
+        """`state` is a Port in one preflight module and a StateTracker elsewhere.
+
+        The name-only predicate counted 48 StateTracker sites as Port
+        stand-ins. Judging per callee is what makes the count mean something.
+        """
+        by_callee = port_parameters_by_callee()
+
+        assert "state" not in by_callee.get("DiagramLoop", set())
 
 
 class TestTheDetectorIsNotDegenerate:
