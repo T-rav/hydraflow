@@ -2,7 +2,14 @@
 
 **Status:** Proposed
 **Date:** 2026-08-31
-**Enforcement:** decision-of-record
+**Enforcement:** enforced
+**Enforced by:**
+- pytest:tests/test_charter_loops_schema.py::TestBidirectionalBinding::test_an_actor_that_moved_to_a_package_is_still_enumerated
+- pytest:tests/test_charter_loops_schema.py::TestBidirectionalBinding::test_an_actor_named_by_no_loop_is_a_drift_finding
+- pytest:tests/test_charter_loops_schema.py::TestMisparseIsLoud::test_a_loop_body_that_is_not_a_mapping_raises
+- pytest:tests/test_charter_loops_schema.py::TestEmptyIsNotAbsent::test_the_two_are_distinguishable_on_a_loaded_charter
+- pytest:tests/test_charter_loops_schema.py::TestDuplicateKeysAreAnError::test_the_guard_covers_the_whole_charter_not_only_loops
+- pytest:tests/test_charter_loops_schema.py::TestTriggerVocabularyIsBound::test_an_on_clause_is_rejected_citing_this_adr
 **Binds:** factory
 **Supersedes:** none
 **Superseded by:** none
@@ -203,15 +210,13 @@ independent adopter is the evidence that would confirm or break these choices,
 and none exists yet. Rulings that turn out to be GNAA-shaped rather than
 generally right should be superseded on that evidence, not defended.
 
-**Enforcement arrives with #11860, and this ADR is not `enforced` until it
-does.** The five guards name tests that do not exist yet. Listing them here as
-`Enforced by:` anchors would have shipped six citations resolving to nothing —
-the dangling-anchor class this repo has already paid for twice (#11781, and the
+**Enforcement landed with #11860.** This shipped as `decision-of-record`
+because the five guards named tests that did not exist yet, and listing them as
+`Enforced by:` anchors would have been six citations resolving to nothing — the
+dangling-anchor class this repo has already paid for twice (#11781, and the
 term-file anchors that resolved green while their prose cited a deleted class).
-`decision-of-record` is the honest status for a ruling whose enforcement is a
-sibling's work. **#11860 flips this to `Enforcement: enforced` and adds the
-anchors in the same change that adds the tests** — if it lands without doing so,
-this ADR is a decision nothing checks.
+#11860 added the tests and flipped the status in the same change, which is the
+only sequence that never leaves a decision nothing checks.
 
 **`on:` is a reserved hole.** The schema carries a shape the validator rejects.
 That is deliberate — it keeps migration lossless for repos whose prose triggers
