@@ -3,8 +3,8 @@ source: feedback_never_commit_main.md
 name: Never commit directly to main
 description: Main is protected — always use worktree branches and PRs, never commit
   to main
-status: issue-open
-issue: 33
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-03-27'

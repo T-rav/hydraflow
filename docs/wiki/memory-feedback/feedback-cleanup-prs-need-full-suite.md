@@ -4,8 +4,8 @@ name: Cleanup PRs need full-suite verification (not file-targeted subsets)
 description: When deleting defensive guards or "redundant" code, run pytest tests/
   -x not just tests/test_<related_file>.py — over-pruning often surfaces in unrelated
   test files
-status: issue-open
-issue: 29
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-05-02'

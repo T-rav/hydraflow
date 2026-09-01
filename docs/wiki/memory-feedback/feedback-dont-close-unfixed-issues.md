@@ -3,8 +3,8 @@ source: feedback_dont_close_unfixed_issues.md
 name: Never close issues that aren't actually fixed
 description: Only close issues with a merged PR that fixes them — never close as "deferred"
   or "tracked debt"
-status: issue-open
-issue: 31
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-04-18'
