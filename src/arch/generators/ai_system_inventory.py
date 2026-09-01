@@ -321,11 +321,36 @@ def _scan_scope_text(entry_files: list[Path], src_dir: Path) -> str:
     return "\n".join(p.read_text() for p in sorted(files))
 
 
+#: Identifier-shaped names can be answered by set membership instead of a scan.
+_PLAIN_IDENTIFIER = re.compile(r"^\w+$")
+_WORD = re.compile(r"\w+")
+
+
 def _detect_model_fields(scope_text: str, model_field_names: list[str]) -> list[str]:
+    r"""Which config fields the loop's one-hop scope mentions.
+
+    Tokenised once rather than scanned once per NAME. The previous form ran
+    ``re.search(rf"\b{name}\b", scope_text)`` for every field, so a run over 70
+    loops x 28 fields was 1960 full scans of a concatenated multi-file source —
+    6.2s, 86% of the whole generator's runtime, and the reason
+    ``test_live_md_is_deterministic`` sat near the suite's per-test budget
+    (#11910).
+
+    ``\b<name>\b`` against a ``\w+`` token set is the same question for a
+    name that is itself identifier-shaped, which every model field is. A name
+    that is not falls back to the scan, so the equivalence is total rather than
+    assumed — and the fallback keeps working if a field name ever grows a dot
+    or a dash.
+    """
+    words = set(_WORD.findall(scope_text))
     hits = [
         name
         for name in model_field_names
-        if re.search(rf"\b{re.escape(name)}\b", scope_text)
+        if (
+            name in words
+            if _PLAIN_IDENTIFIER.match(name)
+            else re.search(rf"\b{re.escape(name)}\b", scope_text)
+        )
     ]
     if _IMPLEMENT_MODEL_RE.search(scope_text):
         hits.append("model")

@@ -15,6 +15,7 @@ import pytest
 
 from arch.extractors.loops import extract_loops
 from arch.generators.ai_system_inventory import (
+    _detect_model_fields,
     collect_inventory,
     render_ai_system_inventory,
 )
@@ -290,3 +291,37 @@ def test_live_md_structure(live_md: str):
 
 def test_live_md_is_deterministic(real_repo_root: Path):
     assert _render(real_repo_root) == _render(real_repo_root)
+
+
+# ---------------------------------------------------------------------------
+# _detect_model_fields — tokenised, but must keep \b semantics exactly (#11910)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectModelFieldsKeepsWordBoundarySemantics:
+    """The scan became a token-set lookup for a 6.6x speedup on the generator.
+
+    That is only sound if the token set answers the SAME question ``\\b<name>\\b``
+    did. These pin the three cases where it could differ.
+    """
+
+    def test_a_field_mentioned_as_a_whole_word_is_detected(self) -> None:
+        assert _detect_model_fields(
+            "uses rc_cadence_hours here", ["rc_cadence_hours"]
+        ) == ["rc_cadence_hours"]
+
+    def test_a_field_appearing_only_as_a_substring_is_not_detected(self) -> None:
+        """The property `\\b` gave us: `max_workers` must not match inside
+        `max_workers_total`. A naive `in` check would regress exactly here."""
+        assert _detect_model_fields("cfg.max_workers_total = 4", ["max_workers"]) == []
+
+    def test_a_non_identifier_name_still_goes_through_the_regex(self) -> None:
+        """A `\\w+` token set cannot represent a dotted name, so those keep the
+        scan. Without the fallback this case would silently stop matching —
+        the sentinel-that-never-fires defect this repo keeps finding."""
+        assert _detect_model_fields("reads gateway.mode today", ["gateway.mode"]) == [
+            "gateway.mode"
+        ]
+
+    def test_absent_fields_stay_absent(self) -> None:
+        assert _detect_model_fields("nothing relevant here", ["max_workers"]) == []
