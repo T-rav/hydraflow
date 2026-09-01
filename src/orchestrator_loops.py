@@ -150,6 +150,15 @@ class OrchestratorLoopsMixin:
             if enabled_name is not None and not self.is_bg_worker_enabled(enabled_name):
                 await self._sleep_or_stop(interval)
                 continue
+            # Mark the tick in flight BEFORE the work. The completion
+            # heartbeat below records "last finished at T", which cannot
+            # distinguish a loop working on a long task from a wedged one —
+            # `plan` running a planner agent on a large issue held an hours-old
+            # completion stamp while actively producing transcript events, and
+            # the health snapshot called it stalled. A genuinely stuck tick is
+            # still caught: the per-cycle watchdog cancels it and it surfaces
+            # in `error_loops`, which is the signal that means "wedged".
+            self.update_bg_worker_status(name, "running")
             try:
                 did_work = bool(await work_fn())
             except INFRA_FATAL_EXCEPTIONS:

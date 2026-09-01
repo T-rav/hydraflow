@@ -143,7 +143,7 @@ class LoopHealth(BaseModel):
     """Per-loop liveness derived from its persisted heartbeat."""
 
     name: str
-    status: str  # ok | error | disabled | stalled
+    status: str  # ok | error | disabled | running | stalled
     last_run: str | None = None
     age_seconds: float | None = None
 
@@ -299,8 +299,14 @@ def build_health_snapshot(
             if parsed is not None:
                 age = (now - parsed).total_seconds()
         interval = intervals.get(name)
+        # `running` is excluded alongside `disabled`: the age is measured from
+        # the last COMPLETED tick, so a loop with work in flight necessarily
+        # carries a stale completion stamp. Flagging it produced correlated
+        # mass "stalls" with `error_loops` empty and vitals green — the
+        # supervisor's own assessments called it "a shared scheduler/heartbeat
+        # cause rather than N independent wedges", which is exactly what it was.
         is_stalled = (
-            status != "disabled"
+            status not in ("disabled", "running")
             and age is not None
             and interval is not None
             and age > stall_multiplier * interval
