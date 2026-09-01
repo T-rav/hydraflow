@@ -11,6 +11,7 @@ import pytest
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 from events import EventBus
+from ports import IssueStorePort, PRPort, WorkspacePort
 from review_insights import ReviewInsightStore
 from review_phase import ReviewPhase
 from state import StateTracker
@@ -25,11 +26,11 @@ def _build_phase(config: HydraFlowConfig) -> ReviewPhase:
     phase = ReviewPhase(
         config=config,
         state=StateTracker(config.state_file),
-        workspaces=MagicMock(),
+        workspaces=MagicMock(spec=WorkspacePort),
         reviewers=MagicMock(),
-        prs=MagicMock(),
+        prs=MagicMock(spec=PRPort),
         stop_event=asyncio.Event(),
-        store=MagicMock(),
+        store=MagicMock(spec=IssueStorePort),
         conflict_resolver=MagicMock(),
         post_merge=MagicMock(),
         review_insights=ReviewInsightStore(config.memory_dir),
@@ -218,11 +219,11 @@ class TestPostReviewTranscript:
         phase = ReviewPhase(
             config=config,
             state=StateTracker(config.state_file),
-            workspaces=MagicMock(),
+            workspaces=MagicMock(spec=WorkspacePort),
             reviewers=MagicMock(),
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             stop_event=asyncio.Event(),
-            store=MagicMock(),
+            store=MagicMock(spec=IssueStorePort),
             conflict_resolver=MagicMock(),
             post_merge=MagicMock(),
             review_insights=ReviewInsightStore(config.memory_dir),

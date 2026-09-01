@@ -32,6 +32,7 @@ from merge_policy import (
     enforce_merge_policy,
     load_merge_policy,
 )
+from ports import PRPort
 from tests.helpers import ConfigFactory
 
 _PACKAGED_POLICY = (
@@ -458,7 +459,7 @@ class TestEnforceMergePolicy:
         _fake_label_fetch(monkeypatch, ["enhancement"])
         verdict = await enforce_merge_policy(
             config=config,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             pr_number=7,
             actor="hydraflow:pr_unsticker",
             approvals=[],
@@ -476,7 +477,7 @@ class TestEnforceMergePolicy:
         _fake_label_fetch(monkeypatch, ["policy-override:emergency-hotfix"])
         verdict = await enforce_merge_policy(
             config=config,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             pr_number=7,
             actor="hydraflow:pr_unsticker",
             approvals=[],
@@ -512,7 +513,7 @@ class TestEnforceMergePolicy:
         _fake_label_fetch(monkeypatch, ["policy-override:"])
         verdict = await enforce_merge_policy(
             config=config,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             pr_number=7,
             actor="hydraflow:pr_unsticker",
             approvals=[],
@@ -530,7 +531,7 @@ class TestEnforceMergePolicy:
         _fake_label_fetch(monkeypatch, [])
         verdict = await enforce_merge_policy(
             config=config,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             pr_number=7,
             actor="hydraflow:post_merge_handler",
             approvals=[_reviewer_approval()],
@@ -550,7 +551,7 @@ class TestEnforceMergePolicy:
         _fake_label_fetch(monkeypatch, ["policy-override:policy-file-corrupt"])
         verdict = await enforce_merge_policy(
             config=config,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             pr_number=7,
             actor="hydraflow:post_merge_handler",
             approvals=[_reviewer_approval()],

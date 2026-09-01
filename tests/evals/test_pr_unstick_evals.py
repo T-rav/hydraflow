@@ -34,6 +34,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ports import IssueFetcherPort, PRPort, WorkspacePort
+
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from troubleshooting_store import (
@@ -130,10 +132,10 @@ def _make_unsticker(config: HydraFlowConfig, store: _FakeTroubleshootingStore):
         config=config,
         state=MagicMock(),
         event_bus=EventBus(),
-        pr_manager=MagicMock(),
+        pr_manager=MagicMock(spec=PRPort),
         agents=agents,
-        workspaces=MagicMock(),
-        fetcher=MagicMock(),
+        workspaces=MagicMock(spec=WorkspacePort),
+        fetcher=MagicMock(spec=IssueFetcherPort),
         troubleshooting_store=cast(TroubleshootingPatternStore, store),
         credentials=Credentials(),
     )

@@ -29,6 +29,7 @@ from phase_utils import (
     safe_file_memory_suggestion,
     store_lifecycle,
 )
+from ports import IssueStorePort
 
 # ---------------------------------------------------------------------------
 # run_concurrent_batch
@@ -853,7 +854,7 @@ class TestPipelineEscalator:
         escalator = PipelineEscalator(
             state=state,
             prs=prs,
-            store=MagicMock(),
+            store=MagicMock(spec=IssueStorePort),
             harness_insights=harness,
             origin_label="hydraflow-ready",
             hitl_label="hydraflow-hitl",

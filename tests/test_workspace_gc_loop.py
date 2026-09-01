@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
 from mockworld.fakes.fake_github import FakeGitHub
+from ports import PRPort
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
 from workspace_gc_landed_safety import (
@@ -1305,7 +1306,7 @@ class TestCollectOrphanedBranchesPerItemIsolation:
         loop = WorkspaceGCLoop(
             config=deps.config,
             workspaces=_workspace_mock(),
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             state=state,
             deps=deps.loop_deps,
             is_in_pipeline_cb=exploding_pipeline,

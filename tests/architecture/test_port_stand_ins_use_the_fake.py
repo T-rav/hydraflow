@@ -30,7 +30,7 @@ TESTS = REPO_ROOT / "tests"
 
 #: Bare-mock stand-ins at Port parameters. SHRINK-ONLY: pass the Port's Fake
 #: (or `MagicMock(spec=...)`) in new tests and lower this. Never raise it.
-BARE_MOCK_BASELINE = 167
+BARE_MOCK_BASELINE = 105
 
 _BARE_MOCK_NAMES = {"MagicMock", "Mock", "NonCallableMock"}
 
