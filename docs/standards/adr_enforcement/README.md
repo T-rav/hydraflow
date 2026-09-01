@@ -136,3 +136,13 @@ gate that exists but never runs is a citation to nothing.
 <!-- standard:enforced-by -->
 - `tests/architecture/test_adr_enforcement_ratchet.py`
 <!-- /standard:enforced-by -->
+
+## Goals served
+
+Charter purpose goals this standard carries (ADR-0143 Amendment 2026-09-01,
+#11856). Cited by id so the link is greppable rather than implied — an
+uncited goal is decoration, and `STANDARD_PURPOSE` says so.
+
+- `every_claim_backed_by_a_check`
+
+A decision nobody can check is a decision that silently rots; this standard makes REAL enforcement the default and the debt visible.

@@ -166,3 +166,13 @@ gate that exists but never runs is a citation to nothing.
 <!-- standard:enforced-by -->
 - `tests/architecture/test_ports_and_loops_standard_drift.py`
 <!-- /standard:enforced-by -->
+
+## Goals served
+
+Charter purpose goals this standard carries (ADR-0143 Amendment 2026-09-01,
+#11856). Cited by id so the link is greppable rather than implied — an
+uncited goal is decoration, and `STANDARD_PURPOSE` says so.
+
+- `reduce_the_cost_of_improving_itself`
+
+One structural contract means a new port or loop costs its author the work and not the rediscovery, and costs a reviewer nothing to check.
