@@ -101,7 +101,13 @@ class TestWorkspaceGCLandedGuardScenario:
             workspaces.destroyed,
             set(state.get_active_workspaces()),
         ) == (
-            {"collected": 2, "skipped": 1, "errors": 0, "pruned_registrations": 0},
+            {
+                "collected": 2,
+                "skipped": 1,
+                "errors": 0,
+                "pruned_registrations": 0,
+                "unenumerable_roots": [],
+            },
             [_TRACKED_MERGED, _ORPHAN_MERGED],
             {_TRACKED_UNLANDED},
         )
@@ -193,7 +199,13 @@ class TestWorkspaceGCLandedGuardScenario:
 
         # collected = phase-1 prune + two landed branches + phase-4 entry prune
         assert (result, workspaces.destroyed, deleted) == (
-            {"collected": 4, "skipped": 1, "errors": 0, "pruned_registrations": 0},
+            {
+                "collected": 4,
+                "skipped": 1,
+                "errors": 0,
+                "pruned_registrations": 0,
+                "unenumerable_roots": [],
+            },
             [],
             [f"agent/issue-{ancestral}", f"agent/issue-{merged}"],
         )

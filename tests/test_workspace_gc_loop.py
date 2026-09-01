@@ -170,6 +170,7 @@ class TestWorkspaceGCLoopBasics:
                 "skipped": 0,
                 "errors": 0,
                 "pruned_registrations": 0,
+                "unenumerable_roots": [],
             },
         ):
             await loop.run()
@@ -266,6 +267,7 @@ class TestWorktreeGCCollectsClosedIssues:
             "skipped": 1,
             "errors": 0,
             "pruned_registrations": 0,
+            "unenumerable_roots": [],
         }
         loop._workspaces.destroy.assert_not_awaited()
         git.assert_not_awaited()
@@ -292,6 +294,7 @@ class TestWorktreeGCCollectsClosedIssues:
             "skipped": 1,
             "errors": 0,
             "pruned_registrations": 0,
+            "unenumerable_roots": [],
         }
         loop._workspaces.destroy.assert_not_awaited()
         assert state.get_active_workspaces()[99] == str(path)
@@ -2824,6 +2827,7 @@ class TestPhase1MissingDirectoryPrune:
             "skipped": 0,
             "errors": 0,
             "pruned_registrations": 0,
+            "unenumerable_roots": [],
         }
         loop._workspaces.destroy.assert_not_awaited()
         git.assert_not_awaited()
@@ -2849,6 +2853,7 @@ class TestPhase1MissingDirectoryPrune:
             "skipped": 1,
             "errors": 0,
             "pruned_registrations": 0,
+            "unenumerable_roots": [],
         }
         loop._workspaces.destroy.assert_not_awaited()
         assert state.get_active_workspaces() == {42: str(path)}
@@ -2871,6 +2876,7 @@ class TestPhase1MissingDirectoryPrune:
             "skipped": 1,
             "errors": 0,
             "pruned_registrations": 0,
+            "unenumerable_roots": [],
         }
         loop._workspaces.destroy.assert_not_awaited()
         assert (path.is_symlink(), 42 in state.get_active_workspaces()) == (True, True)
@@ -2895,6 +2901,7 @@ class TestPhase1MissingDirectoryPrune:
             "skipped": 1,
             "errors": 0,
             "pruned_registrations": 0,
+            "unenumerable_roots": [],
         }
         assert state.get_active_workspaces() == {42: str(path)}
 

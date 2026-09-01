@@ -35,6 +35,7 @@ from workspace_gc_landed_safety import (
 from workspace_gc_landed_safety import (
     WorktreeEntry as _WorktreeEntry,
 )
+from workspace_gc_roots import describe_unenumerable, unenumerable_roots
 
 if TYPE_CHECKING:
     from ports import PRPort, WorkspacePort
@@ -137,6 +138,19 @@ async def _reap_worktree(
     logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)
 
 
+def _count_dirs(root: Path) -> int:
+    """Directories directly under *root*, or 0 when it cannot be read.
+
+    Zero on an unreadable root is deliberate: this feeds a REPORTING path, and
+    a stat failure must not manufacture a warning about a root nobody can see
+    into. The loop already warns loudly when enumeration itself fails.
+    """
+    try:
+        return sum(1 for child in root.iterdir() if child.is_dir())
+    except OSError:
+        return 0
+
+
 class WorkspaceGCLoop(BaseBackgroundLoop):
     """Periodically garbage-collects stale worktrees and orphaned branches.
 
@@ -160,6 +174,10 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         self._prs = prs
         self._state = state
         self._is_in_pipeline = is_in_pipeline_cb
+        #: Roots that held directories but enumerated nothing on the last
+        #: cycle (#11931). Cleared and recomputed per cycle; empty until the
+        #: all-root sweep runs, so an early return publishes no stale finding.
+        self._last_unenumerable: list[tuple[Path, int]] = []
 
     def _get_default_interval(self) -> int:
         return self._config.workspace_gc_interval
@@ -302,6 +320,12 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             "skipped": skipped,
             "errors": errors,
             "pruned_registrations": pruned_registrations,
+            # Published so the mismatch is visible to a reader of the running
+            # system, not only to whoever greps the log (#11931).
+            "unenumerable_roots": [
+                {"root": str(root), "dirs": count}
+                for root, count in self._last_unenumerable
+            ],
         }
 
     async def _is_safe_to_gc(self, issue_number: int) -> bool:
@@ -701,6 +725,22 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return 0
         active_workspaces = active_snapshot.workspaces
         active_path_owners = active_snapshot.path_owners
+
+        # #11931: a root that is configured, exists and holds directories but
+        # from which enumeration can never produce a candidate reads exactly
+        # like a clean root. Reported, never widened — single-repo enumeration
+        # is the blast-radius property that lets the roots list name
+        # `repo_root.parent` at all.
+        self._last_unenumerable = unenumerable_roots(
+            roots, [entry.path for entry in worktrees], dir_count=_count_dirs
+        )
+        if self._last_unenumerable:
+            logger.warning(
+                "GC: %d configured root(s) hold directories but enumerate no "
+                "worktrees — this instance cannot see them: %s",
+                len(self._last_unenumerable),
+                describe_unenumerable(self._last_unenumerable),
+            )
 
         collected = 0
         for entry in worktrees:

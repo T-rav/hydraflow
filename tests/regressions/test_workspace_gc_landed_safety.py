@@ -337,7 +337,7 @@ async def test_full_cycle_authorizes_legitimate_exact_head_worktree(
 
     result = await loop._do_work()
 
-    assert result == {"collected": 1, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+    assert result == {"collected": 1, "skipped": 0, "errors": 0, "pruned_registrations": 0, "unenumerable_roots": []}
     assert not worktree.exists()
     assert _git(repo, "branch", "--list", _BRANCH) == ""
     assert state.get_active_workspaces() == {}
@@ -373,7 +373,7 @@ async def test_prunable_registry_with_moved_unique_worktree_preserves_branch(
 
     registry_after = _git(repo, "worktree", "list", "--porcelain")
     assert (result, registered_path.exists(), moved_path.exists()) == (
-        {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0},
+        {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0, "unenumerable_roots": []},
         False,
         True,
     )
