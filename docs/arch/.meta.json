@@ -40,10 +40,13 @@
       "content_sha": "ad73b417d35edc412353d5898aac27f9efe687d9ff7b2c4148260da1f6f1e40f"
     },
     "modules.md": {
-      "content_sha": "6229d39b9aaf379f232cb10e8d8c4fbf0bff95b7b628834726b78489563673d2"
+      "content_sha": "c73d6aeb273cc0615b5802713cfb8c4c20475fc2b88f89a1c10d977eecfd99f8"
     },
     "ports.md": {
       "content_sha": "c111898c805c3f6970e550c472e0a0c6c2325f56beb48ee25bc76820fae464a1"
+    },
+    "standards-decisions.md": {
+      "content_sha": "ea1772b5384aa021d499ad46c0931d011bbb6702cf553c47e4e4309a807ca2ec"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "62e3a2e8c54c8641e5527040a4f5fefd06a7596060aa7bb02950aa1f73324c09"
@@ -55,5 +58,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "e547ad512f8950d6c1eee9535c857bc448ce5f88c97015403e563e8050accd60"
+  "content_sha": "9596b3cc3b38ad6fd45b0ca880460de4160439163418b99e393166b8c2418274"
 }

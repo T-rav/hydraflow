@@ -64,6 +64,7 @@ from arch.generators.port_map import render_port_map
 from arch.generators.ports_and_loops_standard import (
     render_blocks as render_ports_and_loops_blocks,
 )
+from arch.generators.standards_decisions import render_standards_decisions
 from arch.generators.traceability_matrix import (
     collect_trace_commits,
     render_traceability_matrix,
@@ -89,6 +90,7 @@ _ARTIFACT_FILES = [
     "adr-assertion-density.md",
     "adr-falsifiability.md",
     "vitals-methodology.md",
+    "standards-decisions.md",
     "ai_system_inventory.md",
     "traceability_matrix.md",
     "gauntlet-calibration.md",
@@ -113,6 +115,44 @@ def _run(cmd: list[str], cwd: Path) -> str:
 def _commit_sha(repo_root: Path) -> str:
     sha = _run(["git", "rev-parse", "HEAD"], repo_root).strip()
     return sha or "unknown"
+
+
+def _render_standards_decisions(repo_root: Path) -> str:
+    """(decisions, kwargs) for the verdicts page. Fail-open by design.
+
+    Reads the charter's DECLARED standards so an undecided one renders as a
+    GAP row. Decisions themselves come from the fact ledger, which is
+    gitignored runtime state (ADR-0021) and absent in a clean checkout — so a
+    fresh clone renders every declared standard as a GAP, which is the honest
+    answer rather than an empty page.
+
+    Never raises: this feeds the arch pipeline, and a repo without a charter
+    must still regenerate every other artifact.
+    """
+    declared: tuple[str, ...] = ()
+    decisions: list = []
+    try:
+        from datetime import UTC, datetime
+
+        from charter import load_charter
+        from policy.facts import collect_adr_enforcement_facts
+        from policy.python_engine import PythonDecisionEngine
+
+        charter = load_charter(repo_root)
+        if charter is not None:
+            declared = tuple(charter.articles.standards)
+
+        # Collected from the TREE, not from the fact ledger. The ledger is
+        # gitignored runtime state (ADR-0021) and absent in a clean checkout,
+        # so reading it would make this committed artifact depend on whether
+        # someone had run the factory — the staleness gate would then fail for
+        # everyone else. The ADR corpus is committed, so the enforcement lane
+        # renders identically from any checkout of the same SHA.
+        facts = collect_adr_enforcement_facts(repo_root, observed_at=datetime.now(UTC))
+        decisions = PythonDecisionEngine().decide(facts, charter=charter)
+    except Exception:  # noqa: BLE001 - arch-regen must never be stopped by this page
+        pass
+    return render_standards_decisions(decisions, declared_standards=declared)
 
 
 def _git_log_changelog(repo_root: Path) -> list[CommitInfo]:
@@ -192,6 +232,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "adr-assertion-density.md": render_adr_assertion_density(adrs),
         "adr-falsifiability.md": render_adr_falsifiability(adrs, repo_root=repo_root),
         "vitals-methodology.md": render_vitals_methodology(),
+        "standards-decisions.md": _render_standards_decisions(repo_root),
         "ai_system_inventory.md": render_ai_system_inventory(
             loops, repo_root=repo_root
         ),
