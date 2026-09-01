@@ -587,6 +587,9 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_producer_probe_gate as probe_gate
     from tests.architecture import test_standards_rules_are_wired as rules_wired
+    from tests.architecture import (
+        test_worker_lineage_reaches_the_mint as worker_lineage,
+    )
 
     def _standard_declares_rules(member: str) -> bool:
         """Does this standard still carry a `rules:` block? False if it is gone."""
@@ -668,6 +671,28 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         for path in (policy_purity.REPO / policy_purity._POLICY_PACKAGE).rglob("*.py")  # noqa: SLF001
     }
 
+    def _worker_lineage_drop_is_caught(member: object) -> bool:
+        """Would dropping this case stop the guard seeing a runner?
+
+        Runs the LIVE sweep rather than a copy of it: the anti-vacuity test
+        asserts the three known runners are still found, so a case whose module
+        disappears from the discovered set is caught there. A second case in an
+        already-covered module is a coverage loss, not a blind spot, and the
+        module-level assertion cannot see it — which is exactly what this
+        returns False for.
+        """
+        if not (isinstance(member, tuple) and len(member) == 3):
+            # A member this subject has never carried: answer no, rather than
+            # crashing or claiming a drop nobody could have made.
+            return False
+        module, _func, _passed = member
+        remaining = {
+            other
+            for other, _f, _p in worker_lineage._CASES
+            if other != module  # noqa: SLF001
+        }
+        return module not in remaining
+
     def _policy_purity_drop_is_caught(member: str) -> bool:
         classified = (
             set(policy_purity._PURE_SOURCES) | set(policy_purity._IO_SOURCES)  # noqa: SLF001
@@ -705,6 +730,22 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "src/policy/ looking guarded. The drop is caught by "
                 "test_every_policy_module_is_classified, which compares the "
                 "pin against the files actually on disk."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_worker_lineage_reaches_the_mint._CASES",
+            members=worker_lineage._CASES,  # noqa: SLF001
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_worker_lineage_drop_is_caught,
+            why=(
+                "#11990's brokered-child seam. Every runner that builds a "
+                "WorkerLineage must hand its spawn seam the child id it will "
+                "claim and the driver that asked for it; a dropped case stops "
+                "a runner being asked, and it keeps sitting in src/ minting "
+                "keys under an id no receipt shares. The set is discovered by "
+                "sweeping src/*_worker_runner.py, so the drop is caught by "
+                "test_the_sweep_found_the_runners_it_was_built_from, which "
+                "holds the sweep to the three runners it was built from."
             ),
         ),
         GuardedEnumeration(

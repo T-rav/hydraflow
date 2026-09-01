@@ -52,43 +52,56 @@ def _spawn_calls(func: ast.AST) -> list[ast.Call]:
     ]
 
 
-def _runners_that_spawn_a_child() -> list[tuple[str, ast.AST, ast.Call]]:
+def _runners_that_spawn_a_child() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """Every (module, function, kwargs-it-spawns-with) triple, as plain data.
+
+    Plain strings rather than AST nodes so the enumeration is comparable,
+    printable as a test id, and registrable in
+    ``tests/architecture/guard_enumeration_registry.py``. The kwargs are a
+    SORTED tuple, not a frozenset: the registry gate builds parametrise ids
+    from these members, and a frozenset's repr order follows PYTHONHASHSEED,
+    so every xdist worker would collect a differently-named test and the run
+    would abort on a collection mismatch rather than on anything real.
+    """
     cases = []
     for path in sorted(_SRC.glob("*_worker_runner.py")):
         tree = ast.parse(path.read_text())
         for func in _functions_building_lineage(tree):
             for call in _spawn_calls(func):
-                cases.append((path.name, func, call))
-    return cases
+                passed = tuple(sorted(kw.arg for kw in call.keywords if kw.arg))
+                cases.append((path.name, func.name, passed))
+    return tuple(cases)
 
 
 _CASES = _runners_that_spawn_a_child()
 
+GUARDED_RUNNERS = frozenset(module for module, _func, _passed in _CASES)
+"""The runners this guard actually covers — the registry's drop subject."""
+
 
 def test_the_sweep_found_the_runners_it_was_built_from() -> None:
     """Anti-vacuity: a predicate that matches nothing would pass every case."""
-    names = {name for name, _func, _call in _CASES}
-
-    assert names >= {
+    assert {
         "implement_worker_runner.py",
         "plan_worker_runner.py",
         "review_worker_runner.py",
-    }, f"the sweep stopped seeing its own known positives: {names}"
+    } <= GUARDED_RUNNERS, (
+        f"the sweep stopped seeing its own known positives: {GUARDED_RUNNERS}"
+    )
 
 
 @pytest.mark.parametrize(
-    ("module", "func", "call"),
+    ("module", "func", "passed"),
     _CASES,
-    ids=[f"{name}::{func.name}" for name, func, _call in _CASES],  # type: ignore[attr-defined]
+    ids=[f"{module}::{func}" for module, func, _passed in _CASES],
 )
 def test_the_spawn_seam_is_told_the_child_id_and_the_driver(
-    module: str, func: ast.AST, call: ast.Call
+    module: str, func: str, passed: tuple[str, ...]
 ) -> None:
-    passed = {kw.arg for kw in call.keywords}
-
     missing = [name for name in _REQUIRED if name not in passed]
+
     assert not missing, (
-        f"{module}::{func.name} builds a {_LINEAGE} but spawns without "  # type: ignore[attr-defined]
+        f"{module}::{func} builds a {_LINEAGE} but spawns without "
         f"{missing} — the mint will invent its own id and the receipt will "
         f"name a spawn no ledger row shares"
     )
