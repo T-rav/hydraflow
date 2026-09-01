@@ -274,6 +274,103 @@ class TestL11RetrospectiveLoop:
         )
         assert "make: *** [quality] Error 1" in (find_issues[0].body or "")
 
+    async def test_unparseable_findings_reach_the_published_drop_counter(
+        self, tmp_path
+    ) -> None:
+        """#11983: a tick that parsed nothing must not look like a clean tick.
+
+        The unit tests assert `analyze_evidence` returns the right counts. This
+        is the layer that says the number survives the trip to what a reader of
+        the running system actually sees: `findings_dropped` is threaded from
+        `counts["dropped"]` through `_do_work`, and before this change
+        `unparseable` was computed in the collector and surfaced nowhere — so a
+        confabulating tick published `findings_dropped: 0`, identical to a tick
+        that found nothing wrong.
+        """
+        import json  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+        config = world._harness.config
+
+        run_dir = config.data_root / "traces" / "401" / "implement" / "run-1"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "subprocess-0.json").write_text(
+            json.dumps(
+                {
+                    "issue_number": 401,
+                    "phase": "implement",
+                    "source": "implementer",
+                    "run_id": 1,
+                    "subprocess_idx": 0,
+                    "backend": "claude",
+                    "started_at": "2026-08-31T00:00:00+00:00",
+                    "ended_at": "2026-08-31T00:01:00+00:00",
+                    "success": False,
+                    "crashed": False,
+                    "error": None,
+                    "tokens": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "cache_read_tokens": 0,
+                        "cache_creation_tokens": 0,
+                        "cache_hit_rate": 0.0,
+                    },
+                    "tools": {
+                        "tool_counts": {"Bash": 1},
+                        "tool_errors": {"Bash": 1},
+                        "total_invocations": 1,
+                    },
+                    "tool_calls": [
+                        {
+                            "tool_name": "Bash",
+                            "started_at": "2026-08-31T00:00:01+00:00",
+                            "duration_ms": 10,
+                            "input_summary": "make quality",
+                            "succeeded": False,
+                            "error": "make: *** [quality] Error 1",
+                            "tool_use_id": "t1",
+                        }
+                    ],
+                    "skill_results": [],
+                    "turn_count": 1,
+                    "inference_count": 1,
+                }
+            )
+        )
+
+        fake_queue = MagicMock()
+        fake_queue.load.return_value = [QueueItem(kind=QueueKind.RETRO_PATTERNS)]
+
+        collector = RetrospectiveCollector(config, MagicMock(), world._github)
+        collector._load_recent = MagicMock(
+            return_value=[
+                RetrospectiveEntry(
+                    issue_number=401,
+                    pr_number=501,
+                    timestamp="2026-08-31T00:00:00+00:00",
+                )
+            ]
+        )
+        _seed_ports(world, retrospective_queue=fake_queue, retrospective=collector)
+
+        async def _all_items_unparseable(*_args, **_kwargs):
+            # What the finder does when the model answers with something it
+            # cannot turn into a Finding: it counts them and returns nothing.
+            collector._finder.unparseable = 3
+            return []
+
+        with patch("retro_finder.RetroFinder.find", new=_all_items_unparseable):
+            stats = await world.run_with_loops(["retrospective"], cycles=1)
+
+        assert stats["retrospective"]["findings_dropped"] == 3, (
+            "a tick whose every finding failed to parse published "
+            f"findings_dropped={stats['retrospective']['findings_dropped']}, "
+            "which a reader cannot tell from a clean tick"
+        )
+
     async def test_stale_insight_dedup_across_ticks(self, tmp_path) -> None:
         """Issue #8988 / #9227: ``RetrospectiveLoop`` must not file duplicate
         ``[Review Insight] Persistent finding:`` issues on repeated stale ticks.
