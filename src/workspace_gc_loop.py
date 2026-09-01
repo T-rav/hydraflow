@@ -23,14 +23,10 @@ from workspace_gc_landed_safety import (
     active_workspace_snapshot,
     branch_landed_proof,
     canonical_active_path_owners,
-    child_directories,
     landed_proof,
-    normalized_remote,
     parse_branch_list_line,
-    parse_git_worktrees,
     parse_issue_from_branch,
     path_within,
-    repo_root_from_common_dir,
     tracked_path_matches_destroy_target,
     tracked_workspace_is_gone,
     unenumerable_roots,
@@ -812,97 +808,22 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         )
         return True
 
-    async def _git(self, *args: str, cwd: Path) -> str:
-        return await run_subprocess(
-            "git", *args, cwd=cwd, gh_token=self._credentials.gh_token
-        )
-
-    async def _sibling_clones(self, roots: list[Path]) -> list[Path]:
-        """Every checkout of THIS project that owns a directory under a root.
-
-        `git worktree list` reports only the worktrees of the repo it runs in,
-        so worktrees living in another clone were invisible at any predicate
-        width (#11931). This finds those clones: each root's direct children are
-        asked who owns them via `--git-common-dir`, which is the one command
-        that answers from inside a linked worktree.
-
-        Scoped to SIBLINGS of this project, by remote. `repo_root.parent` is a
-        configured root and on a developer machine that directory holds dozens
-        of unrelated projects; discovering repos without this filter would turn
-        one project's collector into a collector for everything the operator
-        owns. A clone with no matching remote is skipped, not proven safe.
-
-        Shallow by design — a checkout nested inside somebody's worktree is
-        their business, not the collector's.
-        """
-        primary = self._config.repo_root.expanduser().resolve()
-        clones: dict[Path, None] = {primary: None}
-        try:
-            ours = normalized_remote(
-                await self._git("remote", "get-url", "origin", cwd=primary)
-            )
-        except (RuntimeError, OSError):
-            logger.warning("GC: could not read this repo's origin — primary only")
-            return list(clones)
-        if not ours:
-            return list(clones)
-
-        for child in child_directories(roots):
-            try:
-                owner = repo_root_from_common_dir(
-                    await self._git("rev-parse", "--git-common-dir", cwd=child),
-                    cwd=child,
-                )
-            except (RuntimeError, OSError):
-                continue  # not a checkout, or unreadable — owns nothing here
-            if owner is None or owner in clones:
-                continue
-            try:
-                theirs = normalized_remote(
-                    await self._git("remote", "get-url", "origin", cwd=owner)
-                )
-            except (RuntimeError, OSError):
-                continue
-            if theirs and theirs == ours:
-                clones[owner] = None
-        return list(clones)
-
     async def _list_git_worktrees(self) -> list[_WorktreeEntry]:
-        """Registered worktrees across every sibling clone of this project.
+        """Registered worktrees of this project, via the WorkspacePort.
 
-        The PRIMARY repo's failure still propagates fail-closed, unchanged: if
-        this repo cannot be enumerated the sweep must not proceed on a partial
-        picture. A SECONDARY clone's failure is logged and skipped instead —
-        one unreadable checkout must not stop the others being collected, which
-        would hand a single broken clone a veto over the whole sweep.
+        The spawn moved BEHIND the Port (#11931). A loop module growing a new
+        subprocess path needs a declared air-gap seam and may not grow the
+        grandfathered baseline; the sandbox injects `FakeWorkspace`, so routing
+        it there IS the seam — the same move #11917 made, and this loop now
+        carries one fewer spawn path than before.
+
+        Errors still propagate fail-closed: `_collect_orphaned_worktrees`
+        catches them and reaps nothing rather than sweeping a partial picture.
         """
-        roots = [
-            root.expanduser().resolve()
-            for root in self._config.worktree_gc_root_paths()
+        return [
+            _WorktreeEntry(path=path, branch=branch)
+            for path, branch in await self._workspaces.list_project_worktrees()
         ]
-        entries: dict[Path, _WorktreeEntry] = {}
-        primary = self._config.repo_root.expanduser().resolve()
-        for entry in parse_git_worktrees(
-            await self._git("worktree", "list", "--porcelain", cwd=primary)
-        ):
-            entries.setdefault(entry.path, entry)
-
-        if not self._config.worktree_gc_sibling_clones_enabled:
-            return list(entries.values())
-
-        for clone in await self._sibling_clones(roots):
-            if clone == primary:
-                continue
-            try:
-                output = await self._git("worktree", "list", "--porcelain", cwd=clone)
-            except (RuntimeError, OSError):
-                logger.warning(
-                    "GC: could not enumerate worktrees in sibling clone %s", clone
-                )
-                continue
-            for entry in parse_git_worktrees(output):
-                entries.setdefault(entry.path, entry)
-        return list(entries.values())
 
     async def _worktree_work_has_landed(
         self,

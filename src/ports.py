@@ -782,6 +782,21 @@ class WorkspacePort(Protocol):
         """
         ...
 
+    async def list_project_worktrees(self) -> list[tuple[Path, str | None]]:
+        """Every registered worktree of THIS project, across sibling clones.
+
+        ``git worktree list`` reports only the repo it runs in, so a worktree
+        living in another clone of the same project was invisible to the
+        collector at any predicate width (#11931). Returns ``(path, branch)``
+        pairs; ``branch`` is ``None`` for a detached HEAD.
+
+        Behind the Port because the alternative is a new spawn path inside a
+        loop module, which needs a declared air-gap seam — the sandbox injects
+        ``FakeWorkspace``, so routing it here IS the seam (same reasoning as
+        ``prune_dead_registrations``, #11917).
+        """
+        ...
+
     async def merge_main(self, worktree_path: Path, branch: str) -> bool:
         """Merge the main branch into the worktree. Returns True on success."""
         ...

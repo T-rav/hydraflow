@@ -17,10 +17,12 @@ which no amount of per-candidate proof makes acceptable.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 
+from workspace_gc_discovery import enumerate_worktrees
 from workspace_gc_landed_safety import (
     child_directories,
     normalized_remote,
@@ -147,72 +149,84 @@ class TestTheScanIsShallow:
         assert len(child_directories([root, root])) == 1
 
 
-class TestTheLoopActuallyEnumeratesThem:
+class TestTheEnumerationItself:
     """The wiring, not just the helpers.
 
     Pinning the pure functions alone would leave the call site unguarded — the
     failure mode is that discovery never produces a candidate, which is
     invisible from inside a helper that was never called.
+
+    Drives `enumerate_worktrees` with an injected git, which is exactly what the
+    WorkspacePort adapter supplies. The spawn lives behind the Port (#11931): a
+    loop module growing a subprocess path needs a declared air-gap seam and may
+    not grow the grandfathered baseline, and the sandbox injects
+    `FakeWorkspace`, so the Port IS the seam.
     """
 
     @staticmethod
-    def _dispatch(
+    def _git(
         *, remotes: dict[str, str], listings: dict[str, str], owners: dict[str, str]
     ):
-        from unittest.mock import AsyncMock
-
-        async def _fn(*cmd: str, cwd: object = None, **_kw: object) -> str:
+        async def run_git(*args: str, cwd: Path) -> str:
             key = str(Path(str(cwd)).resolve())
-            if cmd[:3] == ("git", "remote", "get-url"):
+            if args[:2] == ("remote", "get-url"):
                 if key not in remotes:
                     raise RuntimeError(f"no remote for {key}")
                 return remotes[key]
-            if cmd[:3] == ("git", "rev-parse", "--git-common-dir"):
+            if args[:2] == ("rev-parse", "--git-common-dir"):
                 if key not in owners:
                     raise RuntimeError(f"not a checkout: {key}")
                 return owners[key]
-            if cmd[:3] == ("git", "worktree", "list"):
+            if args[:2] == ("worktree", "list"):
                 if key not in listings:
                     raise RuntimeError(f"cannot enumerate {key}")
                 return listings[key]
             return ""
 
-        return AsyncMock(side_effect=_fn)
+        return run_git
+
+    @staticmethod
+    def _listing(path: Path, branch: str) -> str:
+        return f"worktree {path}\nHEAD {'a' * 40}\nbranch refs/heads/{branch}\n"
+
+    def _world(self, tmp_path: Path, *, other_remote: str | None = None):
+        """A primary clone plus one other clone holding a worktree."""
+        primary = tmp_path / "primary"
+        primary.mkdir()
+        root = tmp_path / "roots"
+        other = root / "other-clone"
+        (other / ".git").mkdir(parents=True)
+        theirs = other / "wt"
+        theirs.mkdir()
+        ours = "https://github.com/o/r.git\n"
+        run_git = self._git(
+            remotes={
+                str(primary.resolve()): ours,
+                str(other.resolve()): other_remote or "git@github.com:o/r.git\n",
+            },
+            owners={str(other.resolve()): f"{other / '.git'}\n"},
+            listings={
+                str(primary.resolve()): self._listing(primary, "main"),
+                str(other.resolve()): self._listing(theirs, "fix/x-1"),
+            },
+        )
+        return primary, [root], run_git, theirs.resolve()
 
     @pytest.mark.asyncio
     async def test_a_sibling_clones_worktree_becomes_visible(
         self, tmp_path: Path
     ) -> None:
-        from unittest.mock import patch
+        primary, roots, run_git, theirs = self._world(tmp_path)
 
-        from tests.test_workspace_gc_loop import _make_loop
-
-        root = tmp_path / "roots"
-        sibling = root / "other-clone"
-        (sibling / ".git").mkdir(parents=True)
-        theirs = sibling / "wt"
-        theirs.mkdir()
-
-        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
-        primary = str(loop._config.repo_root.expanduser().resolve())
-        dispatch = self._dispatch(
-            remotes={
-                primary: "https://github.com/o/r.git\n",
-                str(sibling.resolve()): "git@github.com:o/r.git\n",
-            },
-            owners={str(sibling.resolve()): f"{sibling / '.git'}\n"},
-            listings={
-                primary: f"worktree {primary}\nHEAD {'a' * 40}\nbranch refs/heads/main\n",
-                str(sibling.resolve()): (
-                    f"worktree {theirs}\nHEAD {'b' * 40}\nbranch refs/heads/fix/x-1\n"
-                ),
-            },
+        entries = await enumerate_worktrees(
+            primary=primary,
+            roots=roots,
+            run_git=run_git,
+            logger=logging.getLogger("t"),
+            include_siblings=True,
         )
 
-        with patch("workspace_gc_loop.run_subprocess", dispatch):
-            entries = await loop._list_git_worktrees()
-
-        assert theirs.resolve() in {e.path for e in entries}
+        assert theirs in {e.path for e in entries}
 
     @pytest.mark.asyncio
     async def test_another_projects_worktree_stays_invisible(
@@ -220,36 +234,19 @@ class TestTheLoopActuallyEnumeratesThem:
     ) -> None:
         # The decoy. `repo_root.parent` is a configured root, so without the
         # remote filter this is every project on the machine.
-        from unittest.mock import patch
-
-        from tests.test_workspace_gc_loop import _make_loop
-
-        root = tmp_path / "roots"
-        stranger = root / "someone-elses-project"
-        (stranger / ".git").mkdir(parents=True)
-        theirs = stranger / "wt"
-        theirs.mkdir()
-
-        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
-        primary = str(loop._config.repo_root.expanduser().resolve())
-        dispatch = self._dispatch(
-            remotes={
-                primary: "https://github.com/o/r.git\n",
-                str(stranger.resolve()): "https://github.com/o/UNRELATED.git\n",
-            },
-            owners={str(stranger.resolve()): f"{stranger / '.git'}\n"},
-            listings={
-                primary: f"worktree {primary}\nHEAD {'a' * 40}\nbranch refs/heads/main\n",
-                str(stranger.resolve()): (
-                    f"worktree {theirs}\nHEAD {'b' * 40}\nbranch refs/heads/their/work\n"
-                ),
-            },
+        primary, roots, run_git, theirs = self._world(
+            tmp_path, other_remote="https://github.com/o/UNRELATED.git\n"
         )
 
-        with patch("workspace_gc_loop.run_subprocess", dispatch):
-            entries = await loop._list_git_worktrees()
+        entries = await enumerate_worktrees(
+            primary=primary,
+            roots=roots,
+            run_git=run_git,
+            logger=logging.getLogger("t"),
+            include_siblings=True,
+        )
 
-        assert theirs.resolve() not in {e.path for e in entries}
+        assert theirs not in {e.path for e in entries}
 
     @pytest.mark.asyncio
     async def test_the_primary_repos_failure_still_propagates(
@@ -257,44 +254,35 @@ class TestTheLoopActuallyEnumeratesThem:
     ) -> None:
         """Unchanged contract: a partial picture must not drive a sweep.
 
-        `_collect_orphaned_worktrees` catches this and reaps nothing. A sibling
-        clone's failure is different and is skipped — see below — because one
-        unreadable checkout must not veto collecting the others.
+        `_collect_orphaned_worktrees` catches this and reaps nothing.
         """
-        from unittest.mock import patch
+        run_git = self._git(remotes={}, owners={}, listings={})
 
-        from tests.test_workspace_gc_loop import _make_loop
-
-        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(tmp_path / "roots")])
-        dispatch = self._dispatch(remotes={}, owners={}, listings={})
-
-        with (
-            patch("workspace_gc_loop.run_subprocess", dispatch),
-            pytest.raises(RuntimeError),
-        ):
-            await loop._list_git_worktrees()
+        with pytest.raises(RuntimeError):
+            await enumerate_worktrees(
+                primary=tmp_path,
+                roots=[],
+                run_git=run_git,
+                logger=logging.getLogger("t"),
+                include_siblings=True,
+            )
 
     @pytest.mark.asyncio
     async def test_an_unreadable_sibling_does_not_stop_the_others(
         self, tmp_path: Path
     ) -> None:
-        from unittest.mock import patch
-
-        from tests.test_workspace_gc_loop import _make_loop
-
+        primary = tmp_path / "primary"
+        primary.mkdir()
         root = tmp_path / "roots"
         broken, good = root / "broken", root / "good"
         for clone in (broken, good):
             (clone / ".git").mkdir(parents=True)
         theirs = good / "wt"
         theirs.mkdir()
-
-        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
-        primary = str(loop._config.repo_root.expanduser().resolve())
         ours = "https://github.com/o/r.git\n"
-        dispatch = self._dispatch(
+        run_git = self._git(
             remotes={
-                primary: ours,
+                str(primary.resolve()): ours,
                 str(broken.resolve()): ours,
                 str(good.resolve()): ours,
             },
@@ -302,17 +290,20 @@ class TestTheLoopActuallyEnumeratesThem:
                 str(broken.resolve()): f"{broken / '.git'}\n",
                 str(good.resolve()): f"{good / '.git'}\n",
             },
+            # `broken` absent -> enumeration raises for it
             listings={
-                primary: f"worktree {primary}\nHEAD {'a' * 40}\nbranch refs/heads/main\n",
-                # `broken` deliberately absent -> enumeration raises for it
-                str(good.resolve()): (
-                    f"worktree {theirs}\nHEAD {'b' * 40}\nbranch refs/heads/fix/x-1\n"
-                ),
+                str(primary.resolve()): self._listing(primary, "main"),
+                str(good.resolve()): self._listing(theirs, "fix/x-1"),
             },
         )
 
-        with patch("workspace_gc_loop.run_subprocess", dispatch):
-            entries = await loop._list_git_worktrees()
+        entries = await enumerate_worktrees(
+            primary=primary,
+            roots=[root],
+            run_git=run_git,
+            logger=logging.getLogger("t"),
+            include_siblings=True,
+        )
 
         assert theirs.resolve() in {e.path for e in entries}
 
@@ -320,33 +311,39 @@ class TestTheLoopActuallyEnumeratesThem:
     async def test_the_kill_switch_restores_single_repo_enumeration(
         self, tmp_path: Path
     ) -> None:
-        from unittest.mock import patch
+        primary, roots, run_git, theirs = self._world(tmp_path)
+
+        entries = await enumerate_worktrees(
+            primary=primary,
+            roots=roots,
+            run_git=run_git,
+            logger=logging.getLogger("t"),
+            include_siblings=False,
+        )
+
+        assert theirs not in {e.path for e in entries}
+
+
+class TestTheLoopReadsItThroughThePort:
+    @pytest.mark.asyncio
+    async def test_the_loop_does_not_spawn_git_itself(self, tmp_path: Path) -> None:
+        """The spawn moved behind the Port, and that is load-bearing.
+
+        A loop module growing a subprocess path needs a declared air-gap seam,
+        and this loop now carries one FEWER — its
+        `_list_git_worktrees::run_subprocess` entry was pruned from the
+        grandfathered baseline in this change.
+        """
+        from unittest.mock import AsyncMock
 
         from tests.test_workspace_gc_loop import _make_loop
 
-        root = tmp_path / "roots"
-        sibling = root / "other-clone"
-        (sibling / ".git").mkdir(parents=True)
-        theirs = sibling / "wt"
-        theirs.mkdir()
-
-        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
-        # The kill switch is a deploy-time setting, not a ConfigFactory kwarg;
-        # set it on the built config so this pins the loop's read of it.
-        object.__setattr__(loop._config, "worktree_gc_sibling_clones_enabled", False)
-        primary = str(loop._config.repo_root.expanduser().resolve())
-        dispatch = self._dispatch(
-            remotes={primary: "https://github.com/o/r.git\n"},
-            owners={str(sibling.resolve()): f"{sibling / '.git'}\n"},
-            listings={
-                primary: f"worktree {primary}\nHEAD {'a' * 40}\nbranch refs/heads/main\n",
-                str(sibling.resolve()): (
-                    f"worktree {theirs}\nHEAD {'b' * 40}\nbranch refs/heads/fix/x-1\n"
-                ),
-            },
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._workspaces.list_project_worktrees = AsyncMock(
+            return_value=[(tmp_path / "wt", "fix/x-1")]
         )
+        loop._list_git_worktrees = type(loop)._list_git_worktrees.__get__(loop)
 
-        with patch("workspace_gc_loop.run_subprocess", dispatch):
-            entries = await loop._list_git_worktrees()
+        entries = await loop._list_git_worktrees()
 
-        assert theirs.resolve() not in {e.path for e in entries}
+        assert [(e.path, e.branch) for e in entries] == [(tmp_path / "wt", "fix/x-1")]
