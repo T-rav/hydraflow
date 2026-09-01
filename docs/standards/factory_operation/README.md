@@ -58,6 +58,7 @@ promises a standard the child repo never receives.
 |---|---|---|
 | **ADR enforcement** | [`docs/standards/adr_enforcement/`](../adr_enforcement/README.md) | An Accepted ADR must bind to a check that really asserts its decision, or carry a justified exemption; the debt ratchet only falls. |
 | **Branch protection** | [`docs/standards/branch_protection/`](../branch_protection/README.md) | Two-tier branch model (integration + release reference) with versioned ruleset configs and a re-applyable apply-script. |
+| **Exception sensor** | [`docs/standards/exception_sensor/`](../exception_sensor/README.md) | Errors leave the process, become issues on the tracker, and re-enter the factory as routable work. The SRE v1 agent. |
 | **Factory autonomy** | [`docs/standards/factory_autonomy/`](../factory_autonomy/README.md) | When agents act vs ask. Tractable + reversible work is factory work, not a permission gate. |
 | **Factory operation** | [`docs/standards/factory_operation/`](../factory_operation/README.md) | This document. How the standards compose into one operating contract, and how the factory absorbs its own recurring patterns. |
 | **Ports and loops** | [`docs/standards/ports-and-loops/`](../ports-and-loops/README.md) | Structural contract for every hexagonal port and background loop: kill-switch, fake, wiki term, ADR, registry row. |
@@ -75,6 +76,8 @@ Removing any one breaks the contract:
   which means the operator becomes QA.
 - Without **ADR enforcement**: decisions stay prose, and the code drifts
   away from them with nothing going red.
+- Without **the exception sensor**: an unattended failure is invisible, and
+  the factory cannot tell "no errors" from "nothing is reporting errors".
 - Without **ports and loops**: each new port or loop is a bespoke shape a
   reviewer has to catch by eye.
 - Without **self-modifying maintenance** (this document,
