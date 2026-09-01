@@ -152,6 +152,10 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
         "typing": frozenset({"TYPE_CHECKING", "Protocol", "runtime_checkable"}),
     },
     "src/policy/python_engine.py": {
+        # The charter arm re-derives fatality from this vocabulary rather than
+        # reading a verdict off the fact — the separation that makes the
+        # parity test against `compute_charter_drift` mean anything (#11862).
+        "charter_model": frozenset({"NON_FATAL_FINDING_CLASSES"}),
         "__future__": frozenset({"annotations"}),
         "adr_conformance": frozenset({"CheckOutcome", "EnforcementClass"}),
         "adr_conformance_remediation": frozenset(
@@ -160,6 +164,7 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
         "collections.abc": frozenset({"Sequence"}),
         "policy.facts": frozenset(
             {
+                "STANDARD_CHARTER",
                 "STANDARD_ADR_CONFORMANCE",
                 "STANDARD_ADR_ENFORCEMENT",
                 "STANDARD_TEST_PYRAMID",
@@ -207,6 +212,7 @@ _PURE_BUILTINS: dict[str, frozenset[str]] = {
     ),
     "src/policy/python_engine.py": frozenset(
         {
+            "any",
             "Exception",
             "bool",
             "dict",

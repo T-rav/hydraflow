@@ -31,11 +31,14 @@ import pytest
 
 from adr_conformance import AdrConformance, CheckOutcome, ConformanceKind
 from adr_conformance_remediation import RemediationAction, classify_remediation
+from charter import CharterDriftReport
 from policy.facts import (
     COLLECTED_STANDARDS,
     STANDARD_ADR_CONFORMANCE,
     STANDARD_ADR_ENFORCEMENT,
+    STANDARD_CHARTER,
     STANDARD_TEST_PYRAMID,
+    collect_charter_facts,
     collect_test_pyramid_facts,
     conformance_facts,
 )
@@ -136,6 +139,9 @@ def test_the_reference_engine_judges_every_standard_the_collectors_emit() -> Non
         STANDARD_TEST_PYRAMID: collect_test_pyramid_facts(
             ["src/a.py", "tests/regressions/test_a.py"],
             observed_at=OBSERVED_AT,
+        ),
+        STANDARD_CHARTER: collect_charter_facts(
+            CharterDriftReport(repo="o/r"), observed_at=OBSERVED_AT
         ),
     }
 

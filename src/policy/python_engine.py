@@ -30,9 +30,11 @@ from typing import TYPE_CHECKING
 
 from adr_conformance import CheckOutcome, EnforcementClass
 from adr_conformance_remediation import RemediationAction, classify_remediation_over
+from charter_model import NON_FATAL_FINDING_CLASSES
 from policy.facts import (
     STANDARD_ADR_CONFORMANCE,
     STANDARD_ADR_ENFORCEMENT,
+    STANDARD_CHARTER,
     STANDARD_TEST_PYRAMID,
 )
 from policy.models import Charter, DecisionStatus, StandardDecision
@@ -143,6 +145,8 @@ class PythonDecisionEngine:
                 decisions.append(self._decide_conformance(subject, subject_facts))
             elif standard == STANDARD_TEST_PYRAMID:
                 decisions.append(self._decide_test_pyramid(subject, subject_facts))
+            elif standard == STANDARD_CHARTER:
+                decisions.append(self._decide_charter(subject, subject_facts))
             else:
                 raise UnsupportedStandardError(
                     f"no ruleset for standard {standard!r} (subject {subject!r}). "
@@ -150,6 +154,69 @@ class PythonDecisionEngine:
                     "return silence that reads as compliance."
                 )
         return decisions
+
+    @staticmethod
+    def _decide_charter(subject: str, facts: Sequence[Fact]) -> StandardDecision:
+        """The repo's own charter, judged from drift facts (#11862).
+
+        Re-derives the fatal/non-fatal split from `NON_FATAL_FINDING_CLASSES`
+        rather than reading it off the fact. The collector emits the finding
+        CLASS; deciding what that class means is this side's job, and keeping
+        the two derivations separate is what makes the parity test against
+        `compute_charter_drift` say anything (ADR-0143 Ruling 4).
+
+        A repo with no charter is EXEMPT, not compliant. It did not satisfy the
+        contract — it was never subject to it, and collapsing the two would
+        make any "compliant" count a lie.
+        """
+        classes = [
+            str(fact.value) for fact in facts if str(fact.key).startswith("finding:")
+        ]
+        has_charter = any(
+            fact.key == "has_charter" and fact.value is True for fact in facts
+        )
+        if not has_charter:
+            return StandardDecision(
+                standard=STANDARD_CHARTER,
+                subject=subject,
+                status=DecisionStatus.EXEMPT,
+                blocking=False,
+                reason="repo carries no charter — ungoverned by the contract",
+                facts=list(facts),
+            )
+        fatal = sorted({c for c in classes if c not in NON_FATAL_FINDING_CLASSES})
+        tolerated = sorted({c for c in classes if c in NON_FATAL_FINDING_CLASSES})
+        if fatal:
+            return StandardDecision(
+                standard=STANDARD_CHARTER,
+                subject=subject,
+                status=DecisionStatus.VIOLATED,
+                blocking=True,
+                reason=f"charter drift: {', '.join(fatal)}",
+                remediation=RemediationAction.FILE_ISSUE,
+                facts=list(facts),
+            )
+        if tolerated:
+            # Reported, never blocking. ADR-0121's forward-compatibility rule:
+            # an unknown standard id or a future layer name is tolerated, and a
+            # decision that blocked on one would make the charter unable to
+            # name anything this factory has not shipped yet.
+            return StandardDecision(
+                standard=STANDARD_CHARTER,
+                subject=subject,
+                status=DecisionStatus.VIOLATED,
+                blocking=False,
+                reason=f"tolerated charter finding(s): {', '.join(tolerated)}",
+                facts=list(facts),
+            )
+        return StandardDecision(
+            standard=STANDARD_CHARTER,
+            subject=subject,
+            status=DecisionStatus.COMPLIANT,
+            blocking=False,
+            reason="charter declares and the repo carries it",
+            facts=list(facts),
+        )
 
     @staticmethod
     def _decide_test_pyramid(subject: str, facts: Sequence[Fact]) -> StandardDecision:
