@@ -35,6 +35,7 @@ from merge_policy import (
 from models import SystemAlertPayload
 from repro_manifest import append_manifest
 from rollup_issue_manager import RollupIssueManager
+from vitals_spool import emit_to_spool, floor_elapsed, read_last_emit
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -148,6 +149,13 @@ class StagingPromotionLoop(BaseBackgroundLoop):
 
         if not self._config.staging_enabled:
             return {"status": "staging_disabled"}
+
+        # #11690 D2 floor: a factory that has not cut an RC in a long time is
+        # still alive, and an aggregate cannot tell "quiet" from "dead" without
+        # hearing from it. Checked before the promotion work, so a factory
+        # whose cuts are failing still reports — the case where the reading
+        # matters most is exactly the one where no cut happens.
+        await self._maybe_emit_vitals_floor()
 
         swept = await self._sweep_if_due()
 
@@ -1140,8 +1148,22 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             )
 
         self._record_last_rc(now)
+        # #11690 D2: the RC cut IS the repo's "state changed meaningfully"
+        # event, so vitals ride it rather than inventing a second cadence.
+        # Never allowed to fail the cut — emit_to_spool swallows and logs.
+        await emit_to_spool(self._config, now=now, reason="rc_cut")
         logger.info("Opened promotion PR #%d for %s", pr_number, rc_branch)
         return {"status": "opened", "pr": pr_number, "rc_branch": rc_branch}
+
+    async def _maybe_emit_vitals_floor(self) -> None:
+        """Emit a heartbeat reading if the time floor has passed."""
+        now = datetime.now(UTC)
+        if floor_elapsed(
+            read_last_emit(self._config),
+            now,
+            self._config.vitals_emit_floor_hours,
+        ):
+            await emit_to_spool(self._config, now=now, reason="floor")
 
     def _cadence_path(self) -> Path:
         return self._config.data_root / "memory" / ".staging_promotion_last_rc"
