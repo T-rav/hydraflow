@@ -18,6 +18,7 @@ graph LR
     IssueStorePort --> IssueStore
     IssueStorePort -.-> FakeIssueStore
     ObservabilityPort --> NoOpObservabilityAdapter
+    ObservabilityPort --> SentryObservabilityAdapter
     ObservabilityPort -.-> FakeObservability
     PRPort --> PRManager
     PRPort -.-> FakeGitHub
@@ -79,6 +80,7 @@ graph LR
 - Methods: `breadcrumb`, `capture_exception`, `capture_message`, `flush`, `set_measurement`
 - Adapters:
   - `NoOpObservabilityAdapter` (`src.observability.noop_adapter`)
+  - `SentryObservabilityAdapter` (`src.observability.sentry_adapter`)
 - Fake: `FakeObservability` (`mockworld.fakes.fake_observability`)
 
 ### PRPort

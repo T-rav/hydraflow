@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-31
 - **Supersedes:** [ADR-0055](0055-otel-honeycomb-instrumentation.md) (OpenTelemetry as the telemetry layer)
-- **Superseded by:** none
+- **Superseded by:** [ADR-0146](0146-sentry-is-the-error-backend.md) (backend direction only — §1 no-OTel and §2 local trace collection still stand)
 - **Related:** [ADR-0045](0045-trust-architecture-hardening.md) (fleet roles), [ADR-0029](0029-caretaker-loop-pattern.md) (loops are reflexes)
 - **Enforcement:** enforced
 - **Binds:** both

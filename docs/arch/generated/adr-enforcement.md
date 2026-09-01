@@ -6,14 +6,14 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 89
-- **REAL** (real asserting enforcement): 86 (96.6%)
+- **Accepted ADRs:** 90
+- **REAL** (real asserting enforcement): 87 (96.7%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 0
 - **Justified exemptions** (process-only, allow-listed): 3
-- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 89 = 0.0%**
+- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 90 = 0.0%**
 
-By declared `**Enforcement:**` kind: `enforced` 86 · `manual` 3 · `decision-of-record` 0.
+By declared `**Enforcement:**` kind: `enforced` 87 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -108,6 +108,7 @@ By declared `**Enforcement:**` kind: `enforced` 86 · `manual` 3 · `decision-of
 | ADR-0141 | REAL | — | enforced | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | REAL | — | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 | ADR-0143 | REAL | — | enforced | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status`, `pytest:tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift`, `pytest:tests/scenarios/test_charter_purpose_drift_scenario.py::TestPurposeDrift::test_a_charter_that_lost_its_purpose_files_one_issue` |
+| ADR-0146 | REAL | — | enforced | `pytest:tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op`, `pytest:tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off` |
 
 ## Unenforced-decision debt
 

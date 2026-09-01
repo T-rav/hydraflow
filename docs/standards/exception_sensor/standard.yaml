@@ -1,0 +1,35 @@
+# See docs/standards/adr_enforcement/standard.yaml for what these keys mean.
+# Properties: tests/architecture/test_standards_registry.py
+id: exception_sensor
+enforced_by:
+  - tests/test_sentry_observability_adapter.py
+  - tests/test_triage_phase.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: the-sensor-is-off-without-a-target
+    claim: With no DSN configured the sensor is inert, so tests, CI and the air-gapped sandbox never report
+    enforced_by: tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op
+  - id: reporting-never-fails-the-work
+    claim: A reporting failure is swallowed rather than raised into the code being observed
+    enforced_by: tests/test_sentry_observability_adapter.py::TestReportingNeverRaises::test_a_transport_failure_is_swallowed
+  - id: a-broken-target-does-not-stop-boot
+    claim: An unreachable or malformed target falls back to the no-op instead of failing startup
+    enforced_by: tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_a_broken_init_falls_back_instead_of_failing_boot
+  - id: the-sensor-does-not-trace
+    claim: The sensor reports errors and does not sample transactions
+    enforced_by: tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off
+  - id: payloads-carry-no-pii-by-default
+    claim: Error payloads do not ship local variables and request bodies by default
+    enforced_by: tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_pii_is_not_sent_by_default
+  - id: the-target-is-resolved-from-the-environment
+    claim: The DSN resolves from the environment or the repo .env, not from code
+    enforced_by: tests/test_sentry_observability_adapter.py::TestTheCredentialIsDeclared::test_the_dsn_is_read_from_dotenv_not_only_the_shell
+  - id: sensor-issues-declare-their-provenance
+    claim: An issue filed by the sensor is recognised by its label, so the board distinguishes an observed failure from an authored finding
+    enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_label_is_matched_case_insensitively
+  - id: triage-routes-them-as-system-exceptions
+    claim: A sensor issue that fails triage is auto-closed as a transient rather than parked for clarification no author will supply
+    enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close

@@ -31,6 +31,7 @@ articles:
   standards:
     - adr_enforcement
     - branch_protection
+    - exception_sensor
     - factory_autonomy
     - factory_operation
     - parametrised_guards
