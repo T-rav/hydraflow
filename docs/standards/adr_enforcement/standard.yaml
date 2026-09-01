@@ -30,3 +30,7 @@ rules:
   - id: resolved-debt-is-really-resolved
     claim: An ADR removed from the baseline genuinely has a check that asserts it now
     enforced_by: tests/architecture/test_adr_enforcement_ratchet.py::test_resolved_adrs_are_genuinely_real_now
+  - id: accepted-adrs-declare-enforcement
+    claim: Every Accepted ADR declares how it is enforced, so the ratchet has something to check
+    enforced_by: tests/test_adr_conformance_coverage.py::test_every_accepted_adr_declares_enforcement
+

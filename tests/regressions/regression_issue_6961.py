@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tests.helpers import make_bg_loop_deps
 from workspace_gc_loop import WorkspaceGCLoop
-from ports import PRPort
+from ports import PRPort, WorkspacePort
 
 # Force-delete flag for branch deletion assertions
 _FORCE_DEL = chr(45) + chr(68)
@@ -81,7 +81,7 @@ def _make_gc_loop(
 
     loop = WorkspaceGCLoop(
         config=deps.config,
-        workspaces=MagicMock(destroy=AsyncMock()),
+        workspaces=MagicMock(spec=WorkspacePort, destroy=AsyncMock()),
         prs=MagicMock(spec=PRPort),
         state=state,
         deps=deps.loop_deps,

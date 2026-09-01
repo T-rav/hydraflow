@@ -81,5 +81,5 @@ rules:
     claim: The README layer table lists exactly the declared layers, in the declared order
     enforced_by: tests/architecture/test_testing_standard_drift.py::test_the_table_lists_exactly_the_declared_layers_in_order
   - id: scenarios-do-not-swap-fakes-for-raw-mocks
-    claim: A scenario does not replace a Fake with a bare mock; the stand-in count only shrinks
-    enforced_by: tests/architecture/test_port_stand_ins_use_the_fake.py::TestTheCountOnlyShrinks
+    claim: A MockWorld scenario asserts GitHub side effects through FakeGitHub state, not raw mocks
+    enforced_by: tests/architecture/test_mockworld_scenario_fake_boundaries.py::test_mockworld_scenarios_assert_github_side_effects_through_fake_state
