@@ -447,6 +447,15 @@ def _mirror(charter_path: Path, dest: Path) -> Path:
     (root / "docs" / "adr" / "0044-hydraflow-principles.md").write_text("x")
     (root / "pyproject.toml").write_text("x")
     (root / "scripts").mkdir(exist_ok=True)
+    # A v2 charter declares loops, and every declared loop must resolve to an
+    # actor contract (ADR-0145 guard 1). A mirror that satisfied the standards
+    # and artifacts but not the actors would report `loop-without-actor` and
+    # make "the real charter is clean" unassertable — the mirror has to satisfy
+    # the WHOLE charter, not the parts that existed when it was written.
+    actors_dir = root / charter.actors
+    actors_dir.mkdir(parents=True, exist_ok=True)
+    for loop in charter.loops.loops:
+        (actors_dir / f"{loop.actor}.md").write_text("contract")
     return root
 
 

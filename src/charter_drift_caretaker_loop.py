@@ -179,10 +179,17 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
     async def _file_repo_drift(
         self, report: CharterDriftReport, dedup: set[str]
     ) -> tuple[int, int]:
-        """File one deduped issue per fatal finding class. Returns (filed, deduped)."""
+        """File one deduped issue per FILED finding class. Returns (filed, deduped).
+
+        Filed, not fatal: an advisory class is not drift — it does not fail
+        `clean` — but it needs a decision only a human can make, and a finding
+        that is merely logged leaves that decision with nobody (#11865).
+        """
         filed = 0
         deduped = 0
-        classes = sorted({f.finding_class for f in report.fatal_findings})
+        # `filed_findings`, not `fatal_findings`: an advisory is not drift
+        # but still needs a human's decision (#11865, ADR-0145).
+        classes = sorted({f.finding_class for f in report.filed_findings})
         for finding_class in classes:
             key = _dedup_key(report.repo, finding_class)
             if key in dedup:
@@ -214,7 +221,7 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
         """Close + clear any tracked finding class for this repo that no longer
         drifts (#9359 issue-hygiene, mirroring branch-protection's clean path)."""
         active = {
-            _dedup_key(report.repo, f.finding_class) for f in report.fatal_findings
+            _dedup_key(report.repo, f.finding_class) for f in report.filed_findings
         }
         prefix = f"{_KEY_PREFIX}:{report.repo}:"
         stale = {k for k in dedup if k.startswith(prefix) and k not in active}
@@ -298,7 +305,36 @@ def observe_repo(
         present_standards=present_standards,
         present_artifacts=present_artifacts,
         known_standards=known,
+        actor_files=_list_actor_files(repo_root / charter.actors),
     )
+
+
+#: Depth cap for the actors listing. The enumeration predicate only recognises
+#: `x.md` and `x/README.md`, so nothing below depth 2 can be an actor — and an
+#: unbounded walk of a repo directory is how a caretaker tick becomes slow on
+#: somebody else's monorepo.
+_ACTORS_MAX_DEPTH = 2
+
+
+def _list_actor_files(actors_dir: Path) -> tuple[str, ...] | None:
+    """Repo-relative POSIX paths under the actors directory, or None on fault.
+
+    ``None`` means "could not look" and is deliberately distinct from an empty
+    tuple. With an empty listing every declared loop would look like it names a
+    missing actor, and the drift check would file on a measurement nobody took
+    — the same fail-loud reasoning ``known_standards`` already carries.
+    """
+    if not actors_dir.is_dir():
+        return None
+    try:
+        found: list[str] = []
+        for path in actors_dir.rglob("*.md"):
+            relative = path.relative_to(actors_dir)
+            if len(relative.parts) <= _ACTORS_MAX_DEPTH:
+                found.append(relative.as_posix())
+    except OSError:
+        return None
+    return tuple(sorted(found))
 
 
 def audit_repo_charter(repo: str, repo_root: Path) -> CharterDriftReport:

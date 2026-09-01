@@ -15,7 +15,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from charter import (
+    FINDING_ACTOR_WITHOUT_LOOP,
     FINDING_LEGACY_RAILS_MANIFEST,
+    FINDING_LOOP_WITHOUT_ACTOR,
     FINDING_MISSING_ARTIFACT,
     FINDING_MISSING_STANDARD,
     FINDING_UNKNOWN_LAYER,
@@ -142,3 +144,89 @@ class TestCharterDriftCaretaker:
         await world.run_with_loops(["charter_drift_caretaker"], cycles=1)
 
         assert await world.github.list_issues_by_label("hydraflow-charter-drift") == []
+
+
+_ACTOR_WITHOUT_LOOP = CharterDriftReport(
+    repo="o/r",
+    findings=(
+        CharterFinding(
+            check_id=f"{FINDING_ACTOR_WITHOUT_LOOP}:records",
+            finding_class=FINDING_ACTOR_WITHOUT_LOOP,
+            detail="actor 'records' has a contract but no loop names it",
+        ),
+    ),
+)
+_LOOP_WITHOUT_ACTOR = CharterDriftReport(
+    repo="o/r",
+    findings=(
+        CharterFinding(
+            check_id=f"{FINDING_LOOP_WITHOUT_ACTOR}:nobody",
+            finding_class=FINDING_LOOP_WITHOUT_ACTOR,
+            detail="loop declares actor 'nobody' but no contract file resolves",
+        ),
+    ),
+)
+
+
+class TestCharterV2LoopBindingReachesAHuman:
+    """The v2 drift classes, through the real caretaker (#11865, ADR-0145).
+
+    The unit tests prove `compute_charter_drift` produces both classes. Only
+    this layer shows what an operator actually receives — and the whole point
+    of the non-fatal side is that it FILES rather than failing a load, so a
+    finding that never became an issue would be the design not working.
+    """
+
+    async def test_an_actor_with_no_loop_files_for_a_human(self, tmp_path) -> None:
+        """Non-fatal does not mean invisible.
+
+        Enlarging the mandate is a human's ENACT (ADR-0143 Ruling 6 guard 4),
+        so the caretaker's whole job here is to put the question in front of
+        one — never to answer it.
+        """
+        world = MockWorld(tmp_path)
+        _seed_ports(
+            world, charter_drift_audit=AsyncMock(return_value=[_ACTOR_WITHOUT_LOOP])
+        )
+
+        await world.run_with_loops(["charter_drift_caretaker"], cycles=1)
+
+        issues = await world.github.list_issues_by_label("hydraflow-charter-drift")
+        assert len(issues) == 1
+        body = world.github.issue(issues[0]["number"]).body
+        assert f"{FINDING_ACTOR_WITHOUT_LOOP}:records" in body
+
+    async def test_a_loop_with_no_actor_files_too(self, tmp_path) -> None:
+        world = MockWorld(tmp_path)
+        _seed_ports(
+            world, charter_drift_audit=AsyncMock(return_value=[_LOOP_WITHOUT_ACTOR])
+        )
+
+        await world.run_with_loops(["charter_drift_caretaker"], cycles=1)
+
+        issues = await world.github.list_issues_by_label("hydraflow-charter-drift")
+        assert len(issues) == 1
+        assert (
+            f"{FINDING_LOOP_WITHOUT_ACTOR}:nobody"
+            in world.github.issue(issues[0]["number"]).body
+        )
+
+    async def test_a_second_tick_does_not_file_a_duplicate(self, tmp_path) -> None:
+        """Dedup, on the class the caretaker will see most often.
+
+        A repo mid-migration reports `actor-without-loop` every tick until a
+        human acts. Without dedup that is one issue per cycle, and the operator
+        stops reading the label — which silences the fatal class filed under it
+        too.
+        """
+        world = MockWorld(tmp_path)
+        _seed_ports(
+            world, charter_drift_audit=AsyncMock(return_value=[_ACTOR_WITHOUT_LOOP])
+        )
+
+        await world.run_with_loops(["charter_drift_caretaker"], cycles=2)
+
+        issues = await world.github.list_issues_by_label("hydraflow-charter-drift")
+        assert len(issues) == 1, (
+            f"a second tick filed a duplicate: {[i['number'] for i in issues]}"
+        )
