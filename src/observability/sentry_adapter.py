@@ -30,7 +30,13 @@ tried to send would hang against the egress block rather than fail fast.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+import os
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, TypeVar
+
+import sentry_sdk
+
+from observability.noop_adapter import NoOpObservabilityAdapter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from config import Credentials
@@ -53,6 +59,27 @@ def _sentry_level(level: str) -> Any:
     return level if level in _SENTRY_LEVELS else "info"
 
 
+_T = TypeVar("_T")
+
+
+def _never_raises(what: str, call: Callable[[], _T], fallback: _T) -> _T:
+    """Run *call*, swallowing anything it throws.
+
+    THE one broad catch in this module, deliberately. Observability must never
+    fail the work it observes — a loop that dies because its error reporter was
+    unreachable has turned a diagnostic into an outage — so the catch has to be
+    blind: narrowing it to today's SDK exception types means tomorrow's escapes
+    into the caller. Funnelling every method through here keeps that reasoning
+    in one place instead of restating it at five call sites, where the fifth
+    copy is the one that eventually gets narrowed by a well-meaning cleanup.
+    """
+    try:
+        return call()
+    except Exception:  # noqa: BLE001 - see the docstring; this is the point
+        logger.debug("sentry %s failed", what, exc_info=True)
+        return fallback
+
+
 class SentryObservabilityAdapter:
     """``ObservabilityPort`` backed by Sentry, for errors.
 
@@ -67,8 +94,6 @@ class SentryObservabilityAdapter:
     _is_fake_adapter: bool = False
 
     def __init__(self, dsn: str) -> None:
-        import sentry_sdk  # noqa: PLC0415
-
         self._sdk = sentry_sdk
         sentry_sdk.init(
             dsn=dsn,
@@ -83,24 +108,25 @@ class SentryObservabilityAdapter:
         )
 
     def capture_exception(self, exc: BaseException) -> None:
-        try:
-            self._sdk.capture_exception(exc)
-        except Exception:  # noqa: BLE001 - reporting must not raise
-            logger.debug("sentry capture_exception failed", exc_info=True)
+        _never_raises(
+            "capture_exception", lambda: self._sdk.capture_exception(exc), None
+        )
 
     def capture_message(self, message: str, *, level: str = "info") -> None:
-        try:
-            self._sdk.capture_message(message, level=_sentry_level(level))
-        except Exception:  # noqa: BLE001 - reporting must not raise
-            logger.debug("sentry capture_message failed", exc_info=True)
+        _never_raises(
+            "capture_message",
+            lambda: self._sdk.capture_message(message, level=_sentry_level(level)),
+            None,
+        )
 
     def breadcrumb(self, category: str, message: str, **data: object) -> None:
-        try:
-            self._sdk.add_breadcrumb(
+        _never_raises(
+            "breadcrumb",
+            lambda: self._sdk.add_breadcrumb(
                 category=category, message=message, data=dict(data)
-            )
-        except Exception:  # noqa: BLE001 - reporting must not raise
-            logger.debug("sentry breadcrumb failed", exc_info=True)
+            ),
+            None,
+        )
 
     def set_measurement(self, name: str, value: float, unit: str = "") -> None:
         """Discarded. Metric ingestion is not implemented (ADR-0146).
@@ -113,12 +139,11 @@ class SentryObservabilityAdapter:
         """
 
     def flush(self, timeout_ms: int = 2000) -> bool:
-        try:
+        def _flush() -> bool:
             self._sdk.flush(timeout=timeout_ms / 1000)
-        except Exception:  # noqa: BLE001 - reporting must not raise
-            logger.debug("sentry flush failed", exc_info=True)
-            return False
-        return True
+            return True
+
+        return _never_raises("flush", _flush, False)
 
 
 def build_observability_adapter(credentials: Credentials) -> ObservabilityPort:
@@ -141,10 +166,6 @@ def build_observability_adapter(credentials: Credentials) -> ObservabilityPort:
     that the test suite defends and no production code honours is the same
     dead-consumer shape this ADR exists to fix, pointing the other way.
     """
-    import os  # noqa: PLC0415
-
-    from observability.noop_adapter import NoOpObservabilityAdapter  # noqa: PLC0415
-
     if os.environ.get("HYDRAFLOW_SENTRY_DISABLED", "").strip().lower() not in (
         "",
         "0",

@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from config import Credentials
+from observability import sentry_adapter
 from observability.noop_adapter import NoOpObservabilityAdapter
 from observability.sentry_adapter import (
     SentryObservabilityAdapter,
@@ -143,7 +144,7 @@ class TestErrorsOnly:
     @staticmethod
     def _adapter(monkeypatch) -> tuple[SentryObservabilityAdapter, MagicMock]:
         sdk = MagicMock()
-        monkeypatch.setitem(__import__("sys").modules, "sentry_sdk", sdk)
+        monkeypatch.setattr(sentry_adapter, "sentry_sdk", sdk)
         return SentryObservabilityAdapter("https://k@o.ingest.sentry.io/1"), sdk
 
     def test_an_exception_reaches_sentry(self, monkeypatch) -> None:
@@ -201,7 +202,7 @@ class TestErrorsOnly:
         # The decoy that matters. A non-zero sample rate would re-instrument
         # the phase blocks by the back door — spans stay OTel's concern.
         sdk = MagicMock()
-        monkeypatch.setitem(__import__("sys").modules, "sentry_sdk", sdk)
+        monkeypatch.setattr(sentry_adapter, "sentry_sdk", sdk)
 
         SentryObservabilityAdapter("https://k@o.ingest.sentry.io/1")
 
@@ -212,7 +213,7 @@ class TestErrorsOnly:
         # local variables to a third party as a side effect of an error is not
         # something an error reporter should decide on its own.
         sdk = MagicMock()
-        monkeypatch.setitem(__import__("sys").modules, "sentry_sdk", sdk)
+        monkeypatch.setattr(sentry_adapter, "sentry_sdk", sdk)
 
         SentryObservabilityAdapter("https://k@o.ingest.sentry.io/1")
 
@@ -236,7 +237,7 @@ class TestReportingNeverRaises:
         sdk = MagicMock()
         for name in ("capture_exception", "capture_message", "add_breadcrumb"):
             getattr(sdk, name).side_effect = RuntimeError("network down")
-        monkeypatch.setitem(__import__("sys").modules, "sentry_sdk", sdk)
+        monkeypatch.setattr(sentry_adapter, "sentry_sdk", sdk)
         adapter = SentryObservabilityAdapter("https://k@o.ingest.sentry.io/1")
 
         getattr(adapter, method)(*args)  # must not raise
@@ -246,7 +247,7 @@ class TestReportingNeverRaises:
     ) -> None:
         sdk = MagicMock()
         sdk.flush.side_effect = RuntimeError("network down")
-        monkeypatch.setitem(__import__("sys").modules, "sentry_sdk", sdk)
+        monkeypatch.setattr(sentry_adapter, "sentry_sdk", sdk)
         adapter = SentryObservabilityAdapter("https://k@o.ingest.sentry.io/1")
 
         assert adapter.flush() is False
