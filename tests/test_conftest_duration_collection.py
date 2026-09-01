@@ -35,6 +35,9 @@ def _run_pytest(target: str, env_extra: dict[str, str]) -> subprocess.CompletedP
 
 
 _TARGET = "tests/test_erosion_slowness.py::TestCompute::test_share_is_the_concentration_not_the_count"
+_OTHER_TARGET = (
+    "tests/test_erosion_slowness.py::TestCompute::test_the_roster_is_slowest_first"
+)
 
 
 def test_no_artifact_is_written_without_the_env_var(tmp_path: Path) -> None:
@@ -48,17 +51,40 @@ def test_the_artifact_records_real_call_durations(tmp_path: Path) -> None:
     out = tmp_path / "durs.json"
     result = _run_pytest(_TARGET, {"HYDRAFLOW_DURATIONS_OUT": str(out)})
     assert result.returncode == 0, result.stdout[-2000:]
-    data = json.loads(out.read_text(encoding="utf-8"))
+    shards = sorted(tmp_path.glob("durs.*.json"))
+    assert shards, "no shard written"
+    data = json.loads(shards[0].read_text(encoding="utf-8"))
     assert _TARGET in data
     assert isinstance(data[_TARGET], float)
 
 
-def test_a_second_run_merges_rather_than_clobbering(tmp_path: Path) -> None:
-    """`make test` runs pytest twice. Overwriting would drop a whole lane's
-    measurements and quietly halve the reading."""
+def test_concurrent_lanes_each_get_their_own_shard(tmp_path: Path) -> None:
+    """`make quality` runs four pytest lanes CONCURRENTLY.
+
+    A writer that read-modify-wrote one shared file would interleave between
+    them and drop whole lanes — a lost update that presents as a smaller,
+    cleaner-looking suite. One shard per process makes that impossible.
+    """
     out = tmp_path / "durs.json"
-    out.write_text(json.dumps({"tests/other_lane.py::test_x": 4.0}), encoding="utf-8")
     _run_pytest(_TARGET, {"HYDRAFLOW_DURATIONS_OUT": str(out)})
-    data = json.loads(out.read_text(encoding="utf-8"))
-    assert "tests/other_lane.py::test_x" in data, "the earlier lane was clobbered"
-    assert _TARGET in data
+    _run_pytest(_OTHER_TARGET, {"HYDRAFLOW_DURATIONS_OUT": str(out)})
+
+    shards = sorted(tmp_path.glob("durs.*.json"))
+    assert len(shards) == 2, f"expected one shard per process, got {shards}"
+
+
+def test_the_reader_merges_every_shard_into_one_reading(tmp_path: Path) -> None:
+    """The other half: sharded writes are only correct if the read reassembles
+    them. A reader that took one shard would report a fraction of the suite."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(_REPO / "src"))
+    from erosion.slowness import collect_durations
+
+    out = tmp_path / "durs.json"
+    _run_pytest(_TARGET, {"HYDRAFLOW_DURATIONS_OUT": str(out)})
+    _run_pytest(_OTHER_TARGET, {"HYDRAFLOW_DURATIONS_OUT": str(out)})
+
+    merged = collect_durations(out)
+    assert _TARGET in merged
+    assert _OTHER_TARGET in merged

@@ -76,14 +76,23 @@ def collect_durations(path: Path) -> dict[str, float]:
     (``SlownessFinding.is_empty`` is true for both, so callers check
     ``total_tests`` when the difference matters).
     """
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        str(nodeid): float(seconds)
-        for nodeid, seconds in raw.items()
-        if isinstance(seconds, int | float)
-    }
+    merged: dict[str, float] = {}
+    # `path` itself plus every per-process shard beside it. The writer shards
+    # because `make quality` runs four pytest lanes concurrently and a shared
+    # read-modify-write would lose whole lanes; merging on READ is the other
+    # half of that, and it is what makes a multi-lane run one reading.
+    for candidate in [path, *sorted(path.parent.glob(f"{path.stem}.*{path.suffix}"))]:
+        try:
+            raw = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        merged.update(
+            {
+                str(nodeid): float(seconds)
+                for nodeid, seconds in raw.items()
+                if isinstance(seconds, int | float)
+            }
+        )
+    return merged
