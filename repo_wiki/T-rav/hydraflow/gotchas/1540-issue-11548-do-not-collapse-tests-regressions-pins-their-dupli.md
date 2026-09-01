@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11548
 source_phase: plan
 created_at: 2026-08-30T10:39:26.773652+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Do not collapse tests/regressions/ pins — their duplication is deliberate

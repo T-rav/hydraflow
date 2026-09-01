@@ -5,6 +5,7 @@ import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { splitPipelineTracks } from '../utils/pipelineTracks'
 import { countPipeline } from '../utils/pipelineCounts'
+import { railIsResyncing } from '../utils/pipelineFreshness'
 import { buildSyntheticStages, overallStatus as deriveOverallStatus } from '../utils/stageStatus'
 import { TerminalFork } from './PipelineFork'
 import {
@@ -394,7 +395,7 @@ export function findWorkerTranscript(workers, prs, stageKey, issueNumber, repo =
 }
 
 export function StreamView({ intents, expandedStages, onToggleStage, onRequestChanges }) {
-  const { pipelineIssues, prs, stageStatus, workers, config, pipelineSnapshotReady } = useHydraFlow()
+  const { pipelineIssues, prs, stageStatus, workers, config, pipelineSnapshotReady, pipelineSnapshotAt } = useHydraFlow()
 
   // Match intents to issues by issueNumber
   const intentMap = useMemo(() => {
@@ -445,7 +446,7 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
         <PendingIntentCard key={`pending-${i}`} intent={intent} />
       ))}
 
-      <PipelineFlow stageGroups={stageGroups} queueStrategy={config?.queue_strategy} resyncing={pipelineSnapshotReady === false} />
+      <PipelineFlow stageGroups={stageGroups} queueStrategy={config?.queue_strategy} resyncing={railIsResyncing({ snapshotAt: pipelineSnapshotAt, snapshotReady: pipelineSnapshotReady })} />
 
       {stageGroups.map(({ stage, issues: stageIssues }) => {
         const status = stageStatus[stage.key] || {}

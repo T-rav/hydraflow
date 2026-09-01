@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11548
 source_phase: plan
 created_at: 2026-08-30T10:39:26.773613+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Parametrised guards need registry ∪ gap == loop_units() or they measure less

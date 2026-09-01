@@ -26,14 +26,6 @@ rules:
   - id: every-loop-has-a-scenario
     claim: Every registered loop is driven by at least one MockWorld scenario
     enforced_by: tests/architecture/test_mockworld_loop_scenario_ratchet.py::test_every_loop_is_driven_by_a_mockworld_scenario
-
-unenforced:
-  - id: tests-stand-in-with-the-fake
-    claim: A test standing in for a Port uses that Port's Fake, not a bare MagicMock
-    why: >-
-      No check exists. Roughly 60 sites pass `MagicMock()` where a Port belongs,
-      so adding one async method to a Protocol breaks all of them at once with
-      "object MagicMock can't be used in 'await' expression" — a message naming
-      neither the port nor the method (#11908 hit this three times in one
-      change). Writing the check is easy; migrating the call sites is the work,
-      and doing it in the same change as a port addition buries the port change.
+  - id: port-stand-ins-only-shrink
+    claim: The count of bare mocks standing in for a Port only shrinks; new tests use the Fake
+    enforced_by: tests/architecture/test_port_stand_ins_use_the_fake.py::TestTheCountOnlyShrinks
