@@ -30,6 +30,10 @@ from hydraflow_gateway.active_routes import (
     build_active_routes_view,
     build_recent_routes_view,
 )
+from hydraflow_gateway.governance_gauge import (
+    GovernanceGauge,
+    measure_governance,
+)
 from hydraflow_gateway.keys import (
     ExpiredVirtualKey,
     InvalidVirtualKey,
@@ -493,6 +497,18 @@ def create_app(
             # exists to prevent.
             truncated=resolved_active_routes.truncated() or len(retained) > limit,
         )
+
+    @app.get("/control/v2/routes/governance", response_model=GovernanceGauge)
+    async def read_governance_gauge() -> GovernanceGauge:
+        """#11544's runtime half: how many governed spawns had no route.
+
+        Reads the durable ledger rather than the in-flight ring. The ring is
+        bounded and evicts, so a bypass that happened before the window would
+        make this read zero — the one answer it must never give wrongly. The
+        read is offloaded because it touches the filesystem.
+        """
+        rows = await asyncio.to_thread(resolved_ledger.read_all)
+        return measure_governance(rows, governs=resolved_settings.governs)
 
     @app.api_route("/{path:path}", methods=_DATA_PLANE_METHODS)
     async def passthrough(request: Request, path: str) -> object:
