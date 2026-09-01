@@ -9,7 +9,7 @@
 - pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet
 - pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members
 - pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status
-- pytest:tests/test_charter_purpose_presence.py::test_a_charter_stating_no_product_is_drift
+- pytest:tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift
 - pytest:tests/scenarios/test_charter_purpose_drift_scenario.py::TestPurposeDrift::test_a_charter_that_lost_its_purpose_files_one_issue
 **Binds:** factory
 **Supersedes:** none
