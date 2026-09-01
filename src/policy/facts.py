@@ -18,19 +18,22 @@ same conclusion by different routes.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 from adr_conformance import (
     enforcement_classification,
     load_enforcement_baseline,
     parse_exemptions,
 )
+from package_resources import ResourceNotFoundError, checkout_path
 from policy.models import Fact
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
     from datetime import datetime
-    from pathlib import Path
 
     from adr_conformance import AdrConformance
 
@@ -173,11 +176,38 @@ def _layer_of(path: str) -> str | None:
     return None
 
 
+#: Conventional-commit type -> the standard's "When each layer is required"
+#: row (`shape` in docs/standards/testing/standard.yaml). Only types whose row
+#: is UNAMBIGUOUS appear: `feat(` may be a new loop, a new port method, or
+#: neither, and those rows disagree, so guessing would gate on a coin flip.
+#: An unmapped type yields no shape and the decision stays report-only.
+_COMMIT_TYPE_SHAPE: dict[str, str] = {
+    "fix": "Bug fix",
+    "refactor": "Pure refactor with no behavior change",
+    "docs": "New ADR / wiki / config",
+    "chore": "New ADR / wiki / config",
+    "test": "Pure refactor with no behavior change",
+}
+
+
+def shape_of_commit(subject: str) -> str:
+    """The standard's requirement-row for a conventional-commit subject.
+
+    Empty when the type is unmapped or absent — the caller must then treat the
+    verdict as advisory. Deriving a shape we are not sure of would gate a PR on
+    a guess, which is how a gate earns its way into being disabled (#11881).
+    """
+    head = subject.split(":", 1)[0].strip()
+    kind = head.split("(", 1)[0].strip().lower()
+    return _COMMIT_TYPE_SHAPE.get(kind, "")
+
+
 def collect_test_pyramid_facts(
     changed_paths: Sequence[str],
     *,
     observed_at: datetime,
     load_bearing_prefixes: Sequence[str] = ("src/",),
+    commit_subjects: Sequence[str] = (),
 ) -> list[Fact]:
     """Observe which pyramid layers a change touched. No judgement.
 
@@ -191,6 +221,20 @@ def collect_test_pyramid_facts(
     force an arbitrary choice among the changed ones.
     """
     layers = {layer for p in changed_paths if (layer := _layer_of(p)) is not None}
+    shape = _dominant_shape(commit_subjects)
+    # The collector does the reading. Falls back to an empty requirement (no
+    # obligation asserted) if the standard is unreadable — a gate that cannot
+    # read its own standard must not block on a guess.
+    req: dict[str, str] = {}
+    if shape:
+        try:
+            # checkout_path, not a walk up from __file__: docs/standards/ is
+            # deliberately absent from the wheel, and parents[2] resolves
+            # inside site-packages there (#11589).
+            std = checkout_path("docs", "standards", "testing", "standard.yaml")
+            req = requirement_matrix(std.read_text("utf-8")).get(shape, {})
+        except (OSError, ValueError, ResourceNotFoundError):
+            req = {}
     touches_source = any(
         p.startswith(tuple(load_bearing_prefixes)) and not p.startswith("tests/")
         for p in changed_paths
@@ -210,5 +254,54 @@ def collect_test_pyramid_facts(
             ("has_unit", "unit" in layers),
             ("has_scenario", "scenario" in layers),
             ("has_sandbox", "sandbox" in layers),
+            ("shape", shape),
+            ("requires_unit", req.get("unit", "")),
+            ("requires_scenario", req.get("scenario", "")),
+            ("requires_sandbox", req.get("sandbox", "")),
         )
     ]
+
+
+def _dominant_shape(subjects: Sequence[str]) -> str:
+    """The strictest known shape across a PR's commits, or "" if none is known.
+
+    Strictest wins because a PR mixing a `fix(` with a `docs(` still contains a
+    bug fix, and the bug-fix row is the one with the obligation. A single
+    unmapped-but-present type does not soften the others; it simply adds no
+    claim of its own.
+    """
+    shapes = [s for s in (shape_of_commit(x) for x in subjects) if s]
+    if not shapes:
+        return ""
+    # Order matches the standard's rows from most to least demanding.
+    for candidate in (
+        "New port method (e.g. `update_pr_branch`)",
+        "New loop or runner",
+        "Bug fix",
+        "Pure refactor with no behavior change",
+        "New ADR / wiki / config",
+    ):
+        if candidate in shapes:
+            return candidate
+    return shapes[0]
+
+
+def requirement_matrix(standard_yaml: str) -> dict[str, dict[str, str]]:
+    """`{shape: {layer: required|conditional|not_required}}` from the standard.
+
+    Parsed from `docs/standards/testing/standard.yaml`, never restated here:
+    the YAML is the normative encoding of the README's matrix and is already
+    drift-checked against it. A second copy in this module would be a third
+    writer for one table.
+    """
+
+    doc = yaml.safe_load(standard_yaml) or {}
+    out: dict[str, dict[str, str]] = {}
+    for row in doc.get("requirements", ()):
+        shape = row.get("shape", "")
+        if shape:
+            out[shape] = {
+                layer: row.get(layer, "not_required")
+                for layer in ("unit", "scenario", "sandbox")
+            }
+    return out

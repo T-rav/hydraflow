@@ -114,13 +114,24 @@ def test_facts_carry_no_judgement() -> None:
     """
     facts = collect_test_pyramid_facts(["src/a.py"], observed_at=datetime.now(UTC))
     assert {f.key for f in facts} == {
+        # what the change touched
         "touches_source",
         "has_unit",
         "has_scenario",
         "has_sandbox",
+        # what the standard demands of that shape — read by the COLLECTOR, so
+        # the engine stays a pure seam that reads nothing (#11880 gate).
+        "shape",
+        "requires_unit",
+        "requires_scenario",
+        "requires_sandbox",
     }
     assert all(f.standard == STANDARD_TEST_PYRAMID for f in facts)
-    assert all(isinstance(f.value, bool) for f in facts)
+    # Layer observations are booleans; the shape and its requirements are the
+    # standard's own words ("required" / "conditional" / "not_required").
+    by_key = {f.key: f.value for f in facts}
+    assert isinstance(by_key["touches_source"], bool)
+    assert isinstance(by_key["requires_scenario"], str)
 
 
 def test_the_engine_refuses_an_unknown_standard_rather_than_staying_silent() -> None:
