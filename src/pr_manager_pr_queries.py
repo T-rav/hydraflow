@@ -18,6 +18,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from false_close import closing_issue_refs
 from merge_state_watcher import ConflictingPR
 from models import PRDiffStats, PRInfo
 
@@ -624,8 +625,6 @@ class PRManagerPRQueriesMixin:
         same issue — an epic PR resolving several, and the one that actually
         did the work — and the later one is the fix a changelog entry means.
         """
-        from false_close import closing_issue_refs  # noqa: PLC0415
-
         raw = await self._gh_json_query(
             "gh",
             "pr",
