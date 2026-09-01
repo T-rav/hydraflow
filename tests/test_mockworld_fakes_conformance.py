@@ -23,61 +23,123 @@ This allows intentional test-convenience patterns without false failures.
 
 from __future__ import annotations
 
+import importlib
 import inspect
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from agent import AgentRunner
-from mockworld.fakes.fake_agent import FakeAgent
-from mockworld.fakes.fake_bot_pr import FakeBotPR
+from arch.extractors.ports import extract_ports
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_fs import FakeFS
 from mockworld.fakes.fake_git import FakeGit
-from mockworld.fakes.fake_github import FakeGitHub
 from mockworld.fakes.fake_http import FakeHTTP
-from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
-from mockworld.fakes.fake_issue_store import FakeIssueStore
 from mockworld.fakes.fake_llm import FakeLLM
-from mockworld.fakes.fake_observability import FakeObservability
-from mockworld.fakes.fake_workspace import FakeWorkspace
 from planner import PlannerRunner
-from ports import AgentPort
 from reviewer import ReviewRunner
-from term_proposer_loop import BotPRPort
 from tests.scenarios.ports import (
     AgentRunnerPort,
     DockerPort,
     FSPort,
     GitPort,
     HTTPPort,
-    IssueFetcherPort,
-    IssueStorePort,
     PlannerRunnerPort,
-    PRPort,
     ReviewRunnerPort,
-    SentryPort,
     TriageRunnerPort,
-    WorkspacePort,
 )
 from triage import TriageRunner
 
-# Hand-maintained Port↔Fake pair list. Add new pairs as Fakes are
-# introduced. (Auto-discovery via convention ``Fake<PortStem>`` is YAGNI
-# at this scale; ~3 pairs total.)
-_PORT_FAKE_PAIRS: list[tuple[type, type]] = [
-    (AgentPort, FakeAgent),
-    (BotPRPort, FakeBotPR),
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_SRC_DIR = _REPO_ROOT / "src"
+_FAKES_DIR = _SRC_DIR / "mockworld" / "fakes"
+
+#: Ports that exist only for scenario plumbing, so the production port
+#: extractor cannot see them. A residual list on the SAFE side: forgetting an
+#: entry loses coverage that is trivially visible here, whereas deriving these
+#: would mean teaching the extractor about `tests/`.
+_TEST_ONLY_PAIRS: list[tuple[type, type]] = [
     (DockerPort, FakeDocker),
     (FSPort, FakeFS),
     (GitPort, FakeGit),
     (HTTPPort, FakeHTTP),
-    (IssueFetcherPort, FakeIssueFetcher),
-    (IssueStorePort, FakeIssueStore),
-    (PRPort, FakeGitHub),
-    (SentryPort, FakeObservability),
-    (WorkspacePort, FakeWorkspace),
 ]
+
+
+def _resolve(module: str, name: str) -> type:
+    """Import a class the extractor named. Never silently skips.
+
+    A pair that cannot be resolved is the failure this test exists to prevent —
+    it would quietly reduce coverage — so the ImportError/AttributeError is
+    allowed to propagate at collection time rather than being caught.
+    """
+    return getattr(importlib.import_module(module.removeprefix("src.")), name)
+
+
+def _production_pairs() -> list[tuple[type, type]]:
+    """Every live Port and its Fake, from the SAME extractor the registry uses.
+
+    Previously hand-maintained, and it had drifted to 7 of the 10 live Ports:
+    `ConformanceRunnerPort`, `ReviewInsightStorePort` and `RouteBackCounterPort`
+    all have real Fakes that no signature check ever saw, so drift on any of
+    them shipped green — while `docs/standards/ports-and-loops` claimed
+    "Every Port's Fake satisfies the Protocol structurally, signature for
+    signature" and cited this test as the enforcer (#11939).
+
+    Deriving is what makes that claim true: the standard's registry table and
+    this test now read one extractor, so a Port added tomorrow is covered
+    without anyone remembering to add a row.
+    """
+    return [
+        (_resolve(info.module, info.name), _resolve(info.fake.module, info.fake.name))
+        for info in extract_ports(src_dir=_SRC_DIR, fakes_dir=_FAKES_DIR)
+        if info.fake is not None
+    ]
+
+
+_PORT_FAKE_PAIRS: list[tuple[type, type]] = [
+    *_production_pairs(),
+    *_TEST_ONLY_PAIRS,
+]
+
+
+def test_every_live_port_is_covered() -> None:
+    """The derivation must actually produce the registry's Ports.
+
+    Both halves of this can fail silently. If `extract_ports` stopped finding
+    Ports the parametrization would shrink to the four test-only pairs and
+    every remaining case would pass — a green run over almost nothing, which is
+    exactly how this test came to cover 7 of 10 without anyone noticing.
+    """
+    covered = {port.__name__ for port, _ in _PORT_FAKE_PAIRS}
+    live = {info.name for info in extract_ports(src_dir=_SRC_DIR, fakes_dir=_FAKES_DIR)}
+
+    assert live, "the port extractor found no Ports at all"
+    assert live <= covered, (
+        f"live Ports with no signature check: {sorted(live - covered)}"
+    )
+
+
+def test_no_live_port_is_missing_its_fake() -> None:
+    """A Port the extractor cannot pair is invisible to the check above.
+
+    `_production_pairs` skips `info.fake is None`, so an unpaired Port silently
+    leaves the parametrization instead of failing it. That is the same shape as
+    the original defect — coverage quietly narrowing — so the absence is
+    asserted here rather than tolerated there.
+    """
+    unpaired = [
+        info.name
+        for info in extract_ports(src_dir=_SRC_DIR, fakes_dir=_FAKES_DIR)
+        if info.fake is None
+    ]
+
+    assert not unpaired, (
+        f"these live Ports have no Fake the extractor can find: {unpaired}. "
+        "Either the Fake is missing, or it does not satisfy the Port and the "
+        "extractor is right to refuse to name it."
+    )
 
 
 def _public_methods(cls: type) -> dict[str, Any]:
