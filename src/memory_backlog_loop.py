@@ -261,6 +261,18 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         is the primary re-filing guard, so a missed commit doesn't cause
         duplicate filings on restart. Surfaces as drift in `git status`.
         """
+        # A simulated board's issue numbers come from a counter, not GitHub.
+        # Writing them to disk is harmless in a tmp repo; COMMITTING them is
+        # what put twenty fake pins (#25-#44) into tracked files and merged
+        # them in PR #8989 (#11972). So the frontmatter still updates — the
+        # scenario layer depends on it — and only the git write is refused.
+        if getattr(self._pr, "is_simulated", False) is True:
+            logger.info(
+                "memory_backlog: simulated board — frontmatter updated but NOT "
+                "committed; a fake issue number must never reach tracked files"
+            )
+            return
+
         repo_root = str(self._config.repo_root)
         mirror_relpath = "/".join(_MIRROR_SUBPATH)
         healed = healed or []
