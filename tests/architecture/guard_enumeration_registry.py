@@ -753,6 +753,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         test_issue_11803_one_flow_stopped,
         test_issue_11891_fields_reach_their_producer,
         test_issue_11939_port_fake_name_is_a_hint,
+        test_issue_11969_mirror_pins_are_real,
     )
     from tests.sandbox_scenarios.runner import test_scenarios
     from tests.scenarios import (
@@ -1376,6 +1377,16 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             members=tuple(str(item) for item in test_scenarios._SCENARIOS),
             kind=EnumerationKind.CORPUS,
             why="Computed at import by test_scenarios, not typed out.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_11969_mirror_pins_are_real._mirrors()",
+            members=tuple(
+                str(item)
+                for item in test_issue_11969_mirror_pins_are_real._mirrors()  # noqa: SLF001
+            ),
+            kind=EnumerationKind.CORPUS,
+            why="Mirror files discovered on disk by frontmatter shape.",
             undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
         GuardedEnumeration(
