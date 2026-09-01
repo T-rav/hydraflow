@@ -1,9 +1,11 @@
 ---
 source: feedback_scratchpad_shared_between_sibling_subagents.md
 name: Scratchpad dir is shared between sibling subagents — prefix filenames
-description: Parallel implementer subagents spawned by one orchestrator all get the ORCHESTRATOR's scratchpad path; generic filenames (pr_body.md, quality.log) get silently overwritten by siblings — one PR shipped with another task's body
-status: pending
-issue: null
+description: Parallel implementer subagents spawned by one orchestrator all get the
+  ORCHESTRATOR's scratchpad path; generic filenames (pr_body.md, quality.log) get
+  silently overwritten by siblings — one PR shipped with another task's body
+status: issue-open
+issue: 11949
 promoted_in: null
 wontfix_reason: null
 created: '2026-08-21'
