@@ -18,6 +18,7 @@ same conclusion by different routes.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,11 +31,12 @@ from adr_conformance import (
     parse_exemptions,
 )
 from charter import CharterDriftReport
+from charter_model import STANDARDS_DIR
 from package_resources import ResourceNotFoundError, checkout_path
-from policy.models import Fact
+from policy.models import Charter, Fact
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
     from datetime import datetime
 
     from adr_conformance import AdrConformance
@@ -63,14 +65,25 @@ STANDARD_TEST_PYRAMID = "test_pyramid"
 #: the engine the answer would make it tautological (ADR-0143 Ruling 4).
 STANDARD_CHARTER = "charter"
 
+#: Goal referential integrity: is each declared purpose goal cited by some
+#: Article, so it cannot be pure decoration? Adopted by the operator's ruling
+#: of 2026-08-31 (ADR-0143 Amendment 2026-09-01, #11856) and placed HERE rather
+#: than in charter drift on purpose: presence is pure over `(charter, observed)`
+#: and belongs to observation, while this is a `(standard, subject)` judgement
+#: over facts gathered from several surfaces, which is what the seam is for.
+#: Semantic conformance — whether the work SERVES a goal — stays refused.
+STANDARD_PURPOSE = "purpose"
+
 #: Every standard this module can collect for — the default charter.
 COLLECTED_STANDARDS: tuple[str, ...] = (
     STANDARD_ADR_ENFORCEMENT,
     STANDARD_ADR_CONFORMANCE,
     STANDARD_TEST_PYRAMID,
     STANDARD_CHARTER,
+    STANDARD_PURPOSE,
 )
 
+_PURPOSE_SOURCE = "policy.facts.collect_purpose_facts"
 _ENFORCEMENT_SOURCE = "policy.facts.collect_adr_enforcement_facts"
 _CONFORMANCE_SOURCE = "policy.facts.conformance_facts"
 _PYRAMID_SOURCE = "policy.facts.collect_test_pyramid_facts"
@@ -178,6 +191,69 @@ def conformance_facts(
             source=_CONFORMANCE_SOURCE,
         )
         for key, value in observations
+    ]
+
+
+def _cites(text: str, goal: str) -> bool:
+    """Whole-word citation of a goal id, so a prefix is not a citation.
+
+    `lights_off_operation` must not be anchored by a file that only mentions
+    `lights_off_operation_v2`, and vice versa — a substring match would make
+    every goal anchored by its own longer sibling.
+    """
+    return re.search(rf"(?<![\w-]){re.escape(goal)}(?![\w-])", text) is not None
+
+
+def _any_file_cites(paths: Iterable[Path], goal: str) -> bool:
+    for path in paths:
+        try:
+            if _cites(path.read_text(encoding="utf-8"), goal):
+                return True
+        except OSError:  # pragma: no cover - unreadable file cites nothing
+            continue
+    return False
+
+
+def collect_purpose_facts(
+    charter: Charter, *, repo_root: Path, observed_at: datetime
+) -> list[Fact]:
+    """Observe where each declared goal is cited. No judgement.
+
+    One subject per goal id, and three primitive observations per subject —
+    cited in a standard's README, in an ADR, in a local article — never a
+    single `anchored` boolean. The engine re-derives the disjunction, which is
+    what keeps a parity test between two engines meaningful: a collector that
+    handed over the answer would make both sides read the same helper rather
+    than reach the same conclusion by different routes.
+
+    `charter.yaml` is deliberately NOT a citation surface. Declaring a goal is
+    what creates the obligation; letting the declaration satisfy it would make
+    every goal anchored by construction and the check vacuous — the
+    `uncheckable-charter` failure wearing a different hat.
+
+    Whole-word matching, so `lights_off` is not anchored by
+    `lights_off_operation`. A substring match would let any goal be satisfied
+    by a longer sibling that happens to contain it.
+    """
+    standards = sorted((repo_root / STANDARDS_DIR).glob("*/README.md"))
+    adrs = sorted((repo_root / "docs" / "adr").glob("*.md"))
+    local = "\n".join(article.statement for article in charter.articles.local)
+
+    return [
+        Fact(
+            standard=STANDARD_PURPOSE,
+            subject=goal,
+            key=key,
+            value=value,
+            observed_at=observed_at,
+            source=_PURPOSE_SOURCE,
+        )
+        for goal in charter.purpose.goals
+        for key, value in (
+            ("cited_in_standards", _any_file_cites(standards, goal)),
+            ("cited_in_adrs", _any_file_cites(adrs, goal)),
+            ("cited_in_local_articles", _cites(local, goal)),
+        )
     ]
 
 

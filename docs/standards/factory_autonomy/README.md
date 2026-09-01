@@ -119,3 +119,14 @@ gate that exists but never runs is a citation to nothing.
 <!-- standard:enforced-by -->
 - `tests/architecture/test_factory_autonomy_policy_drift.py`
 <!-- /standard:enforced-by -->
+
+## Goals served
+
+Charter purpose goals this standard carries (ADR-0143 Amendment 2026-09-01,
+#11856). Cited by id so the link is greppable rather than implied — an
+uncited goal is decoration, and `STANDARD_PURPOSE` says so.
+
+- `lights_off_operation`
+- `reduce_the_cost_of_improving_itself`
+
+The operator is the bottleneck this standard exists to remove, and every decision an agent makes without waiting is a cycle the factory did not spend on itself.

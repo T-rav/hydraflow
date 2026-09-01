@@ -26,19 +26,23 @@ only in which object carries the action, and this is what says so.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from adr_conformance import AdrConformance, CheckOutcome, ConformanceKind
 from adr_conformance_remediation import RemediationAction, classify_remediation
 from charter import CharterDriftReport
+from charter_model import Purpose
 from policy.facts import (
     COLLECTED_STANDARDS,
     STANDARD_ADR_CONFORMANCE,
     STANDARD_ADR_ENFORCEMENT,
     STANDARD_CHARTER,
+    STANDARD_PURPOSE,
     STANDARD_TEST_PYRAMID,
     collect_charter_facts,
+    collect_purpose_facts,
     collect_test_pyramid_facts,
     conformance_facts,
 )
@@ -142,6 +146,15 @@ def test_the_reference_engine_judges_every_standard_the_collectors_emit() -> Non
         ),
         STANDARD_CHARTER: collect_charter_facts(
             CharterDriftReport(repo="o/r"), observed_at=OBSERVED_AT
+        ),
+        # Hermetic on purpose: a repo_root that does not exist yields three
+        # all-False citation facts (a missing directory globs to nothing), so
+        # this exercises the real collector without coupling the pin to which
+        # standards happen to cite which goal today.
+        STANDARD_PURPOSE: collect_purpose_facts(
+            Charter(purpose=Purpose(product="p", goals=("a_goal",))),
+            repo_root=Path("/nonexistent-for-this-pin"),
+            observed_at=OBSERVED_AT,
         ),
     }
 

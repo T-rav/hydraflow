@@ -167,6 +167,7 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
                 "STANDARD_CHARTER",
                 "STANDARD_ADR_CONFORMANCE",
                 "STANDARD_ADR_ENFORCEMENT",
+                "STANDARD_PURPOSE",
                 "STANDARD_TEST_PYRAMID",
             }
         ),
