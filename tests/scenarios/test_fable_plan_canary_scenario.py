@@ -30,6 +30,7 @@ import json
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from director_broker import ShadowDispatchBroker
 from director_sandbox import ProbeEvidence
@@ -341,6 +342,38 @@ async def _brokered(mock_world, tmp_path):
     )
 
 
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def brokered(tmp_path_factory):
+    """The brokered run, executed ONCE for this module (#11844).
+
+    Sixteen of this file's tests each re-ran the same scenario to assert one
+    property of its result — ~1.4s apiece for a value that cannot differ
+    between them. The run is deterministic and every consumer is read-only, so
+    the only thing repetition bought was wall-clock: this file alone was 22s of
+    a ~90s suite.
+
+    It builds its own MockWorld, MonkeyPatch and tmp dir rather than reusing
+    the function-scoped `mock_world`/`seeded_issues`/`tmp_path`: those are
+    shared across every scenario file and widening their scope would change
+    isolation for suites that have nothing to do with this one.
+
+    `--dist loadscope` (see the Makefile) keeps a module's tests on one xdist
+    worker, which is what makes a module-scoped fixture safe under parallel
+    runs rather than recomputed per worker.
+    """
+    from tests.scenarios.fakes import MockWorld
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+        tmp = tmp_path_factory.mktemp("plan_canary_brokered")
+        world = MockWorld(tmp)
+        for issue in (ISSUE_CLASSIC, ISSUE_BROKERED):
+            IssueBuilder().numbered(issue).titled("driven issue").labeled(
+                PLAN_LABEL
+            ).at(world)
+        yield await _brokered(world, tmp)
+
+
 class TestABrokeredPlanReachesTheSameOutcomeAsAClassicOne:
     """The gates stay authoritative: the canary adds workers, not authority."""
 
@@ -355,93 +388,81 @@ class TestABrokeredPlanReachesTheSameOutcomeAsAClassicOne:
 
         assert brokered["labels"] == classic["labels"]
 
-    async def test_the_deterministic_plan_phase_still_ran(
-        self, seeded_issues, tmp_path
-    ) -> None:
+    async def test_the_deterministic_plan_phase_still_ran(self, brokered) -> None:
         # Plan validation, the constitution gate and the cohort gate all live
         # inside that phase. A canary that skipped it would have taken the
         # authority the acceptance criteria say it must not.
-        brokered, _log, _c, _s = await _brokered(seeded_issues, tmp_path)
+        brokered, _log, _c, _s = brokered
 
         assert brokered["planned"] == [0]
 
 
 class TestEachBrokeredChildIsItsOwnProcessWithItsOwnKey:
-    async def test_two_children_are_spawned(self, seeded_issues, tmp_path) -> None:
-        _o, _log, _control, spawner = await _brokered(seeded_issues, tmp_path)
+    async def test_two_children_are_spawned(self, brokered) -> None:
+        _o, _log, _control, spawner = brokered
 
         assert len(spawner.spawns) == 2
 
     async def test_a_sonnet_planner_and_an_opus_architect_both_ran(
-        self, seeded_issues, tmp_path
+        self, brokered
     ) -> None:
-        _o, _log, _control, spawner = await _brokered(seeded_issues, tmp_path)
+        _o, _log, _control, spawner = brokered
 
         models = " ".join(" ".join(s["cmd"]) for s in spawner.spawns)
         assert "sonnet" in models
         assert "opus" in models
 
-    async def test_each_child_minted_its_own_key(self, seeded_issues, tmp_path) -> None:
-        _o, _log, control, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_each_child_minted_its_own_key(self, brokered) -> None:
+        _o, _log, control, _s = brokered
 
         assert len(control.minted) == 2
 
-    async def test_no_two_children_share_a_spawn_id(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, _log, control, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_no_two_children_share_a_spawn_id(self, brokered) -> None:
+        _o, _log, control, _s = brokered
 
         assert len({request.spawn_id for request in control.minted}) == 2
 
-    async def test_each_child_is_attributed_to_its_own_role(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, _log, control, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_each_child_is_attributed_to_its_own_role(self, brokered) -> None:
+        _o, _log, control, _s = brokered
 
         assert {request.principal_id for request in control.minted} == {
             "planner",
             "architect",
         }
 
-    async def test_every_key_was_revoked(self, seeded_issues, tmp_path) -> None:
+    async def test_every_key_was_revoked(self, brokered) -> None:
         # Short-lived is only half of it; the lease is closed when the child
         # finishes rather than left to its TTL.
-        _o, _log, control, _s = await _brokered(seeded_issues, tmp_path)
+        _o, _log, control, _s = brokered
 
         assert sorted(control.revoked) == ["key-1", "key-2"]
 
-    async def test_no_child_receives_the_control_token(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, _log, _control, spawner = await _brokered(seeded_issues, tmp_path)
+    async def test_no_child_receives_the_control_token(self, brokered) -> None:
+        _o, _log, _control, spawner = brokered
 
         assert all(
             "HYDRAFLOW_GATEWAY_CONTROL_TOKEN" not in spawn["env"]
             for spawn in spawner.spawns
         )
 
-    async def test_each_child_receives_its_own_virtual_token(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, _log, _control, spawner = await _brokered(seeded_issues, tmp_path)
+    async def test_each_child_receives_its_own_virtual_token(self, brokered) -> None:
+        _o, _log, _control, spawner = brokered
 
         tokens = {spawn["env"].get("ANTHROPIC_AUTH_TOKEN") for spawn in spawner.spawns}
         assert tokens == {"hfgw_virtual_1", "hfgw_virtual_2"}
 
 
 class TestTheEvidenceIsComplete:
-    async def test_every_child_carries_a_receipt(self, seeded_issues, tmp_path) -> None:
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_every_child_carries_a_receipt(self, brokered) -> None:
+        _o, log, _c, _s = brokered
 
         assert len(log.recent()[0].dispatched) == 2
 
-    async def test_the_two_receipts_name_two_different_models(
-        self, seeded_issues, tmp_path
-    ) -> None:
+    async def test_the_two_receipts_name_two_different_models(self, brokered) -> None:
         # Collapsing into a set and asserting "all contain claude" passed when
         # both children served the SAME model, which is the one thing a
         # Sonnet-and-Opus canary must not do.
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+        _o, log, _c, _s = brokered
 
         served = sorted(row["served_model"] for row in log.recent()[0].dispatched)
         assert len(set(served)) == 2
@@ -449,27 +470,23 @@ class TestTheEvidenceIsComplete:
         assert "sonnet" in served[1]
 
     async def test_every_receipt_carries_the_decision_that_authorised_it(
-        self, seeded_issues, tmp_path
+        self, brokered
     ) -> None:
         # ``decision_id`` is content-addressed so a receipt joins back to why
         # the tier was chosen. A join nothing carries is decorative.
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+        _o, log, _c, _s = brokered
 
         ids = [row["route_decision_id"] for row in log.recent()[0].dispatched]
         assert all(i.startswith("plan_") for i in ids)
         assert len(set(ids)) == 2
 
-    async def test_every_receipt_carries_a_child_spawn_id(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_every_receipt_carries_a_child_spawn_id(self, brokered) -> None:
+        _o, log, _c, _s = brokered
 
         assert all(row["child_spawn_id"] for row in log.recent()[0].dispatched)
 
-    async def test_the_rollup_stops_calling_itself_shadow_mode(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_the_rollup_stops_calling_itself_shadow_mode(self, brokered) -> None:
+        _o, log, _c, _s = brokered
 
         summary = log.summary()
         assert (summary["workers_dispatched"], summary["shadow_mode"]) == (2, False)
@@ -498,16 +515,14 @@ class TestTheTreeAndTheReceiptsAgree:
     same request.
     """
 
-    async def test_every_dispatched_node_is_marked_dispatched(
-        self, seeded_issues, tmp_path
-    ) -> None:
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+    async def test_every_dispatched_node_is_marked_dispatched(self, brokered) -> None:
+        _o, log, _c, _s = brokered
 
         tree = log.recent()[0].would_dispatch
         assert [node["dispatched"] for node in tree] == [True, True]
 
     async def test_the_tree_and_the_receipts_name_the_same_requests(
-        self, seeded_issues, tmp_path
+        self, brokered
     ) -> None:
         """Keyed on *a child ran*, not on ``status == accepted``.
 
@@ -519,7 +534,7 @@ class TestTheTreeAndTheReceiptsAgree:
         one PR encoding opposite predicates is worse than either alone; this is
         the one that was wrong.
         """
-        _o, log, _c, _s = await _brokered(seeded_issues, tmp_path)
+        _o, log, _c, _s = brokered
 
         row = log.recent()[0]
         dispatched = {

@@ -51,6 +51,23 @@ HF_PYTEST_DEADLINE_FLAGS ?= --timeout=300 --durations=25
 HF_PYTEST_WATCHDOG ?= -p tests.hf_spin_watch
 PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG)
 
+# Scenario suites run parallel too (#11844). Deliberately NOT $(PYTEST_PARALLEL):
+# that carries `--reruns 2`, and a rerun is exactly what would hide an xdist
+# isolation flake introduced by this change — the failure mode the repo has
+# already paid for more than once. A scenario that only passes on retry must
+# stay red here.
+#
+# `--dist loadscope` keeps a class's tests on one worker. Every scenario
+# fixture is function-scoped today so nothing depends on that yet, but the
+# canary suites re-run a full scenario per test from a class fixture, and
+# widening one to class scope is the obvious next optimisation. loadscope
+# costs ~6s against plain `load` and makes that change safe instead of
+# silently broken.
+#
+# Override to run serially when bisecting a cross-test interaction:
+#   make scenario SCENARIO_PARALLEL=
+SCENARIO_PARALLEL ?= -n auto --dist loadscope
+
 # Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
 # process-global state that collides across workers).
 # These two suites exercise host-global process groups / advisory locks and
@@ -368,14 +385,14 @@ soak: deps
 scenario: deps
 	@echo "$(BLUE)Running scenario tests...$(RESET)"
 	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario -v \
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario -v $(SCENARIO_PARALLEL) \
 		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario.xml,)
 	@echo "$(GREEN)Scenario tests passed$(RESET)"
 
 scenario-loops: deps
 	@echo "$(BLUE)Running scenario loop tests...$(RESET)"
 	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v \
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v $(SCENARIO_PARALLEL) \
 		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario-loops.xml,)
 	@echo "$(GREEN)Scenario loop tests passed$(RESET)"
 
