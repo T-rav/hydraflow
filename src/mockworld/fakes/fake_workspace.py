@@ -18,6 +18,7 @@ class FakeWorkspace:
         self.created: list[int] = []
         self.destroyed: list[int] = []
         self._next_fault: _WorkspaceFaultKind | None = None
+        self._dead_registrations: list[Path] = []
 
     def fail_next_create(self, *, kind: _WorkspaceFaultKind) -> None:
         """Inject a single-shot fault into the next create() call."""
@@ -42,6 +43,16 @@ class FakeWorkspace:
 
     async def destroy_all(self) -> None:
         """Remove all managed worktrees (no-op stub)."""
+
+    async def prune_dead_registrations(self) -> list[Path]:
+        """Report the registrations a test declared dead via ``set_dead_registrations``."""
+        pruned = list(self._dead_registrations)
+        self._dead_registrations = []
+        return pruned
+
+    def set_dead_registrations(self, paths: list[Path]) -> None:
+        """Test hook: declare registrations whose directory has vanished."""
+        self._dead_registrations = list(paths)
 
     async def merge_main(self, worktree_path: Path, branch: str) -> bool:
         """Merge main into the worktree (stub — always succeeds)."""

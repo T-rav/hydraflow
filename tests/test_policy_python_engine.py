@@ -9,6 +9,13 @@ Two things get proved here that the live-corpus parity test in
 2. **Fail-closed behaviour on thin evidence.** A collector that drops a fact
    must redden, not silently default — dropping ``resolved`` alone would turn a
    paid-off debt back into a grandfathered one.
+3. **The composition probe (#11869).** A ``WEAK`` ADR that binds the factory
+   (``Binds: factory`` / ``Binds: both``, ADR-0123) blocks even when the
+   baseline would grandfather it, once the charter declares a regulated
+   assurance class (ADR-0143). The live corpus's charter is ``internal``, so
+   the parity test can never exercise this arm; it is proved here instead,
+   alongside a direct assertion that ``binds`` has no effect under ``internal``
+   — HydraFlow's own decisions are unchanged by this change.
 
 The conformance half is checked as an exhaustive equivalence against
 ``classify_remediation``: every ``CheckOutcome`` x rename-present/absent x an
@@ -32,7 +39,7 @@ from policy.facts import (
     collect_test_pyramid_facts,
     conformance_facts,
 )
-from policy.models import Charter, DecisionEngine, DecisionStatus, Fact
+from policy.models import Articles, Charter, DecisionEngine, DecisionStatus, Fact
 from policy.python_engine import (
     MissingFactError,
     PythonDecisionEngine,
@@ -49,6 +56,7 @@ def _enforcement_facts(
     in_baseline_snapshot: bool = False,
     resolved: bool = False,
     exempt: bool = False,
+    binds: str = "unknown",
     drop: str | None = None,
 ) -> list[Fact]:
     observations: dict[str, bool | str] = {
@@ -56,6 +64,7 @@ def _enforcement_facts(
         "in_baseline_snapshot": in_baseline_snapshot,
         "resolved": resolved,
         "exempt": exempt,
+        "binds": binds,
     }
     if drop is not None:
         observations.pop(drop)
@@ -70,6 +79,10 @@ def _enforcement_facts(
         )
         for key, value in observations.items()
     ]
+
+
+def _regulated_charter() -> Charter:
+    return Charter(articles=Articles(assurance="regulated-phi"))
 
 
 def _conformance(outcome: CheckOutcome) -> AdrConformance:
@@ -234,7 +247,108 @@ def test_decision_carries_the_facts_it_was_made_from() -> None:
         "in_baseline_snapshot",
         "resolved",
         "exempt",
+        "binds",
     }
+
+
+# ---------------------------------------------------------------------------
+# The composition probe (#11869) — ADR-0123 `binds` x ADR-0143 regulated
+# assurance. The only cross-standard rule the OPA pilot (#11750) measured;
+# ported here per its findings, including its one recorded bug.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("binds", ["factory", "both"])
+def test_weak_factory_binding_debt_blocks_under_a_regulated_charter_even_when_grandfathered(
+    binds: str,
+) -> None:
+    """The OPA pilot's one recorded bug: a probe that checked only
+    ``binds == "factory"`` silently let ``Binds: both`` through. Both values
+    must block, and blocking must override the baseline's grandfathering."""
+    facts = _enforcement_facts(
+        "ADR-0123", enforcement_class="WEAK", in_baseline_snapshot=True, binds=binds
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated_charter())[0]
+
+    assert decision.status is DecisionStatus.VIOLATED
+    assert decision.blocking is True
+    assert decision.remediation is RemediationAction.FILE_ISSUE
+    assert f"Binds:{binds}" in decision.reason
+
+
+def test_weak_work_only_binding_debt_stays_grandfathered_under_a_regulated_charter() -> (
+    None
+):
+    """``Binds: work`` never claims to bind the factory — the probe must not
+    fire, and the ordinary baseline lane still applies."""
+    facts = _enforcement_facts(
+        "ADR-0200", enforcement_class="WEAK", in_baseline_snapshot=True, binds="work"
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated_charter())[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+    assert decision.blocking is False
+
+
+def test_weak_unstated_binds_stays_grandfathered_under_a_regulated_charter() -> None:
+    """An unstated ``Binds:`` (ADR-0123's own defect) is not a factory claim —
+    the probe requires an explicit ``factory``/``both`` declaration."""
+    facts = _enforcement_facts(
+        "ADR-0201", enforcement_class="WEAK", in_baseline_snapshot=True, binds="unknown"
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated_charter())[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+
+
+def test_missing_factory_binding_debt_is_not_probed_only_weak_is() -> None:
+    """The probe reads ``enforcement_class == "WEAK"`` exactly, matching the
+    ported OPA policy: ``MISSING`` debt is unaffected."""
+    facts = _enforcement_facts(
+        "ADR-0202", enforcement_class="MISSING", in_baseline_snapshot=True, binds="both"
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated_charter())[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+
+
+def test_exemption_still_wins_over_the_probe() -> None:
+    """The ladder's precedence is unchanged: exempt is checked before the
+    probe, so an allow-listed ADR stays exempt even if it binds the factory."""
+    facts = _enforcement_facts(
+        "ADR-0203",
+        enforcement_class="WEAK",
+        in_baseline_snapshot=True,
+        exempt=True,
+        binds="both",
+    )
+
+    decision = PythonDecisionEngine().decide(facts, _regulated_charter())[0]
+
+    assert decision.status is DecisionStatus.EXEMPT
+    assert decision.blocking is False
+
+
+@pytest.mark.parametrize("binds", ["work", "factory", "both", "unknown"])
+def test_binds_has_no_effect_under_an_internal_charter(binds: str) -> None:
+    """Acceptance criterion: HydraFlow's own decisions are unchanged under
+    ``internal`` — the probe is gated on the charter's assurance, not on
+    ``binds`` alone. The real ADR corpus is proved unchanged the same way, by
+    ``tests/architecture/test_policy_adr_enforcement_parity.py``, whose
+    ratchet-side comparison never reads ``binds`` at all."""
+    charter = Charter(articles=Articles(assurance="internal"))
+    facts = _enforcement_facts(
+        "ADR-0204", enforcement_class="WEAK", in_baseline_snapshot=True, binds=binds
+    )
+
+    decision = PythonDecisionEngine().decide(facts, charter)[0]
+
+    assert decision.status is DecisionStatus.GRANDFATHERED
+    assert decision.blocking is False
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +378,15 @@ def test_a_dropped_enforcement_class_fact_raises() -> None:
 
     with pytest.raises(MissingFactError, match="enforcement_class"):
         PythonDecisionEngine().decide(facts)
+
+
+def test_a_dropped_binds_fact_raises_rather_than_silently_exempting_the_probe() -> None:
+    """Defaulting ``binds`` would silently exempt every factory-binding ADR
+    from the composition probe under a regulated charter."""
+    facts = _enforcement_facts("ADR-0777", enforcement_class="WEAK", drop="binds")
+
+    with pytest.raises(MissingFactError, match="binds"):
+        PythonDecisionEngine().decide(facts, _regulated_charter())
 
 
 def test_an_unknown_standard_refuses_rather_than_returning_silence() -> None:

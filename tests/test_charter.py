@@ -234,6 +234,25 @@ def test_assurance_defaults_to_internal() -> None:
     assert Charter.from_dict({}).articles.assurance == "internal"
 
 
+def test_is_regulated_true_for_a_regulated_assurance_class() -> None:
+    charter = Charter.from_dict({"articles": {"assurance": "regulated-hipaa"}})
+    assert charter.is_regulated is True
+
+
+def test_is_regulated_false_for_internal_assurance() -> None:
+    assert Charter.from_dict({}).is_regulated is False
+
+
+def test_is_regulated_true_for_a_padded_regulated_assurance_class() -> None:
+    """A YAML scalar with incidental whitespace still validates (
+    ``is_valid_data_class`` strips before matching) and is stored unstripped
+    by ``Articles.from_dict``. ``is_regulated`` must not disagree with the
+    validator it was validated by, or the composition rule (#11869) fails
+    open on exactly the charter it exists to bind."""
+    charter = Charter.from_dict({"articles": {"assurance": " regulated-hipaa "}})
+    assert charter.is_regulated is True
+
+
 # --------------------------------------------------------------------------- #
 # Load / write                                                                 #
 # --------------------------------------------------------------------------- #
@@ -426,7 +445,12 @@ def test_purpose_and_local_articles_alone_do_not_make_a_charter_checkable() -> N
 
 
 def test_one_declared_layer_is_enough_to_be_checkable() -> None:
-    charter = Charter(rails=RailsBlock(layers=("universal",)))
+    # Purpose is stated so `missing-purpose` (#11856) cannot be what makes
+    # this report unclean — the subject here is layer checkability.
+    charter = Charter(
+        purpose=Purpose(product="a factory", goals=("lights_off",)),
+        rails=RailsBlock(layers=("universal",)),
+    )
     observed = ObservedRepo(present_layers=frozenset({"universal"}))
     report = compute_charter_drift(charter, observed, repo="o/r")
     assert report.clean

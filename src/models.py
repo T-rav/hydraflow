@@ -3766,6 +3766,11 @@ class BGWorkerHealth(StrEnum):
     OK = "ok"
     ERROR = "error"
     DISABLED = "disabled"
+    #: A tick is IN FLIGHT. Distinct from OK because "last completed at T" and
+    #: "alive right now" are different claims, and the health snapshot needs
+    #: the second one: a loop dispatching a long agent run (a planner on a
+    #: large issue) keeps an old completion heartbeat while working perfectly.
+    RUNNING = "running"
 
 
 class BackgroundWorkerStatus(BaseModel):

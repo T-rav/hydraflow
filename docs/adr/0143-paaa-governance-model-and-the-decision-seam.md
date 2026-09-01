@@ -9,6 +9,8 @@
 - pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet
 - pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members
 - pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status
+- pytest:tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift
+- pytest:tests/scenarios/test_charter_purpose_drift_scenario.py::TestPurposeDrift::test_a_charter_that_lost_its_purpose_files_one_issue
 **Binds:** factory
 **Supersedes:** none
 **Superseded by:** none
@@ -198,6 +200,74 @@ member set exactly and asserts `blocking` is a field on `StandardDecision` rathe
 than a status member. Both are cited in the *Enforced-by* block above, alongside
 the three checks that were already there. Prose agreement rots; a checked
 invariant does not.
+
+## Amendment (2026-09-01): what checking Purpose means — presence, and anchoring
+
+**The deferral this discharges.** Ruling 3 held that "Purpose is implicit, and
+this ADR does not invent a surface for it", and `Purpose`'s docstring hardened
+that into a precondition: no check may be added "without a ruling that says what
+checking intent would even mean." #11748 gave Purpose a declaration surface and
+deliberately did not make the ruling, so the deferral had a surface but no home
+— it would have sat until someone rediscovered it. The operator ruled on
+2026-08-31 (#11856) and this section is that ruling, recorded.
+
+**The ruling.** Three readings of "check Purpose" were on the table. Two are
+adopted and one is refused, and the split is between *structural* claims and
+*semantic* ones:
+
+1. **Presence and shape — ADOPTED, in charter drift.** A governed charter
+   carries a non-empty `purpose.product` and at least one goal. This checks that
+   intent is *stated*, not that work serves it. It is schema-grade observation,
+   structurally identical to `missing-artifact`, needs no facts, and lands as
+   the `missing-purpose` finding class in `compute_charter_drift`.
+2. **Goal referential integrity — ADOPTED, through the policy seam.** Each goal
+   id must be cited by at least one Article or standard rationale, so a goal
+   cannot be pure decoration. This is a genuine `(standard, subject)` judgement
+   over facts gathered from several surfaces, which is what the seam is for.
+   It makes Purpose the seam's first post-pilot consumer, exercising
+   `Charter.governs()` and the fact ledger beyond the standards it was born
+   with.
+3. **Semantic conformance — REFUSED, permanently.** Whether the work serves the
+   purpose is not deterministically decidable, and a judge-model check would
+   rest a conformance claim on an external service being reachable, which #11687
+   forbids. Recorded here in one line so it is not re-proposed.
+
+**Why 1 is fatal, and why it is a precondition rather than a nicety.** An
+unstated purpose is not a cosmetic gap: reading 2 resolves goal ids against the
+Articles, so a charter with no goals hands that check an empty subject list. A
+check with an empty subject list passes silently and *reads as coverage* — the
+exact failure `uncheckable-charter` exists to name, one layer up. Tolerating an
+unstated purpose would let the stronger check disable itself quietly, so 1 is
+fatal to keep 2 honest.
+
+**Why the two live in different places.** They are different architectures, not
+different file paths. Presence is pure over `(charter, observed)` and belongs
+where Ruling 5 puts observation. Referential integrity is a cross-surface
+judgement over facts and belongs to the seam; putting it in charter drift would
+grow the bespoke decision path the seam was built to absorb, and would set that
+precedent for every later cross-surface article.
+
+**Ruling 3 is amended, not overturned.** Its substance — that Purpose is the
+layer whose *semantics* nothing can check, and that no check may be invented
+without a ruling — stands. What changes is that the ruling it demanded now
+exists, and it licenses exactly two structural checks. The claim "no drift check
+reads it" was true when written and is now false; `Purpose`'s docstring, the
+`charter.yaml` comment block, and `Charter.declares_nothing_checkable`'s
+rationale are corrected in the same change, because a vocabulary that says one
+thing in three places and changes it in one is the drift ADR-0053 exists to
+prevent.
+
+Purpose stays excluded from `declares_nothing_checkable` even though it is now
+read. The reason changed rather than the behaviour: not "nothing checks intent"
+but that *stating* intent is not evidence the repo does anything, so a charter
+carrying only a purpose block would satisfy `missing-purpose` and still report
+clean with no live subject ever compared.
+
+**Enforcement.** `missing-purpose` is asserted by
+`tests/test_charter_purpose_presence.py`, and the caretaker's end-to-end
+behaviour by
+`tests/scenarios/test_charter_purpose_drift_scenario.py`. Both are cited in the
+*Enforced-by* block above.
 
 ## On ratification
 

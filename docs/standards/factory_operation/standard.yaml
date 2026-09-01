@@ -3,3 +3,17 @@
 id: factory_operation
 enforced_by:
   - tests/architecture/test_factory_operation_standard_drift.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: kernel-table-matches-the-stamper
+    claim: The kernel table names exactly the standards the stamper ships
+    enforced_by: tests/architecture/test_factory_operation_standard_drift.py::test_the_kernel_table_names_exactly_what_the_stamper_ships
+  - id: local-table-matches-the-unstamped
+    claim: The local table names exactly the standards the stamper does not ship
+    enforced_by: tests/architecture/test_factory_operation_standard_drift.py::test_the_local_table_names_exactly_the_unstamped_standards
+  - id: tables-partition-the-directory
+    claim: The two tables together partition every standard directory, with no standard in both or neither
+    enforced_by: tests/architecture/test_factory_operation_standard_drift.py::test_the_two_tables_partition_every_standard_directory

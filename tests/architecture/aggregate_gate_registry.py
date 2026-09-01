@@ -88,6 +88,18 @@ class AggregateGate:
 #: Gates that run in the ungated ``aggregate-ratchets`` lane.
 AGGREGATE_GATES: tuple[AggregateGate, ...] = (
     AggregateGate(
+        test_path="tests/architecture/test_slowness_ratchet.py",
+        subject=(
+            "share of total suite runtime held by tests over the slow "
+            "threshold, summed over every measured pytest node id, vs "
+            "disturbance/baselines/slowness.yaml. No paths-filter can express "
+            "it: the subject is the whole suite's CLOCK, and a change to any "
+            "one test moves the ratio for all of them"
+        ),
+        subject_roots=("tests", "src"),
+        evidence="collect_durations(_DURATIONS)",
+    ),
+    AggregateGate(
         test_path="tests/architecture/test_suite_hygiene_ratchet.py",
         subject=(
             "parametrize copies + cross-file duplicate tests summed over every "

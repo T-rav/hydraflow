@@ -30,6 +30,7 @@ from workspace_gc_landed_safety import (
     path_within,
     tracked_path_matches_destroy_target,
     tracked_workspace_is_gone,
+    unenumerable_roots,
     worktree_too_new,
 )
 from workspace_gc_landed_safety import (
@@ -286,7 +287,23 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             )
             collected += reaped
 
-        return {"collected": collected, "skipped": skipped, "errors": errors}
+        # Phase 6: drop registrations whose directory is gone (#11908). These
+        # are invisible to every phase above — `parse_git_worktrees` excludes
+        # locked rows, and a worktree killed mid-`add` keeps its
+        # `locked: initializing` marker forever, so `git worktree prune` skips
+        # it too. One such phantom survived here for over a month.
+        pruned_registrations = 0
+        if not self._stop_event.is_set():
+            pruned_registrations = len(
+                await self._workspaces.prune_dead_registrations()
+            )
+
+        return {
+            "collected": collected,
+            "skipped": skipped,
+            "errors": errors,
+            "pruned_registrations": pruned_registrations,
+        }
 
     async def _is_safe_to_gc(self, issue_number: int) -> bool:
         """Determine whether a worktree for *issue_number* can be safely GC'd.
@@ -674,6 +691,30 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             root.expanduser().resolve()
             for root in self._config.worktree_gc_root_paths()
         ]
+        # A root can be configured, exist, and hold work while contributing
+        # nothing on every cycle: enumeration runs at `repo_root`, so worktrees
+        # owned by another clone are invisible here — by design, and it is what
+        # makes a root list this broad safe (see `worktree_gc_root_paths`).
+        # Unreported, that root logs exactly like a clean one, which is how 14 GB
+        # accumulated unremarked and why #11908 blamed the wrong function.
+        # Reported, not reaped: widening discovery would buy the authority to
+        # delete inside a human's checkout (#11931).
+        for unreachable in unenumerable_roots(
+            [entry.path for entry in worktrees], roots
+        ):
+            logger.warning(
+                "GC: root %s holds %d director%s but contributed no enumerable "
+                "worktree, so nothing under it can be reaped. Discovery runs "
+                "`git worktree list` at repo_root %s and drops locked rows: a "
+                "clone other than this one, and locked registrations, are both "
+                "invisible from here. Which of those applies is not decided "
+                "by this check (#11931)",
+                unreachable.root,
+                unreachable.directories,
+                "y" if unreachable.directories == 1 else "ies",
+                repo_root,
+            )
+
         if active_snapshot is None:
             active_snapshot = active_workspace_snapshot(
                 self._state.get_active_workspaces_validated()

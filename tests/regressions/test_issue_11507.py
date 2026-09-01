@@ -143,7 +143,7 @@ class TestPhasesOneAndTwoRequireLandedWork:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {"collected": 0, "skipped": 1, "errors": 0, "pruned_registrations": 0}
         assert workspaces.destroyed == []
         assert state.get_active_workspaces() == {_TRACKED_UNPUSHED: str(path)}
         assert (
@@ -173,7 +173,7 @@ class TestPhasesOneAndTwoRequireLandedWork:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 0, "errors": 0}
+        assert result == {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0}
         assert workspaces.destroyed == []
         assert (path.exists(), _commit_exists(deps.config.repo_root, sha)) == (
             True,
@@ -197,7 +197,7 @@ class TestPhasesOneAndTwoRequireLandedWork:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {"collected": 0, "skipped": 1, "errors": 0, "pruned_registrations": 0}
         assert workspaces.destroyed == []
         assert _TRACKED_CLEAN in state.get_active_workspaces()
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import re
 import time
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from pathlib import Path
 from typing import NamedTuple
 
@@ -126,6 +126,39 @@ def active_workspace_snapshot(
     return ActiveWorkspaceSnapshot(workspaces, path_owners)
 
 
+def dead_registrations(output: str) -> list[Path]:
+    """Registered worktrees whose directory no longer exists.
+
+    Keyed on the DIRECTORY, never on the lock. `git worktree add` writes
+    `.git/worktrees/<name>/locked` while it works and clears it on success;
+    killed partway, the lock persists forever — and :func:`parse_git_worktrees`
+    excludes locked rows, so the dead registration becomes invisible to the
+    collector and survives every `git worktree prune` (#11908, one such
+    phantom sat for over a month).
+
+    A lock on a worktree that still exists is a live operator lock and is never
+    reported here: if the directory is gone there is nothing a lock could be
+    protecting, and if it is present the lock is not ours to break.
+    """
+    dead: list[Path] = []
+    first = True
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if not line.startswith("worktree "):
+            continue
+        if first:
+            # The primary worktree heads the listing and is never a registration.
+            first = False
+            continue
+        try:
+            path = Path(line[len("worktree ") :]).expanduser()
+        except (OSError, ValueError):
+            continue
+        if not path.exists():
+            dead.append(path)
+    return dead
+
+
 def parse_git_worktrees(output: str) -> list[WorktreeEntry]:
     """Parse ``git worktree list --porcelain``, excluding locked/bare rows."""
     entries: list[WorktreeEntry] = []
@@ -156,6 +189,61 @@ def parse_git_worktrees(output: str) -> list[WorktreeEntry]:
             locked = True
     flush()
     return entries
+
+
+class UnenumerableRoot(NamedTuple):
+    """A configured GC root that discovery can never produce a candidate from."""
+
+    root: Path
+    directories: int
+
+
+def unenumerable_roots(
+    worktree_paths: Iterable[Path], roots: Iterable[Path]
+) -> list[UnenumerableRoot]:
+    """Return roots holding directories that contributed no enumerated worktree.
+
+    Phase 5 enumerates with ``git worktree list`` run at ``config.repo_root``,
+    so it sees exactly one repository's worktrees, while the configured roots
+    are host-wide paths. A root whose contents belong to a *different* clone
+    therefore yields nothing on every cycle — and logs identically to a root
+    that is genuinely clean. That silence is the defect: 14 GB accumulated
+    unremarked under it, and #11908's diagnosis blamed the wrong function
+    because "no candidates here" and "I cannot see here" looked the same.
+
+    This reports the difference; it does not widen the reach. Single-repo
+    enumeration is the blast-radius guard that lets
+    ``HydraFlowConfig.worktree_gc_root_paths`` name paths as broad as
+    ``repo_root.parent`` — see its docstring — so making discovery cross-repo
+    would trade that guard away for the authority to delete inside a human's
+    working checkout.
+
+    A root is excused by a single enumerated worktree at or under it: that
+    proves reachability, and the remaining directories are the reaper's policy
+    to judge, not this check's. Unreadable and absent roots stay silent, since
+    a configured root that does not exist is ordinary.
+
+    The caller is given the observation, never a cause. ``parse_git_worktrees``
+    also drops locked rows, so a root holding only locked registrations is
+    reported by exactly the same evidence as a root belonging to another clone,
+    and this cannot tell them apart. Naming one of them in the message would
+    be a guess, and a warning that asserts the wrong cause sends the next
+    reader where #11908 already went.
+    """
+    paths = list(worktree_paths)
+    reported: list[UnenumerableRoot] = []
+    for root in roots:
+        if any(path_within(path, root) for path in paths):
+            continue
+        try:
+            if not root.is_dir():
+                continue
+            directories = sum(1 for child in root.iterdir() if child.is_dir())
+        except OSError:  # pragma: no cover - unreadable root; nothing to claim
+            continue
+        if directories:
+            reported.append(UnenumerableRoot(root, directories))
+    return reported
 
 
 def worktree_too_new(path: Path, min_age_seconds: int) -> bool:

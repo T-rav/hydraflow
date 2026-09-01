@@ -3,3 +3,23 @@
 id: factory_autonomy
 enforced_by:
   - tests/architecture/test_factory_autonomy_policy_drift.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: readme-and-policy-are-one-set
+    claim: Every README row has a policy.yaml entry and every entry has a row
+    enforced_by: tests/architecture/test_factory_autonomy_policy_drift.py::test_every_readme_row_has_a_policy_entry_and_vice_versa
+  - id: direction-matches-autonomy
+    claim: Each row's act-or-ask direction matches the autonomy its policy entry declares
+    enforced_by: tests/architecture/test_factory_autonomy_policy_drift.py::test_each_rows_action_direction_matches_the_entrys_autonomy
+  - id: policy-is-schema-valid
+    claim: The packaged merge policy validates against its schema
+    enforced_by: tests/architecture/test_factory_autonomy_policy_drift.py::test_packaged_policy_is_schema_valid
+  - id: break-glass-is-documented
+    claim: The README documents the break-glass path and the kill switch
+    enforced_by: tests/architecture/test_factory_autonomy_policy_drift.py::test_readme_documents_break_glass_and_kill_switch
+  - id: never-commit-to-the-default-branch
+    claim: Full autonomy never permits landing on the default branch; every change goes through a PR
+    enforced_by: tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_both_rulesets_are_active_and_block_deletion_forcepush_and_direct_push

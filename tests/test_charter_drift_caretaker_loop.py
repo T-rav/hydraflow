@@ -14,6 +14,7 @@ from charter import (
     CHARTER_FILENAME,
     FINDING_MISSING_ARTIFACT,
     FINDING_MISSING_LAYER,
+    FINDING_MISSING_PURPOSE,
     FINDING_MISSING_STANDARD,
     FINDING_UNCHECKABLE_CHARTER,
     FINDING_UNKNOWN_LAYER,
@@ -26,6 +27,7 @@ from charter import (
     CharterDriftReport,
     CharterError,
     CharterFinding,
+    Purpose,
     RailsBlock,
     compute_charter_drift,
     load_charter,
@@ -351,7 +353,12 @@ def test_unknowable_registry_is_fatal_rather_than_quietly_tolerated(
     """
     _tree(tmp_path)
     monkeypatch.setattr(charter_drift_caretaker_loop, "checkout_root", lambda: tmp_path)
-    charter = Charter(articles=Articles(standards=("testing",)))
+    # A stated purpose, so `missing-purpose` (#11856) cannot be what makes
+    # this report fatal — the subject here is the un-enumerable registry.
+    charter = Charter(
+        purpose=Purpose(product="a factory", goals=("lights_off",)),
+        articles=Articles(standards=("testing",)),
+    )
 
     observed = observe_repo(tmp_path, charter)
     report = compute_charter_drift(charter, observed, repo="o/r")
@@ -447,6 +454,15 @@ def _mirror(charter_path: Path, dest: Path) -> Path:
     (root / "docs" / "adr" / "0044-hydraflow-principles.md").write_text("x")
     (root / "pyproject.toml").write_text("x")
     (root / "scripts").mkdir(exist_ok=True)
+    # A v2 charter declares loops, and every declared loop must resolve to an
+    # actor contract (ADR-0145 guard 1). A mirror that satisfied the standards
+    # and artifacts but not the actors would report `loop-without-actor` and
+    # make "the real charter is clean" unassertable — the mirror has to satisfy
+    # the WHOLE charter, not the parts that existed when it was written.
+    actors_dir = root / charter.actors
+    actors_dir.mkdir(parents=True, exist_ok=True)
+    for loop in charter.loops.loops:
+        (actors_dir / f"{loop.actor}.md").write_text("contract")
     return root
 
 
@@ -480,8 +496,13 @@ def test_emptying_the_declaration_reddens_rather_than_passing(tmp_path: Path) ->
     (root / CHARTER_FILENAME).write_text("schema_version: 1\n")
     report = audit_repo_charter("o/r", root)
     assert not report.clean
+    # An emptied charter now trips two independent guards, and both belong
+    # here: it declares nothing checkable AND states no purpose (#11856).
+    # Asserting only the first would let a future change drop `missing-purpose`
+    # silently; asserting membership loosely would let either one vanish.
     assert {f.finding_class for f in report.fatal_findings} == {
-        FINDING_UNCHECKABLE_CHARTER
+        FINDING_UNCHECKABLE_CHARTER,
+        FINDING_MISSING_PURPOSE,
     }
 
 

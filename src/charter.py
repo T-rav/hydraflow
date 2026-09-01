@@ -57,6 +57,8 @@ finding class                fatal?     meaning
 ``missing-standard``         yes        declared standard this factory
                                         ships, absent from the repo
 ``missing-artifact``         yes        declared required path is absent
+``missing-purpose``          yes        charter states no product, or names
+                                        no goals
 ``uncheckable-charter``      yes        the check has nothing to check, or
                                         could not be performed
 ``unknown-layer``            no         future/unrecognised layer name
@@ -88,14 +90,18 @@ import yaml
 # model itself lives in a pure module the decision seam can also import.
 from charter_model import (
     ACTORS_DIRECTORY,
+    ADVISORY_FINDING_CLASSES,
     CHARTER_FILENAME,
     CHARTER_SCHEMA_VERSION,
     DEFAULT_ASSURANCE,
+    FINDING_ACTOR_WITHOUT_LOOP,
     FINDING_COVERAGE_FLOOR,
     FINDING_LEGACY_RAILS_MANIFEST,
+    FINDING_LOOP_WITHOUT_ACTOR,
     FINDING_MISSING_ARTIFACT,
     FINDING_MISSING_GATE_SCRIPT,
     FINDING_MISSING_LAYER,
+    FINDING_MISSING_PURPOSE,
     FINDING_MISSING_STANDARD,
     FINDING_UNCHECKABLE_CHARTER,
     FINDING_UNKNOWN_LAYER,
@@ -120,6 +126,10 @@ from charter_model import (
     _as_mapping,
     _as_str_tuple,
     _parse_actors,
+    actors_without_a_loop,
+    ambiguous_actors,
+    enumerate_actors,
+    unresolved_actors,
 )
 
 #: Re-exported from :mod:`charter_model`. Declared rather than suppressed:
@@ -136,10 +146,13 @@ __all__ = [
     "CharterFinding",
     "DEFAULT_ASSURANCE",
     "FINDING_COVERAGE_FLOOR",
+    "FINDING_ACTOR_WITHOUT_LOOP",
     "FINDING_LEGACY_RAILS_MANIFEST",
+    "FINDING_LOOP_WITHOUT_ACTOR",
     "FINDING_MISSING_ARTIFACT",
     "FINDING_MISSING_GATE_SCRIPT",
     "FINDING_MISSING_LAYER",
+    "FINDING_MISSING_PURPOSE",
     "FINDING_MISSING_STANDARD",
     "FINDING_UNCHECKABLE_CHARTER",
     "FINDING_UNKNOWN_LAYER",
@@ -147,6 +160,7 @@ __all__ = [
     "KNOWN_LAYERS",
     "LEGACY_RAILS_FILENAME",
     "LocalArticle",
+    "ADVISORY_FINDING_CLASSES",
     "NON_FATAL_FINDING_CLASSES",
     "Purpose",
     "RAILS_SCHEMA_VERSION",
@@ -184,6 +198,12 @@ class ObservedRepo:
     present_standards: frozenset[str] = frozenset()
     present_artifacts: frozenset[str] = frozenset()
     known_standards: frozenset[str] | None = None
+    #: Repo-relative POSIX paths under the actors directory, or ``None`` when
+    #: the directory could not be listed at all. ``None`` is a FAULT, not an
+    #: empty set: with an empty listing every declared loop would look like it
+    #: names a missing actor and the check would file drift on a measurement
+    #: nobody took — the same fail-loud reasoning as ``known_standards``.
+    actor_files: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -214,8 +234,28 @@ class CharterDriftReport:
 
     @property
     def tolerated_findings(self) -> tuple[CharterFinding, ...]:
+        """Non-fatal AND not worth a human's attention — logged only."""
         return tuple(
-            f for f in self.findings if f.finding_class in NON_FATAL_FINDING_CLASSES
+            f
+            for f in self.findings
+            if f.finding_class in NON_FATAL_FINDING_CLASSES
+            and f.finding_class not in ADVISORY_FINDING_CLASSES
+        )
+
+    @property
+    def filed_findings(self) -> tuple[CharterFinding, ...]:
+        """Everything that must reach a human: fatal drift plus advisories.
+
+        Not the same set as `fatal_findings`. An advisory is not drift — it
+        does not fail `clean` — but it does need a decision only a person can
+        make, and a finding that is merely logged leaves that decision with
+        nobody.
+        """
+        return tuple(
+            f
+            for f in self.findings
+            if f.finding_class not in NON_FATAL_FINDING_CLASSES
+            or f.finding_class in ADVISORY_FINDING_CLASSES
         )
 
 
@@ -289,6 +329,66 @@ def _standard_findings(
     return findings
 
 
+def _purpose_findings(charter: Charter) -> list[CharterFinding]:
+    """Is intent STATED? Never whether the repo serves it.
+
+    ADR-0143 Ruling 3 refused a Purpose check until a ruling said what checking
+    intent could mean; the operator ruled on 2026-08-31 and this is the half
+    that lands in drift (#11856). It is deliberately the weakest possible
+    reading — presence and shape — because it is the only one that is
+    observation-grade and needs no facts.
+
+    Fatal, and the reason is sequence rather than severity: Purpose is the
+    precondition for goal referential integrity. A charter with no goals hands
+    that check an empty subject list, which passes silently and reads as
+    coverage — the ``uncheckable-charter`` failure, one layer up. Tolerating an
+    unstated purpose would let the stronger check quietly disable itself.
+
+    The two halves are reported separately rather than as one finding: a
+    charter naming goals under an empty product and one stating a product with
+    no goals are different mistakes, and a single ``missing-purpose`` check_id
+    would leave the caretaker's issue saying which only in prose.
+    """
+    if any(
+        f.finding_class == FINDING_LEGACY_RAILS_MANIFEST for f in charter.load_findings
+    ):
+        # A legacy `rails.yaml` has nowhere to PUT a purpose — the format
+        # predates the Purpose layer entirely. Demanding one would make every
+        # un-migrated repo fatally drifted over a key it cannot express, which
+        # would turn ADR-0121's deliberately non-fatal `legacy-rails-manifest`
+        # tolerance into a hard failure by the side door. The migration to
+        # `charter.yaml` is what surfaces the requirement, and that is already
+        # its own reported finding.
+        return []
+
+    findings: list[CharterFinding] = []
+    if not charter.purpose.product.strip():
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_MISSING_PURPOSE}:product",
+                finding_class=FINDING_MISSING_PURPOSE,
+                detail=(
+                    f"`{CHARTER_FILENAME}` states no `purpose.product` — a "
+                    "factory arriving cold cannot answer what this repo is "
+                    "trying to do"
+                ),
+            )
+        )
+    if not charter.purpose.goals:
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_MISSING_PURPOSE}:goals",
+                finding_class=FINDING_MISSING_PURPOSE,
+                detail=(
+                    f"`{CHARTER_FILENAME}` names no `purpose.goals` — goal "
+                    "referential integrity would have nothing to resolve and "
+                    "would pass silently on an empty subject list"
+                ),
+            )
+        )
+    return findings
+
+
 def _uncheckable_findings(
     charter: Charter, observed: ObservedRepo
 ) -> list[CharterFinding]:
@@ -331,6 +431,75 @@ def _uncheckable_findings(
     return findings
 
 
+def _loop_binding_findings(
+    charter: Charter, observed: ObservedRepo
+) -> list[CharterFinding]:
+    """Both sides of the loop↔actor binding (ADR-0145 guard 1).
+
+    Skipped entirely when the charter carries NO `loops:` block: that is an
+    unmigrated repo, and filing "no loop names this actor" against every actor
+    in a v1 repo would bury the finding under noise on day one. A
+    present-but-empty block IS checked — it declares that nothing runs, which
+    is a claim worth testing against the actors that exist (guard 3).
+
+    Also skipped when the actors directory could not be listed. `None` there is
+    a fault, not an empty set: with an empty listing every loop would look like
+    it names a missing actor, and the check would file drift on a measurement
+    nobody took.
+    """
+    if not charter.loops.present or observed.actor_files is None:
+        return []
+
+    findings: list[CharterFinding] = []
+    ambiguous = ambiguous_actors(observed.actor_files)
+    for name in ambiguous:
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_LOOP_WITHOUT_ACTOR}:ambiguous:{name}",
+                finding_class=FINDING_LOOP_WITHOUT_ACTOR,
+                detail=(
+                    f"actor '{name}' is declared BOTH as '{name}.md' and "
+                    f"'{name}/README.md'. Two files for one key is the "
+                    "two-tables defect at file granularity: whichever the "
+                    "kernel reads, the other is an unread contract that will "
+                    "drift (ADR-0145)."
+                ),
+            )
+        )
+
+    actors = enumerate_actors(observed.actor_files)
+    for name in unresolved_actors(charter.loops, actors):
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_LOOP_WITHOUT_ACTOR}:{name}",
+                finding_class=FINDING_LOOP_WITHOUT_ACTOR,
+                detail=(
+                    f"loop declares actor '{name}' but no contract file "
+                    f"resolves for it under the actors directory. The loop "
+                    "cannot run: a kernel worker handed an unreadable actor "
+                    "refuses the run rather than falling back to a default "
+                    "prompt (ADR-0145 Ruling 2)."
+                ),
+            )
+        )
+
+    for name in actors_without_a_loop(charter.loops, actors):
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_ACTOR_WITHOUT_LOOP}:{name}",
+                finding_class=FINDING_ACTOR_WITHOUT_LOOP,
+                detail=(
+                    f"actor '{name}' has a contract but no loop names it, so "
+                    "it never runs. Non-fatal by design: a repo mid-migration "
+                    "looks exactly like this, and enlarging the mandate is a "
+                    "human's ENACT, not a caretaker's (ADR-0143 Ruling 6 "
+                    "guard 4)."
+                ),
+            )
+        )
+    return findings
+
+
 def compute_charter_drift(
     charter: Charter, observed: ObservedRepo, *, repo: str
 ) -> CharterDriftReport:
@@ -342,6 +511,8 @@ def compute_charter_drift(
 
     Rules:
 
+    * a charter that states **no purpose** — no product, or no goals — is
+      drift (#11856), each half reported separately;
     * a **missing declared layer / standard / required artifact / gate
       script** is drift, and so is observed coverage below the declared floor
       (evaluated only when coverage is known);
@@ -353,8 +524,10 @@ def compute_charter_drift(
     """
     findings: list[CharterFinding] = list(charter.load_findings)
     findings.extend(_uncheckable_findings(charter, observed))
+    findings.extend(_purpose_findings(charter))
     findings.extend(_layer_findings(charter, observed))
     findings.extend(_standard_findings(charter, observed))
+    findings.extend(_loop_binding_findings(charter, observed))
 
     for path in charter.artifacts.required:
         if path not in observed.present_artifacts:
@@ -416,6 +589,63 @@ def standard_ids_under(root: Path) -> frozenset[str]:
     return frozenset(p.name for p in standards.iterdir() if p.is_dir())
 
 
+class _NoDuplicateKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that REFUSES duplicate mapping keys.
+
+    `yaml.safe_load` silently keeps the LAST duplicate. Two `finance-close:`
+    entries — one `enabled: true`, one `false` — load clean, schema-validate
+    clean, and the first vanishes. That is not hypothetical: the evidence repo
+    hit it and fixed it in its own loader (ADR-0145 guard 4).
+
+    Applied to the WHOLE charter load, not just `loops:`. The same hole exists
+    for every block, and a guard scoped to the one place it was noticed is how
+    the next instance goes unnoticed.
+    """
+
+
+def _no_duplicates(loader: yaml.SafeLoader, node: yaml.MappingNode) -> dict[Any, Any]:
+    seen: set[Any] = set()
+    for key_node, _value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            msg = (
+                f"duplicate key {key!r} in the charter at line "
+                f"{key_node.start_mark.line + 1}. A duplicate silently "
+                "overwrites the first declaration, so one of these two is "
+                "invisible — including its `enabled` value (ADR-0145 guard 4)."
+            )
+            raise CharterError(msg)
+        seen.add(key)
+    # `dict[Any, Any]`, not `dict[str, Any]`: YAML mapping keys are Hashable,
+    # and narrowing them here would be a claim this function cannot make. The
+    # caller's `isinstance(raw, dict)` check is where the charter's
+    # string-keyed shape is actually established.
+    return loader.construct_mapping(node, deep=True)
+
+
+_NoDuplicateKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates
+)
+
+
+def _load_yaml_rejecting_duplicates(text: str) -> Any:
+    """`yaml.safe_load` semantics with guard 4 applied.
+
+    Drives the loader directly rather than calling ``yaml.load(...,
+    Loader=...)``. That call is what `yaml.load` does internally, but bandit
+    flags the *spelling* `yaml.load` as B506 regardless of the loader passed,
+    and silencing it would need a suppression the ratchet only lets shrink.
+    Registering the constructor on `SafeLoader` itself was the other option and
+    is worse: it would change every `safe_load` in the process, including
+    callers that have nothing to do with the charter.
+    """
+    loader = _NoDuplicateKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
 def _read_mapping(path: Path) -> dict[str, Any] | None:
     """Parse *path* as a YAML mapping; ``None`` only when the file is absent.
 
@@ -427,7 +657,7 @@ def _read_mapping(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = _load_yaml_rejecting_duplicates(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         msg = f"{path.name} is not valid YAML: {exc}"
         raise CharterError(msg) from exc

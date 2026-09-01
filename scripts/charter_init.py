@@ -42,6 +42,12 @@ from charter_drift_caretaker_loop import (  # noqa: E402
     audit_repo_charter,
     observe_repo,
 )
+from charter_model import (  # noqa: E402
+    CHARTER_SCHEMA_VERSION_V2,
+    LoopsBlock,
+    LoopSpec,
+    enumerate_actors,
+)
 
 #: Candidate ``artifacts.required`` paths. Only the ones that exist are
 #: declared — a charter must be true the day it lands, or its first audit
@@ -55,15 +61,42 @@ _CANDIDATE_ARTIFACTS: tuple[str, ...] = (
 )
 
 
+def _scaffold_loops(repo_root: Path) -> LoopsBlock:
+    """One DORMANT loop per enumerated actor.
+
+    Silence is declared rather than assumed. A scaffold that omitted actors
+    entirely would leave "this actor never runs" and "nobody has decided yet"
+    identical in the file, and the caretaker's `actor-without-loop` finding
+    would fire on a repo that had simply not been asked. Writing every actor
+    with `enabled: false` states the decision.
+
+    Never `enabled: true`: enabling is an ENACT belonging to a human
+    (ADR-0143 Ruling 6 guard 4), and a scaffold that started work on its own
+    would take that decision by default.
+    """
+    observed = observe_repo(repo_root, Charter())
+    if observed.actor_files is None:
+        return LoopsBlock(present=True)
+    return LoopsBlock(
+        present=True,
+        loops=tuple(
+            LoopSpec(name=name, actor=name, enabled=False)
+            for name in enumerate_actors(observed.actor_files)
+        ),
+    )
+
+
 def build_charter(repo_root: Path) -> Charter:
     """Derive a charter from what *repo_root* carries right now."""
     layers = tuple(sorted(observe_repo(repo_root, Charter()).present_layers))
     return Charter(
+        schema_version=CHARTER_SCHEMA_VERSION_V2,
         articles=Articles(standards=tuple(sorted(standard_ids_under(repo_root)))),
         artifacts=Artifacts(
             required=tuple(p for p in _CANDIDATE_ARTIFACTS if (repo_root / p).exists())
         ),
         rails=RailsBlock(template_version="1", layers=layers),
+        loops=_scaffold_loops(repo_root),
     )
 
 

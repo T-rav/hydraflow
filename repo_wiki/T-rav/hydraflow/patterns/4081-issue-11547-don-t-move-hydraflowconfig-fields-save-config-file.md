@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11547
 source_phase: plan
 created_at: 2026-08-30T07:44:19.983871+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Don't move HydraFlowConfig fields — save_config_file JSON keys reorder

@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11795
 source_phase: plan
 created_at: 2026-08-30T07:41:57.361398+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Cover docs/standards in CI python path filters
