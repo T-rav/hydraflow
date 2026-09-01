@@ -470,12 +470,20 @@ function AccountsView({ accounts, admin, styles, onSetAccountState, onRevokeLeas
   )
 }
 
+function driverSuffix(row) {
+  // A brokered child names the driver that asked for it, so an operator can
+  // read one driver's fan-out as a group instead of as N unrelated requests.
+  // Absent for a classic spawn: rendering "via " with nothing after it would
+  // turn "no driver" into a driver with no name.
+  return row.driverId ? ` · via ${row.driverId}` : ''
+}
+
 function LeaseRow({ lease, styles }) {
   return (
     <div style={styles.row} data-testid={`routing-lease-${lease.keyId}`}>
       <span style={styles.nameCol}>
         <Text size="sm" weight="semibold" style={styles.name}>{lease.repoSlug}</Text>
-        <Text as="span" size="xs" tone="muted">{`${lease.accountId} · ${lease.role}`}</Text>
+        <Text as="span" size="xs" tone="muted">{`${lease.accountId} · ${lease.role}${driverSuffix(lease)}`}</Text>
       </span>
       <span style={styles.facts}>
         <Fact label="age" value={lease.ageLabel} styles={styles} testid={`routing-lease-age-${lease.keyId}`} />
@@ -490,7 +498,7 @@ function InFlightRow({ route, styles }) {
       <span style={styles.nameCol}>
         <Text size="sm" weight="semibold" style={styles.name}>{route.repoSlug}</Text>
         <Text as="span" size="xs" tone="muted">
-          {`${route.accountId} · ${route.role}${route.issueNumber ? ` · #${route.issueNumber}` : ''}`}
+          {`${route.accountId} · ${route.role}${route.issueNumber ? ` · #${route.issueNumber}` : ''}${driverSuffix(route)}`}
         </Text>
       </span>
       <span style={styles.facts}>
@@ -507,7 +515,7 @@ function RecentRow({ route, styles }) {
       <span style={styles.nameCol}>
         <Text size="sm" weight="semibold" style={styles.name}>{route.repoSlug}</Text>
         <Text as="span" size="xs" tone="muted">
-          {`${route.accountId} · ${route.role}${route.issueNumber ? ` · #${route.issueNumber}` : ''}`}
+          {`${route.accountId} · ${route.role}${route.issueNumber ? ` · #${route.issueNumber}` : ''}${driverSuffix(route)}`}
         </Text>
       </span>
       <span style={styles.facts}>

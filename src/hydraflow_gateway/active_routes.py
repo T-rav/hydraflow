@@ -66,6 +66,12 @@ class InFlightRoute:
     # ADR-0142: which account of the lane actually served this, when the key was
     # route-bound. ``None`` on every v1 row, where the lane IS the account.
     account_id: str | None = None
+    # ADR-0141 child lineage, carried so an operator watching a Fable
+    # driver can see its children as its own. ``None`` for a classic
+    # spawn, which is a different fact from an unknown parent.
+    spawn_id: str | None = None
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +98,12 @@ class TerminalRoute:
     mint_decision_id: str | None = None
     route_decision_id: str | None = None
     account_id: str | None = None
+    # ADR-0141 child lineage, carried so an operator watching a Fable
+    # driver can see its children as its own. ``None`` for a classic
+    # spawn, which is a different fact from an unknown parent.
+    spawn_id: str | None = None
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
 
 
 class LeaseView(BaseModel):
@@ -114,6 +126,9 @@ class LeaseView(BaseModel):
     principal_id: str
     issue_number: int | None = None
     pr_number: int | None = None
+    spawn_id: str | None = None
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
     issued_at: datetime
     expires_at: datetime
     age_seconds: float = Field(ge=0)
@@ -138,6 +153,9 @@ class InFlightRouteView(BaseModel):
     principal_id: str
     issue_number: int | None = None
     pr_number: int | None = None
+    spawn_id: str | None = None
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
     path: str | None = None
     started_at: datetime
     age_seconds: float = Field(ge=0)
@@ -159,6 +177,9 @@ class TerminalRouteView(BaseModel):
     principal_id: str
     issue_number: int | None = None
     pr_number: int | None = None
+    spawn_id: str | None = None
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
     path: str | None = None
     model_requested: str | None = None
     model_served: str | None = None
@@ -251,6 +272,9 @@ class ActiveRouteRegistry:
             principal_id=identity.principal.id,
             issue_number=identity.principal.issue_number,
             pr_number=identity.principal.pr_number,
+            spawn_id=identity.principal.spawn_id,
+            driver_id=identity.principal.driver_id,
+            parent_spawn_id=identity.principal.parent_spawn_id,
             path=path,
             started_at=started_at,
             mint_decision_id=(None if binding is None else binding.mint_decision_id),
@@ -321,6 +345,9 @@ def _terminal_route(row: GatewayLedgerRow) -> TerminalRoute:
         principal_id=row.principal.id,
         issue_number=row.principal.issue_number,
         pr_number=row.principal.pr_number,
+        spawn_id=row.principal.spawn_id,
+        driver_id=row.principal.driver_id,
+        parent_spawn_id=row.principal.parent_spawn_id,
         path=row.path,
         model_requested=row.model_requested,
         model_served=row.model_served,
@@ -358,6 +385,9 @@ def lease_view(identity: GatewayIdentity, *, now: datetime) -> LeaseView:
         principal_id=identity.principal.id,
         issue_number=identity.principal.issue_number,
         pr_number=identity.principal.pr_number,
+        spawn_id=identity.principal.spawn_id,
+        driver_id=identity.principal.driver_id,
+        parent_spawn_id=identity.principal.parent_spawn_id,
         issued_at=identity.issued_at,
         expires_at=identity.expires_at,
         age_seconds=_age_seconds(identity.issued_at, now),
@@ -398,6 +428,9 @@ def build_active_routes_view(
                 principal_id=route.principal_id,
                 issue_number=route.issue_number,
                 pr_number=route.pr_number,
+                spawn_id=route.spawn_id,
+                driver_id=route.driver_id,
+                parent_spawn_id=route.parent_spawn_id,
                 path=route.path,
                 started_at=route.started_at,
                 age_seconds=_age_seconds(route.started_at, now),
@@ -437,6 +470,9 @@ def build_recent_routes_view(
                 principal_id=route.principal_id,
                 issue_number=route.issue_number,
                 pr_number=route.pr_number,
+                spawn_id=route.spawn_id,
+                driver_id=route.driver_id,
+                parent_spawn_id=route.parent_spawn_id,
                 path=route.path,
                 model_requested=route.model_requested,
                 model_served=route.model_served,

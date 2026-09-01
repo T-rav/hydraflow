@@ -540,6 +540,42 @@ describe('RoutingMode live view', () => {
     expect(screen.getByTestId('routing-inflight-req-live')).toBeInTheDocument()
   })
 
+  it('names the driver that asked for a brokered child (#11990)', () => {
+    const live = toGatewayLiveRoutes(
+      {
+        available: true,
+        source_state: 'available',
+        data: {
+          evidence_since: '2026-08-22T11:00:00Z',
+          leases: [],
+          in_flight: [
+            {
+              request_id: 'req-child',
+              account_id: 'legacy-zai-harness',
+              repo_slug: 'acme/hydraflow',
+              principal_id: 'implementer',
+              worker_role: 'implementer',
+              driver_id: 'drv-7',
+              spawn_id: 'child-1',
+              age_seconds: 2,
+            },
+          ],
+        },
+      },
+      { available: true, source_state: 'available', data: { recent: [] } },
+    )
+
+    render(<RoutingMode accounts={ACCOUNTS} live={live} routingView="live" />)
+
+    expect(screen.getByTestId('routing-inflight-req-child')).toHaveTextContent('via drv-7')
+  })
+
+  it('does not render a nameless driver for a classic spawn', () => {
+    render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="live" />)
+
+    expect(screen.getByTestId('routing-inflight-req-live')).not.toHaveTextContent('via')
+  })
+
   it('shows the lease age', () => {
     render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="live" />)
     expect(screen.getByTestId('routing-lease-age-key-1')).toHaveTextContent('30s')

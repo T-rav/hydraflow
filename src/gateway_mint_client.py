@@ -53,6 +53,22 @@ class GatewayMintError(RuntimeError):
     """The gateway was selected but a per-spawn credential could not be minted."""
 
 
+def _add_lineage(
+    payload: dict[str, object], driver_id: str | None, parent_spawn_id: str | None
+) -> None:
+    """Stamp ADR-0141 lineage onto a mint body, omitting what is unset.
+
+    Shared by both wire versions rather than written twice: the two payload
+    builders have already drifted once over attribution, and lineage is the
+    field where a silent divergence is least visible -- a missing key reads on
+    the gateway exactly like a spawn that genuinely had no driver.
+    """
+    if driver_id is not None:
+        payload["driver_id"] = driver_id
+    if parent_spawn_id is not None:
+        payload["parent_spawn_id"] = parent_spawn_id
+
+
 @dataclass(frozen=True, slots=True)
 class GatewayMintRequest:
     """Stable runner-side contract for ``POST /control/v1/keys``."""
@@ -70,6 +86,12 @@ class GatewayMintRequest:
     # every ledger row it produces. Omitted from the wire when unset.
     issue_number: int | None = None
     pr_number: int | None = None
+    # ADR-0141 child lineage: which driver asked for this spawn, and whose
+    # child it is. Omitted from the wire when unset, exactly like attribution
+    # above -- a classic spawn has no driver, and that is a fact worth keeping
+    # distinct from an unknown one.
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
 
     def wire_payload(self) -> dict[str, object]:
         """JSON body for ``POST /control/v1/keys``; attribution only when set
@@ -89,6 +111,7 @@ class GatewayMintRequest:
             payload["issue_number"] = self.issue_number
         if self.pr_number is not None:
             payload["pr_number"] = self.pr_number
+        _add_lineage(payload, self.driver_id, self.parent_spawn_id)
         return payload
 
 
@@ -132,6 +155,9 @@ class GatewayMintV2Request:
     # against its own terminal ledger before it moves at all.
     retry_of_mint_decision_id: str | None = None
     supersedes_mint_decision_id: str | None = None
+    # ADR-0141 child lineage; see :class:`GatewayMintRequest`.
+    driver_id: str | None = None
+    parent_spawn_id: str | None = None
 
     def wire_payload(self) -> dict[str, object]:
         """JSON body for ``POST /control/v2/keys``; attribution only when set."""
@@ -168,6 +194,7 @@ class GatewayMintV2Request:
             payload["retry_of_mint_decision_id"] = self.retry_of_mint_decision_id
         if self.supersedes_mint_decision_id is not None:
             payload["supersedes_mint_decision_id"] = self.supersedes_mint_decision_id
+        _add_lineage(payload, self.driver_id, self.parent_spawn_id)
         return payload
 
     def with_new_attempt(self) -> GatewayMintV2Request:

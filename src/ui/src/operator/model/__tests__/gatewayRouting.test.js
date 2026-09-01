@@ -431,6 +431,36 @@ describe('toGatewayLiveRoutes', () => {
     ])
   })
 
+  it('carries child lineage so a driver fan-out can be grouped (#11990)', () => {
+    const envelope = activeEnvelope()
+    envelope.data.in_flight[0].driver_id = 'drv-7'
+    envelope.data.in_flight[0].spawn_id = 'child-1'
+    envelope.data.in_flight[0].parent_spawn_id = 'parent-3'
+
+    const vm = toGatewayLiveRoutes(envelope, recentEnvelope())
+
+    expect([vm.inFlight[0].driverId, vm.inFlight[0].spawnId, vm.inFlight[0].parentSpawnId]).toEqual([
+      'drv-7',
+      'child-1',
+      'parent-3',
+    ])
+  })
+
+  it('reports a classic spawn as having no driver rather than an empty one', () => {
+    const vm = toGatewayLiveRoutes(activeEnvelope(), recentEnvelope())
+
+    expect(vm.inFlight[0].driverId).toBeNull()
+  })
+
+  it('normalizes lineage for a lease too, not just an in-flight request', () => {
+    const envelope = activeEnvelope()
+    envelope.data.leases[0].driver_id = 'drv-7'
+
+    const vm = toGatewayLiveRoutes(envelope, recentEnvelope())
+
+    expect(vm.leases[0].driverId).toBe('drv-7')
+  })
+
   it('surfaces a truncated ring so the view cannot claim completeness', () => {
     const vm = toGatewayLiveRoutes(activeEnvelope(), recentEnvelope({ truncated: true }))
     expect(vm.truncated).toBe(true)
