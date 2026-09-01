@@ -40,11 +40,27 @@ async def assert_outcome(api, page) -> None:
             and event.get("data", {}).get("worker") == "retrospective"
         ]
 
-    events_payload = await api.wait_until(
-        "/api/events",
-        lambda payload: bool(_retro_status_events(payload)),
-        timeout=60.0,
-    )
+    def _any_with_details(payload) -> bool:
+        return any(
+            event.get("data", {}).get("details")
+            for event in _retro_status_events(payload)
+        )
+
+    # Wait for a tick that PUBLISHED, not merely for the loop to exist. The
+    # first status event a seeded loop emits is `status: pending` with empty
+    # details, so waiting on "any retrospective event" returned immediately and
+    # the assertions below fired against a loop that had not run yet — a
+    # guaranteed failure dressed as a flake.
+    #
+    # TimeoutError is caught rather than propagated so the diagnostics below
+    # still produce their message; `wait_until` raises with only the raw
+    # payload, which says nothing about which counter was missing.
+    try:
+        events_payload = await api.wait_until(
+            "/api/events", _any_with_details, timeout=60.0
+        )
+    except TimeoutError:
+        events_payload = await api.get("/api/events")
 
     retro_events = _retro_status_events(events_payload)
     assert retro_events, (
