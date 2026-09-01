@@ -45,6 +45,37 @@ _MAX_ERROR_CHARS = 500
 _MAX_STREAM_ERRORS = 20
 
 
+def _newest_errors_within(errors: list[str], budget: int) -> str | None:
+    """Join stream errors newest-first under *budget*, rendered oldest-first.
+
+    The two halves of this cap used to disagree (#11942). In-memory trimming
+    keeps the most recent ``_MAX_STREAM_ERRORS`` — ``del errors[:-N]`` — on the
+    stated grounds that "the newest are the diagnostic ones". The write then did
+    ``"; ".join(errors)[:budget]``, a FRONT slice, which keeps the earliest and
+    silently drops the newest. Three realistic messages (a stack trace, an auth
+    failure) reach 500 characters easily, so the persisted ``error`` could show
+    stale early text instead of the terminal failure — in the one field that
+    reaches disk, since ``SubprocessTrace`` has no ``stream_errors``.
+
+    The newest message is always included, truncated alone if it has to be:
+    a summary that drops the reason a run died is worse than a short one. Older
+    messages are added while they fit whole, never sliced mid-message, and the
+    result reads oldest-to-newest so the sequence still tells a story.
+    """
+    if not errors:
+        return None
+    newest = errors[-1][:budget]
+    kept = [newest]
+    used = len(newest)
+    for message in reversed(errors[:-1]):
+        cost = len(message) + len("; ")
+        if used + cost > budget:
+            break
+        kept.append(message)
+        used += cost
+    return "; ".join(reversed(kept)) or None
+
+
 class TraceCollector:
     """Accumulate spans for one `claude -p` subprocess and write the trace."""
 
@@ -441,7 +472,7 @@ class TraceCollector:
             ended_at=self._ended_at,
             success=success,
             crashed=not success,
-            error="; ".join(self.stream_errors)[:_MAX_ERROR_CHARS] or None,
+            error=_newest_errors_within(self.stream_errors, _MAX_ERROR_CHARS),
             tokens=self.tokens,
             tools=TraceToolProfile(
                 tool_counts=dict(self.tool_counts),

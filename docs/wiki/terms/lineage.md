@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/adr_index.py:ADR"
 aliases: []
 related: [{"kind": "depends_on", "target": "01KVJPAQ8987YPSRSWWWJJTBSG"}]
-evidence: []
+evidence: ["01M3D15670E3B5C47C1A68DAE9"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-27T00:00:00+00:00"
-updated_at: "2026-07-27T00:00:00+00:00"
+updated_at: "2026-09-01T07:13:20.888566+00:00"
 ---
 
 ## Definition
