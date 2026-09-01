@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
+from file_util import append_jsonl, file_lock
 from models import MetricsSnapshot, MetricsSyncResult, QueueStats
 from pr_manager import PRManager
 from state import StateTracker
@@ -111,8 +112,6 @@ class MetricsManager:
         cache_dir = self._cache_dir
         snapshots_file = cache_dir / "snapshots.jsonl"
         try:
-            from file_util import append_jsonl, file_lock  # noqa: PLC0415
-
             cache_dir.mkdir(parents=True, exist_ok=True)
             with file_lock(snapshots_file):
                 append_jsonl(snapshots_file, snapshot.model_dump_json())
@@ -123,6 +122,23 @@ class MetricsManager:
                 snapshots_file,
                 exc_info=True,
             )
+
+    def append_receipt(self, path: Path, line: str) -> None:
+        """Append one receipt line to a metrics JSONL, crash-safe and scrubbed.
+
+        Receipts ARE metrics — `CharterLoopRunner` writes them under
+        ``metrics/`` — and this class already owns that path and the
+        `append_jsonl` edge. Exposing the append here rather than importing
+        `file_util` at a fresh call site keeps the ADR-0085 redaction and the
+        fsync (which reimplementing the append inline would drop) without
+        adding a 40th importer to a module the concentration ratchet already
+        holds at its god-file threshold.
+        """
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            append_jsonl(path, line)
+        except OSError:
+            logger.warning("Failed to append a receipt to %s", path, exc_info=True)
 
     def load_local_history(self, limit: int = 100) -> list[MetricsSnapshot]:
         """Load metrics snapshots from local disk cache.

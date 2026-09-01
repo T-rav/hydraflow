@@ -958,7 +958,12 @@ def _build_driver_manager(
     )
 
 
-def _build_charter_loop_runner(config: HydraFlowConfig, repo: str, repo_root: Path):
+def _build_charter_loop_runner(
+    config: HydraFlowConfig,
+    repo: str,
+    repo_root: Path,
+    metrics: MetricsManager,
+):
     """One `CharterLoopRunner` per repo, with its own receipts path.
 
     Built here rather than in the loop so the loop never constructs a runner:
@@ -967,14 +972,13 @@ def _build_charter_loop_runner(config: HydraFlowConfig, repo: str, repo_root: Pa
     in a loop whose job is scheduling.
     """
     from charter_loop_runner import CharterLoopRunner
-    from file_util import append_jsonl
 
     slug = repo.replace("/", "-")
     return CharterLoopRunner(
         repo=repo,
         repo_root=repo_root,
         receipts_path=config.data_root / slug / "metrics" / "charter_loops.jsonl",
-        receipt_writer=append_jsonl,
+        receipt_writer=metrics.append_receipt,
     )
 
 
@@ -2059,7 +2063,7 @@ def build_services(
         # armed with a live dispatch it had never been run against would be
         # the thing the kill switch exists to prevent.
         runner_for=lambda repo, repo_root: _build_charter_loop_runner(
-            config, repo, repo_root
+            config, repo, repo_root, metrics_manager
         ),
         repos=lambda: managed_repo_roots(config),
     )
