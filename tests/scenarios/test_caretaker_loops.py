@@ -84,12 +84,28 @@ class TestL9ADRReviewerLoop:
 class TestL11RetrospectiveLoop:
     """L11: retrospective_loop drains its queue and records stats."""
 
-    async def test_empty_queue_returns_zero_processed(self, tmp_path) -> None:
-        """With an empty queue, the loop returns zero processed/patterns/stale.
+    async def test_empty_queue_publishes_every_counter_at_zero(self, tmp_path) -> None:
+        """An idle tick reports the FULL counter vocabulary, all at zero.
+
+        This asserted a three-key dict and so pinned the #11890 defect in
+        place: the empty-queue exit dropped `findings_dropped` and
+        `signals_seen`, and a reader of the published details cannot tell
+        "counted zero" from "never counted" when a key is simply absent. The
+        empty-queue path is the one an idle factory takes on nearly every tick.
+
+        This is the layer that should have caught it. It did not, because it
+        asserted the shape the code produced rather than the shape the loop
+        declares — so the defect reached the sandbox suite, which is advisory
+        on staging and required on main, and failed a promotion PR instead.
+
+        Compared against `_RESULT_COUNTERS` rather than a literal, so a counter
+        added later cannot pass here while being absent from what a reader of
+        the running system actually gets.
 
         queue.load() is sync on RetrospectiveQueue so a plain MagicMock works.
-        We configure it to return [] to exercise the early-return branch.
         """
+        from retrospective_loop import _RESULT_COUNTERS
+
         world = MockWorld(tmp_path)
 
         fake_queue = MagicMock()
@@ -98,11 +114,12 @@ class TestL11RetrospectiveLoop:
 
         stats = await world.run_with_loops(["retrospective"], cycles=1)
 
-        assert stats["retrospective"] == {
-            "processed": 0,
-            "patterns_filed": 0,
-            "stale_proposals": 0,
-        }
+        assert stats["retrospective"] == dict.fromkeys(_RESULT_COUNTERS, 0)
+        for counter in ("findings_dropped", "signals_seen"):
+            assert counter in stats["retrospective"], (
+                f"{counter} absent from an idle tick published through the "
+                "loop framework (#11890)"
+            )
         fake_queue.load.assert_called_once()
 
     async def test_retro_patterns_item_processed_and_acknowledged(
