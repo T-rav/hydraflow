@@ -40,13 +40,13 @@
       "content_sha": "da4f08ce80b2906f0395df0dc9314545ee5342f8008dbc7084b052abd6fa8fc9"
     },
     "modules.md": {
-      "content_sha": "73908eab7e5775af762e67e2c30dac8177499a9bd9562410ae63dae9703fca6b"
+      "content_sha": "befd42837c64a1698619bbb1ff1094f9736b45601d1f63b85a9eae0a0b7fb204"
     },
     "ports.md": {
       "content_sha": "f735d206f8cf8b086aa962df93953ce9a41bd8be59d2ec8893c2677e74eb4f28"
     },
     "standards-decisions.md": {
-      "content_sha": "95b3a4b04f86f323794cc8b3830299989e18c65d9ff47b432e316941a53c7c22"
+      "content_sha": "bfad5bb28e3ac2727cc27fd4f47edbac19d8f5218067d64e92ae1c0a1a1a6abf"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "62e3a2e8c54c8641e5527040a4f5fefd06a7596060aa7bb02950aa1f73324c09"
@@ -58,5 +58,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "0edefadde7ad9b613fe5e14d6a17c6ea7634e7cc2aa02942109ba622f03ceb01"
+  "content_sha": "56a6432766c77a060e94f03b5436e6d6665bf99c73a009668d17db65b63afeb2"
 }

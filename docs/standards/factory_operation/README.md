@@ -95,6 +95,7 @@ so a new standard directory cannot appear in neither table.
 |---|---|---|
 | **Parametrised guards** | [`docs/standards/parametrised_guards/`](../parametrised_guards/README.md) | Its gate is a registry of *this* repo's architecture guards (`tests/architecture/guard_enumeration_registry.py`). A repo with no such guards inherits an empty rule. |
 | **Vitals vs conformance** | [`docs/standards/vitals_conformance/`](../vitals_conformance/README.md) | Its enforcement is a classification of this repo's own checks plus an egress-blocked CI lane. Stamping the prose without the lane ships a claim nothing answers. |
+| **Purpose** | [`docs/standards/purpose/`](../purpose/README.md) | Its second rule asks that every declared goal be CITED by some Article. A freshly stamped repo has a charter but no standards that cite anything yet, so shipping this would hand it a rule it cannot satisfy on day one — a goal is decoration until something claims to serve it, and a new repo has nothing to claim with. |
 <!-- /standards:local -->
 
 Moving one of these into the kernel means shipping its enforcement too:

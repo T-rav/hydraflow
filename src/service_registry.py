@@ -41,6 +41,7 @@ from caching_issue_store import CachingIssueStore
 from charter_drift_caretaker_loop import (  # noqa: TCH001
     CharterDriftCaretakerLoop,
     build_charter_auditor,
+    build_purpose_auditor,
 )
 from charter_loop_worker_loop import CharterLoopWorkerLoop, managed_repo_roots
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
@@ -2076,6 +2077,7 @@ def build_services(
         dedup=charter_drift_caretaker_dedup,
         deps=loop_deps,
         auditor=build_charter_auditor(config),
+        purpose_auditor=build_purpose_auditor(config),
     )
 
     gate_activator_dedup = DedupStore(

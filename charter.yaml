@@ -29,6 +29,7 @@ articles:
   # (`missing-standard`); an id neither carried nor shipped is tolerated
   # (`unknown-standard`), per the ADR-0121 forward-compat rule.
   standards:
+    - purpose
     - adr_enforcement
     - branch_protection
     - exception_sensor
