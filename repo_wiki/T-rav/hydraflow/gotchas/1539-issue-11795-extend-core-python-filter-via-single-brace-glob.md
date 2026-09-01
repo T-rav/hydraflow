@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11795
 source_phase: plan
 created_at: 2026-08-30T07:41:57.361414+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Extend core_python filter via single brace-glob
