@@ -95,6 +95,21 @@ def _loop(tmp: Path, *, root: Path | None, dedup: _Dedup, **overrides):
     return loop, receipts
 
 
+def _charter_with_loops(*names: str):
+    """A charter carrying exactly *names* as declared loops.
+
+    Built through the real parser rather than a nested stub class: ADR-0023
+    forbids a test-local class that is only defined, and a hand-rolled stub
+    would also stop matching `LoopsBlock` the moment its shape changed — which
+    is the thing `_last_fired_from_dedup` reads.
+    """
+    from charter_model import Charter
+
+    return Charter.from_dict(
+        {"schema_version": 2, "loops": {name: {"actor": name} for name in names}}
+    )
+
+
 class TestTheKillSwitch:
     """ADR-0049: enabled_cb first, static config flag second."""
 
@@ -182,14 +197,10 @@ class TestDedup:
         """
         from charter_loop_worker_loop import _last_fired_from_dedup
 
-        class _C:
-            class loops:  # noqa: N801 - test stub
-                @staticmethod
-                def by_name():
-                    return {"a": None, "b": None}
-
         window = "2026-09-01T09:00:00+00:00"
-        latest = _last_fired_from_dedup(_C(), "o/r", {dedup_key("o/r", "a", window)})
+        latest = _last_fired_from_dedup(
+            _charter_with_loops("a", "b"), "o/r", {dedup_key("o/r", "a", window)}
+        )
         assert latest["a"] == datetime.fromisoformat(window)
         assert latest["b"] is None, "a loop that never fired must read as None"
 
@@ -198,14 +209,10 @@ class TestDedup:
         repo's window suppress another's."""
         from charter_loop_worker_loop import _last_fired_from_dedup
 
-        class _C:
-            class loops:  # noqa: N801 - test stub
-                @staticmethod
-                def by_name():
-                    return {"a": None}
-
         latest = _last_fired_from_dedup(
-            _C(), "o/r", {dedup_key("other/repo", "a", "2026-09-01T09:00:00+00:00")}
+            _charter_with_loops("a"),
+            "o/r",
+            {dedup_key("other/repo", "a", "2026-09-01T09:00:00+00:00")},
         )
         assert latest["a"] is None
 

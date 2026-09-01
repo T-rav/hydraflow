@@ -42,10 +42,7 @@ from charter_drift_caretaker_loop import (  # noqa: TCH001
     CharterDriftCaretakerLoop,
     build_charter_auditor,
 )
-from charter_loop_worker_loop import (  # noqa: TCH001
-    CharterLoopWorkerLoop,
-    managed_repo_roots,
-)
+from charter_loop_worker_loop import CharterLoopWorkerLoop, managed_repo_roots
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
@@ -2051,7 +2048,7 @@ def build_services(
         "charter_loop_worker",
         config.data_root / "dedup" / "charter_loop_worker.json",
     )
-    charter_loop_worker_loop = CharterLoopWorkerLoop(  # noqa: F841
+    charter_loop_worker_loop = CharterLoopWorkerLoop(
         config=config,
         dedup=charter_loop_worker_dedup,
         deps=loop_deps,

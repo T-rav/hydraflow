@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from base_background_loop import BaseBackgroundLoop
 from charter import load_charter
 from charter_model import CharterError
 from exception_classify import reraise_on_credit_or_bug
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from base_background_loop import LoopDeps
     from config import HydraFlowConfig
     from dedup_store import DedupStore
 
