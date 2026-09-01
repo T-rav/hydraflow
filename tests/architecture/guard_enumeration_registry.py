@@ -588,6 +588,9 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_producer_probe_gate as probe_gate
     from tests.architecture import test_standards_rules_are_wired as rules_wired
     from tests.architecture import (
+        test_ungoverned_spawn_faces as ungoverned_faces,
+    )
+    from tests.architecture import (
         test_worker_lineage_reaches_the_mint as worker_lineage,
     )
 
@@ -693,6 +696,21 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         }
         return module not in remaining
 
+    def _ungoverned_face_drop_is_caught(member: object) -> bool:
+        """Would dropping this face stop the guard asking about it?
+
+        A member of this subject is a face the guard REFUSES unless it is
+        registered, so dropping one removes a refusal rather than a coverage
+        row. The live sweep is re-run: if the path no longer appears among the
+        literal non-gateway faces, it is genuinely gone from the tree; if it
+        still appears, the drop was from the parametrise list alone and the
+        gate would stop asking about a face that is still there.
+        """
+        if not (isinstance(member, tuple) and len(member) == 3):
+            return False
+        path, _line, _value = member
+        return path in {p for p, _l, _v in ungoverned_faces.UNGOVERNED_FACES}
+
     def _policy_purity_drop_is_caught(member: str) -> bool:
         classified = (
             set(policy_purity._PURE_SOURCES) | set(policy_purity._IO_SOURCES)  # noqa: SLF001
@@ -746,6 +764,21 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "sweeping src/*_worker_runner.py, so the drop is caught by "
                 "test_the_sweep_found_the_runners_it_was_built_from, which "
                 "holds the sweep to the three runners it was built from."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_ungoverned_spawn_faces.UNGOVERNED_FACES",
+            members=ungoverned_faces.UNGOVERNED_FACES,
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_ungoverned_face_drop_is_caught,
+            why=(
+                "#11544's one-shot half. A literal provider= at a spawn site "
+                "is a face no dial can move, so an operator locking a "
+                "repository to one provider cannot redirect it and the lock "
+                "stops being true. Every such face must be registered with a "
+                "reason; a dropped member stops being asked for one. The set "
+                "is swept from the tree by AST, so the drop is caught by "
+                "re-running that sweep."
             ),
         ),
         GuardedEnumeration(
