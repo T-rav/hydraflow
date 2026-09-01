@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from flows import Edge, Flow, Node
+from flows import FLOW_STOP_KEY, Edge, Flow, Node
 from implement_failure_class import classify_implement_failure
 from models import WorkerResult
 
@@ -283,13 +283,13 @@ class ImplementFlowMixin:
                     success=True,
                     pr_info=existing_pr,
                 )
-                state["_stop"] = True
+                state[FLOW_STOP_KEY] = True
                 return state
 
         cap_result = await self._check_attempt_cap(issue, branch)
         if cap_result is not None:
             state["result"] = cap_result
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_no_progress_abort(self, state: FlowState) -> FlowState:
@@ -313,7 +313,7 @@ class ImplementFlowMixin:
         if not self._should_abort_no_progress(issue):
             return state
         state["result"] = await self._escalate_no_progress(issue, branch)
-        state["_stop"] = True
+        state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_issue_state(self, state: FlowState) -> FlowState:
@@ -333,7 +333,7 @@ class ImplementFlowMixin:
         state["result"] = await self._abandon_resolved_issue(
             issue, state["branch"], at="branch-cut"
         )
-        state["_stop"] = True
+        state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_build(self, state: FlowState) -> FlowState:
@@ -492,7 +492,7 @@ class ImplementFlowMixin:
             return state
         await self._escalate_zero_commit(issue, state["result"])
         state["disposition"] = "escalate"
-        state["_stop"] = True
+        state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_spec_verify(self, state: FlowState) -> FlowState:
@@ -558,7 +558,7 @@ class ImplementFlowMixin:
             state["result"] = await self._abandon_resolved_issue(
                 issue, state["branch"], at="open-pr"
             )
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         # Fresh failed attempts skip the push entirely — partial commits never
@@ -574,7 +574,7 @@ class ImplementFlowMixin:
                 )
                 if early_return is not None:
                     state["result"] = early_return
-                    state["_stop"] = True
+                    state[FLOW_STOP_KEY] = True
                     return state
 
         if result.success and result.transcript:

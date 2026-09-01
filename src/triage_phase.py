@@ -16,7 +16,16 @@ from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
-from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
+from flows import (
+    FLOW_STOP_KEY,
+    Edge,
+    Flow,
+    FlowState,
+    KillSwitch,
+    Node,
+    NodeHook,
+    flow_stopped,
+)
 from models import Task, TranscriptLinePayload
 from phase_utils import (
     _sentry_transaction,
@@ -122,11 +131,6 @@ def _is_auditor_finding_stale(issue: Task, max_age_days: int) -> bool:
 #    rollups for gauntlet-closed issues) — a behaviour change. The
 #    ``store_lifecycle`` / sentry span / stop-event scaffolding likewise stays
 #    in ``_triage_one``.
-
-
-def _flow_stopped(state: FlowState) -> bool:
-    """Edge guard: a node signalled a fail-closed early exit → route to ``done``."""
-    return bool(state.get("_stop"))
 
 
 class TriagePhase:
@@ -461,11 +465,11 @@ class TriagePhase:
             ],
             edges=[
                 # First-match-wins: a stopped node skips straight to the sink.
-                Edge("classify", "done", when=_flow_stopped),
+                Edge("classify", "done", when=flow_stopped),
                 Edge("classify", "route"),
                 Edge("route", "record"),
                 Edge("record", "reproduce"),
-                Edge("reproduce", "done", when=_flow_stopped),
+                Edge("reproduce", "done", when=flow_stopped),
                 Edge("reproduce", "swap"),
                 Edge("swap", "done"),
             ],
@@ -514,12 +518,12 @@ class TriagePhase:
             # recovers, instead of the 24h clarification backoff.
             self._state.mark_triage_infra_parked(issue.id)
             state["count"] = 0
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         if self._config.dry_run:
             state["count"] = 1
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         state["result"] = result
@@ -726,7 +730,7 @@ class TriagePhase:
                     state["routing_outcome"] = routing_outcome
                     state["_skip_verdict"] = True
                     state["count"] = 1
-                    state["_stop"] = True
+                    state[FLOW_STOP_KEY] = True
                     return state
                 if str(repro.outcome) == "unable":
                     logger.warning(
