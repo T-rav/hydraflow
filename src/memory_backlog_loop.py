@@ -139,8 +139,14 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
                     self._config.memory_backlog_label[0]
                 )
             )
-        except Exception as exc:  # noqa: BLE001
-            reraise_on_credit_or_bug(exc)
+        except (RuntimeError, OSError):
+            # Narrow on purpose. These are the shapes a `gh` read fails with —
+            # non-zero exit and a broken pipe/socket. A `ValueError` from a
+            # malformed payload is a BUG and must propagate rather than be
+            # rendered as "the board is unavailable"; a broad catch here would
+            # also have needed a new `noqa: BLE001`, and that ratchet only
+            # shrinks.
+            #
             # Fail CLOSED, and in the direction that costs least: a tick that
             # files nothing costs a delay, while a tick that files blind costs
             # duplicate issues a human has to close. The guard is unavailable,
