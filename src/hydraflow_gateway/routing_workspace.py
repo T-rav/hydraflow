@@ -131,6 +131,7 @@ class MutationRejection(StrEnum):
     UNKNOWN_REVISION = "unknown-revision"
     MALFORMED_MUTATION = "malformed-mutation"
     CREDENTIAL_SHAPED_VALUE = "credential-shaped-value"
+    UNKNOWN_ACCOUNT = "unknown-account"
     VALIDATION_FAILED = "validation-failed"
 
 
@@ -399,8 +400,19 @@ class PolicyWorkspace:
 
     # -- previewing --------------------------------------------------------
 
-    def preview(self, mutation: PolicyMutation) -> PolicyPreview:
-        """Resolve a candidate edit against the current revision without writing."""
+    def preview(
+        self,
+        mutation: PolicyMutation,
+        *,
+        known_accounts: frozenset[str] | None = None,
+    ) -> PolicyPreview:
+        """Resolve a candidate edit against the current revision without writing.
+
+        Takes the same *known_accounts* as :meth:`apply` so a preview refuses a
+        rollback for the same reason the write would. A preview that cannot see
+        the accounts would show an operator a clean restore and then fail on
+        apply, which is the worst moment to learn it.
+        """
         load = self._store.load()
         before = load.snapshot
         if load.state is SnapshotState.CORRUPT:
@@ -413,7 +425,7 @@ class PolicyWorkspace:
             )
         stale = before.revision != mutation.expected_revision
         try:
-            policies = self._next_policies(mutation, before)
+            policies = self._next_policies(mutation, before, known_accounts)
         except PolicyMutationRejected as rejected:
             return PolicyPreview(
                 before=before,
@@ -441,7 +453,12 @@ class PolicyWorkspace:
     # -- writing -----------------------------------------------------------
 
     def apply(
-        self, mutation: PolicyMutation, *, actor: str, now: datetime
+        self,
+        mutation: PolicyMutation,
+        *,
+        actor: str,
+        now: datetime,
+        known_accounts: frozenset[str] | None = None,
     ) -> MutationResult:
         """Commit one edit, or refuse it and leave the previous revision alone.
 
@@ -450,10 +467,17 @@ class PolicyWorkspace:
         event loop.
         """
         with file_lock(self._lock_path, timeout=_MUTATION_LOCK_TIMEOUT_SECONDS):
-            return self._apply_locked(mutation, actor=actor, now=now)
+            return self._apply_locked(
+                mutation, actor=actor, now=now, known_accounts=known_accounts
+            )
 
     def _apply_locked(
-        self, mutation: PolicyMutation, *, actor: str, now: datetime
+        self,
+        mutation: PolicyMutation,
+        *,
+        actor: str,
+        now: datetime,
+        known_accounts: frozenset[str] | None = None,
     ) -> MutationResult:
         recovery = self._recover_locked(now=now)
         if recovery is JournalOutcome.UNREADABLE:
@@ -483,7 +507,7 @@ class PolicyWorkspace:
                 f"but revision {before.revision} is current",
                 actual_revision=before.revision,
             )
-        policies = self._next_policies(mutation, before)
+        policies = self._next_policies(mutation, before, known_accounts)
         issues = validate_policies(policies)
         if issues:
             raise PolicyMutationRejected(
@@ -623,11 +647,14 @@ class PolicyWorkspace:
     # -- the candidate policy set ------------------------------------------
 
     def _next_policies(
-        self, mutation: PolicyMutation, before: PolicySnapshot
+        self,
+        mutation: PolicyMutation,
+        before: PolicySnapshot,
+        known_accounts: frozenset[str] | None = None,
     ) -> tuple[RoutingPolicy, ...]:
         """Return the policy set this mutation would produce, or refuse it."""
         if mutation.kind is PolicyMutationKind.ROLLBACK:
-            return self._rolled_back_policies(mutation, before)
+            return self._rolled_back_policies(mutation, before, known_accounts)
         policy_id = self._target_id(mutation)
         existing = {candidate.id for candidate in before.policies}
         if mutation.kind is PolicyMutationKind.CREATE and policy_id in existing:
@@ -685,7 +712,10 @@ class PolicyWorkspace:
             )
 
     def _rolled_back_policies(
-        self, mutation: PolicyMutation, before: PolicySnapshot
+        self,
+        mutation: PolicyMutation,
+        before: PolicySnapshot,
+        known_accounts: frozenset[str] | None = None,
     ) -> tuple[RoutingPolicy, ...]:
         """Return this repository's policies as of *target_revision*, scoped.
 
@@ -705,6 +735,9 @@ class PolicyWorkspace:
             if not is_editable_by(policy, self._repo)
         ]
         owned = [policy for policy in restored if is_editable_by(policy, self._repo)]
+        _refusing_unknown_accounts(
+            owned, known_accounts, target_revision=mutation.target_revision
+        )
         return _refusing_credential_shaped(
             _sorted_policies(inherited + owned), baseline=before.policies
         )
@@ -733,6 +766,52 @@ class PolicyWorkspace:
         raise PolicyMutationRejected(
             MutationRejection.UNKNOWN_REVISION,
             f"revision {revision} is not in this repository's mutation history",
+        )
+
+
+def _refusing_unknown_accounts(
+    policies: Sequence[RoutingPolicy],
+    known_accounts: frozenset[str] | None,
+    *,
+    target_revision: int,
+) -> None:
+    """Refuse a rollback whose restored policies name an account that is gone.
+
+    Checked on the *restored owned* policies only, and inside the mutation
+    lock: an account can be deleted between an operator reading a revision and
+    rolling back to it, so the set has to be read at write time rather than at
+    request time.
+
+    ``known_accounts is None`` means the caller could not tell us what exists.
+    That refuses too. A rollback is what an operator reaches for when something
+    has already gone wrong, and "apply a policy naming accounts I cannot
+    verify" is the wrong thing to do at that moment — the epic's rule is that
+    rollback restores *intent* and minting happens afterwards against current
+    account state, which only holds if the intent is known to be satisfiable.
+
+    Names the first missing account. Partially applying and reporting nothing
+    is the failure this criterion exists to prevent.
+    """
+    named = sorted(
+        {account for policy in policies for account in policy.action.account_pool}
+    )
+    if not named:
+        return
+    if known_accounts is None:
+        raise PolicyMutationRejected(
+            MutationRejection.UNKNOWN_ACCOUNT,
+            "this rollback restores policies that name accounts, and the "
+            "current account set was not supplied, so none of them could be "
+            "verified",
+        )
+    missing = [account for account in named if account not in known_accounts]
+    if missing:
+        raise PolicyMutationRejected(
+            MutationRejection.UNKNOWN_ACCOUNT,
+            f"revision {target_revision} names "
+            f"{'accounts' if len(missing) > 1 else 'account'} "
+            f"{', '.join(missing)}, which no longer "
+            f"{'exist' if len(missing) > 1 else 'exists'}",
         )
 
 
