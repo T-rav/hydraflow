@@ -7,10 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cost_budget_watcher_loop import CostBudgetWatcherLoop
+from tests.helpers import config_mock
 
 
 def _build_loop(*, cap: float | None = None):
-    config = MagicMock()
+    config = config_mock()
     config.daily_cost_budget_usd = cap
     bg_workers = MagicMock()
     bg_workers.set_enabled = MagicMock()

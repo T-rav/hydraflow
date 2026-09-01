@@ -34,6 +34,7 @@ import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
+from tests.helpers import config_mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -212,7 +213,7 @@ def test_boot_does_not_warn_about_a_recorder_that_is_not_running() -> None:
 
     from preflight import CheckStatus, _check_contracts_sandbox
 
-    config = MagicMock()
+    config = config_mock()
     config.contract_refresh_external_enabled = True
     config.contracts_sandbox_repo = HydraFlowConfig.model_fields[
         "contracts_sandbox_repo"
@@ -236,7 +237,7 @@ def test_the_boot_remedy_names_the_narrow_lever_first() -> None:
 
     from preflight import CheckStatus, _check_contracts_sandbox
 
-    config = MagicMock()
+    config = config_mock()
     config.contract_refresh_external_enabled = True
     config.contracts_sandbox_repo = "acme/really-missing"
 

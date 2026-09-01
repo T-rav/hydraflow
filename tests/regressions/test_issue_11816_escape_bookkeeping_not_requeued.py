@@ -31,6 +31,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
+from tests.helpers import config_mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
@@ -160,7 +161,7 @@ def _task(n: int) -> Task:
 
 
 def _orch(tmp_path: Path, state):
-    config = MagicMock()
+    config = config_mock()
     # threshold=1 so a single call would requeue if the exclusion did not fire —
     # without this the test could pass on the strike counter, not the fix.
     config.review_orphan_strike_threshold = 1

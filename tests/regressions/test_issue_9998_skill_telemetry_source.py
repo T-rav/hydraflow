@@ -34,7 +34,7 @@ from prompt_efficiency import compute_skill_efficiency, pick_refine_order
 from prompt_telemetry import PromptTelemetry
 from shape_runner import ShapeRunner
 from skill_registry import BUILTIN_SKILLS
-from tests.helpers import ConfigFactory
+from tests.helpers import ConfigFactory, config_mock
 
 # The four blocking skills named by #9998's acceptance criterion.
 _BLOCKING_SKILL_NAMES = [s.name for s in BUILTIN_SKILLS if s.blocking]
@@ -57,7 +57,7 @@ def _make_task(number: int = 42) -> Task:
 
 def _make_base_runner(tmp_path: Path) -> BaseRunner:
     """Bare BaseRunner via __new__ — same scaffold as test_base_runner_execute_trace."""
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     config.agent_timeout = 60
     # CH-6 prompt gate reads the data class in _execute; the MagicMock

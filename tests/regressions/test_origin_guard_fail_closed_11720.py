@@ -34,6 +34,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.helpers import config_mock
 
 
 def _manager(
@@ -44,7 +45,7 @@ def _manager(
 ):
     from workspace import WorkspaceManager
 
-    config = MagicMock()
+    config = config_mock()
     config.repo = repo
     config.repo_root = Path("/tmp/repo")  # noqa: S108
     config.repo_slug = repo.replace("/", "-")

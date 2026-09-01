@@ -14,11 +14,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from report_issue_loop import ReportIssueLoop
+from tests.helpers import config_mock
 
 
 @pytest.fixture
 def report_cfg(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = tmp_path.joinpath
     cfg.dry_run = False

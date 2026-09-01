@@ -21,12 +21,13 @@ from unittest.mock import MagicMock
 
 from repo_wiki import WikiEntry
 from wiki_compiler import WikiCompiler
+from tests.helpers import config_mock
 
 BUDGET = 20_000
 
 
 def _compiler(budget: int = BUDGET) -> WikiCompiler:
-    config = MagicMock()
+    config = config_mock()
     config.wiki_compilation_batch_chars = budget
     config.wiki_compilation_breaker_failures = 3
     config.wiki_compilation_breaker_reset_seconds = 1800

@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from pr_manager import PRManager
+from tests.helpers import config_mock
 
 
 def _stub_pricing() -> object:
@@ -31,7 +32,7 @@ def _stub_pricing() -> object:
 
 @pytest.fixture
 def merge_cfg(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = tmp_path.joinpath
     cfg.dry_run = False

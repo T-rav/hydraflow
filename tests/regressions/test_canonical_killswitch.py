@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from base_background_loop import LoopDeps
+from tests.helpers import config_mock
 
 
 def _disabled_deps() -> LoopDeps:
@@ -44,7 +45,7 @@ def _disabled_deps() -> LoopDeps:
 async def test_cost_budget_watcher_disabled_by_enabled_cb() -> None:
     from cost_budget_watcher_loop import CostBudgetWatcherLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.cost_budget_watcher_loop_enabled = True  # static gate open; cb gate closed
     loop = CostBudgetWatcherLoop(
         config=config,
@@ -65,7 +66,7 @@ async def test_cost_budget_watcher_disabled_by_enabled_cb() -> None:
 async def test_diagram_loop_disabled_by_enabled_cb() -> None:
     from diagram_loop import DiagramLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.diagram_loop_enabled = True  # static gate open; cb gate closed
     loop = DiagramLoop(
         config=config,
@@ -85,7 +86,7 @@ async def test_diagram_loop_disabled_by_enabled_cb() -> None:
 async def test_pricing_refresh_loop_disabled_by_enabled_cb() -> None:
     from pricing_refresh_loop import PricingRefreshLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.pricing_refresh_loop_enabled = True  # static gate open; cb gate closed
     loop = PricingRefreshLoop(
         config=config,
@@ -105,7 +106,7 @@ async def test_pricing_refresh_loop_disabled_by_enabled_cb() -> None:
 async def test_entry_evidence_loop_disabled_by_enabled_cb(tmp_path: Path) -> None:
     from entry_evidence_loop import EntryEvidenceLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.entry_evidence_enabled = True  # static gate is open; cb gate is closed
     loop = EntryEvidenceLoop(
         config=config,
@@ -128,7 +129,7 @@ async def test_entry_evidence_loop_disabled_by_enabled_cb(tmp_path: Path) -> Non
 async def test_edge_proposer_loop_disabled_by_enabled_cb(tmp_path: Path) -> None:
     from edge_proposer_loop import EdgeProposerLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.edge_proposer_enabled = True  # static gate is open; cb gate is closed
     loop = EdgeProposerLoop(
         config=config,
@@ -149,7 +150,7 @@ async def test_edge_proposer_loop_disabled_by_enabled_cb(tmp_path: Path) -> None
 async def test_term_proposer_loop_disabled_by_enabled_cb(tmp_path: Path) -> None:
     from term_proposer_loop import TermProposerLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.term_proposer_enabled = True  # static gate is open; cb gate is closed
     config.term_proposer_interval = 86400
     loop = TermProposerLoop(
@@ -173,7 +174,7 @@ async def test_term_proposer_loop_disabled_by_enabled_cb(tmp_path: Path) -> None
 async def test_term_pruner_loop_disabled_by_enabled_cb(tmp_path: Path) -> None:
     from term_pruner_loop import TermPrunerLoop
 
-    config = MagicMock()
+    config = config_mock()
     config.term_pruner_enabled = True  # static gate is open; cb gate is closed
     config.term_pruner_interval = 86400
     loop = TermPrunerLoop(

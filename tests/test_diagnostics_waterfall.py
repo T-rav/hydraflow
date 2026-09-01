@@ -10,18 +10,18 @@ for ``test_diagnostics_waterfall.py`` and lands on real coverage.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dashboard_routes._diagnostics_routes import build_diagnostics_router
+from tests.helpers import config_mock
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = tmp_path.joinpath
     cfg.repo = "o/r"

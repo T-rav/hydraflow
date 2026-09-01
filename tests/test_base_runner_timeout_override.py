@@ -12,12 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from base_runner import BaseRunner
+from tests.helpers import config_mock
 
 CEILING = 3600
 
 
 def _make_runner(tmp_path: Path) -> BaseRunner:
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     config.agent_timeout = CEILING
     config.repo_data_class = "internal"

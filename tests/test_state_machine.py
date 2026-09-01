@@ -33,6 +33,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from tests.helpers import config_mock
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ st_label = st.text(
 
 def _make_config(labels: list[str] | None = None) -> MagicMock:
     """Build a minimal HydraFlowConfig mock with default pipeline labels."""
-    config = MagicMock()
+    config = config_mock()
     config.all_pipeline_labels = labels or ALL_PIPELINE_LABELS
     config.find_label = ["hydraflow-find"]
     config.planner_label = ["hydraflow-plan"]

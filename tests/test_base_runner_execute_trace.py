@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from tests.helpers import config_mock
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest  # noqa: E402
@@ -16,7 +18,7 @@ from tracing_context import TracingContext  # noqa: E402
 
 
 def _make_runner(tmp_path: Path) -> BaseRunner:
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     config.agent_timeout = 60
     # CH-6 prompt gate reads the data class in _execute; the MagicMock default

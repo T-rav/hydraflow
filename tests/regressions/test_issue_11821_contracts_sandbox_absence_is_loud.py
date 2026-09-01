@@ -22,10 +22,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from preflight import CheckStatus, _check_contracts_sandbox
+from tests.helpers import config_mock
 
 
 def _config(*, enabled: bool = True, slug: str = "acme/sandbox") -> MagicMock:
-    config = MagicMock()
+    config = config_mock()
     config.contract_refresh_external_enabled = enabled
     config.contracts_sandbox_repo = slug
     return config

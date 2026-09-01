@@ -39,7 +39,7 @@ import pytest
 from events import EventBus
 from models import DiagnosisResult, EscalationContext
 from pr_manager import PRManager
-from tests.helpers import ConfigFactory
+from tests.helpers import ConfigFactory, config_mock
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -157,7 +157,7 @@ class TestDiagnosisValidationErrorNotLogged:
     def runner(self):
         from diagnostic_runner import DiagnosticRunner
 
-        config = MagicMock()
+        config = config_mock()
         config.repo_root = "/tmp/repo"
         config.implementation_tool = "claude"
         config.model = "claude-opus-4-5"

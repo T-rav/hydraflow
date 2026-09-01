@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tests.helpers import config_mock
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
@@ -56,7 +58,7 @@ class TestPRPortConformance:
         from pr_manager import PRManager
 
         # Build minimal PRManager without hitting GitHub
-        config = MagicMock()
+        config = config_mock()
         config.repo = "org/repo"
         config.dry_run = False
         event_bus = MagicMock()
@@ -85,7 +87,7 @@ class TestWorkspacePortConformance:
         """WorkspaceManager is a structural subtype of WorkspacePort."""
         from workspace import WorkspaceManager
 
-        config = MagicMock()
+        config = config_mock()
         config.workspace_base = Path("/tmp/wt")
         config.repo_root = Path("/tmp/repo")
         config.main_branch = "main"
@@ -388,7 +390,7 @@ class TestIssueStorePortConformance:
         from issue_store import IssueStore
         from task_source import TaskFetcher
 
-        config = MagicMock()
+        config = config_mock()
         config.data_poll_interval = 30
         config.find_label = ["hydraflow-find"]
         config.planner_label = ["hydraflow-plan"]
@@ -478,7 +480,7 @@ class TestIssueFetcherPortConformance:
         """IssueFetcher is a structural subtype of IssueFetcherPort."""
         from issue_fetcher import IssueFetcher
 
-        config = MagicMock()
+        config = config_mock()
         config.repo = "org/repo"
         config.dry_run = False
         config.data_poll_interval = 30

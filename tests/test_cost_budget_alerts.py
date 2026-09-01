@@ -9,12 +9,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from cost_budget_alerts import check_daily_budget, check_issue_cost
+from tests.helpers import config_mock
 
 
 @pytest.fixture
 def cost_cfg(tmp_path: Path) -> MagicMock:
     """Standalone config mock — avoids the shared `config` fixture."""
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = tmp_path.joinpath
     cfg.daily_cost_budget_usd = None

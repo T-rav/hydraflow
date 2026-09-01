@@ -23,10 +23,11 @@ import repo_wiki_loop as rwl_module
 from base_background_loop import LoopDeps
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop
+from tests.helpers import config_mock
 
 
 def _make_loop(tmp_path: Path) -> RepoWikiLoop:
-    config = MagicMock()
+    config = config_mock()
     config.data_path.return_value = tmp_path / "queue"
     config.repo = "acme/widgets"
     config.repo_wiki_maintenance_pr_coalesce = True

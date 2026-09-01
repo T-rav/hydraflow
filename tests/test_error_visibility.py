@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers import config_mock
+
 # ---------------------------------------------------------------------------
 # _is_likely_disconnect helper
 # ---------------------------------------------------------------------------
@@ -396,7 +398,7 @@ class TestMetricsManagerExcInfo:
     def _make_manager(self, state, event_bus):
         from metrics_manager import MetricsManager
 
-        config = MagicMock()
+        config = config_mock()
         config.repo = "test/repo"
         config.dry_run = False
         config.data_path = MagicMock(return_value="/tmp/test")
