@@ -158,7 +158,15 @@ def produced() -> SubprocessTrace:
     return trace
 
 
-@pytest.mark.parametrize("field", sorted(SubprocessTrace.model_fields))
+#: Derived, not spelled: the guarded set is every declared field MINUS the
+#: justified exemptions. Filtering the parameter list rather than calling
+#: `pytest.skip` inside the test is deliberate —
+#: `tests/architecture/test_no_ignored_active_tests.py` forbids a runtime skip
+#: in an active test, and it is right to: a skip reports as a test that ran.
+_GUARDED_TRACE_FIELDS = sorted(set(SubprocessTrace.model_fields) - set(_PRODUCER_EXEMPT))
+
+
+@pytest.mark.parametrize("field", _GUARDED_TRACE_FIELDS)
 def test_every_field_is_populated_by_the_real_producer(
     produced: SubprocessTrace, field: str
 ) -> None:
@@ -169,9 +177,6 @@ def test_every_field_is_populated_by_the_real_producer(
     it exists for. Deriving from `model_fields` means a new field arrives here
     already under test.
     """
-    if field in _PRODUCER_EXEMPT:
-        pytest.skip(f"exempt: {_PRODUCER_EXEMPT[field]}")
-
     value = getattr(produced, field)
     assert value is not None, (
         f"SubprocessTrace.{field} is None after a real producer run — declared "
@@ -183,6 +188,17 @@ def test_every_field_is_populated_by_the_real_producer(
             "#11887 signature: a consumer aggregates over a container the "
             "producer never fills"
         )
+
+
+def test_the_guarded_set_is_not_empty() -> None:
+    """Anti-vacuity for the filtering above.
+
+    Deriving the parameter list by subtraction means an over-broad exemption
+    set would silently reduce the guard to zero test cases — which reports as
+    a green suite, not as a missing one.
+    """
+    assert len(_GUARDED_TRACE_FIELDS) >= 10, _GUARDED_TRACE_FIELDS
+    assert len(_GUARDED_SUMMARY_FIELDS) >= 8, _GUARDED_SUMMARY_FIELDS
 
 
 def test_the_exempt_list_names_only_fields_that_exist() -> None:
@@ -231,7 +247,10 @@ def rolled_up(produced: SubprocessTrace) -> TraceSummary:
     )
 
 
-@pytest.mark.parametrize("field", sorted(TraceSummary.model_fields))
+_GUARDED_SUMMARY_FIELDS = sorted(set(TraceSummary.model_fields) - set(_SUMMARY_EXEMPT))
+
+
+@pytest.mark.parametrize("field", _GUARDED_SUMMARY_FIELDS)
 def test_every_summary_field_is_populated_by_the_rollup(
     rolled_up: TraceSummary, field: str
 ) -> None:
@@ -250,9 +269,6 @@ def test_every_summary_field_is_populated_by_the_rollup(
     keyword arguments. Only the one test that read the value back failed. The
     hand-built tests were pinning nothing.
     """
-    if field in _SUMMARY_EXEMPT:
-        pytest.skip(f"exempt: {_SUMMARY_EXEMPT[field]}")
-
     value = getattr(rolled_up, field)
     assert value is not None, (
         f"TraceSummary.{field} is None after a real rollup — declared but "
