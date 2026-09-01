@@ -378,6 +378,25 @@ class TestReceipts:
         assert receipts[0].window == _NOW.isoformat()
         assert receipts[0].trigger == "0 9 * * *"
 
+    async def test_tick_returns_only_its_own_receipts(self, tmp_path: Path) -> None:
+        """A long-lived runner's second tick must not re-report the first
+        tick's receipts — the return value is this pass's report, not an
+        ever-growing instance accumulator (#11962)."""
+        (tmp_path / "agents").mkdir()
+        runner = CharterLoopRunner(
+            repo="o/r",
+            repo_root=tmp_path,
+            receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
+        )
+        charter = _charter(dormant={"enabled": False})
+
+        first = await runner.tick(charter, now=_NOW)
+        second = await runner.tick(charter, now=_NOW + timedelta(hours=1))
+
+        assert len(first) == 1
+        assert len(second) == 1
+
 
 class TestTheRunnerHasNoWritePathToTheCharter:
     """ADR-0143 Ruling 6 guard 4, structurally rather than by convention."""
