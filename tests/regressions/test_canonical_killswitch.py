@@ -22,6 +22,7 @@ import pytest
 
 from base_background_loop import LoopDeps
 from tests.helpers import config_mock
+from term_proposer_loop import BotPRPort
 
 
 def _disabled_deps() -> LoopDeps:
@@ -112,7 +113,7 @@ async def test_entry_evidence_loop_disabled_by_enabled_cb(tmp_path: Path) -> Non
         config=config,
         deps=_disabled_deps(),
         llm=MagicMock(),
-        pr_port=MagicMock(),
+        pr_port=MagicMock(spec=BotPRPort),
         repo_root=tmp_path,
         dedup_path=tmp_path / "dedup.json",
     )
@@ -134,7 +135,7 @@ async def test_edge_proposer_loop_disabled_by_enabled_cb(tmp_path: Path) -> None
     loop = EdgeProposerLoop(
         config=config,
         deps=_disabled_deps(),
-        pr_port=MagicMock(),
+        pr_port=MagicMock(spec=BotPRPort),
         repo_root=tmp_path,
     )
     result = await loop._do_work()
@@ -157,7 +158,7 @@ async def test_term_proposer_loop_disabled_by_enabled_cb(tmp_path: Path) -> None
         config=config,
         deps=_disabled_deps(),
         llm=MagicMock(),
-        pr_port=MagicMock(),
+        pr_port=MagicMock(spec=BotPRPort),
         repo_root=tmp_path,
         dedup_path=tmp_path / "dedup.json",
     )
@@ -180,7 +181,7 @@ async def test_term_pruner_loop_disabled_by_enabled_cb(tmp_path: Path) -> None:
     loop = TermPrunerLoop(
         config=config,
         deps=_disabled_deps(),
-        pr_port=MagicMock(),
+        pr_port=MagicMock(spec=BotPRPort),
         repo_root=tmp_path,
     )
     result = await loop._do_work()

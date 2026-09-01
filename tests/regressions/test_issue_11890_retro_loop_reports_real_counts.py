@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from retrospective_queue import QueueItem, QueueKind  # noqa: E402
+from ports import PRPort
 
 
 @pytest.mark.asyncio
@@ -66,6 +67,6 @@ def retro_loop_factory(tmp_path):
         retrospective=collector,
         insights=MagicMock(),
         queue=MagicMock(),
-        prs=MagicMock(),
+        prs=MagicMock(spec=PRPort),
     )
     return loop, collector

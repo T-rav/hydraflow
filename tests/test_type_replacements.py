@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from models import UnstickResult
+from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
 from tests.helpers import ConfigFactory
 
 # ---------------------------------------------------------------------------
@@ -146,11 +147,11 @@ class TestHitlPhaseCallableType:
         phase = HITLPhase(
             config=config,
             state=MagicMock(),
-            store=MagicMock(),
-            fetcher=MagicMock(),
-            workspaces=MagicMock(),
+            store=MagicMock(spec=IssueStorePort),
+            fetcher=MagicMock(spec=IssueFetcherPort),
+            workspaces=MagicMock(spec=WorkspacePort),
             hitl_runner=MagicMock(),
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             event_bus=MagicMock(),
             stop_event=asyncio.Event(),
             active_issues_cb=my_cb,
@@ -188,10 +189,10 @@ class TestPrUnstickerReturnType:
             config=MagicMock(),
             state=MagicMock(),
             event_bus=MagicMock(),
-            pr_manager=MagicMock(),
+            pr_manager=MagicMock(spec=PRPort),
             agents=MagicMock(),
-            workspaces=MagicMock(),
-            fetcher=MagicMock(),
+            workspaces=MagicMock(spec=WorkspacePort),
+            fetcher=MagicMock(spec=IssueFetcherPort),
         )
         result = await unsticker.unstick([])
         assert set(result.keys()) == {

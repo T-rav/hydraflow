@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
+from ports import PRPort
 from state import StateTracker
 
 
@@ -707,7 +708,7 @@ class TestG4CooperativeCancellation:
         )
         loop = StagingBisectLoop(
             config=cfg,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             deps=deps,
             state=StateTracker(state_file=tmp_path / "s.json"),
         )
@@ -850,7 +851,7 @@ class TestWatchdogPaths:
         )
         loop = StagingBisectLoop(
             config=cfg,
-            prs=MagicMock(),
+            prs=MagicMock(spec=PRPort),
             deps=deps,
             state=StateTracker(state_file=tmp_path / "s.json"),
         )

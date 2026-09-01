@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from agent import AgentRunner
 from events import EventBus
 from models import Task
+from ports import AgentPort, PRPort, WorkspacePort
 from tests.conftest import PRInfoFactory, TaskFactory
 from tests.helpers import ConfigFactory
 
@@ -346,9 +347,9 @@ class TestMergeConflictResolverExceptionChaining:
 
         return MergeConflictResolver(
             config=config,
-            workspaces=MagicMock(),
-            agents=MagicMock(),
-            prs=MagicMock(),
+            workspaces=MagicMock(spec=WorkspacePort),
+            agents=MagicMock(spec=AgentPort),
+            prs=MagicMock(spec=PRPort),
             event_bus=event_bus,
             state=MagicMock(),
             summarizer=None,
