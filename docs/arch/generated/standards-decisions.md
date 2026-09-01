@@ -11,7 +11,7 @@ it found. `blocking` is orthogonal to `status` — a violation can be reported
 without stopping anything, and the two columns say so separately.
 
 
-**89** verdict(s) across **1** standard(s); **7** declared standard(s) with no verdict.
+**89** verdict(s) across **1** standard(s); **8** declared standard(s) with no verdict.
 
 | Standard | Subject | Status | Blocking | Reason |
 | --- | --- | --- | --- | --- |
@@ -109,5 +109,6 @@ without stopping anything, and the two columns say so separately.
 | `factory_operation` | — | **GAP** | — | declared by the charter; no collector emits facts for it, so nothing decides it |
 | `parametrised_guards` | — | **GAP** | — | declared by the charter; no collector emits facts for it, so nothing decides it |
 | `ports-and-loops` | — | **GAP** | — | declared by the charter; no collector emits facts for it, so nothing decides it |
+| `purpose` | — | **GAP** | — | declared by the charter; no collector emits facts for it, so nothing decides it |
 | `testing` | — | **GAP** | — | declared by the charter; no collector emits facts for it, so nothing decides it |
 | `vitals_conformance` | — | **GAP** | — | declared by the charter; no collector emits facts for it, so nothing decides it |
