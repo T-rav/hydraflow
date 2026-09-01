@@ -247,20 +247,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # n
     try:
         path = Path(out)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Merged, not overwritten: `make test` runs pytest more than once
-        # (parallel bulk, then the serial paths) and each invocation would
-        # otherwise clobber the previous lane's measurements.
-        existing: dict[str, float] = {}
-        if path.exists():
-            try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    existing = {str(k): float(v) for k, v in loaded.items()}
-            except (OSError, ValueError):
-                existing = {}
-        path.write_text(
-            json.dumps({**existing, **_CALL_DURATIONS}, indent=2, sort_keys=True),
-            encoding="utf-8",
+        # ONE SHARD PER PROCESS, never a read-modify-write of a shared file.
+        # `make quality` runs four pytest lanes CONCURRENTLY; a merging writer
+        # would interleave read and write between them and silently drop whole
+        # lanes — a lost update that presents as a smaller, cleaner-looking
+        # suite. Each process owns its own file and `slowness.collect_durations`
+        # merges the shards on read, which is race-free by construction.
+        shard = path.with_name(f"{path.stem}.{os.getpid()}{path.suffix}")
+        shard.write_text(
+            json.dumps(_CALL_DURATIONS, indent=2, sort_keys=True), encoding="utf-8"
         )
     except OSError:
         pass
