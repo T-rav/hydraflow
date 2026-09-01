@@ -256,18 +256,20 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         # external_enabled=False`` skips them so the loop still completes and
         # emits its worker-status event promptly (s30). Skipped recorders
         # report ``[]``, which the diff layer already treats as no-signal.
-        external = self._config.contract_refresh_external_enabled
+        skips = self._external_recorder_skips()
+        for name, reason in sorted(skips.items()):
+            logger.info("contract_refresh: %s recorder skipped — %s", name, reason)
 
         recorded: dict[str, list[Path]] = {}
         recorded["github"] = (
-            await self._record_with_trace(
+            []
+            if "github" in skips
+            else await self._record_with_trace(
                 "contract_recording.record_github",
                 record_github,
                 self._config.contracts_sandbox_repo,
                 tmp_root / "github",
             )
-            if external
-            else []
         )
         recorded["git"] = await self._record_with_trace(
             "contract_recording.record_git",
@@ -276,18 +278,65 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             tmp_root / "git",
         )
         recorded["docker"] = (
-            await self._record_with_trace(
+            []
+            if "docker" in skips
+            else await self._record_with_trace(
                 "contract_recording.record_docker",
                 record_docker,
                 tmp_root / "docker",
             )
-            if external
-            else []
         )
         recorded["claude"] = (
-            await self._record_claude_stream(tmp_root / "claude") if external else []
+            []
+            if "claude" in skips
+            else await self._record_claude_stream(tmp_root / "claude")
         )
         return recorded
+
+    def _external_recorder_skips(self) -> dict[str, str]:
+        """Which external recorders will NOT run this tick, and why (#11837).
+
+        Two levers, deliberately separate. The master switch
+        ``contract_refresh_external_enabled`` takes every external recorder
+        down at once — the air-gapped sandbox needs that, because each one
+        otherwise blocks up to the 120s subprocess timeout (s30). Under it,
+        ``contract_refresh_external_recorders`` selects recorders BY NAME.
+
+        The two were previously one flag, so #11830 silenced the docker and
+        claude recorders as collateral of turning off the github recorder,
+        whose target 404s. Only github had a diagnosed failure; the other two
+        were never alleged against.
+
+        Returning the reasons rather than a bare bool is the other half of the
+        fix: a skipped recorder used to be an empty list, which is already this
+        module's signal for "tool missing / sandbox offline". A deliberate skip
+        and a broken recorder were indistinguishable.
+        """
+        names = ("github", "docker", "claude")
+        if not self._config.contract_refresh_external_enabled:
+            return dict.fromkeys(
+                names,
+                "contract_refresh_external_enabled=false (all external recorders off)",
+            )
+        allowed = set(self._config.contract_refresh_external_recorders)
+        skips = {
+            name: "not listed in contract_refresh_external_recorders"
+            for name in names
+            if name not in allowed
+        }
+        # The github recorder's diagnosed defect is its TARGET, not the
+        # recorder: the shipped ``contracts_sandbox_repo`` slug 404s, so on a
+        # stock install it could never succeed (#11821). Pointing it at a real
+        # repo re-enables it. The placeholder is read from the field's own
+        # default rather than spelled again here — a second copy would drift
+        # the moment the slug changes, and the skip would silently stop firing.
+        placeholder = type(self._config).model_fields["contracts_sandbox_repo"].default
+        if "github" not in skips and self._config.contracts_sandbox_repo == placeholder:
+            skips["github"] = (
+                "contracts_sandbox_repo is still the placeholder default "
+                f"({placeholder}), which 404s — set it to a real repo to record"
+            )
+        return skips
 
     async def _record_claude_stream(self, tmp_stream_dir: Path) -> list[Path]:
         """Record the native Claude raw stream before the terminal profile.
@@ -790,10 +839,17 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 "fake-drift (#9359)."
             ),
         )
+        # #11837 — "clean" is only meaningful for the recorders that RAN.
+        # With external recorders skipped, no drift is guaranteed by
+        # construction, and this branch resets the Task-18 attempt counters and
+        # auto-closes escalations. Naming the skipped recorders keeps the
+        # all-clear honest instead of reporting silence as a positive result.
+        skips = self._external_recorder_skips()
         return {
             "status": "clean",
             "adapters_refreshed": 0,
             "adapters_drifted": 0,
+            "skipped_recorders": sorted(skips),
         }
 
     def _on_dedup_hit(

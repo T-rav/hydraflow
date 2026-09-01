@@ -5731,6 +5731,22 @@ class HydraFlowConfig(BaseModel):
             "(spec §8). Override if the sandbox org is renamed."
         ),
     )
+    contract_refresh_external_recorders: tuple[str, ...] = Field(
+        default=("github", "docker", "claude"),
+        description=(
+            "Which of ContractRefreshLoop's external recorders may run when "
+            "``contract_refresh_external_enabled`` is on. Selected by name so "
+            "one recorder can be silenced without taking the others with it — "
+            "#11830 turned all three off to stop one, which a sampled "
+            "re-audit flagged as a scope mismatch (#11837).\n\n"
+            "Defaults to all three. The github recorder is skipped separately "
+            "while ``contracts_sandbox_repo`` is still its placeholder default "
+            "(that slug 404s, #11821); pointing it at a real repo is what "
+            "re-enables it, so the skip tracks the diagnosed defect — an "
+            "unreachable TARGET — rather than blaming the recorder."
+        ),
+    )
+
     contract_refresh_external_enabled: bool = Field(
         default=False,
         description=(

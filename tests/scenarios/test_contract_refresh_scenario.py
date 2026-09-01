@@ -166,6 +166,47 @@ class TestContractRefreshScenario:
             "PR opener must not be called when every recorder reports no signal"
         )
 
+    async def test_a_clean_tick_names_the_recorders_that_never_ran(
+        self, tmp_path: Path
+    ) -> None:
+        """#11837 — silence must not reach the operator as a positive all-clear.
+
+        This is the layer the original review lacked. Unit tests cover the skip
+        decision, but the defect was what the LOOP reports: with the external
+        recorders off (the shipped default), no drift is guaranteed by
+        construction, so every tick lands in `_on_clean_tick()` — which resets
+        the Task-18 attempt counters and auto-closes open fake-drift
+        escalations. A skipped recorder also returned a bare `[]`, which is
+        already this module's "tool missing / sandbox offline" signal, so a
+        deliberate skip and a broken recorder were indistinguishable.
+
+        Asserted on the tick result the loop actually publishes rather than on
+        the helper, because the helper was never the thing that misled anyone.
+        """
+        world = MockWorld(tmp_path)
+
+        open_calls: list[dict[str, Any]] = []
+
+        async def fake_open(**kwargs: Any) -> _AutoPrResultStub:
+            open_calls.append(kwargs)
+            return _AutoPrResultStub(status="opened", pr_url="")
+
+        _seed_ports(world, contract_refresh_auto_pr=fake_open)
+
+        stats = await world.run_with_loops(["contract_refresh"], cycles=1)
+
+        tick = stats["contract_refresh"]
+        assert tick["status"] == "clean", tick
+        assert set(tick.get("skipped_recorders", [])) == {
+            "github",
+            "docker",
+            "claude",
+        }, (
+            "a clean tick reported nothing about the three recorders that "
+            f"never ran: {tick}"
+        )
+        assert open_calls == []
+
     async def test_drift_opens_refresh_pr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
