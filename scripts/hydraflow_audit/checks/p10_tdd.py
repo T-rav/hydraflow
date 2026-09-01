@@ -506,6 +506,72 @@ def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
     return _evaluate_pr_regression_delta(ctx, merge_base)
 
 
+def _unmet_conditional_layers(decision: object) -> list[str]:
+    """Layers the standard marks `conditional` for this shape and that are absent.
+
+    Read from the decision's own FACTS, which carry the matrix cell
+    (`requires_<layer>`) alongside what the change shipped (`has_<layer>`), so
+    the audit reports the standard's opinion rather than inventing one.
+
+    This is the whole scope of the WARN, and scoping it matters. An earlier
+    version warned on any non-blocking violation, which the engine reports for
+    every shape it cannot pin — an ambiguous `feat(`, a `refactor(`, a `docs(`
+    that happens to touch `src/`. That is nearly every PR, and a warning on
+    nearly every PR is a warning on none. Where `requires_*` is empty the
+    standard has NO opinion, so there is no omission to surface.
+    """
+    facts = {f.key: f.value for f in decision.facts}  # type: ignore[attr-defined]
+    return [
+        layer
+        for layer in ("unit", "scenario", "sandbox")
+        if str(facts.get(f"requires_{layer}", "")) == "conditional"
+        and not facts.get(f"has_{layer}", False)
+    ]
+
+
+def pyramid_verdict(decision: object, waived: str | None) -> tuple[Status, str]:
+    """Map one pyramid decision onto an audit status. FAIL gates, WARN reports.
+
+    Pure, and separated from the check so it can be tested without a git repo —
+    the mapping is where #11937 went wrong, and the original tests reached the
+    decision engine and the rendered report but never this.
+
+    P10.8 used to collapse every non-blocking outcome into PASS, to avoid
+    tripping the WARN-is-red rule, leaving "the unmet-but-not-required detail
+    riding in the reason". It rode nowhere: `report.format_terminal` skips a
+    finding's message when the status is PASS and `make audit` has no other
+    surface, so the advisory text was discarded before a human saw it. A check
+    that reports nothing is not reporting.
+
+    PASS stays silent deliberately — ninety-odd satisfied checks printing their
+    reasons would bury the ones that matter. Only an outcome with something to
+    say warns: an unmet `conditional` cell, and a waived requirement. A waiver
+    nobody can read is not a waiver, and this module said exactly that while
+    rendering the waiver invisible.
+
+    `blocking` is read from the decision rather than re-derived from `status`,
+    per `StandardDecision`: actuators read `blocking` to decide whether to gate
+    and never infer it, because "violated but not gating" is a real state.
+    """
+    reason = decision.reason  # type: ignore[attr-defined]
+    if decision.blocking:  # type: ignore[attr-defined]
+        if waived:
+            return Status.WARN, f"{reason} — waived by `Skip-Scenario: {waived}`"
+        return Status.FAIL, (
+            f"{reason} Opt out with a `Skip-Scenario: <justification>` commit "
+            "trailer when the defect is provably unit-visible and a scenario "
+            "would observe nothing extra."
+        )
+    unmet = _unmet_conditional_layers(decision)
+    if unmet:
+        return Status.WARN, (
+            f"{reason} The standard marks {', '.join(unmet)} `conditional` for "
+            "this change shape and the change ships neither, so this reports "
+            "rather than gates — visible and deliberate, not silent."
+        )
+    return Status.PASS, reason
+
+
 @register("P10.8")
 def _changes_ship_the_layers_the_standard_requires(ctx: CheckContext) -> Finding:
     """The test pyramid, judged by the policy engine rather than left as prose.
@@ -567,29 +633,11 @@ def _changes_ship_the_layers_the_standard_requires(ctx: CheckContext) -> Finding
         return finding("P10.8", Status.INERT, "engine returned no decision")
     d = decisions[0]
 
-    # PASS or FAIL, never WARN. `overall_exit_code` treats WARN as a red audit
-    # unless the check is allow-listed as telemetry or advisory, and P10.8 is
-    # neither — it judges the PR under test. So a WARN here would redden CI for
-    # every `conditional` cell and every ambiguous `feat(`, which is precisely
-    # the false positive the design set out to avoid: the standard's own word
-    # for "it depends" would become a hard stop, and the gate would be turned
-    # off within a week. The unmet-but-not-required detail rides in the reason.
-    # One exit: PLR0911 caps returns at six and the suppressions ratchet only
-    # shrinks. The waiver is read LAST, after the verdict, so its message names
-    # what was actually waived rather than suppressing the evaluation — a
-    # waiver nobody can read is not a waiver.
-    status, message = Status.PASS, d.reason
-    if d.blocking:
-        waived = _skip_scenario_reason(ctx.root, merge_base)
-        if waived:
-            message = f"{d.reason} — waived by `Skip-Scenario: {waived}`"
-        else:
-            status = Status.FAIL
-            message = (
-                f"{d.reason} Opt out with a `Skip-Scenario: <justification>` "
-                "commit trailer when the defect is provably unit-visible and a "
-                "scenario would observe nothing extra."
-            )
+    # The waiver is read LAST, after the verdict, so its message names what was
+    # actually waived rather than suppressing the evaluation, and the git read
+    # only happens when a waiver could matter.
+    waived = _skip_scenario_reason(ctx.root, merge_base) if d.blocking else None
+    status, message = pyramid_verdict(d, waived)
     return finding("P10.8", status, message)
 
 

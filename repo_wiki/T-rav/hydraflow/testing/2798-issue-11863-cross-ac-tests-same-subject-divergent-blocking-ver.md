@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11863
 source_phase: plan
 created_at: 2026-09-01T06:14:33.638615+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Cross-AC tests: same subject, divergent blocking verdicts
