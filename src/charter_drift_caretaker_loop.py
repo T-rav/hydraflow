@@ -228,11 +228,16 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
         try:
             decisions = await self._purpose_auditor()
         except (RuntimeError, OSError) as exc:
-            # Narrow, AND still re-raised: `CreditExhaustedError` subclasses
-            # RuntimeError, so a bare narrow catch would eat the billing signal
-            # and burn attempt budget against an exhausted account — the exact
-            # failure `reraise_on_credit_or_bug` exists to prevent. Narrow
-            # keeps a ValueError (a bug) propagating too.
+            # Narrow so the suppressions ratchet is satisfied without a blind
+            # `except Exception`, and so a ValueError (a bug) still propagates.
+            #
+            # The re-raise is kept as the file's convention rather than because
+            # this path can hit it: `CreditExhaustedError` subclasses
+            # RuntimeError, so a narrow catch WOULD absorb one — but it is
+            # raised only on the LLM runner paths in `runner_utils`, and a
+            # filesystem read plus a pure engine cannot produce one. Cheap
+            # insurance against this call growing a runner later, not a live
+            # hazard today.
             reraise_on_credit_or_bug(exc)
             logger.warning("purpose audit failed", exc_info=True)
             return 0
