@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from retro_signals import RetroSignal
 
@@ -29,7 +29,12 @@ GUARD_PREFIXES = (
     ".github/workflows/",
 )
 
-NonEmpty = Annotated[str, Field(min_length=1)]
+# `min_length=1` alone counts a single space as content — a POLICY finding
+# whose whole rule_text was " " constructed, validated, and was kept, which is
+# exactly the vagueness these anchors exist to prevent (review pass three).
+# Strip first, THEN require length, so whitespace collapses to "" and is
+# rejected; padded anchors are stored trimmed rather than trusted as typed.
+NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class _FindingBase(BaseModel):
