@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from models import DiagnosisResult, EscalationContext, Severity
+from tests.helpers import config_mock
 
 
 class TestExtractJson:
@@ -194,7 +195,7 @@ class TestDiagnosticRunner:
     def runner(self):
         from diagnostic_runner import DiagnosticRunner
 
-        config = MagicMock()
+        config = config_mock()
         config.repo_root = "/tmp/repo"
         config.implementation_tool = "claude"
         config.model = "claude-opus-4-5"

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from edge_proposer_loop import EdgeProposerLoop
+from tests.helpers import config_mock
 from tests.test_term_proposer_pr_opener import FakePRPort
 from ubiquitous_language import (
     BoundedContext,
@@ -30,7 +31,7 @@ def _seed(repo: Path, *terms: Term) -> None:
 def _build_loop(repo: Path) -> tuple[EdgeProposerLoop, FakePRPort]:
     fake_port = FakePRPort()
     deps = MagicMock()
-    config = MagicMock()
+    config = config_mock()
     config.edge_proposer_enabled = True
     config.edge_proposer_interval = 86400
     return (

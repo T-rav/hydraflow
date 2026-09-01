@@ -20,6 +20,7 @@ from preflight import (
     log_preflight_results,
     run_preflight_checks,
 )
+from tests.helpers import config_mock
 
 # ---------------------------------------------------------------------------
 # _check_git
@@ -310,7 +311,7 @@ def test_log_preflight_results_empty() -> None:
 @pytest.mark.asyncio
 async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
     """Covers the full run with execution_mode='host'."""
-    config = MagicMock()
+    config = config_mock()
     config.repo_root = tmp_path
     config.data_root = tmp_path
     config.execution_mode = "host"
@@ -353,7 +354,7 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_preflight_checks_docker_mode(tmp_path: Path) -> None:
     """Docker mode adds a docker check."""
-    config = MagicMock()
+    config = config_mock()
     config.repo_root = tmp_path
     config.data_root = tmp_path
     config.execution_mode = "docker"
@@ -384,7 +385,7 @@ async def test_run_preflight_checks_docker_mode(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_preflight_checks_deduplicates_tools(tmp_path: Path) -> None:
     """When all tools are the same, we still get 3 agent-cli checks (one per field)."""
-    config = MagicMock()
+    config = config_mock()
     config.repo_root = tmp_path
     config.data_root = tmp_path
     config.execution_mode = "host"
@@ -419,7 +420,7 @@ async def test_server_run_preflight_skipped() -> None:
     """skip_preflight=True bypasses checks."""
     from server import _run_preflight
 
-    config = MagicMock()
+    config = config_mock()
     config.skip_preflight = True
     assert await _run_preflight(config) is True
 
@@ -429,7 +430,7 @@ async def test_server_run_preflight_passes() -> None:
     """Healthy checks let startup proceed."""
     from server import _run_preflight
 
-    config = MagicMock()
+    config = config_mock()
     config.skip_preflight = False
 
     with (
@@ -447,7 +448,7 @@ async def test_server_run_preflight_fails() -> None:
     """Failed checks block startup."""
     from server import _run_preflight
 
-    config = MagicMock()
+    config = config_mock()
     config.skip_preflight = False
 
     with (
@@ -465,7 +466,7 @@ async def test_server_run_aborts_on_preflight_failure() -> None:
     """_run should return early without calling dashboard/headless when preflight fails."""
     from server import _run
 
-    config = MagicMock()
+    config = config_mock()
     config.skip_preflight = False
     config.dashboard_enabled = True
 
@@ -485,7 +486,7 @@ async def test_server_run_proceeds_on_preflight_success() -> None:
     """_run should proceed to dashboard when preflight passes."""
     from server import _run
 
-    config = MagicMock()
+    config = config_mock()
     config.skip_preflight = False
     config.dashboard_enabled = True
 

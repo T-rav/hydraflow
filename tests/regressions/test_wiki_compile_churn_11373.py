@@ -15,11 +15,11 @@ import pytest
 
 from repo_wiki import RepoWikiStore, WikiEntry
 from repo_wiki_loop import RepoWikiLoop
-from tests.helpers import wiki_compiler_mock
+from tests.helpers import wiki_compiler_mock, config_mock
 
 
 def _config(tmp_path: Path) -> MagicMock:
-    config = MagicMock()
+    config = config_mock()
     config.repo_wiki_interval = 3600
     config.repo_wiki_git_backed = False
     config.wiki_anchor_prune_enabled = False

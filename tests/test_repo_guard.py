@@ -16,6 +16,7 @@ import pytest
 from config import _validate_repo_format
 from events import EventBus, EventType, HydraFlowEvent
 from log import JSONFormatter
+from tests.helpers import config_mock
 from tests.workspace_patch import expect_unconsulted
 
 # ---------------------------------------------------------------------------
@@ -65,7 +66,7 @@ class TestPRManagerAssertRepo:
     def _make_pr_manager(self, repo: str = "owner/repo"):
         from pr_manager import PRManager
 
-        config = MagicMock()
+        config = config_mock()
         config.repo = repo
         config.gh_max_retries = 1
         config.dry_run = False
@@ -228,7 +229,7 @@ class TestWorktreeOriginValidation:
     ):
         from workspace import WorkspaceManager
 
-        config = MagicMock()
+        config = config_mock()
         config.repo = repo
         config.repo_root = Path("/tmp/repo")  # noqa: S108
         config.repo_slug = repo.replace("/", "-") if repo else ""

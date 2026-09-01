@@ -55,7 +55,7 @@ from arch.generators import traceability_matrix
 from branch_gc_scan import extract_issue_number
 from escape import attribution
 from false_close import CLOSE_KEYWORD_RE
-from tests.helpers import make_pr_manager
+from tests.helpers import make_pr_manager, config_mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -197,7 +197,7 @@ def _stub_pricing() -> object:
 
 @pytest.fixture
 def merge_cfg(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = tmp_path.joinpath
     cfg.dry_run = False

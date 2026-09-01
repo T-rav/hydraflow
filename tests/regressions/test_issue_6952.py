@@ -23,13 +23,14 @@ import pytest
 
 from models import DiagnosisResult, Severity
 from subprocess_util import AuthenticationError, CreditExhaustedError
+from tests.helpers import config_mock
 
 
 @pytest.fixture
 def runner():
     from diagnostic_runner import DiagnosticRunner
 
-    config = MagicMock()
+    config = config_mock()
     config.repo_root = "/tmp/repo"
     config.implementation_tool = "claude"
     config.model = "claude-opus-4-5"

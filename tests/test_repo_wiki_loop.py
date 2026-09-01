@@ -11,7 +11,7 @@ import pytest
 from base_background_loop import LoopDeps
 from repo_wiki import RepoWikiStore, WikiEntry
 from repo_wiki_loop import RepoWikiLoop
-from tests.helpers import wiki_compiler_mock
+from tests.helpers import config_mock, wiki_compiler_mock
 
 
 def _make_deps() -> LoopDeps:
@@ -42,7 +42,7 @@ def _make_config(wiki_root: Path) -> MagicMock:
     sandbox, and disabling `repo_wiki_git_backed` avoids the `repo_root`
     path that would repeat the same mistake.
     """
-    config = MagicMock()
+    config = config_mock()
     config.repo_wiki_interval = 3600
     config.dry_run = False
     config.repo_wiki_git_backed = False

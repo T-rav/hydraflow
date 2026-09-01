@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from task_source import TaskFetcher, TaskTransitioner
+from tests.helpers import config_mock
 
 if TYPE_CHECKING:
     from pr_manager import PRManager
@@ -164,7 +165,7 @@ class TestPRManagerTransitionerConformance:
     def _make_pr_manager(self) -> PRManager:
         from pr_manager import PRManager
 
-        config = MagicMock()
+        config = config_mock()
         config.repo = "org/repo"
         config.dry_run = False
         event_bus = MagicMock()
@@ -203,7 +204,7 @@ class TestPRManagerTransitionerDelegation:
     def _make_pr_manager(self) -> PRManager:
         from pr_manager import PRManager
 
-        config = MagicMock()
+        config = config_mock()
         config.repo = "org/repo"
         config.dry_run = False
         config.find_label = ["hydraflow-find"]

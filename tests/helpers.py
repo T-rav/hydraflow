@@ -2132,7 +2132,11 @@ def bare_wiki_compiler(**config_overrides: Any) -> Any:
     from wiki_compiler import WikiCompiler
 
     compiler = WikiCompiler.__new__(WikiCompiler)
-    config = MagicMock()
+    # config_mock, not MagicMock: every numeric field carries its real default,
+    # so a knob added later cannot turn this builder into a latent TypeError
+    # (#11827). The explicit sets below are the ones this stand-in needs to
+    # DIFFER from the real defaults.
+    config = config_mock()
     config.wiki_compilation_tool = "stub"
     config.wiki_compilation_model = "stub"
     config.wiki_compilation_provider = None
@@ -2151,3 +2155,41 @@ def bare_wiki_compiler(**config_overrides: Any) -> Any:
     compiler._last_rejected_digests = []
     compiler._last_accepted_count = 0
     return compiler
+
+
+def config_mock(**overrides: Any) -> Any:
+    """A ``MagicMock`` config whose NUMERIC fields carry the real defaults.
+
+    A bare ``MagicMock()`` answers every attribute with a Mock, including the
+    336 numeric fields production code compares against — and comparison
+    against a Mock RAISES (``1 > MagicMock()`` is a ``TypeError``, in both
+    operand orders). The mock is harmless only for as long as no test *reaches*
+    the comparison, so a green fixture is not evidence that it is safe, only
+    that nothing got there yet. Adding a code path that reaches it turns a
+    passing test into a ``TypeError`` with no change to the test (#11827).
+
+    Arithmetic is the silent direction: ``1 + MagicMock()`` returns a truthy
+    Mock and propagates. Comparison at least fails loudly.
+
+    Seeded BY REFERENCE from ``HydraFlowConfig.model_fields``, so a numeric
+    knob added tomorrow is covered without editing this helper. That is the
+    whole point — the class has recurred because every previous fix named one
+    field, and the next field was always unnamed.
+
+    Everything non-numeric stays an ordinary Mock, so callables
+    (``config.data_path``), strings and flags keep their usual stand-in
+    behaviour and can be overridden as before.
+    """
+    from unittest.mock import MagicMock
+
+    from config import HydraFlowConfig
+
+    mock = MagicMock()
+    for name, field in HydraFlowConfig.model_fields.items():
+        if field.annotation in (int, float) and not isinstance(
+            field.default, type(...)
+        ):
+            setattr(mock, name, field.default)
+    for name, value in overrides.items():
+        setattr(mock, name, value)
+    return mock

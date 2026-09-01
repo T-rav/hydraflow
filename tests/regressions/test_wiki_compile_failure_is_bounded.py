@@ -24,12 +24,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from wiki_compiler import WikiCompiler
+from tests.helpers import config_mock
 
 CYCLES = 25
 
 
 def _config() -> MagicMock:
-    config = MagicMock()
+    config = config_mock()
     config.wiki_compilation_tool = "claude"
     config.wiki_compilation_model = "haiku"
     config.wiki_compilation_timeout = 300

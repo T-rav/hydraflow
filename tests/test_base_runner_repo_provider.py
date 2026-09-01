@@ -10,6 +10,7 @@ import pytest
 
 import credit_failover
 from base_runner import BaseRunner
+from tests.helpers import config_mock
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,7 @@ def _reset() -> Iterator[None]:
 def _make_runner(
     tmp_path: Path, *, repo_provider: str = "claude", repo_model: str = ""
 ) -> BaseRunner:
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     config.agent_timeout = 60
     config.repo_data_class = "internal"
