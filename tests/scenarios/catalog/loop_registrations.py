@@ -1394,6 +1394,64 @@ def _build_charter_drift_caretaker(
     )
 
 
+def _build_charter_loop_worker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build CharterLoopWorkerLoop for scenarios (ADR-0145, #11866).
+
+    Tests pre-seed:
+    * ``charter_loop_repos`` → ``[(slug, repo_root)]``. Defaults to ``[]``, so a
+      scenario that does not care about this loop gets an idle tick rather than
+      a filesystem read.
+    * ``charter_loop_dispatch`` → the runner's dispatch surface. Defaults to an
+      AsyncMock returning ``{}``: a run that dispatches nothing still SELECTS
+      and RECEIPTS, which is the half a scenario can observe.
+    * ``charter_loop_receipts`` → a list the receipt writer appends to, so a
+      scenario can assert on receipts without a temp file.
+
+    ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
+    ``charter_loop_worker_dedup``.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    from charter_loop_runner import CharterLoopRunner  # noqa: PLC0415
+    from charter_loop_worker_loop import CharterLoopWorkerLoop  # noqa: PLC0415
+
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "charter_loop_worker_dedup",
+        "charter_loop_worker",
+        "charter_loop_worker.json",
+    )
+
+    dispatch = ports.get("charter_loop_dispatch")
+    if dispatch is None:
+        dispatch = AsyncMock(return_value={})
+        ports["charter_loop_dispatch"] = dispatch
+
+    receipts: list[str] = ports.setdefault("charter_loop_receipts", [])
+
+    def _record(_path: Any, line: str) -> None:
+        receipts.append(line)
+
+    def _runner_for(repo: str, repo_root: Any) -> Any:
+        return CharterLoopRunner(
+            repo=repo,
+            repo_root=repo_root,
+            receipts_path=Path(config.data_root) / "charter_loops.jsonl",
+            receipt_writer=_record,
+            dispatch=dispatch,
+            alert=ports.get("charter_loop_alert"),
+        )
+
+    return CharterLoopWorkerLoop(
+        config=config,
+        dedup=dedup,
+        deps=deps,
+        runner_for=_runner_for,
+        repos=lambda: list(ports.get("charter_loop_repos", [])),
+    )
+
+
 def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build GateActivatorLoop for scenarios (ADR-0082, Slice 4).
 
@@ -2309,6 +2367,7 @@ _BUILDERS: dict[str, Any] = {
     "branch_protection_auditor": _build_branch_protection_auditor,
     "goal_supervisor": _build_goal_supervisor,
     "charter_drift_caretaker": _build_charter_drift_caretaker,
+    "charter_loop_worker": _build_charter_loop_worker,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,

@@ -500,6 +500,7 @@ def build_scripted_services(
     services.branch_protection_auditor_loop = FakeBackgroundLoop()
     services.goal_supervisor_loop = FakeBackgroundLoop()
     services.charter_drift_caretaker_loop = FakeBackgroundLoop()
+    services.charter_loop_worker_loop = FakeBackgroundLoop()
     services.gate_activator_loop = FakeBackgroundLoop()
     services.security_patch_loop = FakeBackgroundLoop()
     services.repo_wiki_loop = FakeBackgroundLoop()

@@ -204,6 +204,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("goal_supervisor_interval", "HYDRAFLOW_GOAL_SUPERVISOR_INTERVAL", 600),
     (
+        "charter_loop_worker_interval",
+        "HYDRAFLOW_CHARTER_LOOP_WORKER_INTERVAL",
+        3600,
+    ),
+    (
         "charter_drift_caretaker_interval",
         "HYDRAFLOW_CHARTER_DRIFT_CARETAKER_INTERVAL",
         86400,
@@ -977,6 +982,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "goal_supervisor_loop_enabled",
         "HYDRAFLOW_GOAL_SUPERVISOR_LOOP_ENABLED",
         False,  # ADR-0124: Tier-2 goal supervisor ships default OFF.
+    ),
+    (
+        "charter_loop_worker_loop_enabled",
+        "HYDRAFLOW_CHARTER_LOOP_WORKER_LOOP_ENABLED",
+        False,  # ADR-0145: dispatching from a repo's declaration is an ENACT.
     ),
     (
         "charter_drift_caretaker_loop_enabled",
@@ -2646,6 +2656,19 @@ class HydraFlowConfig(BaseModel):
             "ADR-0143)"
         ),
     )
+    charter_loop_worker_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description=(
+            "CharterLoopWorkerLoop interval in seconds (default 1 hour). The "
+            "tick RATE is not the schedule: each declared loop fires on its "
+            "own cron clause, and this only bounds how promptly a due window "
+            "is noticed. An hour means a loop scheduled for 09:00 dispatches "
+            "by 10:00 at worst (ADR-0145)."
+        ),
+    )
+
     collaborator_check_enabled: bool = Field(
         default=True,
         description="When True, skip issues from non-collaborators at fetch time",
@@ -6412,6 +6435,19 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for GateActivatorLoop.",
     )
+    charter_loop_worker_loop_enabled: bool = Field(
+        default=False,
+        description=(
+            "Deploy-time kill-switch for CharterLoopWorkerLoop (ADR-0145). "
+            "Defaults OFF, and that default is the ruling rather than caution: "
+            "this loop DISPATCHES AGENT WORK from a target repo's declaration, "
+            "so turning it on enlarges what the factory will run on someone "
+            "else's say-so. That is an ENACT belonging to a human (ADR-0143 "
+            "Ruling 6 guard 4). Set "
+            "HYDRAFLOW_CHARTER_LOOP_WORKER_LOOP_ENABLED=true to arm it."
+        ),
+    )
+
     charter_drift_caretaker_loop_enabled: bool = Field(
         default=False,
         description=(

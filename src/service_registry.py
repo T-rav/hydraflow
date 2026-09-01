@@ -42,6 +42,7 @@ from charter_drift_caretaker_loop import (  # noqa: TCH001
     CharterDriftCaretakerLoop,
     build_charter_auditor,
 )
+from charter_loop_worker_loop import CharterLoopWorkerLoop, managed_repo_roots
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
@@ -324,6 +325,7 @@ class ServiceRegistry:
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
     goal_supervisor_loop: GoalSupervisorLoop
     charter_drift_caretaker_loop: CharterDriftCaretakerLoop
+    charter_loop_worker_loop: CharterLoopWorkerLoop
     gate_activator_loop: GateActivatorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
@@ -953,6 +955,30 @@ def _build_driver_manager(
         # #11537: the shadow director, or ``None``. The allocator discards
         # whatever it returns, so attaching one cannot change a live effect.
         observer=observer,
+    )
+
+
+def _build_charter_loop_runner(
+    config: HydraFlowConfig,
+    repo: str,
+    repo_root: Path,
+    metrics: MetricsManager,
+):
+    """One `CharterLoopRunner` per repo, with its own receipts path.
+
+    Built here rather than in the loop so the loop never constructs a runner:
+    the runner needs a receipt writer and (later) a dispatch surface, and
+    wiring the factory's broker inside a caretaker would put dispatch machinery
+    in a loop whose job is scheduling.
+    """
+    from charter_loop_runner import CharterLoopRunner
+
+    slug = repo.replace("/", "-")
+    return CharterLoopRunner(
+        repo=repo,
+        repo_root=repo_root,
+        receipts_path=config.data_root / slug / "metrics" / "charter_loops.jsonl",
+        receipt_writer=metrics.append_receipt,
     )
 
 
@@ -2022,6 +2048,26 @@ def build_services(
         "charter_drift_caretaker",
         config.data_root / "dedup" / "charter_drift_caretaker.json",
     )
+    charter_loop_worker_dedup = DedupStore(
+        "charter_loop_worker",
+        config.data_root / "dedup" / "charter_loop_worker.json",
+    )
+    charter_loop_worker_loop = CharterLoopWorkerLoop(
+        config=config,
+        dedup=charter_loop_worker_dedup,
+        deps=loop_deps,
+        # The runner factory, not a runner: each repo gets its own receipts
+        # path, and the dispatch surface is deliberately absent until the
+        # broker wiring lands. A runner with no dispatch still SELECTS and
+        # RECEIPTS, which is the observable half — and shipping the driver
+        # armed with a live dispatch it had never been run against would be
+        # the thing the kill switch exists to prevent.
+        runner_for=lambda repo, repo_root: _build_charter_loop_runner(
+            config, repo, repo_root, metrics_manager
+        ),
+        repos=lambda: managed_repo_roots(config),
+    )
+
     charter_drift_caretaker_loop = CharterDriftCaretakerLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
@@ -2439,6 +2485,7 @@ def build_services(
         branch_protection_auditor_loop=branch_protection_auditor_loop,
         goal_supervisor_loop=goal_supervisor_loop,
         charter_drift_caretaker_loop=charter_drift_caretaker_loop,
+        charter_loop_worker_loop=charter_loop_worker_loop,
         gate_activator_loop=gate_activator_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,

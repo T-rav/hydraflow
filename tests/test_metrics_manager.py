@@ -490,3 +490,68 @@ class TestLoadLocalHistoryOSError:
 # ---------------------------------------------------------------------------
 # TestMetricsIssueOptIn
 # ---------------------------------------------------------------------------
+
+
+class TestAppendReceipt:
+    """`append_receipt` — the crash-safe scrubbed append receipts share (#11866).
+
+    Receipts ARE metrics: `CharterLoopRunner` writes them under `metrics/`, and
+    this class already owns that path. The method exists so a receipt writer
+    does not become a 40th importer of `file_util`, which the concentration
+    ratchet holds at its god-file threshold — and so the ADR-0085 redaction and
+    fsync are not reimplemented at a fresh call site.
+    """
+
+    def test_it_appends_rather_than_replacing(self, tmp_path, state, event_bus) -> None:
+        """A receipt log is a history, not a latest-value cell."""
+        mgr, *_ = make_manager(state, event_bus)
+        target = tmp_path / "metrics" / "receipts.jsonl"
+
+        mgr.append_receipt(target, '{"a": 1}')
+        mgr.append_receipt(target, '{"a": 2}')
+
+        assert target.read_text("utf-8").splitlines() == ['{"a": 1}', '{"a": 2}']
+
+    def test_it_creates_the_parent_directory(self, tmp_path, state, event_bus) -> None:
+        """The runner's receipts path is per-repo and may not exist yet."""
+        mgr, *_ = make_manager(state, event_bus)
+        target = tmp_path / "deep" / "nested" / "receipts.jsonl"
+
+        mgr.append_receipt(target, '{"a": 1}')
+
+        assert target.exists()
+
+    def test_an_unwritable_path_does_not_raise(
+        self, tmp_path, state, event_bus
+    ) -> None:
+        """Receipt writing must never break its caller.
+
+        The caller is a loop tick dispatching real work; losing a receipt is
+        bad, and failing the tick that produced it is worse.
+        """
+        mgr, *_ = make_manager(state, event_bus)
+        blocker = tmp_path / "blocked"
+        blocker.write_text("not a directory")
+
+        mgr.append_receipt(blocker / "receipts.jsonl", '{"a": 1}')
+
+    def test_secrets_are_scrubbed_on_the_way_out(
+        self, tmp_path, state, event_bus
+    ) -> None:
+        """ADR-0085: this is a durable stream that persists agent output.
+
+        Pinned here because the whole reason the append is shared rather than
+        reimplemented inline is that an inline `open(..., "a")` would drop the
+        redaction — a security regression traded for a ratchet.
+        """
+        mgr, *_ = make_manager(state, event_bus)
+        target = tmp_path / "receipts.jsonl"
+
+        mgr.append_receipt(
+            target, '{"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+        )
+
+        written = target.read_text("utf-8")
+        assert "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" not in written, (
+            "a credential-shaped string reached the durable receipt stream"
+        )

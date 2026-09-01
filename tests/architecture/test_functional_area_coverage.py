@@ -213,6 +213,19 @@ _GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
 # same "name the intended HOST explicitly" discipline the memory doc asks for.
 # Empty is the healthy default: the first choice is always a workstream fix.
 _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
+    # #11866 (ADR-0145): considered hosting this on CharterDriftCaretakerLoop,
+    # which already loads every managed repo's charter on a tick — the closest
+    # existing host by data source. Rejected: that loop OBSERVES and files, and
+    # this one DISPATCHES agent work inside a budget envelope. Merging them
+    # puts both behind one kill switch, so an operator silencing drift reports
+    # would also stop the work, and arming the work would arm the reports. Also
+    # considered a phase step; rejected because phases run per-issue in the
+    # pipeline while charter loops are cron-driven and issueless — there is no
+    # issue to hang the step on.
+    "CharterLoopWorkerLoop": (
+        "cron-driven dispatch from a repo's own declaration; the drift "
+        "caretaker observes rather than dispatches and shares no kill switch"
+    ),
     # #10371: considered hosting the fail-open RATE monitor as a step in the
     # review phase's post-verify path (where the per-event ledger IS written)
     # and as an intake on DetectorCalibrationLoop. Rejected both: the Shewhart
