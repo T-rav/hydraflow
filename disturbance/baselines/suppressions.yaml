@@ -92,7 +92,6 @@ entries:
   src/caching_issue_store.py::noqa:BLE001: 3
   src/caching_issue_store.py::noqa:PLC0415: 1
   src/changelog.py::noqa:BLE001: 2
-  src/charter_drift_caretaker_loop.py::noqa:PLC0415: 1
   src/charter_drift_caretaker_loop.py::noqa:PLR0911: 1
   src/charter_drift_caretaker_loop.py::noqa:TCH001: 1
   src/ci_monitor_loop.py::noqa:PLR0911: 1

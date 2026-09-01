@@ -23,6 +23,7 @@ observation; every filesystem read lives here, in :func:`observe_repo`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -226,7 +227,12 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
             return 0
         try:
             decisions = await self._purpose_auditor()
-        except Exception as exc:  # noqa: BLE001
+        except (RuntimeError, OSError) as exc:
+            # Narrow, AND still re-raised: `CreditExhaustedError` subclasses
+            # RuntimeError, so a bare narrow catch would eat the billing signal
+            # and burn attempt budget against an exhausted account — the exact
+            # failure `reraise_on_credit_or_bug` exists to prevent. Narrow
+            # keeps a ValueError (a bug) propagating too.
             reraise_on_credit_or_bug(exc)
             logger.warning("purpose audit failed", exc_info=True)
             return 0
@@ -244,7 +250,7 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
                     _unanchored_goal_body(decision),
                     labels=_DRIFT_LABELS,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except (RuntimeError, OSError) as exc:
                 reraise_on_credit_or_bug(exc)
                 logger.warning("could not file unanchored-goal issue", exc_info=True)
                 continue
@@ -453,7 +459,6 @@ def build_purpose_auditor(
     config: HydraFlowConfig,
 ) -> Callable[[], Awaitable[list[StandardDecision]]]:
     """Build the real purpose auditor for the factory's managed checkout."""
-    import asyncio  # noqa: PLC0415
 
     async def _audit() -> list[StandardDecision]:
         return await asyncio.to_thread(audit_repo_purpose, config.repo_root)
@@ -470,7 +475,6 @@ def build_charter_auditor(
     one-element list so the loop's per-repo shape generalises to multi-repo.
     Offloaded to a thread — filesystem reads must not stall the event loop.
     """
-    import asyncio  # noqa: PLC0415
 
     async def _audit() -> list[CharterDriftReport]:
         report = await asyncio.to_thread(
