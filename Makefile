@@ -51,6 +51,15 @@ HF_PYTEST_DEADLINE_FLAGS ?= --timeout=300 --durations=25
 HF_PYTEST_WATCHDOG ?= -p tests.hf_spin_watch
 PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1 $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG)
 
+# Suite-time measurement for `erosion.slowness` (#11910). Off unless a lane
+# opts in: an ordinary pytest invocation must not pay for an artifact nobody
+# asked for. Each pytest PROCESS writes its own shard beside this path and the
+# sensor merges them on read, so the four concurrent `quality` lanes cannot
+# lose one another's measurements. Gitignored — it is a reading, not a fact
+# about the tree, and it is only ever true of the run that produced it.
+HF_DURATIONS_OUT := $(HYDRAFLOW_DIR)/.hydraflow/test_durations.json
+HF_MEASURE := HYDRAFLOW_DURATIONS_OUT=$(HF_DURATIONS_OUT)
+
 # Scenario suites run parallel too (#11844). Deliberately NOT $(PYTEST_PARALLEL):
 # that carries `--reruns 2`, and a rerun is exactly what would hide an xdist
 # isolation flake introduced by this change — the failure mode the repo has
@@ -346,8 +355,8 @@ gateway-coverage: deps
 
 test: deps
 	@echo "$(BLUE)Running HydraFlow unit tests (parallel; scenarios serial)...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) -q
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -q
+	@cd $(HYDRAFLOW_DIR) && $(HF_MEASURE) PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) -q
+	@cd $(HYDRAFLOW_DIR) && $(HF_MEASURE) PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -q
 	@echo "$(GREEN)All tests passed$(RESET)"
 
 smoke: deps
@@ -656,13 +665,13 @@ endif
 quality-unlocked:
 	@echo "$(BLUE)Running host-exclusive preflight, then parallel quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_HOST_EXCLUSIVE_PATHS) && echo "[host-exclusive-tests OK]"
+	@cd $(HYDRAFLOW_DIR) && $(HF_MEASURE) PYTHONPATH=src $(UV) pytest $(PYTEST_HOST_EXCLUSIVE_PATHS) && echo "[host-exclusive-tests OK]"
 	@cd $(HYDRAFLOW_DIR) && $(GATEWAY_PACKAGE_COVERAGE_CMD) && echo "[gateway-coverage OK]"
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
-		PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG) && echo "[serial-tests OK]" & \
+		$(HF_MEASURE) PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		$(HF_MEASURE) PYTHONPATH=src:$(PROJECT_ROOT) $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) $(HF_PYTEST_DEADLINE_FLAGS) $(HF_PYTEST_WATCHDOG) && echo "[serial-tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \
