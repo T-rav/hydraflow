@@ -18,10 +18,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cost_budget_watcher_loop import CostBudgetWatcherLoop
+from tests.helpers import config_mock
 
 
 def _make_loop(cap: float | None = None) -> CostBudgetWatcherLoop:
-    config = MagicMock()
+    config = config_mock()
     config.daily_cost_budget_usd = cap
     config.cost_budget_watcher_loop_enabled = True
     # Throttle off by default; throttle tests opt in via _make_throttle_loop.

@@ -47,10 +47,8 @@ def _make_summary(*, issue_number: int = 42, phase: str = "implement") -> TraceS
         issue_number=issue_number,
         phase=phase,
         harvested_at="2026-04-10T00:00:00+00:00",
-        trace_ids=[],
         spans=TraceSpanStats(
             total_spans=1,
-            total_turns=1,
             total_inference_calls=1,
             duration_seconds=10.0,
         ),
@@ -68,7 +66,6 @@ def _make_summary(*, issue_number: int = 42, phase: str = "implement") -> TraceS
         ),
         skills=TraceSkillProfile(
             skill_counts={},
-            subagent_counts={},
             total_skills=0,
             total_subagents=0,
         ),

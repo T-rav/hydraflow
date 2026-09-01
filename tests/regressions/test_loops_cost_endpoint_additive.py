@@ -21,11 +21,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dashboard_routes._diagnostics_routes import build_diagnostics_router
+from tests.helpers import config_mock
 
 
 @pytest.fixture
 def config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = lambda *parts: tmp_path.joinpath(*parts)
     cfg.factory_metrics_path = tmp_path / "diagnostics" / "factory_metrics.jsonl"

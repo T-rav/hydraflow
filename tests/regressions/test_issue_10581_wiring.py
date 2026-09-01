@@ -28,6 +28,7 @@ from base_background_loop import LoopDeps
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop
 from wiki_drift_detector import detect_prose_drift
+from tests.helpers import config_mock
 
 REPO_SLUG = "o/r"
 
@@ -44,7 +45,7 @@ def _make_deps() -> LoopDeps:
 
 
 def _make_config(wiki_root: Path) -> MagicMock:
-    config = MagicMock()
+    config = config_mock()
     config.repo_wiki_interval = 3600
     config.dry_run = False
     config.repo_wiki_git_backed = True

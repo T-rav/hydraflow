@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
+from tests.helpers import config_mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
@@ -29,7 +30,7 @@ from subprocess_util import AuthenticationError  # noqa: E402
 
 def _make_cache(tmp_path: Path) -> GitHubDataCache:
     """Build a GitHubDataCache with minimal mocked dependencies."""
-    config = MagicMock()
+    config = config_mock()
     config.ready_label = ["hydraflow-ready"]
     config.review_label = ["hydraflow-review"]
     config.hitl_label = ["hydraflow-hitl"]

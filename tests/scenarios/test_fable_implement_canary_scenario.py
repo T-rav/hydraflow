@@ -28,10 +28,12 @@ for exactly that reason. Everything downstream of the turn is real.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from director_broker import ShadowDispatchBroker
 from director_sandbox import ProbeEvidence
@@ -371,6 +373,28 @@ async def _run(mock_world, tmp_path, *, name, issue, canary):
     return built
 
 
+@contextlib.contextmanager
+def _own_world(tmp_path_factory, name: str):
+    """A MockWorld + seeded issues owned by ONE class-scoped fixture (#11844).
+
+    Not the shared `mock_world`/`seeded_issues`/`tmp_path`: those are
+    function-scoped across every scenario file, and widening their scope to
+    let these classes share a run would change isolation for suites that have
+    nothing to do with this one.
+    """
+    from tests.scenarios.fakes import MockWorld
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+        tmp = tmp_path_factory.mktemp(name)
+        world = MockWorld(tmp)
+        for issue in (ISSUE_CLASSIC, ISSUE_BROKERED):
+            IssueBuilder().numbered(issue).titled("driven issue").labeled(
+                READY_LABEL
+            ).at(world)
+        yield world, tmp
+
+
 def _dispatched(shadow_log: ShadowObservationLog) -> list[dict[str, Any]]:
     return list(shadow_log.recent()[-1].dispatched)
 
@@ -470,15 +494,23 @@ class TestABrokeredImplementReachesTheClassicOutcome:
 
 
 class TestEveryChildIsDistinctAndItsKeyIsRevoked:
-    @pytest.fixture
-    async def brokered(self, seeded_issues, tmp_path):
-        return await _run(
-            seeded_issues,
-            tmp_path,
-            name="children",
-            issue=ISSUE_BROKERED,
-            canary=CANARY_REPO,
-        )
+    @pytest_asyncio.fixture(scope="class", loop_scope="class")
+    async def brokered(self, tmp_path_factory):
+        """Run ONCE for the class (#11844).
+
+        Seven tests each re-ran the same deterministic scenario — ~1.7s apiece
+        — to assert one property of its result. Every consumer is read-only,
+        so repetition bought nothing but wall-clock. `--dist loadscope` keeps
+        a class on one xdist worker, which is what makes this safe in parallel.
+        """
+        with _own_world(tmp_path_factory, "impl_canary_children") as (world, tmp):
+            yield await _run(
+                world,
+                tmp,
+                name="children",
+                issue=ISSUE_BROKERED,
+                canary=CANARY_REPO,
+            )
 
     async def test_two_admitted_requests_become_two_children(self, brokered) -> None:
         assert len(brokered["boundary"].spawns) == 2
@@ -584,25 +616,27 @@ class TestTheWriterLeaseIsRealAndTemporary:
 
 
 class TestAWorkerThatCameBackToAMovedTreeIsRejected:
-    @pytest.fixture
-    async def moved(self, seeded_issues, tmp_path):
-        built = _build(
-            seeded_issues,
-            tmp_path,
-            name="moved",
-            issue=ISSUE_BROKERED,
-            canary=CANARY_REPO,
-        )
-        boundary = built["boundary"]
-
-        def land_a_commit() -> None:
-            boundary.answers["status"] = (
-                f"# branch.oid {'7' * 40}\n# branch.head {BRANCH}\n"
+    @pytest_asyncio.fixture(scope="class", loop_scope="class")
+    async def moved(self, tmp_path_factory):
+        """Run ONCE for the class (#11844) — see the sibling class's fixture."""
+        with _own_world(tmp_path_factory, "impl_canary_moved") as (world, tmp):
+            built = _build(
+                world,
+                tmp,
+                name="moved",
+                issue=ISSUE_BROKERED,
+                canary=CANARY_REPO,
             )
+            boundary = built["boundary"]
 
-        boundary.on_spawn = land_a_commit
-        await built["manager"].tick()
-        return built
+            def land_a_commit() -> None:
+                boundary.answers["status"] = (
+                    f"# branch.oid {'7' * 40}\n# branch.head {BRANCH}\n"
+                )
+
+            boundary.on_spawn = land_a_commit
+            await built["manager"].tick()
+            yield built
 
     async def test_both_children_are_superseded(self, moved) -> None:
         assert [row["status"] for row in _dispatched(moved["shadow_log"])] == [

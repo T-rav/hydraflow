@@ -49,6 +49,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TRIAGE` | `triage_tool` | `triage_model` |
 | `HYDRAFLOW_AC` | `ac_tool` | `ac_model` |
 | `HYDRAFLOW_TRANSCRIPT_SUMMARY` | `transcript_summary_tool` | `transcript_summary_model` |
+| `HYDRAFLOW_RETRO_FINDER` | `retro_finder_tool` | `retro_finder_model` |
 | `HYDRAFLOW_WIKI_COMPILATION` | `wiki_compilation_tool` | `wiki_compilation_model` |
 | `HYDRAFLOW_ADR_REVIEW` | `adr_review_tool` | `adr_review_model` |
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |

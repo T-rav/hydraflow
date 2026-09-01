@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from preflight.decision import PreflightResult, apply_decision
+from tests.helpers import config_mock
 
 
 def _result(status: str, **kwargs) -> PreflightResult:
@@ -29,7 +30,7 @@ def _result(status: str, **kwargs) -> PreflightResult:
 
 
 def _config(hitl: str = "hydraflow-hitl", ready: str = "hydraflow-ready"):
-    config = MagicMock()
+    config = config_mock()
     config.hitl_label = [hitl]
     config.ready_label = [ready]
     return config

@@ -11,6 +11,7 @@ import pytest
 
 import credit_failover
 from base_runner import BaseRunner
+from tests.helpers import config_mock
 
 NOW = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 
@@ -23,7 +24,7 @@ def _reset() -> Iterator[None]:
 
 
 def _make_runner(tmp_path: Path) -> BaseRunner:
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     config.agent_timeout = 60
     config.repo_data_class = "internal"

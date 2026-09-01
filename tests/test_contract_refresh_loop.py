@@ -607,7 +607,14 @@ async def test_do_work_emits_telemetry_for_each_recorder_and_replay(
     # this test is specifically about EVERY recorder emitting a trace.
     # Relying on the default would silently reduce it to the local git
     # recorder and assert 5 traces against 2.
-    loop = _loop(tmp_path, contract_refresh_external_enabled=True)
+    # `contracts_sandbox_repo` is overridden alongside it: on the placeholder
+    # default the github recorder is skipped (#11821/#11837) and emits no
+    # trace, which would assert 5 against 4.
+    loop = _loop(
+        tmp_path,
+        contract_refresh_external_enabled=True,
+        contracts_sandbox_repo="real-org/real-contracts-sandbox",
+    )
     await loop._do_work()
 
     # Four recorder calls + one replay gate = five traces.
@@ -1140,13 +1147,42 @@ def test_record_all_skips_external_recorders_when_disabled(
 def test_record_all_runs_all_recorders_when_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Production default (external_enabled=True): every adapter is recorded.
+    """Every adapter records once external recorders are on AND reachable.
+
+    `contracts_sandbox_repo` is overridden because its default is a
+    placeholder slug that 404s (#11821); on a stock install the github
+    recorder is skipped for that reason alone (#11837). Asserting four
+    recorders against the placeholder would be asserting that we still run a
+    recorder that cannot succeed.
+    """
+    calls = _track_recorders(monkeypatch)
+    loop = _loop(
+        tmp_path,
+        contract_refresh_external_enabled=True,
+        contracts_sandbox_repo="real-org/real-contracts-sandbox",
+    )
+
+    asyncio.run(loop._record_all(tmp_path / "rec"))
+
+    assert set(calls) == {"github", "git", "docker", "claude"}
+
+
+def test_a_stock_install_skips_github_but_still_records_docker_and_claude(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #11837 scope fix, at the recorder-dispatch layer.
+
+    One flag used to gate all three, so silencing the 404 recorder silenced
+    contract-drift monitoring for docker and claude too — neither of which
+    had any diagnosed failure.
+    """
     calls = _track_recorders(monkeypatch)
     loop = _loop(tmp_path, contract_refresh_external_enabled=True)
 
     asyncio.run(loop._record_all(tmp_path / "rec"))
 
-    assert set(calls) == {"github", "git", "docker", "claude"}
+    assert set(calls) == {"git", "docker", "claude"}
+    assert "github" not in calls
 
 
 def test_direct_recorder_does_not_borrow_zai_maintenance_model(

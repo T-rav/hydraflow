@@ -59,7 +59,6 @@ def _make_subprocess_trace(
         ),
         tool_calls=[],
         skill_results=skills or [],
-        turn_count=2,
         inference_count=2,
     )
 

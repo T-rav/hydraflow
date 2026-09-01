@@ -174,6 +174,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("loop_startup_stagger_s", "HYDRAFLOW_LOOP_STARTUP_STAGGER_S", 120),
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
+    ("retro_evidence_max_chars", "HYDRAFLOW_RETRO_EVIDENCE_MAX_CHARS", 40_000),
+    ("retro_findings_max_per_tick", "HYDRAFLOW_RETRO_FINDINGS_MAX_PER_TICK", 3),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
     ("dependabot_merge_interval", "HYDRAFLOW_DEPENDABOT_MERGE_INTERVAL", 3600),
     (
@@ -367,12 +369,18 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("visual_max_retries", "HYDRAFLOW_VISUAL_MAX_RETRIES", 2),
     ("agent_timeout", "HYDRAFLOW_AGENT_TIMEOUT", 3600),
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
+    ("retro_finder_timeout", "HYDRAFLOW_RETRO_FINDER_TIMEOUT", 180),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
     ("wiki_compilation_batch_chars", "HYDRAFLOW_WIKI_COMPILATION_BATCH_CHARS", 20_000),
+    (
+        "wiki_compilation_max_batches_per_tick",
+        "HYDRAFLOW_WIKI_COMPILATION_MAX_BATCHES_PER_TICK",
+        4,
+    ),
     (
         "wiki_compilation_breaker_failures",
         "HYDRAFLOW_WIKI_COMPILATION_BREAKER_FAILURES",
@@ -665,6 +673,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_CI_PASS_RATE",
         0.5,
     ),
+    (
+        "wiki_barren_compile_cooldown_hours",
+        "HYDRAFLOW_WIKI_BARREN_COMPILE_COOLDOWN_HOURS",
+        24.0,
+    ),
     ("docker_cpu_limit", "HYDRAFLOW_DOCKER_CPU_LIMIT", 2.0),
     ("docker_spawn_delay", "HYDRAFLOW_DOCKER_SPAWN_DELAY", 2.0),
     ("visual_retry_delay", "HYDRAFLOW_VISUAL_RETRY_DELAY", 2.0),
@@ -755,6 +768,11 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
     ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
     ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
+    (
+        "wiki_compaction_similarity_threshold",
+        "HYDRAFLOW_WIKI_COMPACTION_SIMILARITY_THRESHOLD",
+        0.8,
+    ),
 ]
 
 # Formal give-up window thresholds (#10735) — one N-in-T pair per child-class.
@@ -825,6 +843,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TRANSCRIPT_SUMMARIZATION_ENABLED",
         True,
     ),
+    ("retro_finder_enabled", "HYDRAFLOW_RETRO_FINDER_ENABLED", True),
     ("unstick_auto_merge", "HYDRAFLOW_UNSTICK_AUTO_MERGE", True),
     ("unstick_all_causes", "HYDRAFLOW_UNSTICK_ALL_CAUSES", True),
     (
@@ -1164,6 +1183,7 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("wiki_compilation_provider", "HYDRAFLOW_WIKI_COMPILATION_PROVIDER"),
     ("adr_review_provider", "HYDRAFLOW_ADR_REVIEW_PROVIDER"),
     ("transcript_summary_provider", "HYDRAFLOW_TRANSCRIPT_SUMMARY_PROVIDER"),
+    ("retro_finder_provider", "HYDRAFLOW_RETRO_FINDER_PROVIDER"),
     ("triage_honeypot_provider", "HYDRAFLOW_TRIAGE_HONEYPOT_PROVIDER"),
     ("pr_unstick_provider", "HYDRAFLOW_PR_UNSTICK_PROVIDER"),
     ("term_proposer_provider", "HYDRAFLOW_TERM_PROPOSER_PROVIDER"),
@@ -1249,6 +1269,7 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
         "transcript_summary_tool",
         "transcript_summary_model",
     ),
+    ("HYDRAFLOW_RETRO_FINDER", "retro_finder_tool", "retro_finder_model"),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
@@ -3373,6 +3394,9 @@ class HydraFlowConfig(BaseModel):
     transcript_summary_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
     ] = Field(default="claude", description="Backend for transcript summarization.")
+    retro_finder_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
+        Field(default="claude", description="Backend for the retrospective finder.")
+    )
     triage_honeypot_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
     ] = Field(
@@ -4196,6 +4220,40 @@ class HydraFlowConfig(BaseModel):
             "with a single call."
         ),
     )
+    wiki_compilation_max_batches_per_tick: int = Field(
+        default=4,
+        ge=0,
+        le=1000,
+        description=(
+            "Most synthesis batches one topic may spend in a single tick. "
+            "Batching alone bounds each CALL but not the tick: a 4089-entry "
+            "topic would buy its whole backlog at once. The remainder stays "
+            "active and is compiled on later ticks. 0 disables the cap."
+        ),
+    )
+    wiki_compaction_similarity_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Body-similarity score at or above which two active wiki entries "
+            "count as a merge candidate. A topic with no candidate pair has "
+            "nothing for synthesis to merge, so its spawn is skipped entirely. "
+            "0 disables the check (every topic compiles, the pre-#11898 "
+            "behaviour)."
+        ),
+    )
+    wiki_barren_compile_cooldown_hours: float = Field(
+        default=24.0,
+        ge=0.0,
+        le=720.0,
+        description=(
+            "Hours a wiki topic whose synthesis wrote nothing AND re-proposed "
+            "only already-rejected entries is skipped for. 0 disables the "
+            "barren gate entirely (every changed topic re-compiles, the "
+            "pre-#11888 behaviour)."
+        ),
+    )
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
 
@@ -4420,6 +4478,31 @@ class HydraFlowConfig(BaseModel):
         ge=5_000,
         le=500_000,
         description="Max transcript characters to send for summarization (truncated from end)",
+    )
+    # Retrospective finder (trace-grounded GATE/POLICY/BUGFIX findings)
+    retro_finder_enabled: bool = Field(
+        default=True,
+        description="Turn retrospective signals into typed findings via a model call",
+    )
+    retro_finder_model: str = Field(
+        default="haiku",
+        description="Cheap model that proposes findings from retrospective signals",
+    )
+    retro_finder_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for the retrospective finder",
+    )
+    retro_evidence_max_chars: int = Field(
+        default=40_000,
+        ge=2_000,
+        le=200_000,
+        description="Max evidence characters sent to the retrospective finder",
+    )
+    retro_findings_max_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=25,
+        description="Max retrospective findings emitted per loop tick",
     )
     # Report issue worker
     report_issue_tool: Literal["claude", "codex"] = Field(
@@ -5648,6 +5731,22 @@ class HydraFlowConfig(BaseModel):
             "(spec §8). Override if the sandbox org is renamed."
         ),
     )
+    contract_refresh_external_recorders: tuple[str, ...] = Field(
+        default=("github", "docker", "claude"),
+        description=(
+            "Which of ContractRefreshLoop's external recorders may run when "
+            "``contract_refresh_external_enabled`` is on. Selected by name so "
+            "one recorder can be silenced without taking the others with it — "
+            "#11830 turned all three off to stop one, which a sampled "
+            "re-audit flagged as a scope mismatch (#11837).\n\n"
+            "Defaults to all three. The github recorder is skipped separately "
+            "while ``contracts_sandbox_repo`` is still its placeholder default "
+            "(that slug 404s, #11821); pointing it at a real repo is what "
+            "re-enables it, so the skip tracks the diagnosed defect — an "
+            "unreachable TARGET — rather than blaming the recorder."
+        ),
+    )
+
     contract_refresh_external_enabled: bool = Field(
         default=False,
         description=(
@@ -6150,6 +6249,12 @@ class HydraFlowConfig(BaseModel):
         ge=30,
         le=600,
         description="Timeout in seconds for transcript summarization model calls",
+    )
+    retro_finder_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=900,
+        description="Timeout in seconds for the retrospective finder model call",
     )
     # Execution mode
     dry_run: bool = Field(
@@ -7198,6 +7303,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         for field in (
             "triage_tool",
             "transcript_summary_tool",
+            "retro_finder_tool",
             "report_issue_tool",
             "adr_review_tool",
         ):

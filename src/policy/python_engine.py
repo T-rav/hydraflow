@@ -77,7 +77,12 @@ _PYRAMID_REQUIRED = (
     "has_unit",
     "has_scenario",
     "has_sandbox",
+    "shape",
+    "requires_unit",
+    "requires_scenario",
+    "requires_sandbox",
 )
+
 
 #: Facts every ``adr_conformance`` subject must carry. ``rename_match`` is
 #: optional by design — its absence *is* the observation "no rename detected".
@@ -135,24 +140,25 @@ class PythonDecisionEngine:
 
     @staticmethod
     def _decide_test_pyramid(subject: str, facts: Sequence[Fact]) -> StandardDecision:
-        """Did a load-bearing change ship all three test layers?
+        """Judge a change against the standard's "when each layer is required".
 
-        `docs/standards/testing/README.md`: "Every load-bearing feature ships
-        through three layers before it merges. Skipping a layer is a procedural
-        failure — not a judgment call." The standard was prose; nothing checked
-        it, and on 2026-08-31 six load-bearing fixes merged with unit tests only
-        — including #11853, whose whole defect was a call site the unit tests
-        could not see (#11880).
+        BLOCKING only where the standard itself says `required`, and only for a
+        change shape derived unambiguously from the conventional-commit type.
+        Everything else reports.
 
-        **Never blocking, by design.** "Load-bearing" is not statically
-        decidable: it depends on what a future change puts on the main path.
-        A blocking gate would false-positive on ordinary refactors, get
-        disabled, and a disabled gate is worse than the defect — the same
-        reasoning that ruled out a pre-commit hook in #11827. This reports so
-        the omission is visible on the PR and deliberate rather than silent.
+        That boundary is the whole design. "Load-bearing" is not statically
+        decidable, but "this PR contains a `fix(` commit, and the standard says
+        a bug fix requires a scenario" IS — it reads an obligation the standard
+        already declares rather than inventing one. `feat(` maps to no shape,
+        because it may be a new loop, a new port method, or neither, and those
+        rows disagree; gating on a guess is how a gate earns its way into being
+        disabled (#11881, where a gate of mine rejected a legal value).
+
+        `conditional` never blocks: the standard's own word for "it depends".
         """
         by_key = _indexed(facts, _PYRAMID_REQUIRED)
         touches_source = bool(by_key["touches_source"])
+        shape = str(by_key["shape"])
         present = {
             layer: bool(by_key[f"has_{layer}"])
             for layer in ("unit", "scenario", "sandbox")
@@ -186,15 +192,46 @@ class PythonDecisionEngine:
                 facts=list(facts),
             )
 
+        # The requirement arrives as FACTS, never read here: this module is a
+        # pure seam and its guard says so outright — "if the engine now needs
+        # to read something, the read belongs in policy.facts (a collector)".
+        required_missing = [
+            layer
+            for layer in missing
+            if str(by_key.get(f"requires_{layer}", "")) == "required"
+        ]
+
+        if required_missing:
+            return StandardDecision(
+                standard=STANDARD_TEST_PYRAMID,
+                subject=subject,
+                status=DecisionStatus.VIOLATED,
+                blocking=True,
+                reason=(
+                    f"{shape!r} requires {', '.join(required_missing)} and the "
+                    f"change ships neither. The standard calls skipping a layer "
+                    "'a procedural failure, not a judgment call' — #11853 "
+                    "shipped with 20 passing unit tests and a defect only a "
+                    "scenario could see."
+                ),
+                remediation=RemediationAction.ESCALATE,
+                facts=list(facts),
+            )
+
         return StandardDecision(
             standard=STANDARD_TEST_PYRAMID,
             subject=subject,
             status=DecisionStatus.VIOLATED,
             blocking=False,
             reason=(
-                "source changed with pyramid layer(s) missing: "
-                f"{', '.join(missing)}. Unit tests are blind to integration and "
-                "wiring defects — #11853 shipped with 20 passing unit tests."
+                "layer(s) missing: "
+                f"{', '.join(missing)}"
+                + (
+                    f" — advisory: {shape!r} marks them conditional"
+                    if shape
+                    else " — advisory: the commit type maps to no declared "
+                    "shape, so no obligation is asserted"
+                )
             ),
             remediation=RemediationAction.FILE_ISSUE,
             facts=list(facts),

@@ -21,6 +21,7 @@ import pytest
 
 from models import Task
 from orchestrator import HydraFlowOrchestrator
+from tests.helpers import config_mock
 
 
 def _issue(n: int = 42) -> Task:
@@ -39,7 +40,7 @@ def _issue(n: int = 42) -> Task:
 
 
 def _orch(state, *, threshold: int = 3, max_requeues: int = 3):
-    config = MagicMock()
+    config = config_mock()
     config.review_orphan_strike_threshold = threshold
     config.review_orphan_max_requeues = max_requeues
     config.ready_label = ["hydraflow-ready"]

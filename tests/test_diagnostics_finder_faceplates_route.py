@@ -16,6 +16,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.helpers import config_mock
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import dashboard_routes._diagnostics_routes as diag  # noqa: E402
@@ -36,7 +38,7 @@ _NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
 
 
 def _config(tmp_path: Path) -> MagicMock:
-    cfg = MagicMock()
+    cfg = config_mock()
     cfg.data_root = tmp_path
     cfg.data_path = tmp_path.joinpath
     cfg.repo = "o/r"

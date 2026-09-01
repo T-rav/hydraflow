@@ -24,12 +24,13 @@ import repo_wiki_loop as rwl_module
 from base_background_loop import LoopDeps
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop, _parse_utc
+from tests.helpers import config_mock
 
 
 def _make_loop(
     tmp_path: Path, *, min_files: int = 8, max_age: int = 24
 ) -> RepoWikiLoop:
-    config = MagicMock()
+    config = config_mock()
     config.data_path.return_value = tmp_path / "queue"
     config.repo = "acme/widgets"
     config.repo_wiki_min_batch_files = min_files

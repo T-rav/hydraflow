@@ -203,6 +203,8 @@ cadence and files remediation issues on drift.
 | [0141](0141-bounded-reversible-routing-enforcement-canary.md) | Bounded, reversible routing enforcement — the resolve-and-mint canary | Accepted |
 | [0142](0142-multi-account-pools-and-bounded-fallback.md) | Multi-account pools and bounded fallback | Accepted |
 | [0143](0143-paaa-governance-model-and-the-decision-seam.md) | PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam | Accepted |
+| [0144](0144-trace-grounded-retrospective-findings.md) | Trace-grounded retrospective findings — anchors, not advice | Proposed |
+| [0145](0145-charter-declared-loops.md) | Charter-declared loops — the repo owns the workflow, the factory owns governance | Proposed |
 
 ## Adding a new ADR
 

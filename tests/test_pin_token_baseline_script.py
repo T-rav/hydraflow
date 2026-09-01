@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers import config_mock
 from token_drift import (
     MIN_BASELINE_WINDOWS,
     TokenBaseline,
@@ -38,7 +39,7 @@ def _load_cli() -> ModuleType:
 
 
 def _fake_config(tmp_path: Path) -> MagicMock:
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     prompt_dir = tmp_path / "metrics" / "prompt"
     config.cost_inferences_path = prompt_dir / "inferences.jsonl"

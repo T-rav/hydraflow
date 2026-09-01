@@ -268,6 +268,20 @@ def _check_contracts_sandbox(config: HydraFlowConfig) -> CheckResult:
         )
 
     slug = getattr(config, "contracts_sandbox_repo", "") or ""
+    # #11837 — the github recorder is skipped while its target is the shipped
+    # placeholder, so on a stock install there is nothing here to warn about
+    # and the docker/claude recorders keep working. Reporting "unreachable"
+    # for a recorder that is not running would be the same class of misleading
+    # signal this check was written to remove.
+    placeholder = HydraFlowConfig.model_fields["contracts_sandbox_repo"].default
+    if slug == placeholder:
+        return CheckResult(
+            "contracts-sandbox",
+            CheckStatus.PASS,
+            f"contracts_sandbox_repo is still the placeholder {slug!r}, so the "
+            "github recorder is skipped; docker and claude still record. Point "
+            "it at a real repo to enable github contract recording.",
+        )
     if not slug:
         return CheckResult(
             "contracts-sandbox",
@@ -290,10 +304,13 @@ def _check_contracts_sandbox(config: HydraFlowConfig) -> CheckResult:
         "contracts-sandbox",
         CheckStatus.WARN,
         f"contracts sandbox {slug!r} is unreachable, so ContractRefreshLoop's "
-        "external recorder can never re-record cassettes — it will warn every "
-        "cycle and never succeed (#11821). Create the repo, repoint "
-        "`contracts_sandbox_repo`, or set "
-        "`contract_refresh_external_enabled=false` to stop attempting it.",
+        "github recorder can never re-record cassettes — it will warn every "
+        "cycle and never succeed (#11821). Create the repo, or repoint "
+        "`contracts_sandbox_repo` (its placeholder default skips the github "
+        "recorder outright). Dropping `github` from "
+        "`contract_refresh_external_recorders` silences just this recorder; "
+        "`contract_refresh_external_enabled=false` also stops docker and "
+        "claude, which is more than this problem calls for (#11837).",
     )
 
 

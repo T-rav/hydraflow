@@ -962,3 +962,90 @@ _Source: #11748 (manual)_
 ```json:entry
 {"id":"01M15ZNNP35TN5FRW5093MN2Z1","title":"`charter.yaml` `actors` is a pointer; a role list is rejected at load","topic":null,"source_type":"manual","source_issue":11748,"source_repo":null,"created_at":"2026-08-28T00:00:00+00:00","updated_at":"2026-08-28T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## A background wrapper's exit code is not the suite's — read the recorded log
+
+`( make quality > log 2>&1; echo "EXIT=$?" >> log )` run in the background
+reports **completed (exit code 0)** for the *wrapper*, not for the suite. It
+did so three times in one session while the log's own last line read `EXIT=2`.
+Early stage lines compound the illusion: `772 passed` scrolls past long before
+the real `30223 passed` summary, so a glance at the tail mid-run looks like a
+green finish.
+
+Only two things settle it: the `EXIT=` line the wrapper itself appended, and
+the final `N passed` summary. Never the harness's completion notice.
+
+**Why:** a false green here is not cosmetic — one was nearly reported as a
+passing suite on a PR.
+
+```json:entry
+{"id":"01MA5104E065C4C4CE4B91AE5F","title":"A background wrapper's exit code is not the suite's \u2014 read the recorded log","topic":null,"source_type":"manual","source_issue":11908,"source_repo":null,"created_at":"2026-08-31T00:00:00+00:00","updated_at":"2026-08-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
+## `git merge-base --is-ancestor` reports every squash-merged branch as unmerged
+
+Squash-merging rewrites the commits, so the branch tip is not an ancestor of
+the base. A cleanup predicate built on `--is-ancestor` therefore answers
+"not-merged" for *every* branch this repo has ever merged — this repo squashes.
+
+Ask GitHub instead (`gh pr list --head <branch> --state all --json state`), or
+prove landing the way `workspace_gc_landed_safety.landed_proof` does: ancestry,
+then **squash-tree equality**, then exact-HEAD merged PR. That ladder exists
+precisely because ancestry alone is wrong here.
+
+**Why:** the failure is silent and one-directional — it never deletes anything
+it shouldn't, it just quietly declines to clean anything at all, which is how
+14 GB of merged worktrees accumulated unnoticed.
+
+```json:entry
+{"id":"01M59CDAC58013041A6B4EB407","title":"`git merge-base --is-ancestor` reports every squash-merged branch as unmerged","topic":null,"source_type":"manual","source_issue":11908,"source_repo":null,"created_at":"2026-08-31T00:00:00+00:00","updated_at":"2026-08-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
+## A uniform answer across heterogeneous inputs means the predicate is broken
+
+A worktree sweep reported `NO-REMOTE` for all 33 worktrees. The cause was not
+the data: the shell loop had lost `PATH`, so `git` itself was "command not
+found" and every probe fell through to its fallback branch.
+
+Thirty-three independently-created branches do not share one state. When a
+scan returns the same verdict for every row — all-clean, all-missing,
+all-blocked — suspect the instrument before believing the reading, and feed it
+one input whose answer you already know.
+
+**Why:** this reading would have concluded that nothing was safe to delete.
+The opposite error — a uniform "safe" — deletes everything.
+
+```json:entry
+{"id":"01M004FA6166E59402CBA12F3C","title":"A uniform answer across heterogeneous inputs means the predicate is broken","topic":null,"source_type":"manual","source_issue":11908,"source_repo":null,"created_at":"2026-08-31T00:00:00+00:00","updated_at":"2026-08-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
+## Three CI gates that only fail in CI: suppressions-on-resolved, P1.17 receipts, parametrize copies
+
+Each cost a full CI round trip in one session, and none is reachable from a
+targeted local test run. All three reproduce locally with
+`HYDRAFLOW_AUDIT_PR_BASE=staging make audit` plus `make lint-check`.
+
+- **The suppressions ratchet fires on RESOLVED violations, not only new ones.**
+  Deleting code that carried `noqa:` suppressions requires pruning
+  `disturbance/baselines/suppressions.yaml` **in the same change** — the
+  baseline shrinks with the code. Adding new suppressions is never an option:
+  hoist the deferred import instead (and remember hoisting rebinds the name, so
+  tests must then patch the *consuming* module).
+- **P1.17: a control-plane ADR's `Divergence:` line must cite a receipt** — an
+  ADR, incident, `#issue`, or audit finding. A well-argued Divergence with no
+  citation fails.
+- **The suite-hygiene ratchet counts groups of ≥3 tests in one file with
+  identical normalized bodies.** Do not guess which group tripped it: run
+  `compute(collect_tests(Path("tests")))` from `erosion.suite_hygiene` and it
+  names the file. Guessing cost one wrong collapse that did not move the number.
+
+**Why:** all three are invisible to the targeted runs an implementer actually
+does, so each one is discovered at the most expensive possible moment.
+
+```json:entry
+{"id":"01M3D15670E3B5C47C1A68DAE9","title":"Three CI gates that only fail in CI: suppressions-on-resolved, P1.17 receipts, parametrize copies","topic":null,"source_type":"manual","source_issue":11908,"source_repo":null,"created_at":"2026-08-31T00:00:00+00:00","updated_at":"2026-08-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

@@ -2077,3 +2077,119 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
     from pr_manager import PRManager
 
     return PRManager(config=config, event_bus=event_bus)
+
+
+def wiki_compiler_mock(
+    *,
+    compile_topic: int | None = None,
+    compile_topic_tracked: int | None = None,
+    accepted: int | None = None,
+    rejected: list[str] | None = None,
+) -> Any:
+    """A ``WikiCompiler`` stand-in that answers the loop's WHOLE contract.
+
+    ``RepoWikiLoop`` reads ``last_anchor_gate_verdict`` after every compile to
+    feed the barren ledger (#11888). A bare ``MagicMock()`` returns a Mock for
+    that property, which unpacks to zero values and raises inside the loop's
+    broad ``except`` — reported as "Wiki compile failed" while the compile
+    actually succeeded. Configure the verdict here so the next stand-in cannot
+    reintroduce it.
+
+    *accepted* defaults to whichever compile count the caller supplied, so the
+    stand-in is self-consistent: a compile that returned entries did not also
+    have every entry rejected.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    compiler = MagicMock()
+    if compile_topic is not None:
+        compiler.compile_topic = AsyncMock(return_value=compile_topic)
+    if compile_topic_tracked is not None:
+        compiler.compile_topic_tracked = AsyncMock(return_value=compile_topic_tracked)
+    if accepted is None:
+        accepted = (
+            compile_topic_tracked if compile_topic_tracked is not None else 0
+        ) or (compile_topic or 0)
+    compiler.last_anchor_gate_verdict = (rejected or [], accepted)
+    return compiler
+
+
+def bare_wiki_compiler(**config_overrides: Any) -> Any:
+    """A ``WikiCompiler`` built past ``__init__`` with a usable stub config.
+
+    Eight test files each hand-rolled this, and each set only the fields it
+    happened to need. Adding a numeric knob to the real config then broke all
+    of them at once with ``'>' not supported between 'int' and 'MagicMock'`` —
+    the crash is loud, but the fix would have been eight edits, and the ninth
+    builder written tomorrow would have missed it again (#11819).
+
+    Every NUMERIC field the compile paths read is given a real number here.
+    A bare ``MagicMock`` attribute is fine for a string or a flag; it is a
+    latent crash the moment the subject compares or does arithmetic on it.
+    """
+    from unittest.mock import MagicMock
+
+    from wiki_compiler import WikiCompiler
+
+    compiler = WikiCompiler.__new__(WikiCompiler)
+    # config_mock, not MagicMock: every numeric field carries its real default,
+    # so a knob added later cannot turn this builder into a latent TypeError
+    # (#11827). The explicit sets below are the ones this stand-in needs to
+    # DIFFER from the real defaults.
+    config = config_mock()
+    config.wiki_compilation_tool = "stub"
+    config.wiki_compilation_model = "stub"
+    config.wiki_compilation_provider = None
+    config.wiki_compilation_timeout = 60
+    config.wiki_compilation_batch_chars = 20_000
+    config.wiki_compilation_max_batches_per_tick = 0  # uncapped unless asked
+    # 0 = 'every topic has work', so a fixture that seeds no duplicates still
+    # reaches the compile it is testing (#11898).
+    config.wiki_compaction_similarity_threshold = 0.0
+    for name, value in config_overrides.items():
+        setattr(config, name, value)
+    compiler._config = config
+    compiler._credentials = MagicMock()
+    compiler._credentials.gh_token = ""
+    compiler._runner = MagicMock()
+    compiler._last_rejected_digests = []
+    compiler._last_accepted_count = 0
+    return compiler
+
+
+def config_mock(**overrides: Any) -> Any:
+    """A ``MagicMock`` config whose NUMERIC fields carry the real defaults.
+
+    A bare ``MagicMock()`` answers every attribute with a Mock, including the
+    336 numeric fields production code compares against — and comparison
+    against a Mock RAISES (``1 > MagicMock()`` is a ``TypeError``, in both
+    operand orders). The mock is harmless only for as long as no test *reaches*
+    the comparison, so a green fixture is not evidence that it is safe, only
+    that nothing got there yet. Adding a code path that reaches it turns a
+    passing test into a ``TypeError`` with no change to the test (#11827).
+
+    Arithmetic is the silent direction: ``1 + MagicMock()`` returns a truthy
+    Mock and propagates. Comparison at least fails loudly.
+
+    Seeded BY REFERENCE from ``HydraFlowConfig.model_fields``, so a numeric
+    knob added tomorrow is covered without editing this helper. That is the
+    whole point — the class has recurred because every previous fix named one
+    field, and the next field was always unnamed.
+
+    Everything non-numeric stays an ordinary Mock, so callables
+    (``config.data_path``), strings and flags keep their usual stand-in
+    behaviour and can be overridden as before.
+    """
+    from unittest.mock import MagicMock
+
+    from config import HydraFlowConfig
+
+    mock = MagicMock()
+    for name, field in HydraFlowConfig.model_fields.items():
+        if field.annotation in (int, float) and not isinstance(
+            field.default, type(...)
+        ):
+            setattr(mock, name, field.default)
+    for name, value in overrides.items():
+        setattr(mock, name, value)
+    return mock

@@ -25,7 +25,9 @@ from repo_wiki import (
     WikiEntry,
 )
 from wiki_anchor_gate import config_field_vocabulary, has_repo_anchor
+from wiki_synthesis_ledger import synthesis_digest
 
+from ._batching import batch_by_chars
 from ._flow import WikiCompilerFlowMixin
 from ._judge import WikiCompilerJudgeMixin
 from ._model_io import WikiCompilerModelIOMixin
@@ -67,6 +69,10 @@ class WikiCompiler(
     ) -> None:
         self._config = config
         self._runner = runner
+        # Anchor-gate verdict of the most recent compile (#11888). The loop
+        # folds these into the barren ledger; the compiler only reports.
+        self._last_rejected_digests: list[str] = []
+        self._last_accepted_count = 0
         if credentials is None:
             from config import Credentials as _Creds  # noqa: PLC0415
 
@@ -116,20 +122,11 @@ class WikiCompiler(
         smallest prompt that can carry it; if that one call times out the
         circuit breaker bounds the cost.
         """
-        budget = max(self._config.wiki_compilation_batch_chars, 1)
-        batches: list[list[WikiEntry]] = []
-        current: list[WikiEntry] = []
-        used = 0
-        for entry in entries:
-            size = len(self._entry_block(entry))
-            if current and used + size > budget:
-                batches.append(current)
-                current, used = [], 0
-            current.append(entry)
-            used += size
-        if current:
-            batches.append(current)
-        return batches
+        return batch_by_chars(
+            entries,
+            lambda entry: len(self._entry_block(entry)),
+            self._config.wiki_compilation_batch_chars,
+        )
 
     async def compile_topic(
         self,
@@ -273,8 +270,8 @@ class WikiCompiler(
         )
         return entries
 
-    @staticmethod
     def _filter_anchored_entries(
+        self,
         entries: list[WikiEntry],
         *,
         repo: str,
@@ -294,13 +291,15 @@ class WikiCompiler(
         """
         vocab = config_field_vocabulary()
         kept: list[WikiEntry] = []
-        dropped = 0
+        self._last_rejected_digests = []
         for entry in entries:
             text = f"{entry.title}\n{entry.content}"
             if has_repo_anchor(text, config_fields=vocab):
                 kept.append(entry)
                 continue
-            dropped += 1
+            self._last_rejected_digests.append(
+                synthesis_digest(entry.title, entry.content)
+            )
             logger.info(
                 "Wiki %s gate dropped anchor-less entry for %s/%s: %r",
                 context,
@@ -308,9 +307,25 @@ class WikiCompiler(
                 topic,
                 entry.title,
             )
-        if dropped:
-            _metrics.increment("wiki_entries_rejected_no_anchor", dropped)
+        self._last_accepted_count = len(kept)
+        if self._last_rejected_digests:
+            _metrics.increment(
+                "wiki_entries_rejected_no_anchor", len(self._last_rejected_digests)
+            )
         return kept
+
+    @property
+    def last_anchor_gate_verdict(self) -> tuple[list[str], int]:
+        """``(rejected digests, accepted count)`` from the most recent compile.
+
+        The barren ledger (#11888) needs the OUTPUT of a compile, not its
+        input: the input fingerprint gate (#11373) already covers the input and
+        cannot tell "the topic changed" from "the outcome could change". Read
+        this immediately after the compile call that produced it — it is
+        overwritten by the next one, deliberately, so a caller cannot fold a
+        stale verdict in.
+        """
+        return list(self._last_rejected_digests), self._last_accepted_count
 
     @staticmethod
     def _parse_entries(raw: str) -> list[WikiEntry]:

@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections import Counter
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
+from exception_classify import reraise_on_credit_or_bug
 from models import IsoTimestamp, PlanAccuracyResult, ReviewVerdict
+from retro_emitter import emit
+from retro_evidence import gather
+from retro_finder import RetroFinder
+from retro_findings import validate
+from retro_signals import extract
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -54,18 +60,13 @@ class RetrospectiveCollector:
         queue: RetrospectiveQueue | None = None,
         observability: ObservabilityPort | None = None,
     ) -> None:
-        from dedup_store import DedupStore  # noqa: PLC0415
-
         self._config = config
         self._state = state
         self._prs = prs
         self._queue = queue
         self._obs: ObservabilityPort | None = observability
         self._retro_path = config.retrospectives_path
-        self._filed = DedupStore(
-            "filed_patterns",
-            config.repo_memory_dir / "filed_patterns.json",
-        )
+        self._finder = RetroFinder(config)
 
     async def record(
         self,
@@ -99,9 +100,10 @@ class RetrospectiveCollector:
                     )
                 )
             else:
-                # Fallback: inline detection when queue not wired
-                recent = self._load_recent(self._config.retrospective_window)
-                await self._detect_patterns(recent)
+                # Fallback: inline analysis when the queue is not wired.
+                await self.analyze_evidence(
+                    self._load_recent(self._config.retrospective_window)
+                )
         except Exception:
             logger.warning(
                 "Retrospective failed for issue #%d — continuing",
@@ -261,122 +263,63 @@ class RetrospectiveCollector:
             logger.warning("Could not load retrospective log", exc_info=True)
             return []
 
-    async def _detect_patterns(self, entries: list[RetrospectiveEntry]) -> None:
-        """Scan recent entries for patterns and file improvement proposals."""
-        if len(entries) < 3:
-            return
+    async def analyze_evidence(
+        self, entries: list[RetrospectiveEntry]
+    ) -> dict[str, int]:
+        """Turn recent issues' traces and transcripts into filed findings.
 
-        filed = self._load_filed_patterns()
-        n = len(entries)
+        Replaces the four hardcoded prose branches this class used to emit —
+        "consider strengthening the implementation prompt" and friends — none
+        of which could name a file, a command, an error or a guard, because
+        ``RetrospectiveEntry`` carries no field that could hold one.
+        """
+        counts = {
+            "signals": 0,
+            "filed": 0,
+            "policy": 0,
+            "dropped": 0,
+            "errors": 0,
+            "unparseable": 0,
+            "capped": 0,
+        }
+        issues = sorted({e.issue_number for e in entries})
+        if not issues:
+            return counts
 
-        # Quality fix pattern: >50% needed quality fixes
-        quality_fix_count = sum(1 for e in entries if e.quality_fix_rounds > 0)
-        if quality_fix_count / n > 0.5:
-            key = "quality_fix"
-            if key not in filed:
-                await self._file_improvement_issue(
-                    title="Pattern: Frequent quality fix rounds needed",
-                    body=(
-                        f"**{quality_fix_count} of {n}** recent issues needed "
-                        "quality fix rounds during implementation.\n\n"
-                        "Consider strengthening the implementation prompt to "
-                        "emphasize running `make quality` before finishing.\n\n"
-                        "---\n*Auto-detected by HydraFlow Retrospective*"
-                    ),
-                )
-                filed.add(key)
-                self._save_filed_patterns(filed)
-                return  # Cap at 1 per run
+        signals = extract([gather(self._config, n) for n in issues])
+        counts["signals"] = len(signals)
+        if not signals:
+            return counts
 
-        # Plan accuracy pattern: average < 70%
-        avg_accuracy = sum(e.plan_accuracy_pct for e in entries) / n
-        if avg_accuracy < 70:
-            key = "plan_accuracy"
-            if key not in filed:
-                await self._file_improvement_issue(
-                    title="Pattern: Low plan accuracy across recent issues",
-                    body=(
-                        f"Average plan accuracy is **{avg_accuracy:.1f}%** "
-                        f"across the last {n} issues.\n\n"
-                        "The planner is consistently missing files that need "
-                        "changes. Consider improving the planner prompt to "
-                        "better analyze dependencies.\n\n"
-                        "---\n*Auto-detected by HydraFlow Retrospective*"
-                    ),
-                )
-                filed.add(key)
-                self._save_filed_patterns(filed)
-                return
-
-        # Reviewer fix pattern: >40% needed reviewer fixes
-        reviewer_fix_count = sum(1 for e in entries if e.reviewer_fixes_made)
-        if reviewer_fix_count / n > 0.4:
-            key = "reviewer_fixes"
-            if key not in filed:
-                await self._file_improvement_issue(
-                    title="Pattern: Reviewer frequently fixing implementation",
-                    body=(
-                        f"**{reviewer_fix_count} of {n}** recent reviews "
-                        "required the reviewer to make fixes.\n\n"
-                        "The implementation prompt likely needs strengthening "
-                        "to produce higher-quality first drafts.\n\n"
-                        "---\n*Auto-detected by HydraFlow Retrospective*"
-                    ),
-                )
-                filed.add(key)
-                self._save_filed_patterns(filed)
-                return
-
-        # Unplanned file pattern: same file appears in >30% of entries
-        unplanned_counter: Counter[str] = Counter()
-        for e in entries:
-            for f in e.unplanned_files:
-                unplanned_counter[f] += 1
-        threshold = n * 0.3
-        for file_path, count in unplanned_counter.most_common():
-            if count > threshold:
-                key = f"unplanned_file:{file_path}"
-                if key not in filed:
-                    await self._file_improvement_issue(
-                        title=f"Pattern: {file_path} frequently unplanned",
-                        body=(
-                            f"`{file_path}` appeared as an unplanned file in "
-                            f"**{count} of {n}** recent issues.\n\n"
-                            "The planner should be made aware that this file "
-                            "commonly needs changes.\n\n"
-                            "---\n*Auto-detected by HydraFlow Retrospective*"
-                        ),
-                    )
-                    filed.add(key)
-                    self._save_filed_patterns(filed)
-                    return
-                break
-
-    async def _file_improvement_issue(self, title: str, body: str) -> None:
-        """Write a retrospective pattern suggestion to local JSONL memory store."""
-        from phase_utils import file_memory_suggestion  # noqa: PLC0415
-
-        clean_title = title.removeprefix("[Memory] ").strip()
-        # Map retrospective pattern → tribal-memory schema fields.
-        pseudo_transcript = (
-            "MEMORY_SUGGESTION_START\n"
-            f"principle: {clean_title}\n"
-            f"rationale: {body}\n"
-            "failure_mode: Auto-detected regression pattern during retrospective\n"
-            "scope: hydraflow\n"
-            "MEMORY_SUGGESTION_END"
+        # Label lookup is one API call per issue in the window; skip it
+        # entirely when the finder will not spawn.
+        labels = (
+            await self._window_labels(issues)
+            if self._config.retro_finder_enabled
+            else []
         )
-        await file_memory_suggestion(
-            pseudo_transcript,
-            "retrospective",
-            clean_title,
-            self._config,
-        )
+        findings = await self._finder.find(signals, issue_labels=labels)
+        counts["unparseable"] = getattr(self._finder, "unparseable", 0)
+        kept, dropped = validate(findings, signals, Path(self._config.repo_root))
+        counts["dropped"] = len(dropped)
+        for drop in dropped:
+            logger.info("Retro finding dropped (%s): %s", drop.kind, drop.reason)
 
-    def _load_filed_patterns(self) -> set[str]:
-        """Load the set of already-filed pattern keys."""
-        return self._filed.get()
+        counts.update(await emit(kept, signals, self._prs, self._config))
+        return counts
 
-    def _save_filed_patterns(self, patterns: set[str]) -> None:
-        """Persist the set of filed pattern keys."""
-        self._filed.set_all(patterns)
+    async def _window_labels(self, issues: list[int]) -> list[str]:
+        """Union of labels across the issues whose evidence was read.
+
+        The finder reads many issues at once, so CH-6's upward-only
+        ``data-class:`` elevation must see all of them, not any single one. A
+        lookup failure degrades to no labels rather than sinking the analysis.
+        """
+        labels: set[str] = set()
+        for number in issues:
+            try:
+                labels.update(await self._prs.get_issue_labels(number))
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.debug("Could not read labels for #%d: %s", number, exc)
+        return sorted(labels)

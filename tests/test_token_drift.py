@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from prompt_telemetry import PromptTelemetry
+from tests.helpers import config_mock
 from token_drift import (
     MAX_BASELINE_AGE,
     MEDIAN_TOKENS_SOURCE,
@@ -610,7 +611,7 @@ class TestTokenBaselineLedger:
 
 
 def _fake_config(tmp_path: Path) -> MagicMock:
-    config = MagicMock()
+    config = config_mock()
     config.data_root = tmp_path
     prompt_dir = tmp_path / "metrics" / "prompt"
     config.cost_inferences_path = prompt_dir / "inferences.jsonl"

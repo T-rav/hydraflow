@@ -473,6 +473,116 @@ def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
     return _evaluate_pr_regression_delta(ctx, merge_base)
 
 
+@register("P10.8")
+def _changes_ship_the_layers_the_standard_requires(ctx: CheckContext) -> Finding:
+    """The test pyramid, judged by the policy engine rather than left as prose.
+
+    `docs/standards/testing/README.md` calls skipping a layer "a procedural
+    failure — not a judgment call", and `standard.yaml` carries the normative
+    matrix of when each layer is required. Nothing enforced it: six
+    load-bearing fixes merged on 2026-08-31 with unit tests only, including
+    #11853 whose defect a unit test could not see by construction.
+
+    FAILS only where the standard says `required` AND the change's shape is
+    unambiguous from its conventional-commit type. "Is this load-bearing?" is
+    not statically decidable; "this PR has a `fix(` commit and the standard
+    says a bug fix requires a scenario" is. `feat(` maps to no shape because
+    the rows it could belong to disagree, and gating on a guess is how a gate
+    earns its way into being disabled (#11881, this session's own example).
+
+    Reuses P10.6's merge-base machinery, so it is NA off-PR exactly as that
+    gate is.
+    """
+    merge_base, na = _pr_gate_preflight(ctx.root)
+    if na is not None:
+        return finding("P10.8", na.status, na.what)
+    assert merge_base is not None
+
+    paths = _changed_paths_since(ctx.root, merge_base)
+    if paths is None:
+        return finding("P10.8", Status.INERT, "git read failed — PR diff unread")
+
+    # The PR TITLE decides the shape, not the branch commits: this repo
+    # squash-merges, so the title becomes the landed commit subject and an
+    # in-branch fixup (`fix(...)` correcting code added in the same PR)
+    # vanishes at merge. Judging commits meant gating on a shape that never
+    # ships — the same class of error as gating on a value the standard does
+    # not actually declare (#11881). CI passes it via HYDRAFLOW_AUDIT_PR_TITLE
+    # (github.event.pull_request.title); locally it is absent and the branch
+    # commits are the honest fallback.
+    title = os.environ.get(_PR_TITLE_ENV, "").strip()
+    if title:
+        subjects = [title]
+    else:
+        commits = _pr_commit_subjects(ctx.root, merge_base)
+        if commits is None:
+            return finding("P10.8", Status.INERT, "git read failed — commits unread")
+        subjects = commits
+
+    from datetime import UTC, datetime  # noqa: PLC0415 - audit-local import
+
+    from policy.facts import collect_test_pyramid_facts  # noqa: PLC0415
+    from policy.python_engine import PythonDecisionEngine  # noqa: PLC0415
+
+    facts = collect_test_pyramid_facts(
+        paths, observed_at=datetime.now(UTC), commit_subjects=subjects
+    )
+    # A default Charter governs every standard, so None is correct here and
+    # avoids a duck-typed stub that only satisfies the call by accident.
+    decisions = PythonDecisionEngine().decide(facts, charter=None)
+    if not decisions:
+        return finding("P10.8", Status.INERT, "engine returned no decision")
+    d = decisions[0]
+
+    # PASS or FAIL, never WARN. `overall_exit_code` treats WARN as a red audit
+    # unless the check is allow-listed as telemetry or advisory, and P10.8 is
+    # neither — it judges the PR under test. So a WARN here would redden CI for
+    # every `conditional` cell and every ambiguous `feat(`, which is precisely
+    # the false positive the design set out to avoid: the standard's own word
+    # for "it depends" would become a hard stop, and the gate would be turned
+    # off within a week. The unmet-but-not-required detail rides in the reason.
+    status = Status.FAIL if d.blocking else Status.PASS
+    return finding("P10.8", status, d.reason)
+
+
+def _changed_paths_since(root: Path, merge_base: str) -> list[str] | None:
+    """Repo-relative paths changed by this PR, or None if git fails."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{merge_base}..HEAD"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _pr_commit_subjects(root: Path, merge_base: str) -> list[str] | None:
+    """Subject lines of this PR's non-merge commits, or None if git fails."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "--format=%s", f"{merge_base}..HEAD"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+_PR_TITLE_ENV = "HYDRAFLOW_AUDIT_PR_TITLE"
+
 _CLOSE_SCAN_COUNT = 100
 
 

@@ -11,6 +11,7 @@ import pytest
 from base_background_loop import LoopDeps
 from repo_wiki import RepoWikiStore, WikiEntry
 from repo_wiki_loop import RepoWikiLoop
+from tests.helpers import config_mock, wiki_compiler_mock
 
 
 def _make_deps() -> LoopDeps:
@@ -41,10 +42,17 @@ def _make_config(wiki_root: Path) -> MagicMock:
     sandbox, and disabling `repo_wiki_git_backed` avoids the `repo_root`
     path that would repeat the same mistake.
     """
-    config = MagicMock()
+    config = config_mock()
     config.repo_wiki_interval = 3600
     config.dry_run = False
     config.repo_wiki_git_backed = False
+    # A real number, not a MagicMock: every numeric knob the loop compares
+    # is a latent crash otherwise (a bare Mock RAISES on comparison).
+    # 0 = 'every topic has work', which DISABLES the #11898 compaction
+    # pre-check. Deliberate: these tests' subject is a different gate,
+    # and a test for gate A must not be silently short-circuited by
+    # gate B — that would leave it green while testing nothing.
+    config.wiki_compaction_similarity_threshold = 0.0
     config.semantic_drift_enabled = False
     config.semantic_drift_min_age_days = 30
     config.semantic_drift_max_entries_per_tick = 10
@@ -249,7 +257,6 @@ class TestHeal:
 
     @pytest.mark.asyncio
     async def test_compilation_runs_when_compiler_present(self, tmp_path: Path) -> None:
-        from unittest.mock import AsyncMock
 
         wiki_root = tmp_path / "wiki"
         store = RepoWikiStore(wiki_root)
@@ -266,8 +273,7 @@ class TestHeal:
             ],
         )
 
-        compiler = MagicMock()
-        compiler.compile_topic = AsyncMock(return_value=3)  # 5 → 3
+        compiler = wiki_compiler_mock(compile_topic=3, accepted=3)  # 5 → 3
 
         loop = RepoWikiLoop(
             config=_make_config(wiki_root),

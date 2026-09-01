@@ -51,7 +51,9 @@ def _make_loop(
 
     retro = MagicMock()
     retro._load_recent = MagicMock(return_value=[])
-    retro._detect_patterns = AsyncMock()
+    retro.analyze_evidence = AsyncMock(
+        return_value={"signals": 0, "filed": 0, "policy": 0, "dropped": 0, "errors": 0}
+    )
 
     insights = MagicMock()
     insights.load_recent = MagicMock(return_value=[])
@@ -85,12 +87,24 @@ def _make_loop(
 class TestDoWorkEmptyQueue:
     @pytest.mark.asyncio
     async def test_returns_zero_counts(self, tmp_path: Path) -> None:
+        """Every counter, at zero — not a subset of them.
+
+        This asserted a THREE-key dict until #11890's follow-up, which is how
+        `findings_dropped` and `signals_seen` came to be missing from the exit
+        an idle factory takes on almost every tick. Compared against the loop's
+        declared vocabulary rather than a literal, so a counter added later
+        cannot pass here while being absent from the published details.
+        """
+        from retrospective_loop import _RESULT_COUNTERS
+
         loop, _, _, queue, _ = _make_loop(tmp_path)
         queue.load.return_value = []
 
         result = await loop._do_work()
 
-        assert result == {"processed": 0, "patterns_filed": 0, "stale_proposals": 0}
+        assert result == dict.fromkeys(_RESULT_COUNTERS, 0)
+        assert "findings_dropped" in result
+        assert "signals_seen" in result
 
     @pytest.mark.asyncio
     async def test_does_not_acknowledge_anything(self, tmp_path: Path) -> None:
@@ -111,7 +125,7 @@ class TestDoWorkProcessesItems:
 
         await loop._do_work()
 
-        retro._detect_patterns.assert_awaited_once()
+        retro.analyze_evidence.assert_awaited_once()
         queue.acknowledge.assert_called_once_with([item.id])
 
     @pytest.mark.asyncio
@@ -158,7 +172,7 @@ class TestDoWorkErrorHandling:
         loop, retro, _, queue, _ = _make_loop(tmp_path)
         item = QueueItem(kind=QueueKind.RETRO_PATTERNS, issue_number=42)
         queue.load.return_value = [item]
-        retro._detect_patterns.side_effect = RuntimeError("boom")
+        retro.analyze_evidence.side_effect = RuntimeError("boom")
 
         result = await loop._do_work()
 
@@ -302,7 +316,7 @@ class TestMultipleItemBatch:
 
         assert result is not None
         assert result["processed"] == 2
-        assert retro._detect_patterns.await_count == 2
+        assert retro.analyze_evidence.await_count == 2
         queue.acknowledge.assert_called_once_with([items[0].id, items[1].id])
 
 

@@ -31,6 +31,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.helpers import config_mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
@@ -45,7 +46,7 @@ def _make_review_phase(tmp_path: Path) -> ReviewPhase:
     from merge_conflict_resolver import MergeConflictResolver
     from post_merge_handler import PostMergeHandler
 
-    config = MagicMock()
+    config = config_mock()
     config.state_file = tmp_path / "state.json"
     config.state_file.write_text("{}")
     config.repo_root = tmp_path

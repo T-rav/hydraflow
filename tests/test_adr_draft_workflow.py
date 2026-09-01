@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.helpers import config_mock
 from wiki_compiler import parse_adr_draft_suggestion
 
 
@@ -52,7 +53,7 @@ import pytest
 def compiler():
     from wiki_compiler import WikiCompiler
 
-    config = MagicMock()
+    config = config_mock()
     config.wiki_compilation_tool = "claude"
     config.wiki_compilation_model = "haiku"
     config.wiki_compilation_timeout = 30

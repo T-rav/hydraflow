@@ -15,12 +15,10 @@ class TestTraceSpanStats:
     def test_defaults(self) -> None:
         stats = TraceSpanStats(
             total_spans=10,
-            total_turns=3,
             total_inference_calls=5,
             duration_seconds=42.5,
         )
         assert stats.total_spans == 10
-        assert stats.total_turns == 3
         assert stats.total_inference_calls == 5
         assert stats.duration_seconds == 42.5
 
@@ -70,17 +68,13 @@ class TestTraceSkillProfile:
     def test_defaults(self) -> None:
         profile = TraceSkillProfile(
             skill_counts={"brainstorming": 1, "tdd": 2},
-            subagent_counts={"Explore": 3, "code-reviewer": 1},
             total_skills=3,
             total_subagents=4,
         )
         assert profile.skill_counts["tdd"] == 2
-        assert profile.subagent_counts["Explore"] == 3
 
     def test_empty_profiles(self) -> None:
-        profile = TraceSkillProfile(
-            skill_counts={}, subagent_counts={}, total_skills=0, total_subagents=0
-        )
+        profile = TraceSkillProfile(skill_counts={}, total_skills=0, total_subagents=0)
         assert profile.total_skills == 0
 
 
@@ -90,10 +84,8 @@ class TestTraceSummary:
             issue_number=123,
             phase="implement",
             harvested_at="2026-04-03T12:00:00Z",
-            trace_ids=["0xabc"],
             spans=TraceSpanStats(
                 total_spans=10,
-                total_turns=3,
                 total_inference_calls=5,
                 duration_seconds=42.5,
             ),
@@ -108,12 +100,11 @@ class TestTraceSummary:
                 tool_counts={"Read": 10}, tool_errors={}, total_invocations=10
             ),
             skills=TraceSkillProfile(
-                skill_counts={}, subagent_counts={}, total_skills=0, total_subagents=0
+                skill_counts={}, total_skills=0, total_subagents=0
             ),
         )
         assert summary.issue_number == 123
         assert summary.phase == "implement"
-        assert summary.spans.total_turns == 3
         assert summary.tokens.cache_hit_rate == 0.44
 
     def test_roundtrip_serialization(self) -> None:
@@ -121,10 +112,8 @@ class TestTraceSummary:
             issue_number=42,
             phase="review",
             harvested_at="2026-04-03T12:00:00Z",
-            trace_ids=["0x123"],
             spans=TraceSpanStats(
                 total_spans=5,
-                total_turns=2,
                 total_inference_calls=3,
                 duration_seconds=10.0,
             ),
@@ -139,7 +128,7 @@ class TestTraceSummary:
                 tool_counts={"Edit": 3}, tool_errors={}, total_invocations=3
             ),
             skills=TraceSkillProfile(
-                skill_counts={}, subagent_counts={}, total_skills=0, total_subagents=0
+                skill_counts={}, total_skills=0, total_subagents=0
             ),
         )
         data = summary.model_dump()

@@ -45,7 +45,9 @@ def _make_loop(
 
     retro = MagicMock()
     retro._load_recent = MagicMock(return_value=[])
-    retro._detect_patterns = AsyncMock()
+    retro.analyze_evidence = AsyncMock(
+        return_value={"signals": 0, "filed": 0, "policy": 0, "dropped": 0, "errors": 0}
+    )
 
     insights = MagicMock()
     insights.load_recent = MagicMock(return_value=[])
@@ -81,7 +83,7 @@ class TestAuthenticationErrorPropagates:
         loop, retro, _, queue = _make_loop(tmp_path)
         item = QueueItem(kind=QueueKind.RETRO_PATTERNS, issue_number=42)
         queue.load.return_value = [item]
-        retro._detect_patterns.side_effect = AuthenticationError("token expired")
+        retro.analyze_evidence.side_effect = AuthenticationError("token expired")
 
         with pytest.raises(AuthenticationError, match="token expired"):
             await loop._do_work()
@@ -119,7 +121,7 @@ class TestCreditExhaustedErrorPropagates:
 
         exc = CreditExhaustedError("credits exhausted")
         exc.resume_at = None  # type: ignore[attr-defined]
-        retro._detect_patterns.side_effect = exc
+        retro.analyze_evidence.side_effect = exc
 
         with pytest.raises(CreditExhaustedError, match="credits exhausted"):
             await loop._do_work()
@@ -153,7 +155,7 @@ class TestNonFatalErrorsStillCaught:
         loop, retro, _, queue = _make_loop(tmp_path)
         item = QueueItem(kind=QueueKind.RETRO_PATTERNS, issue_number=42)
         queue.load.return_value = [item]
-        retro._detect_patterns.side_effect = RuntimeError("transient failure")
+        retro.analyze_evidence.side_effect = RuntimeError("transient failure")
 
         # Should NOT raise — the generic handler catches it
         result = await loop._do_work()

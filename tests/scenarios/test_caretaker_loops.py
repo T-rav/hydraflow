@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from retro_findings import GateFinding
+from retrospective import RetrospectiveCollector, RetrospectiveEntry
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
@@ -82,12 +84,28 @@ class TestL9ADRReviewerLoop:
 class TestL11RetrospectiveLoop:
     """L11: retrospective_loop drains its queue and records stats."""
 
-    async def test_empty_queue_returns_zero_processed(self, tmp_path) -> None:
-        """With an empty queue, the loop returns zero processed/patterns/stale.
+    async def test_empty_queue_publishes_every_counter_at_zero(self, tmp_path) -> None:
+        """An idle tick reports the FULL counter vocabulary, all at zero.
+
+        This asserted a three-key dict and so pinned the #11890 defect in
+        place: the empty-queue exit dropped `findings_dropped` and
+        `signals_seen`, and a reader of the published details cannot tell
+        "counted zero" from "never counted" when a key is simply absent. The
+        empty-queue path is the one an idle factory takes on nearly every tick.
+
+        This is the layer that should have caught it. It did not, because it
+        asserted the shape the code produced rather than the shape the loop
+        declares — so the defect reached the sandbox suite, which is advisory
+        on staging and required on main, and failed a promotion PR instead.
+
+        Compared against `_RESULT_COUNTERS` rather than a literal, so a counter
+        added later cannot pass here while being absent from what a reader of
+        the running system actually gets.
 
         queue.load() is sync on RetrospectiveQueue so a plain MagicMock works.
-        We configure it to return [] to exercise the early-return branch.
         """
+        from retrospective_loop import _RESULT_COUNTERS
+
         world = MockWorld(tmp_path)
 
         fake_queue = MagicMock()
@@ -96,11 +114,12 @@ class TestL11RetrospectiveLoop:
 
         stats = await world.run_with_loops(["retrospective"], cycles=1)
 
-        assert stats["retrospective"] == {
-            "processed": 0,
-            "patterns_filed": 0,
-            "stale_proposals": 0,
-        }
+        assert stats["retrospective"] == dict.fromkeys(_RESULT_COUNTERS, 0)
+        for counter in ("findings_dropped", "signals_seen"):
+            assert counter in stats["retrospective"], (
+                f"{counter} absent from an idle tick published through the "
+                "loop framework (#11890)"
+            )
         fake_queue.load.assert_called_once()
 
     async def test_retro_patterns_item_processed_and_acknowledged(
@@ -108,7 +127,7 @@ class TestL11RetrospectiveLoop:
     ) -> None:
         """A RETRO_PATTERNS queue item causes _handle_retro_patterns to run.
 
-        The retrospective collector's _load_recent and _detect_patterns are
+        The retrospective collector's _load_recent and analyze_evidence are
         called.  The item id is acknowledged and processed count == 1.
         """
         from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
@@ -122,7 +141,15 @@ class TestL11RetrospectiveLoop:
 
         fake_retro = MagicMock()
         fake_retro._load_recent.return_value = []
-        fake_retro._detect_patterns = AsyncMock(return_value=None)
+        fake_retro.analyze_evidence = AsyncMock(
+            return_value={
+                "signals": 0,
+                "filed": 0,
+                "policy": 0,
+                "dropped": 0,
+                "errors": 0,
+            }
+        )
 
         _seed_ports(
             world,
@@ -135,6 +162,117 @@ class TestL11RetrospectiveLoop:
         assert stats["retrospective"]["processed"] == 1
         fake_queue.acknowledge.assert_called_once_with([item.id])
         fake_retro._load_recent.assert_called_once()
+
+    async def test_trace_evidence_becomes_one_class_issue(self, tmp_path) -> None:
+        """A repeated tool error in the traces becomes ONE hydraflow-find issue.
+
+        Drives the real RetrospectiveCollector against FakeGitHub with a real
+        seeded trace tree; only the finder's model call is stubbed. Two ticks
+        over the same evidence must fold, not file twice — the finding is
+        pattern-shaped by construction, so siblings belong on one class issue.
+        """
+        import json  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+        config = world._harness.config
+
+        # A failed Bash call, twice, in two different issues' traces.
+        for issue in (301, 302):
+            run_dir = config.data_root / "traces" / str(issue) / "implement" / "run-1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "subprocess-0.json").write_text(
+                json.dumps(
+                    {
+                        "issue_number": issue,
+                        "phase": "implement",
+                        "source": "implementer",
+                        "run_id": 1,
+                        "subprocess_idx": 0,
+                        "backend": "claude",
+                        "started_at": "2026-08-31T00:00:00+00:00",
+                        "ended_at": "2026-08-31T00:01:00+00:00",
+                        "success": False,
+                        "crashed": False,
+                        "error": None,
+                        "tokens": {
+                            "prompt_tokens": 1,
+                            "completion_tokens": 1,
+                            "cache_read_tokens": 0,
+                            "cache_creation_tokens": 0,
+                            "cache_hit_rate": 0.0,
+                        },
+                        "tools": {
+                            "tool_counts": {"Bash": 1},
+                            "tool_errors": {"Bash": 1},
+                            "total_invocations": 1,
+                        },
+                        "tool_calls": [
+                            {
+                                "tool_name": "Bash",
+                                "started_at": "2026-08-31T00:00:01+00:00",
+                                "duration_ms": 10,
+                                "input_summary": "make quality",
+                                "succeeded": False,
+                                "error": "make: *** [quality] Error 1",
+                                "tool_use_id": "t1",
+                            }
+                        ],
+                        "skill_results": [],
+                        "turn_count": 1,
+                        "inference_count": 1,
+                    }
+                )
+            )
+
+        entries = [
+            RetrospectiveEntry(
+                issue_number=n,
+                pr_number=n + 100,
+                timestamp="2026-08-31T00:00:00+00:00",
+            )
+            for n in (301, 302)
+        ]
+
+        fake_queue = MagicMock()
+        fake_queue.load.return_value = [QueueItem(kind=QueueKind.RETRO_PATTERNS)]
+
+        collector = RetrospectiveCollector(config, MagicMock(), world._github)
+        collector._load_recent = MagicMock(return_value=entries)
+
+        _seed_ports(world, retrospective_queue=fake_queue, retrospective=collector)
+
+        def _propose(signals, **_kwargs):
+            return [
+                GateFinding(
+                    kind="gate",
+                    signal_id=signals[0].id,
+                    title="Guard the recurring make quality failure",
+                    guard_path="tests/architecture/test_quality_signal.py",
+                    observed=f"{signals[0].count} occurrences",
+                )
+            ]
+
+        with patch(
+            "retro_finder.RetroFinder.find",
+            new=AsyncMock(side_effect=_propose),
+        ):
+            await world.run_with_loops(["retrospective"], cycles=1)
+            fake_queue.load.return_value = [QueueItem(kind=QueueKind.RETRO_PATTERNS)]
+            await world.run_with_loops(["retrospective"], cycles=1)
+
+        find_issues = [
+            issue
+            for issue in world._github._issues.values()
+            if "hydraflow-find" in (issue.labels or [])
+        ]
+        assert len(find_issues) == 1, (
+            "a pattern-shaped finding must fold onto one class issue, got "
+            f"{[i.number for i in find_issues]}"
+        )
+        assert "make: *** [quality] Error 1" in (find_issues[0].body or "")
 
     async def test_stale_insight_dedup_across_ticks(self, tmp_path) -> None:
         """Issue #8988 / #9227: ``RetrospectiveLoop`` must not file duplicate

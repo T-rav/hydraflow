@@ -21,6 +21,7 @@ from entry_evidence_loop import ENTRY_EVIDENCE_PR_LABEL
 from mockworld.fakes.fake_bot_pr import FakeBotPR
 from term_proposer_loop import TERM_PROPOSER_PR_LABEL, UL_BOT_PR_LABELS
 from term_pruner_loop import TERM_PRUNER_PR_LABEL, TermPrunerLoop
+from tests.helpers import config_mock
 from ubiquitous_language import BoundedContext, Term, TermKind, TermStore
 
 
@@ -96,7 +97,7 @@ def _edge_fixture(repo: Path) -> tuple[EdgeProposerLoop, FakeBotPR]:
         ),
     )
     port = FakeBotPR()
-    config = MagicMock()
+    config = config_mock()
     config.edge_proposer_enabled = True
     config.edge_proposer_interval = 86400
     loop = EdgeProposerLoop(
@@ -149,7 +150,7 @@ class TestEdgeProposerSingleFlight:
     async def test_no_proposals_never_queries_the_port(self, tmp_path: Path) -> None:
         (tmp_path / "src").mkdir()
         port = FakeBotPR()
-        config = MagicMock()
+        config = config_mock()
         config.edge_proposer_enabled = True
         config.edge_proposer_interval = 86400
         loop = EdgeProposerLoop(
@@ -187,7 +188,7 @@ class TestTermPrunerSingleFlight:
             files={},
         )
         port.calls.clear()
-        config = MagicMock()
+        config = config_mock()
         config.term_pruner_enabled = True
         config.term_pruner_interval = 86400
         loop = TermPrunerLoop(

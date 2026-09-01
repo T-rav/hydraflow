@@ -80,7 +80,6 @@ class TraceCollector:
         self.tool_calls: list[ToolCallSpan] = []
         self.skill_results: list[SkillResultRecord] = []
         self.inference_count: int = 0
-        self.turn_count: int = 0
 
         # Track open tool_use → tool_result by id, value is monotonic start time
         self._open_tool_starts: dict[str, float] = {}
@@ -385,7 +384,6 @@ class TraceCollector:
             ),
             tool_calls=list(self.tool_calls),
             skill_results=list(self.skill_results),
-            turn_count=self.turn_count,
             inference_count=self.inference_count,
         )
 
