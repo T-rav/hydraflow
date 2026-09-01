@@ -106,7 +106,6 @@ class TestTraceSummaryNewFields:
             "issue_number": 42,
             "phase": "implement",
             "harvested_at": "2026-04-06T12:00:00Z",
-            "trace_ids": [],
             "spans": {
                 "total_spans": 0,
                 "total_inference_calls": 0,
@@ -126,7 +125,6 @@ class TestTraceSummaryNewFields:
             },
             "skills": {
                 "skill_counts": {},
-                "subagent_counts": {},
                 "total_skills": 0,
                 "total_subagents": 0
             }
@@ -142,7 +140,6 @@ class TestTraceSummaryNewFields:
             issue_number=42,
             phase="implement",
             harvested_at="2026-04-06T12:00:00Z",
-            trace_ids=[],
             spans=TraceSpanStats(
                 total_spans=10,
                 total_inference_calls=4,
@@ -157,7 +154,7 @@ class TestTraceSummaryNewFields:
             ),
             tools=TraceToolProfile(tool_counts={}, tool_errors={}, total_invocations=0),
             skills=TraceSkillProfile(
-                skill_counts={}, subagent_counts={}, total_skills=0, total_subagents=0
+                skill_counts={}, total_skills=0, total_subagents=0
             ),
             run_id=2,
             subprocess_count=5,

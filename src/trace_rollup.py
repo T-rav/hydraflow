@@ -169,7 +169,6 @@ def _aggregate(
         issue_number=issue_number,
         phase=phase,
         harvested_at=datetime.now(UTC).isoformat(),
-        trace_ids=[],
         spans=TraceSpanStats(
             total_spans=sum(len(t.tool_calls) for t in traces) + inference_total,
             total_inference_calls=inference_total,
@@ -189,7 +188,6 @@ def _aggregate(
         ),
         skills=TraceSkillProfile(
             skill_counts=skill_counts,
-            subagent_counts={},  # subagent tracking lives in tool_counts as "Task" tool
             total_skills=total_skills,
             total_subagents=tool_counts.get("Task", 0),
         ),
