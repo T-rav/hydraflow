@@ -47,6 +47,8 @@ def _make_loop(
         state.set_workspace(issue_number, str(path))
 
     workspaces = MagicMock()
+
+    workspaces.prune_dead_registrations = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
 

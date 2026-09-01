@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -19,6 +19,13 @@ from workspace_gc_landed_safety import (
     parse_issue_from_branch,
 )
 from workspace_gc_loop import WorkspaceGCLoop
+
+
+def _workspace_mock() -> MagicMock:
+    """A WorkspacePort double that answers the async surface (#11908)."""
+    mock = MagicMock()
+    mock.prune_dead_registrations = AsyncMock(return_value=[])
+    return mock
 
 _BRANCH = "fix/reused-workspace-gc"
 _MOVED_BRANCH = "fix/moved-worktree-11507"
@@ -134,7 +141,7 @@ def _loop(tmp_path: Path, github: FakeGitHub) -> WorkspaceGCLoop:
     )
     return WorkspaceGCLoop(
         config=deps.config,
-        workspaces=MagicMock(),
+        workspaces=_workspace_mock(),
         prs=github,
         state=StateTracker(deps.config.state_file),
         deps=deps.loop_deps,
@@ -321,7 +328,7 @@ async def test_full_cycle_authorizes_legitimate_exact_head_worktree(
     )
     loop = WorkspaceGCLoop(
         config=deps.config,
-        workspaces=MagicMock(),
+        workspaces=_workspace_mock(),
         prs=github,
         state=state,
         deps=deps.loop_deps,
@@ -330,7 +337,7 @@ async def test_full_cycle_authorizes_legitimate_exact_head_worktree(
 
     result = await loop._do_work()
 
-    assert result == {"collected": 1, "skipped": 0, "errors": 0}
+    assert result == {"collected": 1, "skipped": 0, "errors": 0, "pruned_registrations": 0}
     assert not worktree.exists()
     assert _git(repo, "branch", "--list", _BRANCH) == ""
     assert state.get_active_workspaces() == {}
@@ -354,7 +361,7 @@ async def test_prunable_registry_with_moved_unique_worktree_preserves_branch(
     )
     loop = WorkspaceGCLoop(
         config=deps.config,
-        workspaces=MagicMock(),
+        workspaces=_workspace_mock(),
         prs=github,
         state=StateTracker(deps.config.state_file),
         deps=deps.loop_deps,
@@ -366,7 +373,7 @@ async def test_prunable_registry_with_moved_unique_worktree_preserves_branch(
 
     registry_after = _git(repo, "worktree", "list", "--porcelain")
     assert (result, registered_path.exists(), moved_path.exists()) == (
-        {"collected": 0, "skipped": 0, "errors": 0},
+        {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0},
         False,
         True,
     )

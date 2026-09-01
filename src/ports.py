@@ -770,6 +770,18 @@ class WorkspacePort(Protocol):
         """Remove all managed worktrees (used by ``make clean``)."""
         ...
 
+    async def prune_dead_registrations(self) -> list[Path]:
+        """Drop worktree registrations whose directory no longer exists.
+
+        Returns the paths pruned. Keyed on the DIRECTORY, never on the lock:
+        ``git worktree add`` writes a ``locked: initializing`` marker while it
+        works and clears it on success, so one killed partway leaves a lock
+        that makes the registration invisible to ``git worktree prune``
+        forever (#11908). A lock on a worktree that still exists is a live
+        operator lock and must be left alone.
+        """
+        ...
+
     async def merge_main(self, worktree_path: Path, branch: str) -> bool:
         """Merge the main branch into the worktree. Returns True on success."""
         ...

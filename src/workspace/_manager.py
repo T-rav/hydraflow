@@ -16,6 +16,7 @@ from pathlib import Path
 
 from config import Credentials, HydraFlowConfig
 from subprocess_util import run_subprocess
+from workspace_gc_landed_safety import dead_registrations
 
 from ._heal import WorkspaceHealMixin
 from ._mainline import WorkspaceMainlineMixin
@@ -305,3 +306,47 @@ class WorkspaceManager(
                         await self.destroy(num)
                     except (ValueError, RuntimeError) as exc:
                         logger.warning("Could not destroy %s: %s", child, exc)
+
+    async def prune_dead_registrations(self) -> list[Path]:
+        """Unlock and prune worktree registrations whose directory is gone.
+
+        Keyed on the DIRECTORY, never on the lock. ``git worktree add`` writes
+        ``.git/worktrees/<name>/locked`` containing ``initializing`` while it
+        works and clears it on success; one killed partway leaves that lock
+        behind, and a locked registration is skipped by every ``git worktree
+        prune`` — one such phantom survived here for over a month (#11908).
+
+        A lock on a worktree that still EXISTS is a live operator lock and is
+        never touched: if the directory is present the lock is not ours to
+        break, and if it is absent there is nothing the lock could protect.
+        """
+        try:
+            listing = await run_subprocess(
+                "git", "worktree", "list", "--porcelain", cwd=self._repo_root
+            )
+        except Exception:
+            logger.debug("Could not list worktrees for registration prune")
+            return []
+
+        dead = dead_registrations(listing)
+        if not dead:
+            return []
+
+        for path in dead:
+            # A no-op when the registration is not locked; required when it is.
+            with contextlib.suppress(Exception):
+                await run_subprocess(
+                    "git", "worktree", "unlock", str(path), cwd=self._repo_root
+                )
+        try:
+            await run_subprocess("git", "worktree", "prune", cwd=self._repo_root)
+        except Exception:
+            logger.warning("Worktree prune failed", exc_info=True)
+            return []
+
+        logger.info(
+            "Pruned %d dead worktree registration(s): %s",
+            len(dead),
+            [p.name for p in dead],
+        )
+        return dead

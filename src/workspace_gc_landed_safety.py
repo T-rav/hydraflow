@@ -126,6 +126,39 @@ def active_workspace_snapshot(
     return ActiveWorkspaceSnapshot(workspaces, path_owners)
 
 
+def dead_registrations(output: str) -> list[Path]:
+    """Registered worktrees whose directory no longer exists.
+
+    Keyed on the DIRECTORY, never on the lock. `git worktree add` writes
+    `.git/worktrees/<name>/locked` while it works and clears it on success;
+    killed partway, the lock persists forever — and :func:`parse_git_worktrees`
+    excludes locked rows, so the dead registration becomes invisible to the
+    collector and survives every `git worktree prune` (#11908, one such
+    phantom sat for over a month).
+
+    A lock on a worktree that still exists is a live operator lock and is never
+    reported here: if the directory is gone there is nothing a lock could be
+    protecting, and if it is present the lock is not ours to break.
+    """
+    dead: list[Path] = []
+    first = True
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if not line.startswith("worktree "):
+            continue
+        if first:
+            # The primary worktree heads the listing and is never a registration.
+            first = False
+            continue
+        try:
+            path = Path(line[len("worktree ") :]).expanduser()
+        except (OSError, ValueError):
+            continue
+        if not path.exists():
+            dead.append(path)
+    return dead
+
+
 def parse_git_worktrees(output: str) -> list[WorktreeEntry]:
     """Parse ``git worktree list --porcelain``, excluding locked/bare rows."""
     entries: list[WorktreeEntry] = []

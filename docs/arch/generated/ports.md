@@ -109,7 +109,7 @@ graph LR
 ### WorkspacePort
 
 - Module: `src.ports`
-- Methods: `abort_merge`, `create`, `destroy`, `destroy_all`, `get_conflicting_files`, `merge_main`, `post_work_cleanup`, `reset_to_main`, `start_merge_main`
+- Methods: `abort_merge`, `create`, `destroy`, `destroy_all`, `get_conflicting_files`, `merge_main`, `post_work_cleanup`, `prune_dead_registrations`, `reset_to_main`, `start_merge_main`
 - Adapters:
   - `WorkspaceManager` (`src.workspace._manager`)
 - Fake: `FakeWorkspace` (`mockworld.fakes.fake_workspace`)

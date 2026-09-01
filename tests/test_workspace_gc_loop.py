@@ -23,6 +23,14 @@ from workspace_gc_landed_safety import (
 )
 from workspace_gc_loop import _MAX_GC_PER_CYCLE, WorkspaceGCLoop
 
+
+def _workspace_mock() -> MagicMock:
+    """A WorkspacePort double that answers the async surface (#11908)."""
+    mock = MagicMock()
+    mock.prune_dead_registrations = AsyncMock(return_value=[])
+    return mock
+
+
 # Force-delete flag for branch deletion assertions
 _FORCE_DEL = chr(45) + chr(68)
 
@@ -63,6 +71,8 @@ def _make_loop(
     in_pipeline = pipeline_issues or set()
 
     workspaces = MagicMock()
+    # Phase 6 asks the port for dead registrations every cycle (#11908).
+    workspaces.prune_dead_registrations = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
     prs.get_branch_pr_state = AsyncMock(return_value="UNKNOWN")
@@ -155,7 +165,12 @@ class TestWorkspaceGCLoopBasics:
             loop,
             "_do_work",
             new_callable=AsyncMock,
-            return_value={"collected": 0, "skipped": 0, "errors": 0},
+            return_value={
+                "collected": 0,
+                "skipped": 0,
+                "errors": 0,
+                "pruned_registrations": 0,
+            },
         ):
             await loop.run()
         events = [
@@ -246,7 +261,12 @@ class TestWorktreeGCCollectsClosedIssues:
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as git:
             result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "pruned_registrations": 0,
+        }
         loop._workspaces.destroy.assert_not_awaited()
         git.assert_not_awaited()
         assert state.get_active_workspaces()[42] == str(path)
@@ -267,7 +287,12 @@ class TestWorktreeGCCollectsClosedIssues:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "pruned_registrations": 0,
+        }
         loop._workspaces.destroy.assert_not_awaited()
         assert state.get_active_workspaces()[99] == str(path)
         assert unique.read_text() == "owned by issue 99\n"
@@ -1279,7 +1304,7 @@ class TestCollectOrphanedBranchesPerItemIsolation:
         state = StateTracker(deps.config.state_file)
         loop = WorkspaceGCLoop(
             config=deps.config,
-            workspaces=MagicMock(),
+            workspaces=_workspace_mock(),
             prs=MagicMock(),
             state=state,
             deps=deps.loop_deps,
@@ -1519,6 +1544,7 @@ class TestWorkspaceGCReadsViaPort:
         state = StateTracker(deps.config.state_file)
         workspaces = MagicMock()
         workspaces.destroy = AsyncMock()
+        workspaces.prune_dead_registrations = AsyncMock(return_value=[])
         loop = WorkspaceGCLoop(
             config=deps.config,
             workspaces=workspaces,
@@ -2793,7 +2819,12 @@ class TestPhase1MissingDirectoryPrune:
             result = await loop._do_work()
 
         # Phase 1 prunes the workspace entry; phase 4 prunes the branch entry.
-        assert result == {"collected": 2, "skipped": 0, "errors": 0}
+        assert result == {
+            "collected": 2,
+            "skipped": 0,
+            "errors": 0,
+            "pruned_registrations": 0,
+        }
         loop._workspaces.destroy.assert_not_awaited()
         git.assert_not_awaited()
         assert (42 in state.get_active_workspaces(), state.get_branch(42)) == (
@@ -2813,7 +2844,12 @@ class TestPhase1MissingDirectoryPrune:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "pruned_registrations": 0,
+        }
         loop._workspaces.destroy.assert_not_awaited()
         assert state.get_active_workspaces() == {42: str(path)}
 
@@ -2830,7 +2866,12 @@ class TestPhase1MissingDirectoryPrune:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "pruned_registrations": 0,
+        }
         loop._workspaces.destroy.assert_not_awaited()
         assert (path.is_symlink(), 42 in state.get_active_workspaces()) == (True, True)
 
@@ -2849,7 +2890,12 @@ class TestPhase1MissingDirectoryPrune:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "pruned_registrations": 0,
+        }
         assert state.get_active_workspaces() == {42: str(path)}
 
 

@@ -286,7 +286,23 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             )
             collected += reaped
 
-        return {"collected": collected, "skipped": skipped, "errors": errors}
+        # Phase 6: drop registrations whose directory is gone (#11908). These
+        # are invisible to every phase above — `parse_git_worktrees` excludes
+        # locked rows, and a worktree killed mid-`add` keeps its
+        # `locked: initializing` marker forever, so `git worktree prune` skips
+        # it too. One such phantom survived here for over a month.
+        pruned_registrations = 0
+        if not self._stop_event.is_set():
+            pruned_registrations = len(
+                await self._workspaces.prune_dead_registrations()
+            )
+
+        return {
+            "collected": collected,
+            "skipped": skipped,
+            "errors": errors,
+            "pruned_registrations": pruned_registrations,
+        }
 
     async def _is_safe_to_gc(self, issue_number: int) -> bool:
         """Determine whether a worktree for *issue_number* can be safely GC'd.
