@@ -128,7 +128,9 @@ _PURE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {
         "collections.abc": frozenset({"Sequence"}),
         # The data-governance vocabulary, extracted to its own pure module so
         # this one need not import prompt_gate (which writes audit records).
-        "data_class_vocabulary": frozenset({"is_valid_data_class"}),
+        "data_class_vocabulary": frozenset(
+            {"is_regulated_class", "is_valid_data_class"}
+        ),
         "dataclasses": frozenset({"dataclass", "field"}),
         # PurePosixPath only: it never touches the filesystem. `Path` is
         # deliberately absent — the loader that reads files lives in charter.py.

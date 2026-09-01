@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11868
 source_phase: plan
 created_at: 2026-09-01T03:50:35.471649+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # No wall-clock in generator body — use {{ARCH_FOOTER}} sentinel

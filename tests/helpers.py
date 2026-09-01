@@ -12,7 +12,18 @@ from collections.abc import Callable, Coroutine
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple
+from types import UnionType
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Union,
+    get_args,
+    get_origin,
+)
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from config import Credentials
@@ -2157,6 +2168,29 @@ def bare_wiki_compiler(**config_overrides: Any) -> Any:
     return compiler
 
 
+def _holds_a_number(annotation: Any) -> bool:
+    """Can this annotation hold an ``int`` or a ``float``?
+
+    Structural, not textual: it walks unions and ``Annotated`` wrappers instead
+    of comparing the annotation to ``int``/``float``. Comparing is what shipped
+    first, and it missed every ``float | None`` in the config (#11938) — the
+    newest and fastest-growing shape there.
+
+    Deliberately answers for the WHOLE annotation, so ``float | None`` is
+    numeric even though its default is ``None``. Seeding that ``None`` is the
+    point: production reads it as ``if x is None: return``, and a Mock makes
+    that guard silently not fire.
+    """
+    if annotation in (int, float):
+        return True
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _holds_a_number(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        return any(_holds_a_number(arg) for arg in get_args(annotation))
+    return False
+
+
 def config_mock(**overrides: Any) -> Any:
     """A ``MagicMock`` config whose NUMERIC fields carry the real defaults.
 
@@ -2176,6 +2210,19 @@ def config_mock(**overrides: Any) -> Any:
     whole point — the class has recurred because every previous fix named one
     field, and the next field was always unnamed.
 
+    "Numeric" is decided by walking the annotation, not by comparing it
+    (#11938). The first version asked ``field.annotation in (int, float)``,
+    which is a spelling test: ``float | None`` is a ``types.UnionType`` and
+    matches neither member, so all ten Optional-numeric knobs
+    (``daily_cost_budget_usd``, the five ``audit_retention_days_*``, ...) were
+    left as Mocks — and they are the class most recently added to the config.
+
+    That was worse than not seeding them. Production guards these fields with
+    ``if threshold is None: return``; a Mock is not ``None``, so the guard
+    silently does not fire and execution falls through to the comparison,
+    reproducing the exact ``TypeError`` this helper exists to prevent. The
+    converted call sites only escaped it by overriding those fields by hand.
+
     Everything non-numeric stays an ordinary Mock, so callables
     (``config.data_path``), strings and flags keep their usual stand-in
     behaviour and can be overridden as before.
@@ -2186,7 +2233,7 @@ def config_mock(**overrides: Any) -> Any:
 
     mock = MagicMock()
     for name, field in HydraFlowConfig.model_fields.items():
-        if field.annotation in (int, float) and not isinstance(
+        if _holds_a_number(field.annotation) and not isinstance(
             field.default, type(...)
         ):
             setattr(mock, name, field.default)

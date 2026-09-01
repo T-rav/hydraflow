@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/convergence_gate.py:Gate"
 aliases: []
 related: []
-evidence: []
+evidence: ["EROSION-BASELINE-RECORDED-NUMBERS-001", "GATE-DEMAND-ANCHORED-AND-PINNED-001", "GATE-REJECTIONS-OUTCOME-CENSORED-CALIBRATION-001", "GATE-TRIGGER-SCOPE-COVERS-SUBJECT-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-08-01T00:00:00+00:00"
-updated_at: "2026-08-01T00:00:00+00:00"
+updated_at: "2026-09-01T07:13:20.888566+00:00"
 ---
 
 ## Definition

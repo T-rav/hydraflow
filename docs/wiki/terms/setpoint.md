@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/signal_control/controllers.py:PidController"
 aliases: []
 related: [{"kind": "depends_on", "target": "01KZZTMMG25DET54FHSH9WK37S"}]
-evidence: []
+evidence: ["EROSION-BASELINE-RECORDED-NUMBERS-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-08-01T00:00:00+00:00"
-updated_at: "2026-08-15T05:33:38.290486+00:00"
+updated_at: "2026-09-01T07:13:20.888566+00:00"
 ---
 
 ## Definition

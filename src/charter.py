@@ -90,11 +90,14 @@ import yaml
 # model itself lives in a pure module the decision seam can also import.
 from charter_model import (
     ACTORS_DIRECTORY,
+    ADVISORY_FINDING_CLASSES,
     CHARTER_FILENAME,
     CHARTER_SCHEMA_VERSION,
     DEFAULT_ASSURANCE,
+    FINDING_ACTOR_WITHOUT_LOOP,
     FINDING_COVERAGE_FLOOR,
     FINDING_LEGACY_RAILS_MANIFEST,
+    FINDING_LOOP_WITHOUT_ACTOR,
     FINDING_MISSING_ARTIFACT,
     FINDING_MISSING_GATE_SCRIPT,
     FINDING_MISSING_LAYER,
@@ -123,6 +126,10 @@ from charter_model import (
     _as_mapping,
     _as_str_tuple,
     _parse_actors,
+    actors_without_a_loop,
+    ambiguous_actors,
+    enumerate_actors,
+    unresolved_actors,
 )
 
 #: Re-exported from :mod:`charter_model`. Declared rather than suppressed:
@@ -139,7 +146,9 @@ __all__ = [
     "CharterFinding",
     "DEFAULT_ASSURANCE",
     "FINDING_COVERAGE_FLOOR",
+    "FINDING_ACTOR_WITHOUT_LOOP",
     "FINDING_LEGACY_RAILS_MANIFEST",
+    "FINDING_LOOP_WITHOUT_ACTOR",
     "FINDING_MISSING_ARTIFACT",
     "FINDING_MISSING_GATE_SCRIPT",
     "FINDING_MISSING_LAYER",
@@ -151,6 +160,7 @@ __all__ = [
     "KNOWN_LAYERS",
     "LEGACY_RAILS_FILENAME",
     "LocalArticle",
+    "ADVISORY_FINDING_CLASSES",
     "NON_FATAL_FINDING_CLASSES",
     "Purpose",
     "RAILS_SCHEMA_VERSION",
@@ -188,6 +198,12 @@ class ObservedRepo:
     present_standards: frozenset[str] = frozenset()
     present_artifacts: frozenset[str] = frozenset()
     known_standards: frozenset[str] | None = None
+    #: Repo-relative POSIX paths under the actors directory, or ``None`` when
+    #: the directory could not be listed at all. ``None`` is a FAULT, not an
+    #: empty set: with an empty listing every declared loop would look like it
+    #: names a missing actor and the check would file drift on a measurement
+    #: nobody took — the same fail-loud reasoning as ``known_standards``.
+    actor_files: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -218,8 +234,28 @@ class CharterDriftReport:
 
     @property
     def tolerated_findings(self) -> tuple[CharterFinding, ...]:
+        """Non-fatal AND not worth a human's attention — logged only."""
         return tuple(
-            f for f in self.findings if f.finding_class in NON_FATAL_FINDING_CLASSES
+            f
+            for f in self.findings
+            if f.finding_class in NON_FATAL_FINDING_CLASSES
+            and f.finding_class not in ADVISORY_FINDING_CLASSES
+        )
+
+    @property
+    def filed_findings(self) -> tuple[CharterFinding, ...]:
+        """Everything that must reach a human: fatal drift plus advisories.
+
+        Not the same set as `fatal_findings`. An advisory is not drift — it
+        does not fail `clean` — but it does need a decision only a person can
+        make, and a finding that is merely logged leaves that decision with
+        nobody.
+        """
+        return tuple(
+            f
+            for f in self.findings
+            if f.finding_class not in NON_FATAL_FINDING_CLASSES
+            or f.finding_class in ADVISORY_FINDING_CLASSES
         )
 
 
@@ -395,6 +431,75 @@ def _uncheckable_findings(
     return findings
 
 
+def _loop_binding_findings(
+    charter: Charter, observed: ObservedRepo
+) -> list[CharterFinding]:
+    """Both sides of the loop↔actor binding (ADR-0145 guard 1).
+
+    Skipped entirely when the charter carries NO `loops:` block: that is an
+    unmigrated repo, and filing "no loop names this actor" against every actor
+    in a v1 repo would bury the finding under noise on day one. A
+    present-but-empty block IS checked — it declares that nothing runs, which
+    is a claim worth testing against the actors that exist (guard 3).
+
+    Also skipped when the actors directory could not be listed. `None` there is
+    a fault, not an empty set: with an empty listing every loop would look like
+    it names a missing actor, and the check would file drift on a measurement
+    nobody took.
+    """
+    if not charter.loops.present or observed.actor_files is None:
+        return []
+
+    findings: list[CharterFinding] = []
+    ambiguous = ambiguous_actors(observed.actor_files)
+    for name in ambiguous:
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_LOOP_WITHOUT_ACTOR}:ambiguous:{name}",
+                finding_class=FINDING_LOOP_WITHOUT_ACTOR,
+                detail=(
+                    f"actor '{name}' is declared BOTH as '{name}.md' and "
+                    f"'{name}/README.md'. Two files for one key is the "
+                    "two-tables defect at file granularity: whichever the "
+                    "kernel reads, the other is an unread contract that will "
+                    "drift (ADR-0145)."
+                ),
+            )
+        )
+
+    actors = enumerate_actors(observed.actor_files)
+    for name in unresolved_actors(charter.loops, actors):
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_LOOP_WITHOUT_ACTOR}:{name}",
+                finding_class=FINDING_LOOP_WITHOUT_ACTOR,
+                detail=(
+                    f"loop declares actor '{name}' but no contract file "
+                    f"resolves for it under the actors directory. The loop "
+                    "cannot run: a kernel worker handed an unreadable actor "
+                    "refuses the run rather than falling back to a default "
+                    "prompt (ADR-0145 Ruling 2)."
+                ),
+            )
+        )
+
+    for name in actors_without_a_loop(charter.loops, actors):
+        findings.append(
+            CharterFinding(
+                check_id=f"{FINDING_ACTOR_WITHOUT_LOOP}:{name}",
+                finding_class=FINDING_ACTOR_WITHOUT_LOOP,
+                detail=(
+                    f"actor '{name}' has a contract but no loop names it, so "
+                    "it never runs. Non-fatal by design: a repo mid-migration "
+                    "looks exactly like this, and enlarging the mandate is a "
+                    "human's ENACT, not a caretaker's (ADR-0143 Ruling 6 "
+                    "guard 4)."
+                ),
+            )
+        )
+    return findings
+
+
 def compute_charter_drift(
     charter: Charter, observed: ObservedRepo, *, repo: str
 ) -> CharterDriftReport:
@@ -422,6 +527,7 @@ def compute_charter_drift(
     findings.extend(_purpose_findings(charter))
     findings.extend(_layer_findings(charter, observed))
     findings.extend(_standard_findings(charter, observed))
+    findings.extend(_loop_binding_findings(charter, observed))
 
     for path in charter.artifacts.required:
         if path not in observed.present_artifacts:

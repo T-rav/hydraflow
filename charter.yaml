@@ -9,7 +9,7 @@
 # it changes the mandate rather than executing against it, so it is the
 # operator's act. Nothing in the factory automates an edit to `articles`.
 
-schema_version: 1
+schema_version: 2
 
 # Purpose is checked for PRESENCE and SHAPE only (ADR-0143 Amendment
 # 2026-09-01, #11856): `missing-purpose` in `compute_charter_drift` requires a
@@ -79,3 +79,28 @@ rails:
     - domain_rails
   coverage_floor: 70
   domain_gate_scripts: []
+
+# Charter-declared loops (ADR-0145, schema_version 2).
+#
+# All three are DORMANT. These actors are design-chamber contracts a human
+# convenes; nothing schedules them, and declaring them here with
+# `enabled: false` says so. An empty block would leave "this actor never runs"
+# and "nobody has decided yet" identical in the file — and would make the
+# caretaker file `actor-without-loop` on all three from day one.
+#
+# Enabling any of these is an ENACT, not a RATIFY (ADR-0143 Ruling 6 guard 4):
+# it enlarges the mandate, so it is the operator's commit. The kernel worker
+# may never flip one of these to true.
+loops:
+  product-manager:
+    actor: product-manager
+    enabled: false
+    goal: Convened by a human for a design-chamber run; not scheduled.
+  senior-principal:
+    actor: senior-principal
+    enabled: false
+    goal: Convened by a human for a design-chamber run; not scheduled.
+  vp-eng:
+    actor: vp-eng
+    enabled: false
+    goal: Convened by a human for a design-chamber run; not scheduled.
