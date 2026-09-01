@@ -42,7 +42,9 @@ def test_an_unresolvable_base_fails_rather_than_reporting_no_deletions(
     """Returning 0 here is the shipped bug: no comparison was made, and
     'nothing found' was reported as 'nothing there'."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    assert gate.main(["--base", "origin/definitely-not-a-branch", "--head", "HEAD"]) == 1
+    assert (
+        gate.main(["--base", "origin/definitely-not-a-branch", "--head", "HEAD"]) == 1
+    )
 
 
 def test_a_failing_git_command_raises_instead_of_returning_empty() -> None:
@@ -63,4 +65,25 @@ def test_the_ci_lane_fetches_a_refspec_that_creates_the_remote_ref() -> None:
     assert "refs/remotes/origin/${{ github.base_ref }}" in workflow, (
         "the deletion-scope lane must fetch an explicit refspec, or "
         "origin/<base> will not exist and the gate cannot see anything"
+    )
+
+
+def test_the_ci_lane_checks_out_enough_history_for_a_merge_base() -> None:
+    """`fatal: no merge base`, observed on this PR's own CI.
+
+    ``actions/checkout`` defaults to ``--depth=1`` of the PR MERGE ref. A base
+    branch fetched separately then shares no history with it, so
+    ``git diff base...HEAD`` cannot resolve a merge base and the step dies.
+    Before the gate failed closed this was invisible; after, it was the very
+    next thing it reported. Full depth is the only setting that reliably has a
+    merge base.
+    """
+    workflow = (
+        Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
+    ).read_text(encoding="utf-8")
+    lane = workflow[workflow.index("  conflict-markers:") :]
+    lane = lane[: lane.index("\n  ", 1) if "\n  " in lane[1:] else len(lane)]
+    assert "fetch-depth: 0" in workflow.split("conflict-markers:")[1][:900], (
+        "the deletion-scope lane needs full history; at --depth=1 the "
+        "three-dot diff has no merge base and the step cannot run at all"
     )

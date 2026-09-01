@@ -254,9 +254,16 @@ jobs:
   conflict-markers:
     name: Conflict Markers
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the deletion-scope step below needs a MERGE BASE with
+          # the target branch. The default --depth=1 checkout of the PR merge ref
+          # shares no history with a separately-fetched base, and `git diff
+          # base...HEAD` dies with `fatal: no merge base` (observed on this very
+          # PR). Depth 0 is the only setting that reliably has one.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -276,8 +283,9 @@ jobs:
           # Explicit refspec: `git fetch origin <branch>` updates FETCH_HEAD
           # only — it does NOT create refs/remotes/origin/<branch>, so the
           # three-dot diff below had no base and the gate went green on a
-          # branch that deleted a file.
-          git fetch --no-tags --depth=200 origin \
+          # branch that deleted a file. Unshallowed (no --depth) so a merge
+          # base exists; the checkout above is already full-depth.
+          git fetch --no-tags origin \
             "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
           python3 scripts/check_deletion_scope.py \
             --base "origin/${{ github.base_ref }}" \
