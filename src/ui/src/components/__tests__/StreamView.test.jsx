@@ -30,6 +30,15 @@ function defaultHydraFlowContext(overrides = {}) {
     prs: [],
     config,
     backgroundWorkers,
+    // A console that has taken an authoritative snapshot, because that is what
+    // every test here means by "normal". The rail carries TWO staleness
+    // signals and a never-snapshotted stamp reads as resyncing by design
+    // (#11350) — so a fixture that sets only `pipelineSnapshotReady` was
+    // asserting "after an authoritative snapshot" while modelling "no snapshot
+    // has ever arrived". The flag-only derivation could not tell those apart,
+    // which is the #11924 defect itself.
+    pipelineSnapshotReady: true,
+    pipelineSnapshotAt: Date.now(),
     stageStatus: deriveStageStatus(
       pipelineIssues,
       workers,

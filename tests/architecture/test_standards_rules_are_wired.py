@@ -51,7 +51,7 @@ STANDARDS = REPO_ROOT / "docs" / "standards"
 UNWIRED_STANDARDS_BASELINE = 0
 
 #: Declared-but-unenforced rules across all standards. SHRINK-ONLY.
-UNENFORCED_RULES_BASELINE = 3
+UNENFORCED_RULES_BASELINE = 0
 
 
 def _standards() -> list[tuple[str, dict[str, Any]]]:
