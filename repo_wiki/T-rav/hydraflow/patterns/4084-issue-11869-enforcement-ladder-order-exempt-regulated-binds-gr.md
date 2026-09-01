@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11869
 source_phase: plan
 created_at: 2026-09-01T05:42:49.576664+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Enforcement ladder order: exempt, regulated-binds, grandfathered
