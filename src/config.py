@@ -5731,6 +5731,31 @@ class HydraFlowConfig(BaseModel):
             "(spec §8). Override if the sandbox org is renamed."
         ),
     )
+    vitals_emit_enabled: bool = Field(
+        default=True,
+        description=(
+            "Emit this factory's vitals document to a local append-only spool "
+            "(#11690). Layer 2 transport only: the document goes to "
+            "``<data_root>/vitals/spool.jsonl`` and an adapter OUTSIDE "
+            "HydraFlow ships it, so changing sink is never a HydraFlow change. "
+            "Emission runs on the factory host, not CI, because the document's "
+            "value is its identity (repo / head_sha / host) and a CI runner "
+            "would stamp the wrong one."
+        ),
+    )
+
+    vitals_emit_floor_hours: float = Field(
+        default=24.0,
+        ge=0.0,
+        description=(
+            "Emit a vitals reading if this many hours have passed since the "
+            "last one, even with no RC cut (#11690 decision D2). The floor is "
+            "what keeps a quiet factory distinguishable from a dead one — the "
+            "single thing a push-based aggregate cannot infer for itself. "
+            "0 disables the floor, leaving RC cuts as the only trigger."
+        ),
+    )
+
     contract_refresh_external_recorders: tuple[str, ...] = Field(
         default=("github", "docker", "claude"),
         description=(
