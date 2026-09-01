@@ -52,7 +52,7 @@ graph LR
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "9" --> src_epic
-    src -- "24" --> src_erosion
+    src -- "26" --> src_erosion
     src -- "10" --> src_escape
     src -- "4" --> src_flows
     src -- "1" --> src_health_monitor_loop

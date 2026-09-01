@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -224,6 +225,47 @@ _SLOW_TEST_GRANDFATHER = frozenset(
 )
 
 
+#: Call-phase seconds per nodeid for this session, when collection is asked for.
+#: Written at session end to ``$HYDRAFLOW_DURATIONS_OUT`` and read by
+#: ``erosion.slowness`` (#11910). Off unless the env var is set: the sensor
+#: needs a MEASUREMENT — duration cannot be derived from source the way mass
+#: and suite-hygiene are — and an ordinary run must not pay for an artifact
+#: nobody asked for.
+_CALL_DURATIONS: dict[str, float] = {}
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # noqa: ARG001 — pytest hook signature
+    """Persist this session's call durations when asked, best-effort.
+
+    Best-effort on purpose: a failed write must never turn a green suite red.
+    A missing artifact reads as "not measured", which the sensor distinguishes
+    from "measured and fast" via ``total_tests``.
+    """
+    out = os.environ.get("HYDRAFLOW_DURATIONS_OUT")
+    if not out or not _CALL_DURATIONS:
+        return
+    try:
+        path = Path(out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Merged, not overwritten: `make test` runs pytest more than once
+        # (parallel bulk, then the serial paths) and each invocation would
+        # otherwise clobber the previous lane's measurements.
+        existing: dict[str, float] = {}
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = {str(k): float(v) for k, v in loaded.items()}
+            except (OSError, ValueError):
+                existing = {}
+        path.write_text(
+            json.dumps({**existing, **_CALL_DURATIONS}, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):  # noqa: ARG001 — call required by pytest hook signature
     """Fail any test whose CALL phase exceeds the slow-test budget.
@@ -238,6 +280,11 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):  
     # teardown can tell "this test passed and still tripped me" from "this test
     # already failed" and stay quiet in the second case.
     setattr(item, f"rep_{report.when}", report)
+    if report.when == "call":
+        # Recorded for every call phase, pass or fail: a test that got slow
+        # enough to fail is exactly the one the roster wants to have seen
+        # climbing.
+        _CALL_DURATIONS[item.nodeid] = report.duration
     if (
         report.when == "call"
         and report.passed
