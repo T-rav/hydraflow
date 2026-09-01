@@ -49,42 +49,39 @@ class TestTheBranchNameLookupStillWins:
 
 
 class TestADifferentlyNamedBranchIsStillFound:
+    @pytest.mark.parametrize(
+        ("pr", "expected"),
+        [
+            pytest.param(
+                _pr(101, body="## Summary\n\nCloses #42.\n"), 101, id="body-declares"
+            ),
+            pytest.param(
+                _pr(102, title="fix(x): thing — Fixes #42", body=""),
+                102,
+                id="title-declares",
+            ),
+            # The two that must NOT match are the point of the set: a bare
+            # mention claiming the issue is exactly how a changelog attributes
+            # a fix to the wrong PR, and it is the decoy that keeps the two
+            # positives above from passing against a matcher that says yes to
+            # everything.
+            pytest.param(
+                _pr(103, body="Related to #42, but does not fix it."),
+                0,
+                id="bare-mention-is-not-a-declaration",
+            ),
+            pytest.param(_pr(104, body="Closes #99"), 0, id="a-different-issue"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_a_pr_declaring_the_issue_is_found_by_body(
-        self, config, event_bus
+    async def test_only_a_real_declaration_of_this_issue_matches(
+        self, config, event_bus, pr: dict, expected: int
     ) -> None:
         mgr = make_pr_manager(config, event_bus)
-        calls = [[], [], [_pr(101, body="## Summary\n\nCloses #42.\n")]]
+        calls = [[], [], [pr]]
 
         with patch.object(mgr, "_gh_json_query", new=AsyncMock(side_effect=calls)):
-            assert await mgr.get_pr_for_issue(42) == 101
-
-    @pytest.mark.asyncio
-    async def test_a_declaration_in_the_title_counts(self, config, event_bus) -> None:
-        """`fix(x): thing (Fixes #42)` is a real shape here."""
-        mgr = make_pr_manager(config, event_bus)
-        calls = [[], [], [_pr(102, title="fix(x): thing — Fixes #42", body="")]]
-
-        with patch.object(mgr, "_gh_json_query", new=AsyncMock(side_effect=calls)):
-            assert await mgr.get_pr_for_issue(42) == 102
-
-    @pytest.mark.asyncio
-    async def test_a_bare_mention_is_not_a_declaration(self, config, event_bus) -> None:
-        """ "Related to #42" must not claim the issue — that is how a changelog
-        attributes a fix to the wrong PR."""
-        mgr = make_pr_manager(config, event_bus)
-        calls = [[], [], [_pr(103, body="Related to #42, but does not fix it.")]]
-
-        with patch.object(mgr, "_gh_json_query", new=AsyncMock(side_effect=calls)):
-            assert await mgr.get_pr_for_issue(42) == 0
-
-    @pytest.mark.asyncio
-    async def test_a_different_issue_is_not_matched(self, config, event_bus) -> None:
-        mgr = make_pr_manager(config, event_bus)
-        calls = [[], [], [_pr(104, body="Closes #99")]]
-
-        with patch.object(mgr, "_gh_json_query", new=AsyncMock(side_effect=calls)):
-            assert await mgr.get_pr_for_issue(42) == 0
+            assert await mgr.get_pr_for_issue(42) == expected
 
     @pytest.mark.asyncio
     async def test_the_most_recently_updated_declaration_wins(
