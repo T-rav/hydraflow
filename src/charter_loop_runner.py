@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 from cron_window import CronError, fired_since
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from charter_model import Charter, LoopSpec
@@ -201,6 +201,16 @@ class CharterLoopRunner:
     repo: str
     repo_root: Path
     receipts_path: Path
+    #: REQUIRED, and injected rather than imported. `file_util.append_jsonl`
+    #: carries the ADR-0085 secret redaction and the fsync this durable audit
+    #: stream needs, so the runner must be handed a writer that does that work
+    #: — reimplementing the append inline would drop the redaction. It is
+    #: injected because importing `file_util` here crosses the concentration
+    #: ratchet's god-file threshold (fan-in 40), and the ratchet only shrinks.
+    #: No default: a runner constructed without a writer would drop every
+    #: receipt silently, and "no receipt" is the one thing this design cannot
+    #: tolerate.
+    receipt_writer: Callable[[Path, str], None]
     #: Injected so the runner is unit-testable without a broker, and so the
     #: dispatch surface stays the ONE place a goal override can enter.
     dispatch: Any = None
@@ -210,12 +220,10 @@ class CharterLoopRunner:
     _written: list[RunReceipt] = field(default_factory=list)
 
     def _receipt(self, receipt: RunReceipt) -> None:
-        from file_util import append_jsonl
-
         self._written.append(receipt)
         try:
             self.receipts_path.parent.mkdir(parents=True, exist_ok=True)
-            append_jsonl(self.receipts_path, receipt.to_json())
+            self.receipt_writer(self.receipts_path, receipt.to_json())
         except OSError:
             logger.warning(
                 "charter-loop: could not write a receipt to %s",

@@ -30,6 +30,7 @@ from charter_loop_runner import (
     select_due_loops,
 )
 from charter_model import Charter
+from file_util import append_jsonl
 
 _NOW = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
 _YESTERDAY = _NOW - timedelta(days=1)
@@ -129,6 +130,7 @@ class TestTheRefusalPaths:
             repo="o/r",
             repo_root=tmp_path,
             receipts_path=tmp_path / "receipts.jsonl",
+            receipt_writer=append_jsonl,
             dispatch=_dispatch,
             alert=_alert,
         )
@@ -152,7 +154,10 @@ class TestTheRefusalPaths:
         has none, which is the structural version of the rule.
         """
         runner = CharterLoopRunner(
-            repo="o/r", repo_root=tmp_path, receipts_path=tmp_path / "r.jsonl"
+            repo="o/r",
+            repo_root=tmp_path,
+            receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
         )
         assert not hasattr(runner, "prs")
         assert not hasattr(runner, "issues")
@@ -171,6 +176,7 @@ class TestTheRefusalPaths:
             repo="o/r",
             repo_root=tmp_path,
             receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
             dispatch=_dispatch,
         )
         receipts = await runner.tick(
@@ -224,6 +230,7 @@ class TestTheContractIsTheSystemPrompt:
             repo="o/r",
             repo_root=tmp_path,
             receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
             dispatch=_dispatch,
         )
         await runner.tick(
@@ -261,6 +268,7 @@ class TestTheGoalOverrideIsRecorded:
             repo="o/r",
             repo_root=tmp_path,
             receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
             dispatch=_dispatch,
         )
         receipts = await runner.tick(
@@ -295,6 +303,7 @@ class TestTheGoalOverrideIsRecorded:
             repo="o/r",
             repo_root=tmp_path,
             receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
             dispatch=_dispatch,
         )
         receipts = await runner.tick(
@@ -321,7 +330,12 @@ class TestReceipts:
         indistinguishable from a loop nobody looked at."""
         (tmp_path / "agents").mkdir()
         path = tmp_path / "receipts.jsonl"
-        runner = CharterLoopRunner(repo="o/r", repo_root=tmp_path, receipts_path=path)
+        runner = CharterLoopRunner(
+            repo="o/r",
+            repo_root=tmp_path,
+            receipts_path=path,
+            receipt_writer=append_jsonl,
+        )
         await runner.tick(
             _charter(
                 dormant={"enabled": False},
@@ -353,6 +367,7 @@ class TestReceipts:
             repo="o/r",
             repo_root=tmp_path,
             receipts_path=tmp_path / "r.jsonl",
+            receipt_writer=append_jsonl,
             dispatch=_dispatch,
         )
         receipts = await runner.tick(
