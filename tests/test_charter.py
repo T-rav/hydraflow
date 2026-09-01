@@ -243,6 +243,16 @@ def test_is_regulated_false_for_internal_assurance() -> None:
     assert Charter.from_dict({}).is_regulated is False
 
 
+def test_is_regulated_true_for_a_padded_regulated_assurance_class() -> None:
+    """A YAML scalar with incidental whitespace still validates (
+    ``is_valid_data_class`` strips before matching) and is stored unstripped
+    by ``Articles.from_dict``. ``is_regulated`` must not disagree with the
+    validator it was validated by, or the composition rule (#11869) fails
+    open on exactly the charter it exists to bind."""
+    charter = Charter.from_dict({"articles": {"assurance": " regulated-hipaa "}})
+    assert charter.is_regulated is True
+
+
 # --------------------------------------------------------------------------- #
 # Load / write                                                                 #
 # --------------------------------------------------------------------------- #

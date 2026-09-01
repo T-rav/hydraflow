@@ -35,7 +35,9 @@ FAIL_CLOSED_DATA_CLASS = "regulated-unclassified"
 #: Every class more restrictive than ``internal`` carries this prefix.
 REGULATED_PREFIX = "regulated-"
 
-_VALID_CLASS_RE = _compile(r"^(?:public-code|internal|regulated-[a-z0-9][a-z0-9-]*)$")
+_VALID_CLASS_RE = _compile(
+    rf"^(?:public-code|internal|{REGULATED_PREFIX}[a-z0-9][a-z0-9-]*)$"
+)
 
 
 def is_valid_data_class(raw: str) -> bool:
@@ -44,5 +46,12 @@ def is_valid_data_class(raw: str) -> bool:
 
 
 def is_regulated_class(raw: str) -> bool:
-    """True for ``regulated-*`` classes (including the fail-closed class)."""
-    return raw.startswith(REGULATED_PREFIX)
+    """True for ``regulated-*`` classes (including the fail-closed class).
+
+    Strips like :func:`is_valid_data_class` so the two predicates agree on
+    every string ``Articles.from_dict`` can store — a charter loaded with a
+    padded ``assurance: " regulated-demo "`` validates as regulated and must
+    also classify as regulated, or the composition rule (#11869) silently
+    fails open in exactly the repo it exists to bind.
+    """
+    return raw.strip().startswith(REGULATED_PREFIX)
