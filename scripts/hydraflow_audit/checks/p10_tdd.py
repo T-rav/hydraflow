@@ -13,6 +13,7 @@ from pathlib import Path
 # adds ``src`` to ``sys.path`` so this top-level import resolves under both
 # ``make audit`` (root on path) and the test suite (root + src on path).
 from false_close import SKIP_REGRESSION_RE as _SKIP_REGRESSION_RE
+from false_close import SKIP_SCENARIO_RE as _SKIP_SCENARIO_RE
 from false_close import UI_TEST_RE as _UI_TEST_RE
 from false_close import closing_issue_refs as _closing_issue_refs
 from false_close import has_regression_delta as _has_regression_delta
@@ -357,6 +358,38 @@ def _skip_regression_reason(root: Path, merge_base: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _skip_scenario_reason(root: Path, merge_base: str) -> str | None:
+    """The first ``Skip-Scenario:`` justification in the PR's commit range.
+
+    P10.8's escape hatch, and it exists because the gate produced a real false
+    positive on its first week: #11921 changed one Pydantic annotation
+    (`min_length=1` -> `strip_whitespace=True`) so `" "` stops counting as
+    content. The defect lives entirely in model validation; a MockWorld
+    scenario can observe nothing a unit test cannot, and demanding one yields a
+    ceremonial scenario — a test nobody believes, which is worse than none.
+
+    Modelled on P10.6's ``Skip-Regression:`` rather than invented: a written,
+    greppable reason that survives into the squash-merge body and shows up in
+    review. The obligation stays the default; opting out costs a sentence
+    someone can disagree with.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "--format=%B", f"{merge_base}..HEAD"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = _SKIP_SCENARIO_RE.search(result.stdout)
+    return match.group(1).strip() if match else None
+
+
 def _ui_prefixes(ctx: CheckContext) -> tuple[str, ...]:
     """Repo-relative prefixes a UI product file can sit under, both layouts.
 
@@ -541,8 +574,23 @@ def _changes_ship_the_layers_the_standard_requires(ctx: CheckContext) -> Finding
     # the false positive the design set out to avoid: the standard's own word
     # for "it depends" would become a hard stop, and the gate would be turned
     # off within a week. The unmet-but-not-required detail rides in the reason.
-    status = Status.FAIL if d.blocking else Status.PASS
-    return finding("P10.8", status, d.reason)
+    # One exit: PLR0911 caps returns at six and the suppressions ratchet only
+    # shrinks. The waiver is read LAST, after the verdict, so its message names
+    # what was actually waived rather than suppressing the evaluation — a
+    # waiver nobody can read is not a waiver.
+    status, message = Status.PASS, d.reason
+    if d.blocking:
+        waived = _skip_scenario_reason(ctx.root, merge_base)
+        if waived:
+            message = f"{d.reason} — waived by `Skip-Scenario: {waived}`"
+        else:
+            status = Status.FAIL
+            message = (
+                f"{d.reason} Opt out with a `Skip-Scenario: <justification>` "
+                "commit trailer when the defect is provably unit-visible and a "
+                "scenario would observe nothing extra."
+            )
+    return finding("P10.8", status, message)
 
 
 def _changed_paths_since(root: Path, merge_base: str) -> list[str] | None:

@@ -37,6 +37,11 @@ CLOSE_KEYWORD_RE = re.compile(
 # its justification survives into the squash-merge body.
 SKIP_REGRESSION_RE = re.compile(r"^Skip-Regression:\s*(\S.*)$", re.MULTILINE)
 
+# The greppable opt-out trailer P10.8 honours (``Skip-Scenario: <why>``). Same
+# shape and same discipline as Skip-Regression above: a written, reviewable
+# reason that survives into the squash-merge body, NOT a silent bypass.
+SKIP_SCENARIO_RE = re.compile(r"^Skip-Scenario:\s*(\S.*)$", re.MULTILINE)
+
 # UI regression coverage: a test delta under the UI tree counts for UI-only
 # fixes, so such paths are excluded from the "product source" fix-delta set.
 #

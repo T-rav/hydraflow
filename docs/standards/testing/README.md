@@ -54,6 +54,33 @@ A feature merges into `staging` when ALL three layers exist for it. Specifically
 | New ADR / wiki / config | ❌ no test (docs) | ❌ | ❌ |
 <!-- /standard:requirements -->
 
+### The Bug-fix row's qualifier, and how to assert it
+
+The Bug fix row reads "required **if the bug is observable through a loop /
+runner path**". That condition is prose: `standard.yaml` derives
+required/conditional/not_required from the cell's leading symbol, so it carries
+the ✅ and cannot carry the "if". P10.8 reads the YAML, so by default it holds
+every `fix(` to the unqualified obligation.
+
+Whether a given bug is observable through a loop path is not statically
+decidable — only the author knows. Assert it with a commit trailer:
+
+```
+Skip-Scenario: pure Pydantic constraint change; the defect is entirely in model
+validation and a MockWorld scenario observes nothing a unit test cannot.
+```
+
+The trailer survives into the squash-merge body, is greppable, and appears in
+review where someone can disagree with it. It mirrors P10.6's
+`Skip-Regression:` exactly.
+
+**This is not a bypass.** The obligation stays the default; opting out costs a
+written sentence naming why a scenario would see nothing. A `fix(` with neither
+a scenario nor a trailer still fails. Added after the gate's first genuine false
+positive (#11921, a one-line `min_length=1` → `strip_whitespace=True` change):
+demanding a scenario there would have produced a ceremonial test, and a test
+nobody believes is worse than none.
+
 ## How to write each layer
 
 ### Unit tests
