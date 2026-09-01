@@ -80,12 +80,6 @@ rules:
   - id: layer-table-matches-the-declaration
     claim: The README layer table lists exactly the declared layers, in the declared order
     enforced_by: tests/architecture/test_testing_standard_drift.py::test_the_table_lists_exactly_the_declared_layers_in_order
-
-unenforced:
-  - id: no-raw-mocks-for-fakegithub-side-effects
-    claim: A MockWorld scenario does not replace FakeGitHub side effects with raw mocks
-    why: >-
-      Stated in the README as a Pattern A rule. No check exists: detecting a
-      raw mock standing in for a Fake needs the same call-site analysis the
-      ports-and-loops `tests-stand-in-with-the-fake` gap needs, and the two
-      should be solved together rather than twice.
+  - id: scenarios-do-not-swap-fakes-for-raw-mocks
+    claim: A scenario does not replace a Fake with a bare mock; the stand-in count only shrinks
+    enforced_by: tests/architecture/test_port_stand_ins_use_the_fake.py::TestTheCountOnlyShrinks
