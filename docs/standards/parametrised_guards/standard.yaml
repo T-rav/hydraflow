@@ -3,3 +3,20 @@
 id: parametrised_guards
 enforced_by:
   - tests/architecture/test_guard_enumeration_gate.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: every-enumeration-is-classified
+    claim: Every module-level sequence fed to parametrize under tests/architecture is classified as subject or corpus
+    enforced_by: tests/architecture/test_guard_enumeration_gate.py::test_every_parametrised_arch_sequence_is_classified
+  - id: a-subject-drop-is-detected
+    claim: Dropping a member from a subject is caught by that subject's live drop-detector
+    enforced_by: tests/architecture/test_guard_enumeration_gate.py::test_dropping_a_member_is_detected
+  - id: a-degenerate-detector-fails
+    claim: A detector that answers the same way for everything is a failure, not a pass
+    enforced_by: tests/architecture/test_guard_enumeration_gate.py::test_a_degenerate_detector_is_a_failure
+  - id: exemptions-name-a-mechanism
+    claim: Every member exemption names the mechanism that protects it instead
+    enforced_by: tests/architecture/test_guard_enumeration_gate.py::test_every_member_exemption_names_a_mechanism

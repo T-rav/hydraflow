@@ -4,3 +4,20 @@ id: branch_protection
 enforced_by:
   - tests/architecture/test_adr0042_two_tier_branch_rulesets.py
   - tests/test_gen_gates_cli.py
+
+# Each normative rule in README.md names the check that catches its violation.
+# Properties: tests/architecture/test_standards_rules_are_wired.py
+
+rules:
+  - id: main-is-merge-commit-only
+    claim: The main ruleset permits merge commits only, so history stays linear through RCs
+    enforced_by: tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only
+  - id: staging-allows-squash
+    claim: The staging ruleset allows squash and merge, the two-tier model's working branch
+    enforced_by: tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_staging_ruleset_allows_squash_and_merge
+  - id: both-branches-block-force-push
+    claim: Both rulesets are active and block deletion, force-push and direct push
+    enforced_by: tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_both_rulesets_are_active_and_block_deletion_forcepush_and_direct_push
+  - id: generated-gates-are-committed
+    claim: The generated gate config matches the committed tree and regenerates idempotently
+    enforced_by: tests/test_gen_gates_cli.py::test_check_passes_on_committed_tree
