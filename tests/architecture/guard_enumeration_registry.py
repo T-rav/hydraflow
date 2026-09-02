@@ -701,6 +701,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     """Every classified enumeration under the drop-detection gate."""
     import plan_broker
     import review_worker_runner as rwr
+    import routing_baseline
     from tests import (
         test_adequacy_demand,
         test_claude_hook_shell_tests,
@@ -885,6 +886,21 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         path, _line, _value = member
         return path in {p for p, _l, _v in ungoverned_faces.UNGOVERNED_FACES}
 
+    def _baseline_dial_drop_is_caught(member: str) -> bool:
+        """A dial dropped from the generator's maps reddens the parity gate.
+
+        `_GENERATABLE` derives from `routing_baseline._ROLE_DIALS` and
+        `_PRINCIPAL_DIALS`, and the generator's own
+        `test_every_dial_is_either_generated_or_registered_as_a_gap` compares
+        their union with `UNGENERATED_DIALS` against every `*_provider` field
+        on `HydraFlowConfig`. Removing a dial from either map shrinks the
+        covered set while the config is unchanged, so the equality fails and
+        names the dial.
+        """
+        from config import HydraFlowConfig  # noqa: PLC0415
+
+        return member in HydraFlowConfig.model_fields
+
     def _policy_purity_drop_is_caught(member: str) -> bool:
         classified = (
             set(policy_purity._PURE_SOURCES) | set(policy_purity._IO_SOURCES)  # noqa: SLF001
@@ -908,6 +924,26 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
 
     return (
         # --- SUBJECTS, derived ------------------------------------------
+        GuardedEnumeration(
+            name="test_routing_baseline_generator._GENERATABLE",
+            members=tuple(
+                sorted(
+                    {*routing_baseline._ROLE_DIALS, *routing_baseline._PRINCIPAL_DIALS}
+                )  # noqa: SLF001
+            ),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_baseline_dial_drop_is_caught,
+            why=(
+                "#11991 P6b's generator. Every parity case is parametrised over "
+                "this tuple, so a dial dropped from it stops having its "
+                "generated policy resolved against what the dial produces "
+                "today — and the whole point of the migration is that a dial "
+                "which stops steering does not raise, it routes to a default "
+                "that looks reasonable (#11853's shape). The drop is caught by "
+                "test_every_dial_is_either_generated_or_registered_as_a_gap, "
+                "which compares the maps against HydraFlowConfig's own fields."
+            ),
+        ),
         GuardedEnumeration(
             name="test_policy_engine_is_pure._PURE_SOURCES",
             members=tuple(policy_purity._PURE_SOURCES),  # noqa: SLF001
