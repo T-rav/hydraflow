@@ -55,6 +55,17 @@ _DOCUMENTED_UNREAD_ALLOWLIST: dict[str, str] = {
     "HYDRAFLOW_DIRECTOR_SHADOW_USD_CEILING": "#11541 — settings field, env wiring is separate work",
     # Read by compose files, not Python: docker-compose.bugsink.yml refuses
     # to start without the first three (`:?set ... in .env`).
+    # Read by src/observability/sentry_adapter.build_observability_adapter via
+    # a direct os.environ lookup rather than an override table — the kill switch
+    # must work before any config object exists.
+    "HYDRAFLOW_SENTRY_DISABLED": "sentry_adapter.build_observability_adapter",
+    # Read by nginx through envsubst, not Python: the intake proxy's two lane
+    # tokens and its TLS material (docker-compose.intake-proxy.yml refuses to
+    # start without them — an empty lane token would render `location =
+    # /exception/`, a real reachable path).
+    "HF_EXCEPTION_PATH_TOKEN": "docker-compose.intake-proxy.yml",
+    "HF_REPORT_PATH_TOKEN": "docker-compose.intake-proxy.yml",
+    "HF_TLS_CERT_DIR": "docker-compose.intake-proxy.yml",
     "BUGSINK_SECRET_KEY": "docker-compose.bugsink.yml",
     "BUGSINK_SUPERUSER": "docker-compose.bugsink.yml",
     "BUGSINK_DB_PASSWORD": "docker-compose.bugsink.yml",
