@@ -25,13 +25,21 @@ forgetting it is indistinguishable from the dial silently going unread.
 
 from __future__ import annotations
 
+import inspect
 import typing
+from pathlib import Path
 
 import pytest
 
+import runner_utils
 from config import HydraFlowConfig
+from credit_failover import apply_credit_failover
 from hydraflow_gateway.routing_policy import RequestFace, RouteTransport
+from repo_backend import apply_repo_provider
 from route_shadow import provider_binding_for, transport_for
+
+#: The source tree the seam sweep reads, by reference to this file.
+_SRC = Path(__file__).resolve().parents[1] / "src"
 
 #: The governed seam. A dial that can name it can be migrated to policy.
 _GATEWAY = "gateway"
@@ -166,3 +174,116 @@ class _StubRunner:
         from models import SimpleResult
 
         return SimpleResult(stdout="ok", returncode=0)
+
+
+class TestTheRewriterStackIsPinnedBeforeMigration:
+    """#11991's fourth criterion, stated as the order the rewriters compose in.
+
+    "Credit failover still reroutes after migration" is the visible half. The
+    half that decides it is the *order*: `config.py` documents the stack as
+    `role dial > repo_provider > credit-failover`, and each layer is written to
+    act only on a spawn still resolving to `"claude"`. Once the resolver reads
+    policy, that ordering has to be reproduced by policy priority — so what it
+    resolves to today is recorded here, against the unmigrated path.
+
+    Driven through the real functions. Asserting the order from the source text
+    of `_execute` would redden on a harmless rewrite and stay green if the
+    layers were reordered while the words survived.
+    """
+
+    def test_a_role_dial_already_off_claude_wins_over_the_repo_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The top of the stack: `repo_provider` never overrules an explicit dial.
+
+        The key is set deliberately. `apply_repo_provider` refuses to reroute to
+        an endpoint with no credential, so on a host without `ZAI_API_KEY` this
+        assertion is satisfied by the missing key rather than by the ordering it
+        is meant to pin — and would stay green with the ordering guard deleted.
+        Caught by mutating that guard away and watching the test pass.
+        """
+        monkeypatch.setenv("ZAI_API_KEY", "zai-parity-baseline-key")
+        config = HydraFlowConfig(repo_provider="zai", repo_model="glm-5.2")
+
+        assert apply_repo_provider("gateway", _claude_cmd(), config) == (
+            "gateway",
+            _claude_cmd(),
+        )
+
+    def test_the_repo_override_reroutes_a_spawn_still_on_claude(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The middle of the stack, and the anti-vacuity partner of the test above.
+
+        Without this, a broken `apply_repo_provider` that returned its input
+        unchanged for every argument would satisfy the ordering assertion.
+        """
+        monkeypatch.setenv("ZAI_API_KEY", "zai-parity-baseline-key")
+        config = HydraFlowConfig(repo_provider="zai", repo_model="glm-5.2")
+
+        provider, cmd = apply_repo_provider("claude", _claude_cmd(), config)
+
+        assert (provider, "glm-5.2" in cmd) == ("zai", True)
+
+    def test_credit_failover_does_not_touch_a_spawn_the_repo_moved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bottom of the stack. A GLM-native repo is untouched by a Claude cap.
+
+        This is the property the migration is most likely to lose: expressed as
+        policy, "failover applies" and "this repo is already elsewhere" stop
+        being an ordering and become two rules that must not both match.
+        """
+        monkeypatch.setenv("ZAI_API_KEY", "zai-parity-baseline-key")
+        config = HydraFlowConfig(credit_failover_enabled=True)
+
+        assert apply_credit_failover("zai", _claude_cmd(), config) == (
+            "zai",
+            _claude_cmd(),
+        )
+
+    def test_the_maintenance_seam_is_out_of_the_repo_override_s_scope(self) -> None:
+        """The scope boundary, recorded because migration could quietly widen it.
+
+        `repo_provider` is documented as governing "this repo's **work** spawns";
+        the lightweight seam routes on `maintenance_provider` instead and calls
+        no repo override. Expressed as policy both become rules matching on a
+        repo, and nothing about a rule says which spawns it was meant for — so
+        the boundary is written down while it is still structural.
+        """
+        source = inspect.getsource(runner_utils.run_lightweight_agent)
+
+        assert "apply_credit_failover" in source
+        assert "apply_repo_provider" not in source
+
+
+def test_every_seam_that_failover_reaches_is_a_known_one() -> None:
+    """The #11853 property itself: a new spawn seam cannot skip failover quietly.
+
+    #11853 was not a wrong function — `apply_credit_failover` was correct and
+    simply never called from one of the places that spawns. A test of the
+    function cannot see that; only a test of the *call sites* can. The set is
+    swept out of `src/` rather than listed in prose, so a fourth seam added
+    after the migration fails here and has to be classified rather than
+    inherited.
+    """
+    found = {
+        path.relative_to(_SRC).as_posix()
+        for path in _SRC.rglob("*.py")
+        if "apply_credit_failover(" in path.read_text(encoding="utf-8")
+        and path.name not in {"credit_failover.py", "repo_backend.py"}
+    }
+
+    assert found == {
+        "base_runner.py",
+        "runner_utils.py",
+        "runners/base_subprocess_runner.py",
+    }, (
+        f"the credit-failover seam set changed: {sorted(found)}. A new seam must "
+        f"apply failover (#11853) and be recorded here before P6b migrates the "
+        f"resolution off the dials"
+    )
+
+
+def _claude_cmd() -> list[str]:
+    return ["claude", "--model", "sonnet", "-p", "hello"]
