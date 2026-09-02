@@ -507,10 +507,17 @@ stack, not open a lane.
 
 ### Configuring an app that is not HydraFlow
 
-`.claude/agents/hf.sre.md` carries the SRE agent's runbook: SDK init for Python
-and Node, the check at each step, how Bugsink's grouping differs from Sentry's,
-and a symptom table for "we get no error issues". Read it before wiring a
-managed repo.
+[`docs/standards/exception_sensor/RUNBOOK.md`](../standards/exception_sensor/RUNBOOK.md)
+carries the SRE runbook: SDK init for Python and Node, the check at each step,
+how Bugsink's grouping differs from Sentry's, and a symptom table for "we get no
+error issues". Read it before wiring a managed repo.
+
+It lives beside the standard deliberately. `.claude/` is stamped into nothing,
+so a runbook there would have reached HydraFlow and no one else — a repo
+onboarded to the format would inherit the exception-sensor rules with no
+instructions for satisfying them. Everything under a kernel standard's
+directory ships, and `test_the_exception_sensor_runbook_ships_with_the_kernel`
+pins that.
 
 ### How Bugsink groups (it is not Sentry's algorithm)
 

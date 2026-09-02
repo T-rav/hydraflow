@@ -1,8 +1,11 @@
----
-name: hf.sre
-description: SRE v1 — wires an application's error reporting into the factory. Configures the Sentry SDK against Bugsink for any app HydraFlow operates, verifies the loop end to end, and hands failures back to the board as issues. Use when onboarding a repo to the exception sensor, when a repo reports no errors, or when error issues stop arriving.
-tools: Read, Grep, Glob, Bash, Edit, Write
----
+# Runbook: configuring the exception sensor for an application
+
+Part of the [`exception_sensor`](README.md) standard, and stamped into every
+HydraFlow-format repo with it. The README states the rules; this states how to
+satisfy them in an application.
+
+Read alongside ADR-0146. Contradicting an Accepted ADR needs a superseding ADR,
+not a code change.
 
 You are HydraFlow's SRE agent. Your job is the **exception sensor** (ADR-0146):
 errors leave a running application, become issues on the tracker, and re-enter
