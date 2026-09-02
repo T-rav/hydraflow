@@ -169,28 +169,91 @@ def _remove_worktree(
 # ---------------------------------------------------------------------------
 
 
-#: How the staged-file set is reconciled with generated arch artifacts before
-#: the commit. `make arch-regen-stage` is the exact remedy the worktree
+#: How generated arch artifacts are reconciled with the staged file set before
+#: a bot commit. `make arch-regen-stage` is the exact remedy the worktree
 #: pre-commit hook prints when docs/arch/generated/ is out of sync (#12062):
 #: term files, ports, loops and ADR surfaces are INPUTS to the generated
 #: artifacts, so a bot PR that stages one without regenerating is rejected at
-#: commit time — the term proposer hit this on every cycle. Module-level so
+#: commit time — TermProposerLoop hit this on every cycle. Module-level so
 #: tests can substitute a recording stub.
 _ARCH_REGEN_ARGV: tuple[str, ...] = ("make", "arch-regen-stage")
 _ARCH_REGEN_TIMEOUT_S = 600.0
 
 
-def _regen_arch_artifacts(worktree_path: Path) -> None:
-    """Regenerate and stage arch artifacts in the worktree — FAIL-OPEN.
+#: The drift-exempt generated artifacts (arch.runner._DRIFT_EXEMPT): derived
+#: from a moving ``git log`` window rather than from source, so two trees with
+#: byte-identical architecture still produce different bytes for them.
+#: ``make arch-regen-stage`` blanket-adds the generated directory; without
+#: this exclusion a caller whose files touch no arch inputs would stage
+#: volatile churn — turning a no-diff into a spurious PR, the exact scenario
+#: ``substantive_specs`` exists to prevent. Duplicated here rather than
+#: imported (arch.runner is heavyweight and this module must stay light);
+#: bound to the runner's set by
+#: tests/regressions/test_issue_12062_auto_pr_arch_regen.py so it cannot
+#: drift.
+_VOLATILE_ARCH_ARTIFACTS: tuple[str, ...] = ("changelog.md", "traceability_matrix.md")
 
-    Deterministic regen means callers whose files touch no arch inputs stage
-    nothing extra. On any failure (no Makefile in a toy test repo, uv absent,
-    regen bug) the flow proceeds and the commit either succeeds (inputs
-    untouched) or fails with the pre-commit hook's own clear remedy — never
-    worse than the pre-#12062 behaviour.
+
+def _volatile_arch_paths() -> list[str]:
+    """The drift-exempt generated artifacts, as repo-relative paths."""
+    return [f"docs/arch/generated/{name}" for name in sorted(_VOLATILE_ARCH_ARTIFACTS)]
+
+
+async def _regen_arch_artifacts_async(
+    worktree_path: Path, gh_token: str, run_subprocess: Callable[..., Awaitable[str]]
+) -> None:
+    """Regenerate + stage arch artifacts in the worktree — FAIL-OPEN (#12062).
+
+    Runs the pre-commit hook's own remedy between the caller's staging and the
+    commit, then unstages the volatile drift-exempt artifacts (per path, so a
+    repo that lacks one still gets the others excluded). Deterministic regen
+    (`.meta.json` is a content digest, #11674) stages nothing when inputs are
+    untouched. On any failure the flow proceeds: the commit then either
+    succeeds (inputs untouched) or fails with the hook's clear remedy — never
+    worse than the pre-#12062 behaviour. Toy test repos without a Makefile
+    take the fail-open path by construction. ``run_subprocess`` is passed by
+    the caller (which already holds the deferred import) so this helper adds
+    no import-suppression of its own — the suppressions ratchet only shrinks.
     """
     try:
-        result = subprocess.run(  # noqa: S603
+        await run_subprocess(
+            *_ARCH_REGEN_ARGV,
+            cwd=worktree_path,
+            gh_token=gh_token,
+            timeout=_ARCH_REGEN_TIMEOUT_S,
+        )
+    except (RuntimeError, OSError) as exc:
+        logger.warning(
+            "auto_pr: arch regen failed in %s — proceeding; the pre-commit "
+            "hook rejects the commit if artifacts are stale (%s)",
+            worktree_path,
+            exc,
+        )
+        return
+    for path in _volatile_arch_paths():
+        try:
+            await run_subprocess(
+                "git",
+                "restore",
+                "--staged",
+                "--worktree",
+                "--",
+                path,
+                cwd=worktree_path,
+                gh_token=gh_token,
+            )
+        except (RuntimeError, OSError):
+            # Path absent in this tree (minimal repos) — nothing staged for it.
+            logger.debug("auto_pr: volatile-artifact exclusion skipped for %s", path)
+
+
+def _regen_arch_artifacts(worktree_path: Path) -> None:
+    """Sync twin of :func:`_regen_arch_artifacts_async` for
+    :func:`open_automated_pr` — same argv, same volatile exclusion, same
+    fail-open contract. Kept in step by the #12062 regression tests, which
+    drive both entry points through the shared module-level seam."""
+    try:
+        result = subprocess.run(
             list(_ARCH_REGEN_ARGV),
             cwd=worktree_path,
             capture_output=True,
@@ -214,6 +277,14 @@ def _regen_arch_artifacts(worktree_path: Path) -> None:
             result.returncode,
             worktree_path,
             (result.stderr or "")[-300:],
+        )
+        return
+    for path in _volatile_arch_paths():
+        subprocess.run(
+            ["git", "restore", "--staged", "--worktree", "--", path],
+            cwd=worktree_path,
+            capture_output=True,
+            check=False,
         )
 
 
@@ -864,6 +935,12 @@ async def _finalize_pr_from_worktree(
     (``None``) preserves the all-staged behavior for every other caller.
     """
     from subprocess_util import run_subprocess  # noqa: PLC0415
+
+    # Reconcile generated arch artifacts with whatever the caller staged
+    # (#12062). Runs BEFORE the substantive-diff check so regen output rides
+    # the same commit, and excludes the drift-exempt volatile artifacts so a
+    # no-input caller cannot be turned into a spurious PR.
+    await _regen_arch_artifacts_async(worktree_path, gh_token, run_subprocess)
 
     # Empty (substantive) staged diff → nothing to PR. This is what stops
     # DiagramLoop opening a churn PR when only volatile artifacts moved.
