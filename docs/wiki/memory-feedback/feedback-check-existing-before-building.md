@@ -6,7 +6,7 @@ description: '2026-08-18: I rebuilt an already-shipped feature (rung-0 ledger #1
   especially when a roadmap says ''NOW''.'
 status: issue-open
 issue: 11947
-promoted_in: null
+promoted_in: 12016
 wontfix_reason: null
 created: '2026-08-17'
 ---
