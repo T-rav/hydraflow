@@ -38,7 +38,6 @@ from route_shadow import (  # noqa: E402
 )
 from routing_baseline import (  # noqa: E402
     _PRINCIPAL_DIALS,
-    _ROLE_DIALS,
     UNGENERATED_DIALS,
     baseline_policies,
 )
@@ -64,13 +63,10 @@ def _zai_account_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 #: `canonical_worker_role` maps onto their role (exact match, ADR-0137);
 #: principal dials use one of the sources #12023 swept for them.
 _PRINCIPAL_FOR: dict[str, str] = {
-    "implementation_provider": "implementer",
-    "planner_provider": "planner",
-    "review_provider": "reviewer",
-    **{dial: sorted(sources)[0] for dial, sources in _PRINCIPAL_DIALS.items()},
+    dial: sorted(sources)[0] for dial, sources in _PRINCIPAL_DIALS.items()
 }
 
-_GENERATABLE = tuple(sorted({*_ROLE_DIALS, *_PRINCIPAL_DIALS}))
+_GENERATABLE = tuple(sorted(_PRINCIPAL_DIALS))
 
 #: The one dial whose model is not `<dial>_model`. `_tool_model_stage_pairs`
 #: pairs the `implementation` stage with the top-level `config.model`; there is
@@ -219,7 +215,7 @@ def test_every_dial_is_either_generated_or_registered_as_a_gap() -> None:
     while migrating two thirds of the fleet.
     """
     dials = {n for n in HydraFlowConfig.model_fields if n.endswith("_provider")}
-    covered = {*_ROLE_DIALS, *_PRINCIPAL_DIALS, *UNGENERATED_DIALS}
+    covered = {*_PRINCIPAL_DIALS, *UNGENERATED_DIALS}
 
     assert dials == covered, (
         f"unclassified dials: {sorted(dials - covered)}; "
@@ -229,6 +225,56 @@ def test_every_dial_is_either_generated_or_registered_as_a_gap() -> None:
 
 def test_no_dial_is_both_generated_and_registered_as_a_gap() -> None:
     """A dial in both maps would read as covered while its reason said otherwise."""
-    generated = {*_ROLE_DIALS, *_PRINCIPAL_DIALS}
+    generated = set(_PRINCIPAL_DIALS)
 
     assert not (generated & set(UNGENERATED_DIALS))
+
+
+def test_every_declared_principal_exists_in_the_tree() -> None:
+    """The map is read off the spawn sites; this fails when one is renamed.
+
+    Each entry in `_PRINCIPAL_DIALS` came from an `event_data["source"]` or
+    `source=` literal in `src/`. Those are ordinary strings — nothing stops a
+    rename, and a policy naming a principal no spawn carries matches nothing
+    while still looking complete. That is #11853's shape at the join.
+    """
+    sources = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in (Path(__file__).parents[1] / "src").rglob("*.py")
+    )
+    declared = {p for principals in _PRINCIPAL_DIALS.values() for p in principals}
+
+    missing = sorted(p for p in declared if f'"{p}"' not in sources)
+
+    assert not missing, (
+        f"these principals are declared in `_PRINCIPAL_DIALS` but appear at no "
+        f"spawn site in src/: {missing}. Either the source literal was renamed "
+        f"(update the map) or the policy claims a principal nothing emits."
+    )
+
+
+def test_no_dial_joins_on_a_role_instead_of_its_principals() -> None:
+    """Roles are a LOSSY projection of principals — #11991's silent split.
+
+    `canonical_worker_role` matches ADR-0137's vocabulary exactly, so `reviewer`
+    resolves and `review_fixer` / `verification_judge` do not. A generated
+    `roles=[REVIEWER]` policy claimed one of `review_provider`'s three spawn
+    sites and left the other two on the legacy path — one dial, split down the
+    middle, with nothing going red.
+    """
+    config = _config_with("review_provider", "zai")
+
+    for policy in baseline_policies(config):
+        assert policy.match.roles == (), (
+            f"{policy.id} joins on roles; a role cannot express a principal "
+            f"like `review_fixer` that names no WorkerRole"
+        )
+        assert policy.match.principal_ids, f"{policy.id} names no principals"
+
+
+def test_the_lossy_principals_are_actually_covered_now() -> None:
+    """The two the role join dropped, named explicitly so the fix cannot regress."""
+    policies = baseline_policies(_config_with("review_provider", "zai"))
+    covered = {p for policy in policies for p in policy.match.principal_ids}
+
+    assert {"review_fixer", "verification_judge"} <= covered

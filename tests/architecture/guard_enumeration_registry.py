@@ -734,6 +734,9 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_producer_probe_gate as probe_gate
     from tests.architecture import test_provider_dial_source_map as dial_sources
+    from tests.architecture import (
+        test_readme_model_dials_exist as readme_model_dials,
+    )
     from tests.architecture import test_standards_rules_are_wired as rules_wired
     from tests.architecture import (
         test_ungoverned_spawn_faces as ungoverned_faces,
@@ -891,7 +894,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     def _baseline_dial_drop_is_caught(member: str) -> bool:
         """A dial dropped from the generator's maps reddens the parity gate.
 
-        `_GENERATABLE` derives from `routing_baseline._ROLE_DIALS` and
+        `_GENERATABLE` derives from `routing_baseline._PRINCIPAL_DIALS` and
         `_PRINCIPAL_DIALS`, and the generator's own
         `test_every_dial_is_either_generated_or_registered_as_a_gap` compares
         their union with `UNGENERATED_DIALS` against every `*_provider` field
@@ -928,11 +931,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         # --- SUBJECTS, derived ------------------------------------------
         GuardedEnumeration(
             name="test_routing_baseline_generator._GENERATABLE",
-            members=tuple(
-                sorted(
-                    {*routing_baseline._ROLE_DIALS, *routing_baseline._PRINCIPAL_DIALS}
-                )  # noqa: SLF001
-            ),
+            members=tuple(sorted(routing_baseline._PRINCIPAL_DIALS)),  # noqa: SLF001
             kind=EnumerationKind.SUBJECT,
             detects_drop=_baseline_dial_drop_is_caught,
             why=(
@@ -1007,6 +1006,27 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "one leaves the rule still checked, with one fewer example."
             ),
             undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_readme_model_dials_exist._listed_loops()",
+            members=tuple(readme_model_dials._listed_loops()),  # noqa: SLF001
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "The loop names README.md itself lists as having a model dial. "
+                "CORPUS rather than SUBJECT because the members are READ FROM "
+                "the subject: when a name leaves that sentence the README no "
+                "longer claims the dial, so the gate is not silently failing to "
+                "cover something still asserted. Pruning four dead names "
+                "(sentry, code_grooming, memory_judge, memory_compaction) is "
+                "what this guard was added to force, and a classification that "
+                "reddened on it would punish the fix."
+            ),
+            undetected_reason=(
+                "Evidence, not subject: each member is one claim the README "
+                "makes, asserted per case. The vacuous end — an emptied list "
+                "asserting nothing — is held by "
+                "test_readme_model_dials_exist.test_the_list_is_not_empty."
+            ),
         ),
         GuardedEnumeration(
             name="test_adequacy_demand.ANCHORED_CORPUS",
