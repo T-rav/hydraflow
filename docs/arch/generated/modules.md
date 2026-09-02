@@ -56,7 +56,7 @@ graph LR
     src -- "10" --> src_escape
     src -- "4" --> src_flows
     src -- "1" --> src_health_monitor_loop
-    src -- "26" --> src_hydraflow_gateway
+    src -- "27" --> src_hydraflow_gateway
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
