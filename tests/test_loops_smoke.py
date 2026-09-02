@@ -30,7 +30,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventBus
-from service_registry import ServiceRegistry, build_services
+from service_registry import (
+    ServiceRegistry,
+    WorkerRegistryCallbacks,
+    build_services,
+)
 from state import StateTracker
 from tests.test_service_registry import _make_callbacks
 
@@ -104,3 +108,56 @@ async def test_loop_ticks_without_internal_raise(
         raise AssertionError(
             f"{loop_field} ticked beyond 10s; mock the boundary for a deterministic smoke"
         ) from exc
+
+
+def _disabled_callbacks() -> WorkerRegistryCallbacks:
+    """Callbacks with every worker's kill switch OFF."""
+    return WorkerRegistryCallbacks(
+        update_status=lambda *args, **kwargs: None,
+        is_enabled=lambda name: False,
+        get_interval=lambda name: 60,
+        get_watchdog_timeout=lambda name: 7200,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loop_field", _all_loop_fields())
+async def test_loop_honours_its_kill_switch(
+    config: HydraFlowConfig, loop_field: str
+) -> None:
+    """Every registry loop short-circuits on `enabled_cb`, by reference (#11548).
+
+    ADR-0049's convention: gate `_do_work` on `self._enabled_cb(self._worker_name)`
+    at the top and return `{"status": "disabled"}`. Verified per loop, by hand,
+    in each loop's own test file until now — which is opt-in: a new loop is
+    covered only if its author remembers to write the test. Sweeping the
+    registry makes it structural.
+
+    The wiki suggests verifying this with
+    `grep -L 'self._enabled_cb' src/*_loop.py`. That checks the SPELLING. This
+    calls `_do_work` with the switch off and checks what the loop DOES — one
+    that reads `_enabled_cb` and ignores the answer passes the grep and fails
+    here.
+
+    How many loops were previously uncovered is deliberately not claimed: a
+    filename predicate and a class-mention predicate answer it in opposite
+    directions (nine versus zero), which is the argument for an executable
+    sweep rather than another grep.
+    """
+    bus = EventBus()
+    state = StateTracker(config.state_file)
+    stop_event = asyncio.Event()
+
+    registry = build_services(config, bus, state, stop_event, _disabled_callbacks())
+    loop = getattr(registry, loop_field)
+    assert loop is not None, f"{loop_field} is gated off by config"
+
+    result = await asyncio.wait_for(loop._do_work(), timeout=10.0)
+
+    assert result == {"status": "disabled"}, (
+        f"{loop_field} did not short-circuit with its kill switch off — it "
+        f"returned {result!r}. ADR-0049: gate `_do_work` on "
+        f"`self._enabled_cb(self._worker_name)` at the TOP and return "
+        f'{{"status": "disabled"}}. A loop that runs while disabled ignores '
+        f"the operator's bg-worker control."
+    )
