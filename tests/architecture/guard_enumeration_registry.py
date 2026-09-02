@@ -716,6 +716,9 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         test_sandbox_scenario_contract,
         test_worker_receipts,
     )
+    from tests import (
+        test_generated_lock_refuses_a_literal as generated_lock,
+    )
     from tests.architecture import aggregate_gate_registry as aggregate_lane
     from tests.architecture import canary_registry
     from tests.architecture import test_admission_rule_tables as admission
@@ -990,6 +993,21 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "is swept from the tree by AST, so the drop is caught by "
                 "re-running that sweep."
             ),
+        ),
+        GuardedEnumeration(
+            name="test_generated_lock_refuses_a_literal._LITERALS",
+            members=tuple(generated_lock._LITERALS),  # noqa: SLF001
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "The two literal Anthropic models #11993 names as the "
+                "non-negotiable — 'a literal Opus/Sonnet requirement is never "
+                "silently rewritten to GLM'. They are examples the refusal is "
+                "exercised with, not the population being guarded: the subject "
+                "is `anthropic_lane_required`'s rule, which the generator's own "
+                "empty `requirement_map` assertion covers directly. Dropping "
+                "one leaves the rule still checked, with one fewer example."
+            ),
+            undetected_reason=_CORPUS_IS_EVIDENCE,
         ),
         GuardedEnumeration(
             name="regression_issue_6494.MALFORMED_PAYLOADS",
