@@ -7,6 +7,11 @@ what a tag promises, and the cut recipe live in
 
 ## Unreleased
 
+- `make env` renamed to `make deps-heal` (#12041): the old name read as dotenv
+  setup while `.env` seeding lives in `make setup`; `make env` remains as a
+  deprecated alias for one cycle. The factory launcher, help text, wiki, and
+  launcher-service test move to the new name.
+
 - Ubiquitous language: the **adversarial planning ensemble** is renamed off "Council", so
   "Council" now names exactly one thing in this repo — the `agents/council/` governance
   layer (ADR-0053). `PlanCouncil`→`PlanEnsemble`, `DecompositionCouncil`→`DecompositionEnsemble`,
