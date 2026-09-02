@@ -8266,8 +8266,9 @@ def declared_env_keys() -> frozenset[str]:
     these keys elsewhere. Callers needing a hermetic environment (e.g. the
     test suite's session-scoped isolation fixture) should scrub this whole
     set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
-    several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
-    third-party naming conventions instead (#10876). Credential keys are
+    the tables are not guaranteed to stay behind one prefix (#10876; the
+    former third-party-named entries ``OTEL_SERVICE_NAME`` and ``HF_ENV``
+    were removed with ADR-0118, but the rule outlives its examples). Credential keys are
     *deliberately excluded* — they are read directly by
     :func:`build_credentials` (not a table) and are enumerated separately as
     :data:`CREDENTIAL_ENV_KEYS`, which the isolation fixture scrubs in addition
