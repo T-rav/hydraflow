@@ -440,7 +440,8 @@ the no-op adapter — so it is its own command:
 |---|---|---|
 | `make run` | dashboard + UI | 5555 (loopback) |
 | `make factory` | the factory loops | — |
-| `make bugsink-up` | Bugsink, its database, **and the nginx proxy** | 8000 loopback / 8443 exposed |
+| `make bugsink-up` | Bugsink + its database (local only) | 8000 (loopback) |
+| `make bugsink-up-exposed` | the above **plus** the nginx intake proxy | + 8443 (exposed) |
 
 `make run` and `make factory` do **not** start nginx or Bugsink. Order does not
 matter: the proxy retries its upstream, and HydraFlow only reads the DSN at
@@ -480,6 +481,36 @@ the house default because self-hosting keeps error payloads from a repo full of
 unreleased work on infrastructure you own.
 
 `HYDRAFLOW_SENTRY_DISABLED=1` overrides a configured DSN, always toward off.
+
+### Verifying the loop for real
+
+```bash
+scripts/bugsink_e2e_smoke.sh
+```
+
+Not in CI (needs Docker, pulls two images). It stands the stack up from nothing,
+creates a project, throws a real exception through the real adapter, checks
+Bugsink grouped it, drives the nginx lane, and proves a client cannot choose its
+own `?source=`.
+
+It exists because the unit, config and scenario layers all passed while the loop
+had never actually been run once — and the first real run found two defects
+those layers could not see: compose interpolating every service's variables (so
+a local-only start demanded TLS certs), and the proxy's upstream pointing at
+Bugsink's port instead of the dashboard's.
+
+The proxy lives in its own `docker-compose.intake-proxy.yml` for exactly that
+first reason. Giving its tokens empty defaults instead would have been worse
+than it looks: an empty `HF_EXCEPTION_PATH_TOKEN` renders
+`location = /exception/`, a real reachable path. A missing token must stop the
+stack, not open a lane.
+
+### Configuring an app that is not HydraFlow
+
+`.claude/agents/hf.sre.md` carries the SRE agent's runbook: SDK init for Python
+and Node, the check at each step, how Bugsink's grouping differs from Sentry's,
+and a symptom table for "we get no error issues". Read it before wiring a
+managed repo.
 
 ### How Bugsink groups (it is not Sentry's algorithm)
 
@@ -541,7 +572,7 @@ The application keeps **one** intake handler. The separation is at the proxy:
 
 ### Remote deploys — expose the intake, never the dashboard
 
-`make bugsink-up` includes an nginx front door (`docker/hydraflow-proxy/`). It is
+`make bugsink-up-exposed` adds an nginx front door (`docker/hydraflow-proxy/`). It is
 **default-deny** and opens exactly two lanes, both landing on the one intake
 method: `/exception/<token>` and `/report/<token>` (see below).
 

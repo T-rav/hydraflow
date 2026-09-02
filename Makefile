@@ -268,16 +268,23 @@ dev: run
 bugsink-up:
 	@echo "$(BLUE)Starting Bugsink (exception sensor backend) on :$${BUGSINK_PORT:-8000}$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml up -d
+
+## bugsink-up-exposed — Bugsink PLUS the nginx intake proxy (remote deploys).
+## Needs HF_TLS_CERT_DIR, HF_EXCEPTION_PATH_TOKEN, HF_REPORT_PATH_TOKEN and
+## HYDRAFLOW_OPERATOR_TOKEN. Local-only setups do not need this target.
+bugsink-up-exposed:
+	@echo "$(BLUE)Starting Bugsink + intake proxy (exposed on :$${HF_INTAKE_PROXY_PORT:-8443})$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml -f docker-compose.intake-proxy.yml up -d
 	@echo "$(GREEN)Bugsink at http://localhost:$${BUGSINK_PORT:-8000}/$(RESET)"
 
 ## bugsink-down — stop Bugsink. Data survives (the volume is not removed).
 bugsink-down:
-	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml down
+	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml -f docker-compose.intake-proxy.yml down
 	@echo "$(GREEN)Bugsink stopped; bugsink-db-data volume kept$(RESET)"
 
 ## bugsink-logs — follow Bugsink's logs.
 bugsink-logs:
-	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml logs -f
+	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml -f docker-compose.intake-proxy.yml logs -f
 
 factory:
 	@echo "$(BLUE)Starting HydraFlow factory in an isolated workspace (dev checkout stays clean)$(RESET)"
