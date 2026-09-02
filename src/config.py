@@ -56,6 +56,15 @@ class Credentials(BaseModel):
         default="",
         description="GitHub token for gh CLI auth",
     )
+    sentry_dsn: str = Field(
+        default="",
+        description=(
+            "Sentry DSN for error ingestion (ADR-0146). A write key, so it "
+            "lives with the credentials rather than in domain config. Its "
+            "PRESENCE is the switch: empty means the no-op adapter, which is "
+            "what tests, CI and the air-gapped sandbox get."
+        ),
+    )
     whatsapp_token: str = Field(
         default="",
         description="WhatsApp Business API access token",
@@ -3186,6 +3195,15 @@ class HydraFlowConfig(BaseModel):
     find_label: list[str] = Field(
         default=["hydraflow-find"],
         description="Labels for new issues to discover and triage into planning (OR logic)",
+    )
+    exception_sensor_label: list[str] = Field(
+        default=["bugsink"],
+        description=(
+            "Labels marking an issue as an incoming system exception filed by "
+            "the exception sensor's backend (ADR-0146). Provenance only — the "
+            "issue still needs a find_label to enter the pipeline. Triage "
+            "routes these as system exceptions rather than authored findings."
+        ),
     )
     regulated_labels: str = Field(
         default="",
@@ -7303,6 +7321,7 @@ class HydraFlowConfig(BaseModel):
 # _dotenv_lookup falls back on.
 _GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 # 1:1 credential-field → env-key. Read with empty-string defaults.
+_SENTRY_ENV_KEYS: dict[str, str] = {"sentry_dsn": "SENTRY_DSN"}
 _WHATSAPP_ENV_KEYS: dict[str, str] = {
     "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
     "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
@@ -7313,8 +7332,10 @@ _WHATSAPP_ENV_KEYS: dict[str, str] = {
 #: Every env var :func:`build_credentials` reads, as one enumerable surface so
 #: test isolation and .env/documentation generators don't hand-list the
 #: credential keys (#10885). Folded into :func:`declared_env_keys`.
-CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(_GH_TOKEN_ENV_KEYS) | frozenset(
-    _WHATSAPP_ENV_KEYS.values()
+CREDENTIAL_ENV_KEYS: frozenset[str] = (
+    frozenset(_GH_TOKEN_ENV_KEYS)
+    | frozenset(_WHATSAPP_ENV_KEYS.values())
+    | frozenset(_SENTRY_ENV_KEYS.values())
 )
 
 
@@ -7334,8 +7355,16 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
             break
     if not gh_token:
         gh_token = _dotenv_lookup(config.repo_root, *_GH_TOKEN_ENV_KEYS)
+    # Same os.environ-then-.env resolution as gh_token: the DSN lives in the
+    # repo's `.env` on this deployment and is NOT exported to the shell, so an
+    # os.environ-only read would leave the adapter permanently inert while
+    # looking configured (ADR-0146).
+    sentry_dsn = os.environ.get(_SENTRY_ENV_KEYS["sentry_dsn"], "") or _dotenv_lookup(
+        config.repo_root, _SENTRY_ENV_KEYS["sentry_dsn"]
+    )
     return Credentials(
         gh_token=gh_token,
+        sentry_dsn=sentry_dsn,
         **{
             field: os.environ.get(env_key, "")
             for field, env_key in _WHATSAPP_ENV_KEYS.items()

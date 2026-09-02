@@ -105,7 +105,7 @@ from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
 from models import StatusCallback
-from observability.noop_adapter import NoOpObservabilityAdapter
+from observability.sentry_adapter import build_observability_adapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
 from plan_touchpoint_expander import PlanTouchpointExpander
@@ -1064,11 +1064,13 @@ def build_services(
     # been extracted via scripts/extract_hindsight_to_wiki.py before merge.
 
     # Observability port — constructed once and injected throughout.
-    # Production path: NoOpObservabilityAdapter (discards events until the SRE
-    # agent wires a real backend, ADR-0118). Sandbox/test path: caller passes
-    # FakeObservability.
+    # Production path: Sentry when a DSN is configured, the no-op otherwise
+    # (ADR-0146 supersedes ADR-0118's backend direction). The DSN's presence IS
+    # the switch, so tests, CI and the air-gapped sandbox get the no-op without
+    # a flag anyone has to remember. Sandbox/test path: caller passes
+    # FakeObservability, which still wins over both.
     if observability is None:
-        observability = NoOpObservabilityAdapter()
+        observability = build_observability_adapter(credentials)
 
     # Core runners
     if workspaces is None:

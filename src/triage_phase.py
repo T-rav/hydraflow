@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from adr_utils import (
@@ -46,6 +47,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.triage_phase")
 
+#: Legacy body marker from the Sentry ingest loop ADR-0118 deleted. Between
+#: that removal and ADR-0146 NOTHING in ``src/`` wrote it — the only writers
+#: repo-wide were this module's own tests, which hand-build the string, so the
+#: route below stayed green while being unreachable in production. Kept as a
+#: fallback because it costs one ``in``; the label is the live key.
 _SENTRY_MARKER = "<!-- [sentry:"
 _AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
 
@@ -55,6 +61,11 @@ _AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
 # Outcomes not in this map (e.g. "unknown") are not recorded.
 _TRIAGE_VERDICT_MAP: dict[str, str] = {
     "plan": "ADVANCE",
+    # Wire value, not a label: this string is written into issue classification
+    # records (issue_cache.py) and read back to score historical verdicts.
+    # ADR-0146 renamed the vendor around it and deliberately left the key —
+    # renaming a persisted value is a migration, and an unmigrated rename
+    # scores every pre-existing record "unknown" instead of ADVANCE.
     "sentry_noise_closed": "ADVANCE",
     "already_addressed": "ADVANCE",
     "bug_not_present": "ADVANCE",
@@ -62,8 +73,21 @@ _TRIAGE_VERDICT_MAP: dict[str, str] = {
 }
 
 
-def _is_sentry_issue(issue: Task) -> bool:
-    """Return True if the issue was filed by the Sentry ingest loop."""
+def _is_exception_sensor_issue(issue: Task, sensor_labels: Sequence[str]) -> bool:
+    """Return True if the issue is an incoming system exception (ADR-0146).
+
+    Keyed on the LABEL, not the body: the label is set by the sensor backend's
+    tracker integration, which is structured configuration, where a body marker
+    depends on an issue template rendering one exact string. The body marker
+    remains a fallback for anything filed before the label existed.
+
+    A GitHub label arrives here as a ``Task.tag`` — ``GitHubIssue.to_task``
+    renames the field at the boundary, so ``issue.labels`` does not exist on
+    this side and reading it raises rather than quietly returning nothing.
+    """
+    tags = {tag.casefold() for tag in issue.tags}
+    if any(name.casefold() in tags for name in sensor_labels):
+        return True
     return _SENTRY_MARKER in (issue.body or "")
 
 
@@ -566,19 +590,21 @@ class TriagePhase:
                 issue.id,
                 self._config.planner_label[0],
             )
-        elif _is_sentry_issue(issue):
-            # Sentry-originated issues that fail triage are noise — auto-close
+        elif _is_exception_sensor_issue(issue, self._config.exception_sensor_label):
+            # An incoming system exception that fails triage is noise —
+            # auto-close it rather than spending planner budget on a transient.
             await self._prs.post_comment(
                 issue.id,
-                "## Auto-closed\n\nThis Sentry-originated issue did not pass triage "
-                "evaluation. Likely a transient infrastructure error, not a code bug.\n\n"
+                "## Auto-closed\n\nThis incoming system exception did not pass "
+                "triage evaluation. Likely a transient infrastructure error, not a "
+                "code bug.\n\n"
                 f"Reasons: {'; '.join(result.reasons)}",
             )
             await self._transitioner.close_task(issue.id)
             self._state.mark_issue(issue.id, "completed")
             routing_outcome = "sentry_noise_closed"
             logger.info(
-                "Issue #%d Sentry noise auto-closed by triage: %s",
+                "Issue #%d exception-sensor noise auto-closed by triage: %s",
                 issue.id,
                 "; ".join(result.reasons),
             )

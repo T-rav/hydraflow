@@ -97,6 +97,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0141 | enforced | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
 | ADR-0142 | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 | ADR-0143 | enforced | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status`, `pytest:tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift`, `pytest:tests/scenarios/test_charter_purpose_drift_scenario.py::TestPurposeDrift::test_a_charter_that_lost_its_purpose_files_one_issue` |
+| ADR-0146 | enforced | `pytest:tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op`, `pytest:tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off`, `pytest:tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close` |
 
 ## Check → ADRs it protects
 
@@ -301,10 +302,13 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_screenshot_scanner.py` | ADR-0018 |
 | `pytest:tests/test_secret_scrub.py` | ADR-0085 |
 | `pytest:tests/test_seed_terms.py` | ADR-0053, ADR-0099 |
+| `pytest:tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off` | ADR-0146 |
+| `pytest:tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op` | ADR-0146 |
 | `pytest:tests/test_state_machine.py` | ADR-0002, ADR-0014, ADR-0017, ADR-0034 |
 | `pytest:tests/test_state_persistence.py` | ADR-0021 |
 | `pytest:tests/test_term_proposer_loop.py` | ADR-0054 |
 | `pytest:tests/test_term_pruner_loop.py` | ADR-0057 |
+| `pytest:tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close` | ADR-0146 |
 | `pytest:tests/test_trust_fleet_anomaly_detectors.py` | ADR-0045 |
 | `pytest:tests/test_trust_fleet_sanity_loop.py` | ADR-0045 |
 | `pytest:tests/test_ubiquitous_language_drift.py` | ADR-0053 |
