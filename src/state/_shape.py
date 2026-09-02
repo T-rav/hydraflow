@@ -40,7 +40,7 @@ class ShapeStateMixin:
         self.save()
 
     def set_shape_response(self, issue_number: int, response: str) -> None:
-        """Store a human response for a shape conversation (from dashboard/WhatsApp)."""
+        """Store a human response for a shape conversation (from the dashboard)."""
         self._data.shape_responses[self._key(issue_number)] = response
         self.save()
 

@@ -19,10 +19,6 @@ class TestCredentialsModel:
     def test_defaults_are_empty_strings(self) -> None:
         creds = Credentials()
         assert creds.gh_token == ""
-        assert creds.whatsapp_token == ""
-        assert creds.whatsapp_phone_id == ""
-        assert creds.whatsapp_recipient == ""
-        assert creds.whatsapp_verify_token == ""
 
     def test_frozen_rejects_mutation(self) -> None:
         creds = Credentials(gh_token="tok")
@@ -32,10 +28,8 @@ class TestCredentialsModel:
     def test_explicit_values_stored(self) -> None:
         creds = Credentials(
             gh_token="gh-tok",
-            whatsapp_token="wa-tok",
         )
         assert creds.gh_token == "gh-tok"
-        assert creds.whatsapp_token == "wa-tok"
 
 
 class TestCredentialsFactory:
@@ -47,9 +41,8 @@ class TestCredentialsFactory:
         assert creds.gh_token == ""
 
     def test_factory_overrides(self) -> None:
-        creds = CredentialsFactory.create(gh_token="tok", whatsapp_token="wa")
+        creds = CredentialsFactory.create(gh_token="tok")
         assert creds.gh_token == "tok"
-        assert creds.whatsapp_token == "wa"
 
 
 class TestBuildCredentials:
@@ -61,10 +54,6 @@ class TestBuildCredentials:
         "GITHUB_TOKEN": "",
         "HYDRAFLOW_HINDSIGHT_URL": "",
         "HYDRAFLOW_HINDSIGHT_API_KEY": "",
-        "HYDRAFLOW_WHATSAPP_TOKEN": "",
-        "HYDRAFLOW_WHATSAPP_PHONE_ID": "",
-        "HYDRAFLOW_WHATSAPP_RECIPIENT": "",
-        "HYDRAFLOW_WHATSAPP_VERIFY_TOKEN": "",
     }
 
     def test_gh_token_priority_hydraflow(self, tmp_path: Path) -> None:
@@ -100,22 +89,8 @@ class TestBuildCredentials:
 
     # test_reads_hindsight_fields removed in Phase 3 cutover — Hindsight
     # credentials deleted from the Credentials model.
-
-    def test_reads_whatsapp_fields(self, tmp_path: Path) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        env = {
-            **self._CLEARED_ENV,
-            "HYDRAFLOW_WHATSAPP_TOKEN": "wa-tok",
-            "HYDRAFLOW_WHATSAPP_PHONE_ID": "12345",
-            "HYDRAFLOW_WHATSAPP_RECIPIENT": "+1999",
-            "HYDRAFLOW_WHATSAPP_VERIFY_TOKEN": "vfy",
-        }
-        with patch.dict(os.environ, env, clear=False):
-            creds = build_credentials(config)
-        assert creds.whatsapp_token == "wa-tok"
-        assert creds.whatsapp_phone_id == "12345"
-        assert creds.whatsapp_recipient == "+1999"
-        assert creds.whatsapp_verify_token == "vfy"
+    # test_reads_whatsapp_fields removed with the WhatsApp bridge — the
+    # Credentials model no longer carries those fields.
 
 
 class TestHydraFlowConfigExcludesCredentials:
@@ -124,12 +99,10 @@ class TestHydraFlowConfigExcludesCredentials:
     def test_model_dump_has_no_credential_keys(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path)
         dumped = config.model_dump()
-        credential_keys = {
-            "gh_token",
-            "whatsapp_token",
-            "whatsapp_phone_id",
-            "whatsapp_recipient",
-            "whatsapp_verify_token",
-        }
+        # Derived, not spelled. The hardcoded list this replaces still named
+        # four WhatsApp fields after that bridge was deleted — so it was
+        # asserting that config does not carry fields which no longer exist
+        # anywhere, while a NEWLY added credential would have gone unchecked.
+        credential_keys = set(Credentials.model_fields)
         leaked = credential_keys & set(dumped.keys())
         assert not leaked, f"Credential fields still on HydraFlowConfig: {leaked}"

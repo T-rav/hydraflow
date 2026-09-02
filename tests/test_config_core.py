@@ -895,10 +895,6 @@ class TestCredentialsSeparation:
 
     _CREDENTIAL_FIELDS = {
         "gh_token",
-        "whatsapp_token",
-        "whatsapp_phone_id",
-        "whatsapp_recipient",
-        "whatsapp_verify_token",
     }
 
     def test_hydraflow_config_model_dump_excludes_credential_fields(
@@ -914,9 +910,8 @@ class TestCredentialsSeparation:
 
     def test_credentials_model_contains_all_secret_fields(self) -> None:
         """Credentials must define all expected secret fields."""
-        creds = Credentials(gh_token="tok", whatsapp_token="wa")
+        creds = Credentials(gh_token="tok")
         assert creds.gh_token == "tok"
-        assert creds.whatsapp_token == "wa"
 
     def test_credentials_is_frozen(self) -> None:
         """Credentials must be immutable to prevent accidental mutation."""
