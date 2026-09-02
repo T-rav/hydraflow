@@ -12,13 +12,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import workspace_gc_loop
 from events import EventType
 from mockworld.fakes.fake_github import FakeGitHub
 from ports import PRPort
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
+from workspace_gc_discovery import enumerate_worktrees
 from workspace_gc_landed_safety import (
     parse_branch_list_line,
+    parse_git_worktrees,
     tracked_workspace_is_gone,
     worktree_too_new,
 )
@@ -1739,11 +1742,28 @@ class TestBroadenedBranchReaper:
 
 
 class TestListGitWorktrees:
-    """Porcelain parsing must yield (path, branch) and skip bare/locked."""
+    """Porcelain parsing must yield (path, branch) and skip bare/locked.
+
+    Driven through `enumerate_worktrees`, which is where the parsing lives now
+    that the spawn moved behind WorkspacePort (#11931). Same subject, one hop
+    closer to it: the loop no longer parses anything.
+    """
+
+    @staticmethod
+    async def _entries(porcelain: str):
+        async def run_git(*_args: str, cwd: Path) -> str:
+            return porcelain
+
+        return await enumerate_worktrees(
+            primary=Path("/repo/main"),
+            roots=[],
+            run_git=run_git,
+            logger=logging.getLogger("t"),
+            include_siblings=False,
+        )
 
     @pytest.mark.asyncio
     async def test_parses_branches_and_detached(self, tmp_path: Path) -> None:
-        loop, _s, _e = _make_loop(tmp_path)
         porcelain = (
             "worktree /repo/main\n"
             "HEAD abc\n"
@@ -1757,12 +1777,7 @@ class TestListGitWorktrees:
             "HEAD 999\n"
             "detached\n"
         )
-        with patch(
-            "workspace_gc_loop.run_subprocess",
-            new_callable=AsyncMock,
-            return_value=porcelain,
-        ):
-            entries = await loop._list_git_worktrees()
+        entries = await self._entries(porcelain)
         branches = {str(e.path): e.branch for e in entries}
         assert branches["/wt/fix"] == "fix/broaden-10698"
         assert branches["/repo/main"] == "staging"
@@ -1770,7 +1785,6 @@ class TestListGitWorktrees:
 
     @pytest.mark.asyncio
     async def test_skips_bare_and_locked(self, tmp_path: Path) -> None:
-        loop, _s, _e = _make_loop(tmp_path)
         porcelain = (
             "worktree /repo/bare\n"
             "HEAD abc\n"
@@ -1785,12 +1799,7 @@ class TestListGitWorktrees:
             "HEAD 111\n"
             "branch refs/heads/fix/thing-2\n"
         )
-        with patch(
-            "workspace_gc_loop.run_subprocess",
-            new_callable=AsyncMock,
-            return_value=porcelain,
-        ):
-            entries = await loop._list_git_worktrees()
+        entries = await self._entries(porcelain)
         paths = {str(e.path) for e in entries}
         assert paths == {"/wt/live"}
 
@@ -2199,6 +2208,20 @@ class TestCollectOrphanedWorktrees:
         loop._worktree_work_has_landed = (  # type: ignore[method-assign]
             WorkspaceGCLoop._worktree_work_has_landed.__get__(loop)
         )
+
+        # Enumeration moved behind WorkspacePort (#11931), so the loop no longer
+        # spawns git for it. These tests drive the policy, and they express
+        # their world as a `git worktree list` porcelain string — so the port
+        # stands in for the real adapter and reads that same string. Resolved at
+        # call time, so each test's `patch("workspace_gc_loop.run_subprocess")`
+        # still decides what it returns, including raising.
+        async def _port_list() -> list[tuple[Path, str | None]]:
+            output = await workspace_gc_loop.run_subprocess(
+                "git", "worktree", "list", "--porcelain", cwd=loop._config.repo_root
+            )
+            return [(e.path, e.branch) for e in parse_git_worktrees(output)]
+
+        loop._workspaces.list_project_worktrees = _port_list
 
     @staticmethod
     def _dispatch(
@@ -2667,14 +2690,18 @@ class TestCollectOrphanedWorktrees:
 
     @pytest.mark.asyncio
     async def test_list_failure_returns_zero(self, tmp_path: Path) -> None:
+        # The enumeration moved behind WorkspacePort (#11931), so this is now
+        # the PORT failing rather than a direct spawn. The contract is
+        # unchanged and is the point of the test: a partial picture reaps
+        # nothing.
         loop, _s, _e = _make_loop(tmp_path)
         self._real_phase5(loop)
-        with patch(
-            "workspace_gc_loop.run_subprocess",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("git worktree list failed"),
-        ):
-            count = await loop._collect_orphaned_worktrees()
+        loop._workspaces.list_project_worktrees = AsyncMock(
+            side_effect=RuntimeError("git worktree list failed")
+        )
+
+        count = await loop._collect_orphaned_worktrees()
+
         assert count == 0
 
     # A configured root that discovery can never produce a candidate from
@@ -2693,14 +2720,10 @@ class TestCollectOrphanedWorktrees:
             tmp_path, worktree_gc_roots=[str(tmp_path / "roots"), str(unreachable)]
         )
         self._real_phase5(loop)
-        porcelain = f"worktree {mine}\nHEAD {'a' * 40}\nbranch refs/heads/main\n"
-        with (
-            caplog.at_level(logging.WARNING, logger="workspace_gc_loop"),
-            patch(
-                "workspace_gc_loop.run_subprocess",
-                self._dispatch(worktrees=porcelain),
-            ),
-        ):
+        loop._workspaces.list_project_worktrees = AsyncMock(
+            return_value=[(mine, "main")]
+        )
+        with caplog.at_level(logging.WARNING, logger="workspace_gc_loop"):
             await loop._collect_orphaned_worktrees()
 
         warnings = [r.getMessage() for r in caplog.records]
@@ -2719,14 +2742,10 @@ class TestCollectOrphanedWorktrees:
         (root / "also-here").mkdir()
         loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
         self._real_phase5(loop)
-        porcelain = f"worktree {mine}\nHEAD {'a' * 40}\nbranch refs/heads/main\n"
-        with (
-            caplog.at_level(logging.WARNING, logger="workspace_gc_loop"),
-            patch(
-                "workspace_gc_loop.run_subprocess",
-                self._dispatch(worktrees=porcelain),
-            ),
-        ):
+        loop._workspaces.list_project_worktrees = AsyncMock(
+            return_value=[(mine, "main")]
+        )
+        with caplog.at_level(logging.WARNING, logger="workspace_gc_loop"):
             await loop._collect_orphaned_worktrees()
 
         assert [

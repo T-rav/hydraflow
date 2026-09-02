@@ -231,7 +231,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,src/hydraflow_resources/**,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,docs/standards/**,control/**}'
+              - '{src/**/*.py,src/hydraflow_resources/**,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,tools/**,docs/wiki/**,docs/standards/**,control/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
@@ -1120,6 +1120,23 @@ jobs:
         run: |
           npm ci
           npm run build
+      # Chromium is ~25s of this job's wall clock and changes only when the
+      # pinned playwright version does — so the key is that version, read from
+      # the lockfile rather than hardcoded, or the cache would silently serve a
+      # browser built for a different client after an upgrade.
+      - name: Resolve the pinned playwright version
+        id: pw
+        run: |
+          v="$(uv run python -c 'from importlib.metadata import version; print(version("playwright"))')"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Cache Chromium
+        id: chromium-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      # `--with-deps` installs OS packages outside the cached directory, so it
+      # runs either way; only the browser download is skipped on a hit.
       - name: Install Chromium
         run: uv run python -m playwright install --with-deps chromium
       - name: Browser smoke + happy + orchestrator-controls subset

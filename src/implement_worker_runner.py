@@ -166,6 +166,9 @@ class ImplementWorkerSpawn(Protocol):
         provider: str,
         gateway_client: GatewayControlClient | None,
         spawn_out: dict[str, object],
+        spawn_id: str,
+        driver_id: str,
+        parent_spawn_id: str | None,
     ) -> SimpleResult: ...
 
 
@@ -183,6 +186,9 @@ async def _spawn_implement_worker(
     provider: str,
     gateway_client: GatewayControlClient | None,
     spawn_out: dict[str, object],
+    spawn_id: str,
+    driver_id: str,
+    parent_spawn_id: str | None,
 ) -> SimpleResult:
     """The real seam. Named so the scan sees it and the seam row is honest.
 
@@ -208,6 +214,9 @@ async def _spawn_implement_worker(
         provider=provider,
         gateway_client=gateway_client,
         spawn_out=spawn_out,
+        spawn_id=spawn_id,
+        driver_id=driver_id,
+        parent_spawn_id=parent_spawn_id,
     )
 
 
@@ -557,6 +566,17 @@ class ImplementWorkerRunner:
                 provider="gateway",
                 gateway_client=self._gateway_client,
                 spawn_out=spawn_out,
+                # The id the receipt's lineage will claim, so the receipt and
+                # the ledger rows it accounts for name the same spawn. Left to
+                # default, the mint would invent its own and the receipt would
+                # describe a spawn that billed under a different id.
+                spawn_id=child_spawn_id,
+                driver_id=lease.driver_id,
+                # The spawn that asked for this child, when the director named
+                # one. ADR-0137 already fences a role on it; carrying it to the
+                # mint is what lets a ledger row be attributed to the request
+                # that caused it, not just to the driver that owns the phase.
+                parent_spawn_id=request.requesting_spawn_id,
             )
         except TimeoutError:
             # The child outlived even the seam's own deadline; its process group

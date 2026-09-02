@@ -25,7 +25,6 @@ from workspace_gc_landed_safety import (
     canonical_active_path_owners,
     landed_proof,
     parse_branch_list_line,
-    parse_git_worktrees,
     parse_issue_from_branch,
     path_within,
     tracked_path_matches_destroy_target,
@@ -810,16 +809,21 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         return True
 
     async def _list_git_worktrees(self) -> list[_WorktreeEntry]:
-        """Read and parse registered worktrees; errors propagate fail-closed."""
-        output = await run_subprocess(
-            "git",
-            "worktree",
-            "list",
-            "--porcelain",
-            cwd=self._config.repo_root,
-            gh_token=self._credentials.gh_token,
-        )
-        return parse_git_worktrees(output)
+        """Registered worktrees of this project, via the WorkspacePort.
+
+        The spawn moved BEHIND the Port (#11931). A loop module growing a new
+        subprocess path needs a declared air-gap seam and may not grow the
+        grandfathered baseline; the sandbox injects `FakeWorkspace`, so routing
+        it there IS the seam — the same move #11917 made, and this loop now
+        carries one fewer spawn path than before.
+
+        Errors still propagate fail-closed: `_collect_orphaned_worktrees`
+        catches them and reaps nothing rather than sweeping a partial picture.
+        """
+        return [
+            _WorktreeEntry(path=path, branch=branch)
+            for path, branch in await self._workspaces.list_project_worktrees()
+        ]
 
     async def _worktree_work_has_landed(
         self,

@@ -17,7 +17,7 @@ called out as gaps in that module:
 
 * reuses the real scaffolders (``makefile_scaffold`` / ``ci_scaffold``) instead of
   duplicating Makefile / CI YAML inline,
-* copies the full six-directory ``docs/standards/**`` corpus directly from the
+* copies the full kernel ``docs/standards/**`` corpus directly from the
   running HydraFlow checkout rather than writing a single testing doc,
 * ships ``AGENTS.md`` and the five ``RepoWikiLoop`` topic pages,
 * enforces per-file, ownership-aware idempotency (product-owned files are never
@@ -56,10 +56,15 @@ WIKI_TOPICS: tuple[str, ...] = (
     "dependencies",
 )
 
-# All six standards directories copied verbatim from HydraFlow (issue #10935).
+# The kernel standards corpus, copied verbatim from HydraFlow (issue #10935).
+# Bound to the kernel table in docs/standards/factory_operation/README.md by
+# tests/architecture/test_factory_operation_standard_drift.py, which also
+# asserts the two tables partition docs/standards/ exactly — so a new standard
+# directory cannot land in neither.
 STANDARDS_DIRS: tuple[str, ...] = (
     "adr_enforcement",
     "branch_protection",
+    "exception_sensor",
     "factory_autonomy",
     "factory_operation",
     "ports-and-loops",
@@ -378,7 +383,7 @@ def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Owners
         plan.append(
             ("AGENTS.md", agents_src.read_text(encoding="utf-8"), Ownership.TEMPLATE)
         )
-    # docs/standards/** — the full six-directory corpus, copied verbatim.
+    # docs/standards/** — the full kernel corpus, copied verbatim.
     standards_root = hydraflow_root / "docs" / "standards"
     for standard in STANDARDS_DIRS:
         src_dir = standards_root / standard

@@ -156,6 +156,7 @@ def _request(
     key: str = "key-1",
     kind: ModelRequirementKind = ModelRequirementKind.LITERAL_FAMILY,
     value: str = "claude-sonnet",
+    requesting_spawn_id: str | None = None,
 ) -> WorkerDispatchRequest:
     return WorkerDispatchRequest(
         request_id=request_id,
@@ -167,6 +168,7 @@ def _request(
         task_contract="fix the double-counted retry",
         reason="the review found a double increment",
         expected_route_policy_revision=ROUTE_REVISION,
+        requesting_spawn_id=requesting_spawn_id,
         idempotency_key=key,
     )
 
@@ -1221,3 +1223,52 @@ class TestTheWorkerIsToldItsBound:
         )
 
         assert "no uncommitted or committed change" in rendered
+
+
+class TestChildLineageReachesTheSpawnSeam:
+    """#11990 (P6a): the mint must learn the same child id the receipt claims.
+
+    Before this, ``_run_child`` minted with no ``spawn_id`` at all, so
+    :func:`runner_utils.resolve_harness_env` fell through to its
+    ``uuid.uuid4().hex`` default. The receipt then named a child that no ledger
+    row shared, and nothing anywhere named the driver — the two halves of one
+    dispatch could not be joined after the fact.
+    """
+
+    async def test_each_child_passes_its_own_receipt_spawn_id_and_the_driver(
+        self, tmp_path: Path
+    ) -> None:
+        spawn = SpawnRecorder()
+        runner, _git = _build(tmp_path, spawn=spawn)
+        requests = [
+            _request(request_id=f"req-{n}", key=f"key-{n}") for n in range(1, 4)
+        ]
+
+        receipts = await _dispatch(runner, requests)
+
+        seam_ids = [call["spawn_id"] for call in spawn.calls]
+        claimed = [r.lineage.child_spawn_id for r in receipts if r.lineage]
+        assert seam_ids == claimed, "the mint and the receipt named different spawns"
+        assert len(set(seam_ids)) == len(requests), "children shared a spawn id"
+        assert {call["driver_id"] for call in spawn.calls} == {"drv-7"}
+
+    async def test_a_stated_requester_reaches_the_seam_as_the_parent(
+        self, tmp_path: Path
+    ) -> None:
+        spawn = SpawnRecorder()
+        runner, _git = _build(tmp_path, spawn=spawn)
+
+        await _dispatch(runner, [_request(requesting_spawn_id="parent-9")])
+
+        assert spawn.calls[0]["parent_spawn_id"] == "parent-9"
+
+    async def test_an_unstated_requester_is_none_not_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0137 leaves the field unstated unless the director names one."""
+        spawn = SpawnRecorder()
+        runner, _git = _build(tmp_path, spawn=spawn)
+
+        await _dispatch(runner, [_request()])
+
+        assert spawn.calls[0]["parent_spawn_id"] is None

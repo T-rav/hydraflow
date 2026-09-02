@@ -1362,6 +1362,12 @@ def _build_charter_drift_caretaker(
     * ``charter_drift_audit`` → an async auditor returning a
       ``list[CharterDriftReport]`` (replaces the checkout-observing auditor).
       Defaults to ``[]`` (no managed repos ⇒ nothing to audit).
+    * ``charter_purpose_audit`` → an async auditor returning a
+      ``list[StandardDecision]`` for the `purpose` standard (#11856). Defaults
+      to ``[]``. Forwarded rather than left to its ``None`` default: an
+      unforwarded optional collaborator means every scenario exercises the loop
+      with the actuator ABSENT and nothing says so — the #11416 shape that
+      `test_collaborator_wiring` exists to catch.
 
     ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
     ``charter_drift_caretaker_dedup``.
@@ -1383,6 +1389,11 @@ def _build_charter_drift_caretaker(
         auditor = AsyncMock(return_value=[])
         ports["charter_drift_audit"] = auditor
 
+    purpose_auditor = ports.get("charter_purpose_audit")
+    if purpose_auditor is None:
+        purpose_auditor = AsyncMock(return_value=[])
+        ports["charter_purpose_audit"] = purpose_auditor
+
     pr_manager = ports.get("pr_manager") or ports["github"]
 
     return CharterDriftCaretakerLoop(
@@ -1391,6 +1402,7 @@ def _build_charter_drift_caretaker(
         dedup=dedup,
         deps=deps,
         auditor=auditor,
+        purpose_auditor=purpose_auditor,
     )
 
 

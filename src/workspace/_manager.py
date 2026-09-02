@@ -16,6 +16,7 @@ from pathlib import Path
 
 from config import Credentials, HydraFlowConfig
 from subprocess_util import run_subprocess
+from workspace_gc_discovery import enumerate_worktrees
 from workspace_gc_landed_safety import dead_registrations
 
 from ._heal import WorkspaceHealMixin
@@ -306,6 +307,31 @@ class WorkspaceManager(
                         await self.destroy(num)
                     except (ValueError, RuntimeError) as exc:
                         logger.warning("Could not destroy %s: %s", child, exc)
+
+    async def list_project_worktrees(self) -> list[tuple[Path, str | None]]:
+        """Registered worktrees of this project, across every sibling clone.
+
+        The adapter half of #11931. Discovery logic is pure and lives in
+        ``workspace_gc_discovery``; this supplies the one thing it cannot have —
+        a way to run git — and that is why the whole thing sits behind the Port
+        rather than in the loop: the sandbox injects ``FakeWorkspace``, so no
+        real spawn happens there.
+        """
+
+        async def run_git(*args: str, cwd: Path) -> str:
+            return await run_subprocess("git", *args, cwd=cwd)
+
+        entries = await enumerate_worktrees(
+            primary=self._repo_root.expanduser().resolve(),
+            roots=[
+                root.expanduser().resolve()
+                for root in self._config.worktree_gc_root_paths()
+            ],
+            run_git=run_git,
+            logger=logger,
+            include_siblings=self._config.worktree_gc_sibling_clones_enabled,
+        )
+        return [(entry.path, entry.branch) for entry in entries]
 
     async def prune_dead_registrations(self) -> list[Path]:
         """Unlock and prune worktree registrations whose directory is gone.

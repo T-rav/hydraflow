@@ -60,7 +60,7 @@ graph LR
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
-    src -- "2" --> src_policy
+    src -- "5" --> src_policy
     src -- "2" --> src_pr_unsticker
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase

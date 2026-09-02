@@ -81,14 +81,21 @@ def test_stamps_the_five_repowikiloop_topic_pages(tmp_path) -> None:
         assert (result.root / rel).is_file()
 
 
-def test_copies_all_six_standards_directories_from_hydraflow(tmp_path) -> None:
+def test_copies_every_kernel_standards_directory_from_hydraflow(tmp_path) -> None:
     result = stamp_kernel(_spec(), tmp_path / "game1")
 
     for standard in STANDARDS_DIRS:
         readme = result.root / "docs" / "standards" / standard / "README.md"
         assert readme.is_file(), f"missing standards copy: {standard}"
-    # Verified against HydraFlow's own six standards dirs.
-    assert len(STANDARDS_DIRS) == 6
+    # The count assertion this replaces (``== 6``) restated the kernel set in a
+    # second place: it went stale the moment a standard was promoted and never
+    # said WHICH directory moved. The set itself is already bound in both
+    # directions by test_factory_operation_standard_drift, and the loop above
+    # already proves each entry stamps a real README — so the only claim left
+    # worth making here is the one neither of those covers.
+    assert len(STANDARDS_DIRS) == len(set(STANDARDS_DIRS)), (
+        f"duplicate kernel standard entries: {STANDARDS_DIRS}"
+    )
 
 
 def test_pyproject_and_cli_carry_package_substitution(tmp_path) -> None:

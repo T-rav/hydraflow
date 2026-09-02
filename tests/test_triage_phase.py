@@ -857,6 +857,99 @@ class TestTriageConvergenceLedger:
         assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
 
 
+class TestTheExceptionSensorRoute:
+    """Incoming system exceptions are recognised by their label (ADR-0146).
+
+    Between ADR-0118 deleting the Sentry ingest loop and ADR-0146 giving the
+    sensor a producer again, the only writers of the body marker repo-wide were
+    this file's own fixtures — the route was unreachable in production while its
+    tests stayed green. These pin the LABEL, which is what the sensor backend's
+    tracker integration actually sets.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_sensor_label_routes_a_failed_triage_to_auto_close(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The label alone is enough — no body marker present."""
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=901,
+            title="TypeError in worker",
+            body="No marker anywhere in this body.",
+            tags=["hydraflow-find", "bugsink"],
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=901, ready=False, reasons=["Transient"]
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(901)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "ADVANCE", (
+            "A labelled system exception that fails triage is noise and must "
+            "auto-close; body-marker-only detection would park it instead"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unlabelled_issue_does_not_take_the_exception_route(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The decoy: an ordinary unready finding must still park, not close.
+
+        Asserts the ledger verdict, not ``prs.close_issue``: the route closes
+        through ``transitioner.close_task``, so a ``close_issue`` assertion is
+        answered by a method the code never calls and passes under a detector
+        that returns True unconditionally. Caught by mutation, not by review.
+        """
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=902, title="Ordinary finding", body="No marker.", tags=["hydraflow-find"]
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=902, ready=False, reasons=["Needs detail"]
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        ledger = state.get_convergence_ledger(902)
+        assert ledger is not None, "Ledger must be created"
+        assert ledger.stage_state["triage"].last_verdict == "LOOP_BACK", (
+            "An unlabelled unready finding parks for clarification; taking the "
+            "exception route would auto-close it and record ADVANCE"
+        )
+
+    def test_the_label_is_matched_case_insensitively(self) -> None:
+        """GitHub label casing is not guaranteed to match the configured spelling."""
+        from triage_phase import _is_exception_sensor_issue
+
+        issue = TaskFactory.create(id=903, body="", tags=["BugSink"])
+
+        assert _is_exception_sensor_issue(issue, ["bugsink"]) is True
+
+    def test_the_legacy_body_marker_still_matches(self) -> None:
+        """Issues filed before the label existed keep their route."""
+        from triage_phase import _is_exception_sensor_issue
+
+        issue = TaskFactory.create(id=904, body="<!-- [sentry:abc] -->", tags=[])
+
+        assert _is_exception_sensor_issue(issue, ["bugsink"]) is True
+
+    def test_neither_signal_means_not_an_exception(self) -> None:
+        from triage_phase import _is_exception_sensor_issue
+
+        issue = TaskFactory.create(id=905, body="plain", tags=["hydraflow-find"])
+
+        assert _is_exception_sensor_issue(issue, ["bugsink"]) is False
+
+
 # ---------------------------------------------------------------------------
 # Blocked-by gate (#11614)
 # ---------------------------------------------------------------------------

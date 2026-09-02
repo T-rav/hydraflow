@@ -137,6 +137,8 @@ class MintV2Request(BaseModel):
     principal_id: str = Field(min_length=1, max_length=256)
     spawn_id: str | None = Field(default=None, min_length=1, max_length=256)
     session_id: str | None = Field(default=None, min_length=1, max_length=256)
+    driver_id: str | None = Field(default=None, min_length=1, max_length=128)
+    parent_spawn_id: str | None = Field(default=None, min_length=1, max_length=256)
     issue_number: int | None = Field(default=None, ge=1)
     pr_number: int | None = Field(default=None, ge=1)
     repo: str = Field(min_length=1, max_length=512)
@@ -201,6 +203,8 @@ class MintV2Request(BaseModel):
             id=self.principal_id,
             spawn_id=self.spawn_id,
             session_id=self.session_id,
+            driver_id=self.driver_id,
+            parent_spawn_id=self.parent_spawn_id,
             issue_number=self.issue_number,
             pr_number=self.pr_number,
         )

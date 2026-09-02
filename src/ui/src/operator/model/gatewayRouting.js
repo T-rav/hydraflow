@@ -317,6 +317,14 @@ function routeIdentity(raw) {
     role: orNull(raw?.worker_role) || str(raw?.principal_id),
     canonicalRole: orNull(raw?.worker_role),
     issueNumber: raw?.issue_number == null ? null : num(raw.issue_number),
+    // ADR-0141 child lineage. Normalized here rather than in each row builder
+    // because all three read through this one function: a lease, an in-flight
+    // request and a finished one are the same identity at three ages.
+    // ``null`` means the gateway sent no driver — a classic spawn — which the
+    // console must not render as an empty-named driver.
+    spawnId: orNull(raw?.spawn_id),
+    driverId: orNull(raw?.driver_id),
+    parentSpawnId: orNull(raw?.parent_spawn_id),
   }
 }
 

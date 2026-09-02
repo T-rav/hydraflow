@@ -41,6 +41,7 @@ from caching_issue_store import CachingIssueStore
 from charter_drift_caretaker_loop import (  # noqa: TCH001
     CharterDriftCaretakerLoop,
     build_charter_auditor,
+    build_purpose_auditor,
 )
 from charter_loop_worker_loop import CharterLoopWorkerLoop, managed_repo_roots
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
@@ -104,7 +105,7 @@ from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
 from models import StatusCallback
-from observability.noop_adapter import NoOpObservabilityAdapter
+from observability.sentry_adapter import build_observability_adapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
 from plan_touchpoint_expander import PlanTouchpointExpander
@@ -1063,11 +1064,13 @@ def build_services(
     # been extracted via scripts/extract_hindsight_to_wiki.py before merge.
 
     # Observability port — constructed once and injected throughout.
-    # Production path: NoOpObservabilityAdapter (discards events until the SRE
-    # agent wires a real backend, ADR-0118). Sandbox/test path: caller passes
-    # FakeObservability.
+    # Production path: Sentry when a DSN is configured, the no-op otherwise
+    # (ADR-0146 supersedes ADR-0118's backend direction). The DSN's presence IS
+    # the switch, so tests, CI and the air-gapped sandbox get the no-op without
+    # a flag anyone has to remember. Sandbox/test path: caller passes
+    # FakeObservability, which still wins over both.
     if observability is None:
-        observability = NoOpObservabilityAdapter()
+        observability = build_observability_adapter(credentials)
 
     # Core runners
     if workspaces is None:
@@ -2074,6 +2077,7 @@ def build_services(
         dedup=charter_drift_caretaker_dedup,
         deps=loop_deps,
         auditor=build_charter_auditor(config),
+        purpose_auditor=build_purpose_auditor(config),
     )
 
     gate_activator_dedup = DedupStore(

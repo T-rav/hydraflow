@@ -3,8 +3,8 @@ source: feedback_beads_workflow.md
 name: Keep factory task state in worktree JSONL
 description: HydraFlow owns phase-task lifecycle in each implementation worktree;
   agents never invoke a database-backed task CLI
-status: issue-open
-issue: 26
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-03-28'

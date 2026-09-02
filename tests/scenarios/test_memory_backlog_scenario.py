@@ -236,3 +236,75 @@ class TestARecloneDoesNotReFile:
         second = await loop._do_work()
 
         assert second["filed"] == 1
+
+
+class TestASimulatedBoardNeverCommits:
+    """#11972 — the write is fine, the COMMIT is what did the damage.
+
+    A sandbox run of this loop wrote #25-#44 into the real repo's mirrors and
+    they were MERGED (PR #8989). Unit tests see the refusal branch; only this
+    layer sees the thing that made those numbers durable — whether git history
+    gained a commit.
+
+    `FakeGitHub` is the board here and declares itself simulated, exactly as it
+    would in a sandbox run pointed at a live checkout.
+    """
+
+    @staticmethod
+    def _commits(repo: Path) -> int:
+        out = _sp.run(
+            ["git", "-C", str(repo), "rev-list", "--count", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return int(out or 0)
+
+    async def test_the_frontmatter_is_still_written(self, tmp_path: Path) -> None:
+        # The write must survive: the scenario layer and the loop's own
+        # re-filing guard both depend on the mirror being updated.
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        path = _write_entry(mirror, "feedback-alpha")
+        loop, _github = _make_loop(repo)
+
+        await loop._do_work()
+
+        assert "status: issue-open" in path.read_text()
+
+    async def test_git_history_does_not_gain_the_fake_number(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        _write_entry(repo / "docs" / "wiki" / "memory-feedback", "feedback-alpha")
+        loop, _github = _make_loop(repo)
+        before = self._commits(repo)
+
+        await loop._do_work()
+
+        assert self._commits(repo) == before
+
+    async def test_the_change_is_left_visible_in_the_working_tree(
+        self, tmp_path: Path
+    ) -> None:
+        # Refused, not hidden. An operator who lands here should SEE an
+        # uncommitted change rather than wonder why nothing happened.
+        #
+        # Asserted on `docs`, not on the mirror's full path: the directory is
+        # untracked in this throwaway repo, so git reports the parent (`?? docs/`)
+        # rather than each file. Pinning the longer string would be pinning
+        # git's porcelain formatting, not the property.
+        repo = _make_repo_with_mirror(tmp_path)
+        _write_entry(repo / "docs" / "wiki" / "memory-feedback", "feedback-alpha")
+        loop, _github = _make_loop(repo)
+
+        await loop._do_work()
+
+        dirty = _sp.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert dirty.strip()
+        assert "docs" in dirty

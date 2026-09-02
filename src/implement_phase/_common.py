@@ -14,7 +14,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from adequacy_demand import pin_findings
-from flows import flow_stopped
+from flows import FLOW_STOP_KEY, flow_stopped
 
 if TYPE_CHECKING:
     from flows import FlowState
@@ -102,4 +102,4 @@ def _open_pr_terminal(state: FlowState) -> bool:
     falls through to ``spec-verify`` so the two-stage reviewer still captures
     gaps for the next attempt (ADR-0063 W5).
     """
-    return bool(state.get("_stop")) or bool(state["result"].success)
+    return bool(state.get(FLOW_STOP_KEY)) or bool(state["result"].success)

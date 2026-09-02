@@ -40,7 +40,7 @@ depend on ports, not adapters.
 | `ConformanceRunnerPort` | `src/ports.py` | `FakeConformanceRunner` | — | — |
 | `IssueFetcherPort` | `src/ports.py` | `FakeIssueFetcher` | 0067, 0081 | [issue-fetcher-port.md](../../wiki/terms/issue-fetcher-port.md) |
 | `IssueStorePort` | `src/ports.py` | `FakeIssueStore` | 0041 | [issue-store-port.md](../../wiki/terms/issue-store-port.md) |
-| `ObservabilityPort` | `src/ports.py` | `FakeObservability` | 0072 | [observability-port.md](../../wiki/terms/observability-port.md) |
+| `ObservabilityPort` | `src/ports.py` | `FakeObservability` | 0072, 0146 | [observability-port.md](../../wiki/terms/observability-port.md) |
 | `PRPort` | `src/ports.py` | `FakeGitHub` | 0002, 0045, 0052, 0056, 0068, 0069, 0075, 0077, 0109, 0115 | [pr-port.md](../../wiki/terms/pr-port.md) |
 | `ReviewInsightStorePort` | `src/ports.py` | `FakeReviewInsightStore` | 0070 | [review-insight-store-port.md](../../wiki/terms/review-insight-store-port.md) |
 | `RouteBackCounterPort` | `src/route_back.py` | `FakeRouteBackCounter` | 0071 | [route-back-counter-port.md](../../wiki/terms/route-back-counter-port.md) |

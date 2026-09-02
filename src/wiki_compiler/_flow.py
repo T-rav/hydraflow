@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
+from flows import FLOW_STOP_KEY, Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from repo_wiki import (
     DEFAULT_TOPICS,
     WikiEntry,
@@ -47,7 +47,7 @@ def _flow_aborted(state: FlowState) -> bool:
     the graph routes straight to ``done`` without running ``validate`` — the
     only node that writes.
     """
-    return bool(state.get("_stop"))
+    return bool(state.get(FLOW_STOP_KEY))
 
 
 def _tracked_entry_block(entry: dict[str, Any]) -> str:
@@ -195,7 +195,7 @@ class WikiCompilerFlowMixin:
         state["topic_dir"] = topic_dir
         state["active_entries"] = active_entries
         if len(active_entries) < 2:
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
         return state
 
     async def _flow_verify(self, state: FlowState) -> FlowState:
@@ -299,7 +299,7 @@ class WikiCompilerFlowMixin:
                 repo,
                 topic,
             )
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         # Supersession follows what was actually synthesized. ``validate``
@@ -328,7 +328,7 @@ class WikiCompilerFlowMixin:
                 repo,
                 topic,
             )
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         # Byte-identity no-op guard (#10573): if the synthesized bodies are
@@ -344,7 +344,7 @@ class WikiCompilerFlowMixin:
                 repo,
                 topic,
             )
-            state["_stop"] = True
+            state[FLOW_STOP_KEY] = True
             return state
 
         state["compiled"] = compiled

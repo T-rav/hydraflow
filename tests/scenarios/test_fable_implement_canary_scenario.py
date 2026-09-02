@@ -524,6 +524,26 @@ class TestEveryChildIsDistinctAndItsKeyIsRevoked:
         # revoke in its ``finally``.
         assert sorted(brokered["control"].revoked) == ["key-1", "key-2"]
 
+    async def test_each_mint_names_the_driver_and_its_own_child(self, brokered) -> None:
+        """#11990 (P6a): lineage reaches the mint, not just the receipt.
+
+        The unit tests inject the spawn seam and so can only see what the
+        runner *passes*. This runs the real ``resolve_harness_env``, which is
+        where the id used to be discarded: it minted with no ``spawn_id`` and
+        fell through to its own ``uuid4``, so the receipt named one child and
+        the ledger row another.
+        """
+        minted = brokered["control"].minted
+
+        drivers = {request.driver_id for request in minted}
+        spawns = {request.spawn_id for request in minted}
+        # ``len(drivers) == 1`` alone would also hold for ``{None}`` -- the
+        # pre-fix state, where no mint named a driver at all. The non-None
+        # check is the one carrying the assertion.
+        assert None not in drivers, "a mint did not name its driver"
+        assert len(drivers) == 1, "children of one driver disagreed about it"
+        assert len(spawns) == len(minted), "two children shared a spawn id"
+
     async def test_no_child_receives_the_gateway_control_token(self, brokered) -> None:
         # The control token mints keys; a worker holding one could mint its own.
         leaked = [
