@@ -34,7 +34,13 @@ from finder_faceplate import (  # noqa: E402
     baseline_ledger_path,
 )
 
-_NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+#: NOW-RELATIVE, not a fixed date. `baseline_stale` is computed by the route
+#: against the REAL clock (`is_baseline_stale(golden, now)`, 30-day default), so
+#: a hardcoded `vetted_at` is a time bomb: this file pinned 2026-08-03, passed
+#: for thirty days, and began failing at 2026-09-02T12:00Z when the fixture aged
+#: past the threshold — turning every PR in the repo red for a reason no PR
+#: caused. A fixture that must read "fresh" has to BE fresh whenever it runs.
+_NOW = datetime.now(UTC)
 
 
 def _config(tmp_path: Path) -> MagicMock:
