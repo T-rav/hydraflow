@@ -184,9 +184,11 @@ _ARCH_REGEN_TIMEOUT_S = 600.0
 #: from a moving ``git log`` window rather than from source, so two trees with
 #: byte-identical architecture still produce different bytes for them.
 #: ``make arch-regen-stage`` blanket-adds the generated directory; without
-#: this exclusion a caller whose files touch no arch inputs would stage
-#: volatile churn — turning a no-diff into a spurious PR, the exact scenario
-#: ``substantive_specs`` exists to prevent. Duplicated here rather than
+#: the scoped exclusion in the regen helpers, a caller whose files touch no
+#: arch inputs would stage volatile churn — turning a no-diff into a spurious
+#: PR, the exact scenario ``substantive_specs`` exists to prevent. When
+#: substantive content IS staged, these ride along per the documented
+#: contract. Duplicated here rather than
 #: imported (arch.runner is heavyweight and this module must stay light);
 #: bound to the runner's set by
 #: tests/regressions/test_issue_12062_auto_pr_arch_regen.py so it cannot
@@ -205,8 +207,11 @@ async def _regen_arch_artifacts_async(
     """Regenerate + stage arch artifacts in the worktree — FAIL-OPEN (#12062).
 
     Runs the pre-commit hook's own remedy between the caller's staging and the
-    commit, then unstages the volatile drift-exempt artifacts (per path, so a
-    repo that lacks one still gets the others excluded). Deterministic regen
+    commit. The volatile drift-exempt artifacts (git-log-window views) honor
+    the substantive_specs contract: they RIDE ALONG when anything substantive
+    is staged, and are unstaged (per path, so a repo lacking one still gets
+    the others handled) only when they would be the commit's sole content —
+    preventing spurious churn PRs without starving the committed views. Deterministic regen
     (`.meta.json` is a content digest, #11674) stages nothing when inputs are
     untouched. On any failure the flow proceeds: the commit then either
     succeeds (inputs untouched) or fails with the hook's clear remedy — never
@@ -230,7 +235,26 @@ async def _regen_arch_artifacts_async(
             exc,
         )
         return
-    for path in _volatile_arch_paths():
+    volatile = _volatile_arch_paths()
+    try:
+        await run_subprocess(
+            "git",
+            "diff",
+            "--cached",
+            "--quiet",
+            "--",
+            ".",
+            *[f":(exclude){path}" for path in volatile],
+            cwd=worktree_path,
+            gh_token=gh_token,
+        )
+    except (RuntimeError, OSError):
+        # Non-zero: something SUBSTANTIVE is staged — the volatile artifacts
+        # ride along, exactly as the substantive_specs contract documents.
+        return
+    # Exit 0: the only staged content (if any) is volatile churn. Drop it so
+    # the no-diff short-circuit holds and no spurious PR opens (#12062).
+    for path in volatile:
         try:
             await run_subprocess(
                 "git",
@@ -279,7 +303,17 @@ def _regen_arch_artifacts(worktree_path: Path) -> None:
             (result.stderr or "")[-300:],
         )
         return
-    for path in _volatile_arch_paths():
+    volatile = _volatile_arch_paths()
+    substantive = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", "."]
+        + [f":(exclude){path}" for path in volatile],
+        cwd=worktree_path,
+        capture_output=True,
+        check=False,
+    )
+    if substantive.returncode != 0:
+        return  # substantive content staged — volatile rides along
+    for path in volatile:
         subprocess.run(
             ["git", "restore", "--staged", "--worktree", "--", path],
             cwd=worktree_path,
@@ -1291,6 +1325,9 @@ async def generate_and_open_pr_async(
             ``no-diff`` — no branch, no push, no PR. Those volatile paths are
             still committed when a substantive one changed. ``None`` (default)
             means every staged change counts, preserving prior behavior.
+            (The finalize tail's arch regen honors the same contract: its
+            volatile drift-exempt outputs ride along with substantive changes
+            and are unstaged only when they would be the sole content, #12062.)
 
     All other args mirror :func:`open_automated_pr_async`.
     """

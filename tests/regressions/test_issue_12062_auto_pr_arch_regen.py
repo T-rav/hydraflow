@@ -13,9 +13,11 @@ callers — caught in review):
 
 1. regen runs in the WORKTREE between staging and commit, and what it stages
    rides the same commit;
-2. the drift-exempt volatile artifacts (``arch.runner._DRIFT_EXEMPT``) are
-   excluded, so a caller whose files touch no arch inputs cannot be turned
-   into a spurious PR;
+2. the drift-exempt volatile artifacts (``arch.runner._DRIFT_EXEMPT``) ride
+   along with substantive changes per the documented substantive_specs
+   contract, and are unstaged only when they would be the commit's sole
+   content — so a no-input caller cannot be turned into a spurious PR
+   (pass-2 review: an unconditional exclusion silently broke ride-along);
 3. failing / missing regen tools are fail-open;
 4. ``auto_pr._VOLATILE_ARCH_ARTIFACTS`` stays bound to the runner's set.
 """
@@ -143,8 +145,9 @@ async def test_async_path_regen_rides_commit_and_excludes_volatile(
     assert "docs/arch/generated/artifact.md" in show.stdout, (
         "regen-staged artifacts must ride the same commit"
     )
-    assert "changelog.md" not in show.stdout, (
-        "drift-exempt volatile artifacts must not ride bot commits"
+    assert "changelog.md" in show.stdout, (
+        "volatile artifacts RIDE ALONG when substantive content changed — "
+        "the documented substantive_specs contract (pass-2 review of #12063)"
     )
 
 
@@ -153,14 +156,25 @@ async def test_async_volatile_only_regen_stays_no_diff(
     local_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A caller whose generate stages nothing must stay no-diff even when
-    regen churns the volatile artifacts — no spurious PRs."""
-    script, _record = _write_recording_regen(tmp_path)
+    regen churns the volatile artifacts — no spurious PRs. (In the real repo
+    the regen is deterministic, but the volatile git-log views churn on every
+    window shift; this fake stages ONLY volatile content.)"""
+    record = tmp_path / "regen-cwd.txt"
+    script = tmp_path / "volatile-only-regen.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'pwd > "{record}"\n'
+        "mkdir -p docs/arch/generated\n"
+        "echo volatile-window > docs/arch/generated/changelog.md\n"
+        "git add docs/arch/generated\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
     stub = _GitPassthroughGhStub()
     monkeypatch.setattr(auto_pr, "_ARCH_REGEN_ARGV", (str(script),))
     monkeypatch.setattr("subprocess_util.run_subprocess", stub)
 
     async def generate(worktree: Path) -> None:
-        # Writes the volatile artifact's twin of "nothing substantive".
         return None
 
     result = await generate_and_open_pr_async(
@@ -177,22 +191,8 @@ async def test_async_volatile_only_regen_stays_no_diff(
         raise_on_failure=False,
     )
 
-    # artifact.md IS substantive (regen staged it) — but with no caller input
-    # having changed, the real target regenerates byte-identical artifacts and
-    # stages nothing. The fake regen cannot model determinism, so assert the
-    # sharper invariant: the volatile artifact alone must never reach a
-    # commit. Either the PR opened WITHOUT changelog.md, or no PR was needed.
-    if result.status == "opened":
-        show = subprocess.run(
-            ["git", "-C", str(local_repo), "show", "--stat", "origin/ul/volatile-only"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "changelog.md" not in show.stdout
-    else:
-        assert result.status == "no-diff"
-        assert not any(c[:3] == ("gh", "pr", "create") for c in stub.gh_calls)
+    assert result.status == "no-diff", result
+    assert not any(c[:3] == ("gh", "pr", "create") for c in stub.gh_calls)
 
 
 @pytest.mark.asyncio
@@ -266,7 +266,9 @@ def test_sync_twin_regen_runs_in_worktree(
         text=True,
         check=True,
     )
-    assert "changelog.md" not in show.stdout
+    # note.md is substantive, so the volatile artifact rides along (the
+    # documented contract) — the exclusion fires only for volatile-only stages.
+    assert "changelog.md" in show.stdout
 
 
 def test_sync_twin_toy_repo_without_makefile_unaffected(
