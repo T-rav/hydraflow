@@ -44,10 +44,11 @@ Python:
 
 ```python
 import sentry_sdk
+
 sentry_sdk.init(
     dsn=os.environ["SENTRY_DSN"],
-    traces_sample_rate=0.0,      # spans are OTel's, not this
-    send_default_pii=False,      # no local variables, no request bodies
+    traces_sample_rate=0.0,  # spans are OTel's, not this
+    send_default_pii=False,  # no local variables, no request bodies
 )
 ```
 
