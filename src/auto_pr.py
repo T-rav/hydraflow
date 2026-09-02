@@ -169,6 +169,54 @@ def _remove_worktree(
 # ---------------------------------------------------------------------------
 
 
+#: How the staged-file set is reconciled with generated arch artifacts before
+#: the commit. `make arch-regen-stage` is the exact remedy the worktree
+#: pre-commit hook prints when docs/arch/generated/ is out of sync (#12062):
+#: term files, ports, loops and ADR surfaces are INPUTS to the generated
+#: artifacts, so a bot PR that stages one without regenerating is rejected at
+#: commit time — the term proposer hit this on every cycle. Module-level so
+#: tests can substitute a recording stub.
+_ARCH_REGEN_ARGV: tuple[str, ...] = ("make", "arch-regen-stage")
+_ARCH_REGEN_TIMEOUT_S = 600.0
+
+
+def _regen_arch_artifacts(worktree_path: Path) -> None:
+    """Regenerate and stage arch artifacts in the worktree — FAIL-OPEN.
+
+    Deterministic regen means callers whose files touch no arch inputs stage
+    nothing extra. On any failure (no Makefile in a toy test repo, uv absent,
+    regen bug) the flow proceeds and the commit either succeeds (inputs
+    untouched) or fails with the pre-commit hook's own clear remedy — never
+    worse than the pre-#12062 behaviour.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603
+            list(_ARCH_REGEN_ARGV),
+            cwd=worktree_path,
+            capture_output=True,
+            text=True,
+            timeout=_ARCH_REGEN_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning(
+            "open_automated_pr: arch regen failed in %s (%s) — proceeding; "
+            "the pre-commit hook will reject the commit if artifacts are stale",
+            worktree_path,
+            exc,
+        )
+        return
+    if result.returncode != 0:
+        logger.warning(
+            "open_automated_pr: arch regen exited %d in %s — proceeding; "
+            "the pre-commit hook will reject the commit if artifacts are "
+            "stale. stderr tail: %s",
+            result.returncode,
+            worktree_path,
+            (result.stderr or "")[-300:],
+        )
+
+
 def _build_commit_args(author_name: str, author_email: str, message: str) -> list[str]:
     """Build the arg list for `git commit`, skipping identity overrides when
     the caller-supplied name or email is empty.
@@ -290,6 +338,12 @@ def open_automated_pr(
             raise AutoPrError(
                 f"failed to stage files for branch {branch!r}: {exc}"
             ) from exc
+
+        # Reconcile generated arch artifacts with the staged inputs (#12062).
+        # Runs BEFORE the empty-diff check so a regen no-op cannot turn a
+        # genuinely empty PR into a non-empty one, and regen-staged artifacts
+        # ride the same commit as the files that changed them.
+        _regen_arch_artifacts(worktree_path)
 
         # Detect empty staged diff — e.g. the file contents matched origin.
         diff_check = _run_git(
