@@ -7,7 +7,7 @@ description: A substantial PR merges ONLY on an explicit convergence report from
   PRs in one night (2026-08-22/23).
 status: issue-open
 issue: 11948
-promoted_in: null
+promoted_in: 12017
 wontfix_reason: null
 created: '2026-08-23'
 ---
