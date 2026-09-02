@@ -18,12 +18,12 @@ Two halves, and only the first is code in this repo:
 | Half | Where it lives | What it does |
 |---|---|---|
 | Outbound | `src/observability/sentry_adapter.py` | Ships exceptions to an ingest endpoint |
-| Inbound | The backend's own tracker integration | Turns error groups into GitHub issues |
+| Inbound | `src/dashboard_routes/_bugsink_routes.py` | Receives the backend's alert webhook and files the issue |
 
-The inbound half is deliberately *not* a HydraFlow loop. Bugsink already files
-GitHub issues, deduplicated per error group; a polling loop here would be a
-second implementation of something the backend does, with its own state, its own
-backoff, and its own way of going stale.
+The inbound half is deliberately *not* a HydraFlow loop — but it is code, which
+an earlier draft of ADR-0146 denied. Bugsink has **no** GitHub integration; its
+only outbound path is a custom webhook. Because that webhook pushes, the
+receiver is a route: no interval, no cursor, no backoff to keep correct.
 
 ## House flavour
 
@@ -55,13 +55,20 @@ and this standard is satisfied either way.
 9. **Triage routes them as incoming system exceptions.** A sensor issue that
    fails triage is a transient, not a bug report, and is auto-closed rather than
    parked for clarification that no author will ever supply.
+10. **The receiver refuses anonymous callers.** The alert webhook's config is a
+    bare URL — no signing secret, no auth header — so the URL is the credential.
+    Unconfigured means closed, never open.
+11. **One issue per error group.** The backend re-fires the same group on
+    regression and unmute; the receiver deduplicates on the group id rather than
+    the rendered message, which varies within a group.
 
-Rules 8 and 9 are why the label matters more than it looks: the label is what
+Rules 8-11 are why the label matters more than it looks: the label is what
 makes an error a routable piece of work rather than a notification.
 
 <!-- standard:enforced-by -->
 - `tests/test_sentry_observability_adapter.py`
 - `tests/test_triage_phase.py`
+- `tests/test_bugsink_alert_receiver.py`
 <!-- /standard:enforced-by -->
 
 ## Why a standard and not just an ADR

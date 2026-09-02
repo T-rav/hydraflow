@@ -65,6 +65,16 @@ class Credentials(BaseModel):
             "what tests, CI and the air-gapped sandbox get."
         ),
     )
+    bugsink_webhook_token: str = Field(
+        default="",
+        description=(
+            "Shared secret in the Bugsink alert webhook URL (ADR-0146). "
+            "Bugsink's webhook config is a URL and nothing else — no signing "
+            "secret, no auth header — so the URL IS the credential. Empty "
+            "means the receiver 404s, which is the safe default: an endpoint "
+            "that files GitHub issues must not accept anonymous POSTs."
+        ),
+    )
     whatsapp_token: str = Field(
         default="",
         description="WhatsApp Business API access token",
@@ -7322,6 +7332,9 @@ class HydraFlowConfig(BaseModel):
 _GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 # 1:1 credential-field → env-key. Read with empty-string defaults.
 _SENTRY_ENV_KEYS: dict[str, str] = {"sentry_dsn": "SENTRY_DSN"}
+_BUGSINK_ENV_KEYS: dict[str, str] = {
+    "bugsink_webhook_token": "HYDRAFLOW_BUGSINK_WEBHOOK_TOKEN"
+}
 _WHATSAPP_ENV_KEYS: dict[str, str] = {
     "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
     "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
@@ -7336,6 +7349,7 @@ CREDENTIAL_ENV_KEYS: frozenset[str] = (
     frozenset(_GH_TOKEN_ENV_KEYS)
     | frozenset(_WHATSAPP_ENV_KEYS.values())
     | frozenset(_SENTRY_ENV_KEYS.values())
+    | frozenset(_BUGSINK_ENV_KEYS.values())
 )
 
 
@@ -7362,9 +7376,15 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
     sentry_dsn = os.environ.get(_SENTRY_ENV_KEYS["sentry_dsn"], "") or _dotenv_lookup(
         config.repo_root, _SENTRY_ENV_KEYS["sentry_dsn"]
     )
+    # Same os.environ-then-.env resolution as the DSN, and for the same reason:
+    # this lives in the repo's `.env` beside it, not in the exported shell.
+    bugsink_webhook_token = os.environ.get(
+        _BUGSINK_ENV_KEYS["bugsink_webhook_token"], ""
+    ) or _dotenv_lookup(config.repo_root, _BUGSINK_ENV_KEYS["bugsink_webhook_token"])
     return Credentials(
         gh_token=gh_token,
         sentry_dsn=sentry_dsn,
+        bugsink_webhook_token=bugsink_webhook_token,
         **{
             field: os.environ.get(env_key, "")
             for field, env_key in _WHATSAPP_ENV_KEYS.items()

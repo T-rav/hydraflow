@@ -430,6 +430,66 @@ them (two 2026-07 sessions nearly did):
 
 Still open: subagent-verify wrapper, pre-commit arch-regen.
 
+## Exception sensor — standing Bugsink up (ADR-0146)
+
+The factory runs unattended, so an unreported exception is invisible rather than
+quiet. The sensor closes the loop from *the software failed* to *the board
+knows*. Two halves, both ours.
+
+### 1. Start the backend
+
+```bash
+# .env — the compose file REFUSES to start without these, by design
+BUGSINK_SECRET_KEY=$(openssl rand -base64 50)
+BUGSINK_SUPERUSER=you@example.com:a-real-password
+BUGSINK_DB_PASSWORD=$(openssl rand -base64 24)
+
+make bugsink-up      # http://localhost:8000/  (loopback only)
+make bugsink-logs
+make bugsink-down    # data survives; the volume is not removed
+```
+
+### 2. Outbound — point HydraFlow at it
+
+Create a project in the Bugsink UI, copy its DSN, and put it in `.env`:
+
+```bash
+SENTRY_DSN=http://<key>@localhost:8000/<project-id>
+```
+
+The DSN's presence is the switch: absent, the composition root returns the no-op
+adapter, which is what tests, CI and the air-gapped sandbox get. The client is
+the Sentry SDK, so this same setting can point at sentry.io instead — Bugsink is
+the house default because self-hosting keeps error payloads from a repo full of
+unreleased work on infrastructure you own.
+
+`HYDRAFLOW_SENTRY_DISABLED=1` overrides a configured DSN, always toward off.
+
+### 3. Inbound — point it back at HydraFlow
+
+**Bugsink has no GitHub integration.** Its only outbound path is a custom
+webhook. Generate a token, put it in `.env`, and configure the webhook in
+Bugsink's project alert settings:
+
+```bash
+HYDRAFLOW_BUGSINK_WEBHOOK_TOKEN=$(openssl rand -hex 32)
+# then in Bugsink: Alerts -> Custom webhook ->
+#   http://<hydraflow-host>:8000/api/bugsink/alert/<that-token>
+```
+
+The URL **is** the credential — Bugsink's webhook config carries no signing
+secret and no auth header — so treat it like one. Unconfigured means the
+receiver 404s every request; it never falls open.
+
+### What arrives on the board
+
+One issue per error group, labelled `hydraflow-find` (so triage picks it up) and
+`bugsink` (so a human reading the board can tell an observed failure from an
+authored finding). Bugsink re-fires the same group on regression and unmute; the
+receiver deduplicates on the group id, so those land as no-ops rather than
+duplicates. A sensor issue that fails triage is auto-closed as a transient
+rather than parked for clarification no author will supply.
+
 ## Onboarding a foreign managed repo
 
 The first foreign managed repo is `T-rav/poop-scoop-hero` (PSH, a Phaser.js game). Onboarding flow:

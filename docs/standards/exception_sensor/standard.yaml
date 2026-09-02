@@ -4,6 +4,7 @@ id: exception_sensor
 enforced_by:
   - tests/test_sentry_observability_adapter.py
   - tests/test_triage_phase.py
+  - tests/test_bugsink_alert_receiver.py
 
 # Each normative rule in README.md names the check that catches its violation.
 # Properties: tests/architecture/test_standards_rules_are_wired.py
@@ -33,6 +34,12 @@ rules:
   - id: sensor-issues-declare-their-provenance
     claim: An issue filed by the sensor is recognised by its label, so the board distinguishes an observed failure from an authored finding
     enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_label_is_matched_case_insensitively
+  - id: the-receiver-refuses-anonymous-callers
+    claim: The alert webhook URL is the credential, and an unconfigured token refuses every request rather than accepting any
+    enforced_by: tests/test_bugsink_alert_receiver.py::TestTheUrlIsTheCredential::test_nothing_authorises_against_an_unconfigured_token
+  - id: one-issue-per-error-group
+    claim: A redelivered alert for a group already on the board does not file a second issue
+    enforced_by: tests/test_bugsink_alert_receiver.py::TestOneIssuePerErrorGroup::test_a_redelivery_does_not_file_a_second_issue
   - id: triage-routes-them-as-system-exceptions
     claim: A sensor issue that fails triage is auto-closed as a transient rather than parked for clarification no author will supply
     enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close

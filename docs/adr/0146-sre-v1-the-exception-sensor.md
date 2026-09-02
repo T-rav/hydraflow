@@ -72,13 +72,35 @@ citing an `_init_sentry` that ADR-0118 deleted. A flag the suite defends and no
 production code reads is this ADR's own dead-consumer shape, pointing the other
 way.
 
-### Inbound: the tracker integration, not a loop
+### Inbound: a receiver, not a loop
 
-Bugsink files GitHub issues itself, deduplicated per error group. **We do not
-build a polling loop for this.** A loop here would be a second implementation of
-something the backend already does, carrying its own state, backoff and failure
-modes — and, as the dead route above shows, a HydraFlow-side producer is exactly
-the thing that can be removed without its consumer noticing.
+**Correction (2026-09-02).** This ADR was accepted saying "Bugsink files GitHub
+issues itself, deduplicated per error group." **That is wrong.** Bugsink has no
+GitHub, GitLab or Jira integration. Its alert backends are email, Slack,
+Mattermost, Discord, Microsoft Teams, Telegram and a **custom webhook** — the
+last of which POSTs a JSON representation of the issue to a URL you control
+(upstream `alerts/service_backends/custom.py`), firing on a new issue, a
+regression, or an unmute.
+
+The claim was assumed rather than checked, and it was load-bearing: it was the
+entire argument for why the inbound half needed no code. It did.
+
+**What stands:** still no polling loop. Bugsink pushes, so there is no interval,
+no cursor and no backoff to keep correct — the receiver is a route
+(`dashboard_routes/_bugsink_routes.py`), and the original objection to a loop
+(a second implementation of somebody else's state machine) never applied to a
+webhook endpoint.
+
+**The URL is the credential.** Bugsink's webhook config is a bare URL — no
+signing secret, no auth header — so an endpoint that files GitHub issues from
+anonymous POSTs would be an open invitation. The token is a path segment
+compared in constant time; unconfigured means closed; a mismatch is a 404 rather
+than a 401 so the endpoint does not confirm its own existence.
+
+**Dedup is ours now, not the backend's.** Bugsink fires the *same* issue id on
+new/regression/unmute, so the receiver keys the issue title on that id and
+looks for an existing open issue before filing. Keying on the message would file
+one issue per rendered value within a single error group.
 
 Those issues enter the pipeline the same way every other piece of work does:
 they carry a `find_label` and triage picks them up. They additionally carry a
@@ -116,9 +138,10 @@ This supersedes ADR-0118's **backend direction only**:
 decorative. The dead triage route gets a producer, and a test that fails when it
 loses one. #11879 gets a shipped first rung instead of a blocked epic.
 
-**Costs.** A `sentry-sdk` dependency. An operator must run a Bugsink instance and
-configure its GitHub integration — the inbound half is deployment, not code, so
-CI cannot prove it works; the standard's rules cover the half we own. Error
+**Costs.** A `sentry-sdk` dependency. An operator must run a Bugsink instance
+(`make bugsink-up`) and point its custom webhook at this deployment's receiver
+with the shared token. The webhook's delivery is deployment, not code, so CI
+cannot prove the round trip; the standard's rules cover both halves we own. Error
 payloads leave the process, which is why PII is off by default (ADR-0085).
 
 **Risk accepted.** A noisy error group could file issues faster than triage
