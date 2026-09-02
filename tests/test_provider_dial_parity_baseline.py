@@ -34,7 +34,15 @@ import pytest
 import runner_utils
 from config import HydraFlowConfig
 from credit_failover import apply_credit_failover
-from hydraflow_gateway.routing_policy import RequestFace, RouteTransport
+from hydraflow_gateway.routing_policy import (
+    ProviderBinding,
+    RequestFace,
+    RouteTransport,
+    RoutingAction,
+    RoutingMatch,
+    RoutingPolicy,
+    precedence_level,
+)
 from repo_backend import apply_repo_provider
 from route_shadow import provider_binding_for, transport_for
 
@@ -287,3 +295,86 @@ def test_every_seam_that_failover_reaches_is_a_known_one() -> None:
 
 def _claude_cmd() -> list[str]:
     return ["claude", "--model", "sonnet", "-p", "hello"]
+
+
+class TestThePolicyLadderInvertsTheLegacyOrder:
+    """The constraint P6b's generator has to satisfy, found before it was written.
+
+    The legacy stack resolves `role dial > repo_provider > credit-failover`, and
+    the class above pins that. Policy precedence is *structural*: a policy earns
+    a rung from the dimensions its `match` names, and nothing else — a `priority`
+    number cannot lift it, because `_rank` compares the rung first.
+
+    Those two orders disagree. A role dial is naturally expressed as a policy
+    matching `roles=[...]`, which earns `GLOBAL_ROLE_OR_REQUIREMENT` (7).
+    `repo_provider` is naturally expressed as a policy matching `repo_ids=[...]`,
+    which earns `REPO_ANY_ROLE` (4). Lower wins, so the repo-wide preference
+    would outrank the explicit role dial — the exact inverse of the behaviour
+    the migration is supposed to preserve.
+
+    It is silent in the #11853 way: nothing raises, and both spawns route to a
+    real provider. The only visible symptom is that a repo with a `repo_provider`
+    set stops honouring its role dials, on a config most repos never set.
+
+    The escape is available inside the model and costs nothing: because each
+    registered repo has its own `HydraFlowConfig`, a generated role-dial policy
+    can name its repo as well as its role, earning `REPO_ROLE` (3) and beating
+    the repo-wide rule again. This class states that as a requirement so the
+    generator cannot be written the obvious way.
+    """
+
+    def test_a_role_only_policy_is_outranked_by_a_repo_only_policy(self) -> None:
+        """The inversion itself, so the constraint below is not folklore."""
+        role_only = precedence_level(
+            _policy("role", match=RoutingMatch(roles=["planner"]))
+        )
+        repo_only = precedence_level(
+            _policy("repo", match=RoutingMatch(repo_ids=[_REPO]))
+        )
+
+        assert repo_only < role_only, (
+            "the ladder no longer inverts the legacy order — re-read whether "
+            "the generator still needs to scope role policies to their repo"
+        )
+
+    def test_scoping_the_role_policy_to_its_repo_restores_the_legacy_order(
+        self,
+    ) -> None:
+        """The escape the generator must take, pinned as the requirement it is."""
+        scoped = precedence_level(
+            _policy("scoped", match=RoutingMatch(repo_ids=[_REPO], roles=["planner"]))
+        )
+        repo_only = precedence_level(
+            _policy("repo", match=RoutingMatch(repo_ids=[_REPO]))
+        )
+
+        assert scoped < repo_only, (
+            "a repo-scoped role policy no longer outranks the repo-wide rule; "
+            "P6b's generator cannot preserve `role dial > repo_provider`"
+        )
+
+    def test_priority_cannot_rescue_a_policy_from_a_lower_rung(self) -> None:
+        """Why the fix is structural and not a bigger number.
+
+        Without this the obvious repair — leave the role policy role-only and
+        give it `priority=10_000` — looks like it should work. `_rank` compares
+        the rung before the priority, so it does not.
+        """
+        loud_role = _policy(
+            "loud", match=RoutingMatch(roles=["planner"]), priority=10_000
+        )
+        quiet_repo = _policy("quiet", match=RoutingMatch(repo_ids=[_REPO]), priority=0)
+
+        assert precedence_level(quiet_repo) < precedence_level(loud_role)
+
+
+_REPO = "acme/hydraflow"
+
+
+def _policy(policy_id: str, *, match: RoutingMatch, priority: int = 0) -> RoutingPolicy:
+    return RoutingPolicy(
+        id=f"parity-{policy_id}",
+        priority=priority,
+        match=match,
+        action=RoutingAction(provider_lock=ProviderBinding.ZAI_HARNESS),
+    )
