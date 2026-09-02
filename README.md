@@ -109,10 +109,18 @@ Reply directly from WhatsApp — no computer needed.
 git submodule add https://github.com/T-rav/hydraflow.git hydraflow
 git submodule update --init --recursive
 cd hydraflow
-git checkout v1.0.0   # pin to a stable release — see "Install a pinned release" below
+git checkout v1.0.1   # pin to a stable release — see "Install a pinned release" below
 
 # install deps + bootstrap target repo hooks/assets/labels
+# (seeds .env from .env.sample and runs `gh auth login` if needed)
 make setup
+
+# REQUIRED: tell HydraFlow which repo to work on — without this the factory
+# boots looking healthy and does nothing. Host mode needs no API keys beyond
+# gh + your logged-in Claude CLI; Docker mode also needs CLAUDE_CODE_OAUTH_TOKEN
+# (see "Claude Authentication"). The QUICK START block at the top of
+# .env.sample maps every stage tool to the key it needs.
+$EDITOR .env   # set HYDRAFLOW_GITHUB_REPO=owner/repo
 
 # scaffold quality gates in the target repo (CI/make/tests/lint where missing)
 make prep
@@ -135,29 +143,30 @@ the changes in each release are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ```bash
 # fresh clone, pinned to the release
-git clone --branch v1.0.0 https://github.com/T-rav/hydraflow.git hydraflow
+git clone --branch v1.0.1 https://github.com/T-rav/hydraflow.git hydraflow
 cd hydraflow && make setup
 
 # or pin an existing submodule
 git -C hydraflow fetch --tags origin
-git -C hydraflow checkout v1.0.0
-git add hydraflow && git commit -m "chore: pin hydraflow to v1.0.0"
+git -C hydraflow checkout v1.0.1
+git add hydraflow && git commit -m "chore: pin hydraflow to v1.0.1"
 
 # verify what you are on
-git -C hydraflow describe --tags --exact-match   # → v1.0.0
+git -C hydraflow describe --tags --exact-match   # → v1.0.1
 ```
 
 To move to the next release, repeat the `fetch --tags` + `checkout vX.Y.Z` step and
 commit the new submodule pointer. Do not track `main` from a downstream repo.
 
-`uv pip install git+https://github.com/T-rav/hydraflow@v1.0.0` (or any later tag) installs
+`uv pip install git+https://github.com/T-rav/hydraflow@v1.0.1` (or any later tag) installs
 the HydraFlow modules and the `hydraflow` console script into a venv — useful for importing
 HydraFlow as a library or smoke-testing a pinned release:
 
 ```bash
 uv venv .venv-hydraflow
-uv pip install --python .venv-hydraflow/bin/python git+https://github.com/T-rav/hydraflow@v1.0.0
-.venv-hydraflow/bin/hydraflow --version   # → hydraflow 1.0.0
+uv pip install --python .venv-hydraflow/bin/python git+https://github.com/T-rav/hydraflow@v1.0.1
+.venv-hydraflow/bin/hydraflow --version   # → hydraflow 1.0.0 (the v1.0.1 tag shipped an unbumped
+                                          #   version string; tags after it report themselves correctly)
 ```
 
 It is **not** a way to run the server. The wheel does not carry the dashboard templates,
@@ -167,7 +176,8 @@ relative to a checkout (#11589). Run HydraFlow from a checkout — the Makefile 
 
 ### Dashboard Mode (multi-repo)
 
-Set `HYDRAFLOW_DASHBOARD_ENABLED=true` in `.env`, then:
+The dashboard is on by default (`dashboard_enabled` is a config-file/settings-UI
+field, not an env var), so simply:
 
 ```bash
 make run
@@ -338,7 +348,7 @@ Codex credentials are mounted automatically from `~/.codex/` on your host. No ex
 
 **Other supported providers** (set in `.env` as needed):
 
-`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY, ZAI_CODING_PLAN_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `ZAI_CODING_PLAN_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`
 
 ### 4. Verify
 
