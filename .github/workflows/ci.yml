@@ -231,7 +231,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,src/hydraflow_resources/**,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,tools/**,docs/wiki/**,docs/standards/**,control/**}'
+              - '{src/**/*.py,src/hydraflow_resources/**,tests/**,gateway/**,docker/**,pyproject.toml,uv.lock,scripts/**,tools/**,docs/wiki/**,docs/standards/**,control/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
