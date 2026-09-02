@@ -5,7 +5,7 @@ description: '`gh pr merge --auto` returns "Auto merge is not allowed for this r
   — use `gh pr merge --squash` directly when CI is green'
 status: promoted
 issue: 12053
-promoted_in: null
+promoted_in: '#12065'
 wontfix_reason: null
 created: '2026-05-02'
 ---
