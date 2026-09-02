@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -12,7 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from config import HydraFlowConfig
+from config import HydraFlowConfig, _detect_repo_slug
+from subprocess_util import _read_dotenv
 
 logger = logging.getLogger("hydraflow.preflight")
 
@@ -42,9 +44,11 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     results.append(_check_gh_cli())
     results.append(await _check_gh_auth())
     results.append(_check_repo_root(config.repo_root))
+    results.append(_check_pipeline_target(config))
     results.append(_check_disk_space(config.data_root))
     if config.execution_mode == "docker":
         results.append(_check_docker())
+        results.append(_check_docker_agent_credential(config))
     # Check configured agent CLIs
     for tool_field in ("implementation_tool", "review_tool", "planner_tool"):
         tool = getattr(config, tool_field)
@@ -64,6 +68,146 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     results.append(_check_contracts_sandbox(config))
 
     return results
+
+
+#: Either credential lets a containerized direct-claude worker authenticate;
+#: resolution order (process env, then repo_root/.env via the SAME parser that
+#: builds the container env — subprocess_util._read_dotenv) keeps preflight and
+#: make_docker_env in exact agreement: a line the container cannot see (e.g. an
+#: ``export``-prefixed one) must not satisfy preflight either.
+_CLAUDE_CREDENTIAL_KEYS: tuple[str, ...] = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+)
+
+#: The zai harness credential chain, in runner_utils._HARNESS_BACKENDS order.
+#: A zai role with none of these FALLS OPEN to the native Anthropic credential
+#: (resolve_harness_env logs and returns {}), so preflight mirrors that too.
+_ZAI_CREDENTIAL_KEYS: tuple[str, ...] = (
+    "ZAI_CODING_PLAN_KEY",
+    "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+    "ZAI_API_KEY",
+    "HYDRAFLOW_ZAI_API_KEY",
+)
+
+#: The three dispatching roles preflight already checks CLIs for, with the
+#: provider dial that routes them and the operator-facing stage var used in
+#: .env.sample — messages speak the operator's vocabulary, not field names.
+#: A role resolved to "gateway" gets a per-spawn virtual key, never a host
+#: credential; under gateway_fleet_ratchet_enabled the dials are promoted to
+#: "gateway" during config resolution, before preflight ever sees them. The
+#: dials are Literal["claude", "gateway", "zai"] — three states, and the
+#: zai harness (Claude CLI against GLM) has its own key chain above.
+_CLAUDE_ROLE_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("implementation_tool", "implementation_provider", "HYDRAFLOW_IMPLEMENT"),
+    ("review_tool", "review_provider", "HYDRAFLOW_REVIEW"),
+    ("planner_tool", "planner_provider", "HYDRAFLOW_PLANNER"),
+)
+
+
+def _check_pipeline_target(config: HydraFlowConfig) -> CheckResult:
+    """WARN when no repo is targeted — the factory otherwise idles silently.
+
+    WARN rather than FAIL: booting untargeted and registering repos through
+    the dashboard afterwards is a legal path. But the consequence belongs in
+    the preflight report the operator reads, not only in an import-time
+    ``logger.warning`` inside a pydantic validator (#12040).
+    """
+    if config.repo:
+        return CheckResult(
+            "pipeline-target", CheckStatus.PASS, f"pipeline target: {config.repo}"
+        )
+    detected = _detect_repo_slug(config.repo_root)
+    remote_note = (
+        f" (The checkout's own remote is {detected!r}; it is never targeted"
+        " automatically.)"
+        if detected
+        else ""
+    )
+    return CheckResult(
+        "pipeline-target",
+        CheckStatus.WARN,
+        "HYDRAFLOW_GITHUB_REPO is unset — the triage/plan/implement/review "
+        "loops will idle. Set HYDRAFLOW_GITHUB_REPO=<owner>/<repo> or register "
+        f"a repo via the dashboard.{remote_note}",
+    )
+
+
+def _first_present(keys: tuple[str, ...], dotenv: dict[str, str]) -> str:
+    """First key resolvable the way the container env is built: process env,
+    then the ``_read_dotenv`` view of ``repo_root/.env``."""
+    for key in keys:
+        if os.environ.get(key, "") or dotenv.get(key, ""):
+            return key
+    return ""
+
+
+def _check_docker_agent_credential(config: HydraFlowConfig) -> CheckResult:
+    """FAIL when docker mode dispatches claude-CLI workers with no credential.
+
+    Containers cannot reach the host keychain, so a host-mode login does not
+    travel; unlike an unset repo there is no post-boot UI path that fixes
+    this, and every dispatched worker fails mid-run with the
+    "Agent CLI authentication failed" string in ``runner_utils`` (#12040).
+
+    Provider dials are three-valued: "gateway" roles are exempt (per-spawn
+    virtual keys); "zai" roles need the zai key chain and fall open to the
+    native Anthropic credential exactly as ``resolve_harness_env`` does;
+    "claude" roles need the native credential.
+    """
+    claude_roles: list[str] = []
+    zai_roles: list[str] = []
+    for tool_field, provider_field, stage_var in _CLAUDE_ROLE_FIELDS:
+        if getattr(config, tool_field) != "claude":
+            continue
+        provider = getattr(config, provider_field)
+        if provider == "gateway":
+            continue
+        (zai_roles if provider == "zai" else claude_roles).append(stage_var)
+    if not claude_roles and not zai_roles:
+        return CheckResult(
+            "docker-agent-credential",
+            CheckStatus.PASS,
+            "no direct claude-harness roles configured — no host credential needed",
+        )
+
+    dotenv = _read_dotenv(config.repo_root)
+    anthropic_key = _first_present(_CLAUDE_CREDENTIAL_KEYS, dotenv)
+    zai_key = _first_present(_ZAI_CREDENTIAL_KEYS, dotenv)
+
+    problems: list[str] = []
+    if claude_roles and not anthropic_key:
+        problems.append(
+            f"{', '.join(claude_roles)} dispatch direct claude workers but "
+            "neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set in "
+            "the environment or .env — run 'claude setup-token' and put the "
+            "token in .env"
+        )
+    if zai_roles and not zai_key and not anthropic_key:
+        problems.append(
+            f"{', '.join(zai_roles)} route via the zai harness but no "
+            "ZAI_CODING_PLAN_KEY / ZAI_API_KEY (or HYDRAFLOW_-prefixed "
+            "variant) is set, and there is no native Anthropic credential to "
+            "fall open to"
+        )
+    if problems:
+        return CheckResult(
+            "docker-agent-credential",
+            CheckStatus.FAIL,
+            "docker mode: "
+            + "; ".join(problems)
+            + ". Containers cannot reach the host keychain.",
+        )
+
+    covered: list[str] = []
+    if claude_roles:
+        covered.append(f"{anthropic_key} covers {', '.join(claude_roles)}")
+    if zai_roles:
+        covered.append(
+            f"{zai_key or anthropic_key + ' (zai fall-open)'} covers "
+            f"{', '.join(zai_roles)}"
+        )
+    return CheckResult("docker-agent-credential", CheckStatus.PASS, "; ".join(covered))
 
 
 def _check_git() -> CheckResult:

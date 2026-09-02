@@ -81,14 +81,42 @@ def test_stamps_the_five_repowikiloop_topic_pages(tmp_path) -> None:
         assert (result.root / rel).is_file()
 
 
-def test_copies_all_six_standards_directories_from_hydraflow(tmp_path) -> None:
+def test_copies_every_kernel_standards_directory_from_hydraflow(tmp_path) -> None:
     result = stamp_kernel(_spec(), tmp_path / "game1")
 
     for standard in STANDARDS_DIRS:
         readme = result.root / "docs" / "standards" / standard / "README.md"
         assert readme.is_file(), f"missing standards copy: {standard}"
-    # Verified against HydraFlow's own six standards dirs.
-    assert len(STANDARDS_DIRS) == 6
+    # The count assertion this replaces (``== 6``) restated the kernel set in a
+    # second place: it went stale the moment a standard was promoted and never
+    # said WHICH directory moved. The set itself is already bound in both
+    # directions by test_factory_operation_standard_drift, and the loop above
+    # already proves each entry stamps a real README — so the only claim left
+    # worth making here is the one neither of those covers.
+    assert len(STANDARDS_DIRS) == len(set(STANDARDS_DIRS)), (
+        f"duplicate kernel standard entries: {STANDARDS_DIRS}"
+    )
+
+
+def test_the_exception_sensor_runbook_ships_with_the_kernel(tmp_path) -> None:
+    """The SRE runbook must reach a stamped repo, not just HydraFlow.
+
+    It began life in `.claude/agents/`, which nothing stamps — so a repo
+    onboarded to the format inherited the exception_sensor RULES with no
+    instructions for satisfying them. The stamper copies every file under a
+    kernel standard's directory, so living beside the standard is what makes it
+    ship; this pins that rather than trusting it.
+    """
+    result = stamp_kernel(_spec(), tmp_path / "game1")
+
+    runbook = result.root / "docs" / "standards" / "exception_sensor" / "RUNBOOK.md"
+
+    assert runbook.is_file(), "the exception-sensor runbook did not ship"
+    text = runbook.read_text(encoding="utf-8")
+    assert "traces_sample_rate" in text, "must tell an app how to init the SDK"
+    assert "no GitHub integration" in text, (
+        "must carry the fact that makes the webhook necessary"
+    )
 
 
 def test_pyproject_and_cli_carry_package_substitution(tmp_path) -> None:

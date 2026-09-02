@@ -18,6 +18,7 @@ graph LR
     IssueStorePort --> IssueStore
     IssueStorePort -.-> FakeIssueStore
     ObservabilityPort --> NoOpObservabilityAdapter
+    ObservabilityPort --> SentryObservabilityAdapter
     ObservabilityPort -.-> FakeObservability
     PRPort --> PRManager
     PRPort -.-> FakeGitHub
@@ -79,6 +80,7 @@ graph LR
 - Methods: `breadcrumb`, `capture_exception`, `capture_message`, `flush`, `set_measurement`
 - Adapters:
   - `NoOpObservabilityAdapter` (`src.observability.noop_adapter`)
+  - `SentryObservabilityAdapter` (`src.observability.sentry_adapter`)
 - Fake: `FakeObservability` (`mockworld.fakes.fake_observability`)
 
 ### PRPort
@@ -109,7 +111,7 @@ graph LR
 ### WorkspacePort
 
 - Module: `src.ports`
-- Methods: `abort_merge`, `create`, `destroy`, `destroy_all`, `get_conflicting_files`, `merge_main`, `post_work_cleanup`, `prune_dead_registrations`, `reset_to_main`, `start_merge_main`
+- Methods: `abort_merge`, `create`, `destroy`, `destroy_all`, `get_conflicting_files`, `list_project_worktrees`, `merge_main`, `post_work_cleanup`, `prune_dead_registrations`, `reset_to_main`, `start_merge_main`
 - Adapters:
   - `WorkspaceManager` (`src.workspace._manager`)
 - Fake: `FakeWorkspace` (`mockworld.fakes.fake_workspace`)

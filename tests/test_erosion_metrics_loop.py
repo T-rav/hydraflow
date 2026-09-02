@@ -22,6 +22,7 @@ from erosion_metrics_loop import (
     scatter_finding_fingerprint,
     spread_finding_fingerprint,
 )
+from ports import PRPort
 from subprocess_util import CreditExhaustedError
 from tests.helpers import make_bg_loop_deps
 
@@ -233,7 +234,7 @@ class TestKillSwitch:
         object.__setattr__(bg.config, "erosion_metrics_loop_enabled", True)
         loop = ErosionMetricsLoop(
             config=bg.config,
-            pr_manager=MagicMock(),
+            pr_manager=MagicMock(spec=PRPort),
             state=_make_state(),
             dedup=_make_dedup(),
             deps=bg.loop_deps,
@@ -250,7 +251,7 @@ class TestKillSwitch:
         object.__setattr__(bg.config, "erosion_metrics_loop_enabled", False)
         loop = ErosionMetricsLoop(
             config=bg.config,
-            pr_manager=MagicMock(),
+            pr_manager=MagicMock(spec=PRPort),
             state=_make_state(),
             dedup=_make_dedup(),
             deps=bg.loop_deps,

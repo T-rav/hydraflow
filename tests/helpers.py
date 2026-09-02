@@ -862,22 +862,12 @@ class CredentialsFactory:
         gh_token: str = "",
         hindsight_url: str = "",
         hindsight_api_key: str = "",
-        whatsapp_token: str = "",
-        whatsapp_phone_id: str = "",
-        whatsapp_recipient: str = "",
-        whatsapp_verify_token: str = "",
-        whatsapp_app_secret: str = "",
     ) -> Credentials:
         """Create a Credentials with test-friendly defaults."""
         return Credentials(
             gh_token=gh_token,
             hindsight_url=hindsight_url,
             hindsight_api_key=hindsight_api_key,
-            whatsapp_token=whatsapp_token,
-            whatsapp_phone_id=whatsapp_phone_id,
-            whatsapp_recipient=whatsapp_recipient,
-            whatsapp_verify_token=whatsapp_verify_token,
-            whatsapp_app_secret=whatsapp_app_secret,
         )
 
 

@@ -36,6 +36,7 @@ from starlette.responses import JSONResponse
 
 from dashboard_routes._common import REPO_ALL
 from driver_contracts import ModelRequirement, ModelRequirementKind
+from gateway_control_reader import reader_from_config
 from hydraflow_gateway.routing_policy import canonicalize_repo, runtime_slug_for
 from hydraflow_gateway.routing_workspace import (
     DEFAULT_HISTORY_LIMIT,
@@ -79,6 +80,11 @@ _REJECTION_STATUS: dict[MutationRejection, int] = {
     MutationRejection.AUDIT_CHAIN_BROKEN: 409,
     MutationRejection.JOURNAL_UNREADABLE: 409,
     MutationRejection.POLICY_ALREADY_EXISTS: 409,
+    # The restored policy names an account the gateway no longer has, or
+    # the account set could not be read. Conflict rather than 422: the
+    # mutation is well-formed and was valid when written — the world moved
+    # under it, which is the same shape as a stale revision.
+    MutationRejection.UNKNOWN_ACCOUNT: 409,
     MutationRejection.POLICY_NOT_FOUND: 404,
     MutationRejection.OUT_OF_SCOPE: 422,
     MutationRejection.UNKNOWN_REVISION: 422,
@@ -293,8 +299,13 @@ def build_gateway_policy_router(
             # Blocking: an advisory file lock plus two fsync'd writes. Handing it
             # to a thread keeps one operator's save off the event loop every
             # other dashboard poll shares.
+            known = await _live_account_ids(_config_for(repo))
             result = await asyncio.to_thread(
-                workspace.apply, body, actor=identity.actor, now=now()
+                workspace.apply,
+                body,
+                actor=identity.actor,
+                now=now(),
+                known_accounts=known,
             )
         except PolicyMutationRejected as rejected:
             return _rejection(rejected)
@@ -502,6 +513,41 @@ def _policy_json(policy: RoutingPolicy) -> dict[str, Any]:
 
 def _issue_json(issue: PolicyValidationIssue) -> dict[str, Any]:
     return issue.model_dump(mode="json")
+
+
+async def _live_account_ids(config: Any) -> frozenset[str] | None:
+    """The accounts the gateway currently knows, or None when unreadable.
+
+    #11994. A rollback restores a policy set that may name accounts which were
+    valid when it was written and are not now. The policy workspace cannot
+    answer that on its own — the registry lives in the gateway — but the
+    dashboard can already READ it, through the same `reader_from_config` path
+    the accounts view uses. Owning a registry and being able to read one are
+    different questions, and only the second had to be true.
+
+    Read at mutation time rather than cached: an account can be deleted between
+    an operator loading a revision and rolling back to it.
+
+    `None` means unreadable, and the workspace refuses on it. That is the right
+    default for a rollback specifically — it is what an operator reaches for
+    when something has already gone wrong, and applying a policy naming
+    accounts nobody could verify is the wrong move at that moment.
+
+    No try/except: `GatewayControlReader._read` already turns every transport
+    failure into a result whose `available` is False. Wrapping it was how this
+    first shipped, and it was wrong twice over — it added an unbaselined
+    BLE001 suppression, and it read a `.value` attribute that does not exist,
+    so it returned None unconditionally and refused every rollback.
+    """
+    result = await reader_from_config(config).accounts()
+    if not result.available or not result.data:
+        return None
+    accounts = result.data.get("accounts") or []
+    return frozenset(
+        str(entry["account_id"])
+        for entry in accounts
+        if isinstance(entry, dict) and entry.get("account_id")
+    )
 
 
 def _rejection(rejected: PolicyMutationRejected) -> JSONResponse:

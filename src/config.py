@@ -56,25 +56,24 @@ class Credentials(BaseModel):
         default="",
         description="GitHub token for gh CLI auth",
     )
-    whatsapp_token: str = Field(
+    sentry_dsn: str = Field(
         default="",
-        description="WhatsApp Business API access token",
+        description=(
+            "Sentry DSN for error ingestion (ADR-0146). A write key, so it "
+            "lives with the credentials rather than in domain config. Its "
+            "PRESENCE is the switch: empty means the no-op adapter, which is "
+            "what tests, CI and the air-gapped sandbox get."
+        ),
     )
-    whatsapp_phone_id: str = Field(
+    bugsink_api_token: str = Field(
         default="",
-        description="WhatsApp Business API phone number ID",
-    )
-    whatsapp_recipient: str = Field(
-        default="",
-        description="WhatsApp recipient phone number (with country code)",
-    )
-    whatsapp_verify_token: str = Field(
-        default="",
-        description="WhatsApp webhook verification token",
-    )
-    whatsapp_app_secret: str = Field(
-        default="",
-        description="WhatsApp app secret used to verify X-Hub-Signature-256 webhook signatures",
+        description=(
+            "Bugsink API token used to fetch an error group's stack trace at "
+            "intake (ADR-0146). The alert webhook carries no frames — Bugsink's "
+            "IssueSerializer comments out last_frame_* — so without this the "
+            "board gets a one-line message and triage classifies blind. "
+            "Optional: enrichment is best-effort and never blocks filing."
+        ),
     )
 
 
@@ -203,6 +202,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("goal_supervisor_interval", "HYDRAFLOW_GOAL_SUPERVISOR_INTERVAL", 600),
+    (
+        "charter_loop_worker_interval",
+        "HYDRAFLOW_CHARTER_LOOP_WORKER_INTERVAL",
+        3600,
+    ),
     (
         "charter_drift_caretaker_interval",
         "HYDRAFLOW_CHARTER_DRIFT_CARETAKER_INTERVAL",
@@ -868,7 +872,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
-    ("whatsapp_enabled", "HYDRAFLOW_WHATSAPP_ENABLED", False),
     (
         "sandbox_failure_fixer_enabled",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
@@ -977,6 +980,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "goal_supervisor_loop_enabled",
         "HYDRAFLOW_GOAL_SUPERVISOR_LOOP_ENABLED",
         False,  # ADR-0124: Tier-2 goal supervisor ships default OFF.
+    ),
+    (
+        "charter_loop_worker_loop_enabled",
+        "HYDRAFLOW_CHARTER_LOOP_WORKER_LOOP_ENABLED",
+        False,  # ADR-0145: dispatching from a repo's declaration is an ENACT.
     ),
     (
         "charter_drift_caretaker_loop_enabled",
@@ -1160,6 +1168,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "worktree_gc_all_roots_enabled",
         "HYDRAFLOW_WORKTREE_GC_ALL_ROOTS_ENABLED",
+        True,
+    ),
+    (
+        "worktree_gc_sibling_clones_enabled",
+        "HYDRAFLOW_WORKTREE_GC_SIBLING_CLONES_ENABLED",
         True,
     ),
     ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
@@ -2646,6 +2659,19 @@ class HydraFlowConfig(BaseModel):
             "ADR-0143)"
         ),
     )
+    charter_loop_worker_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description=(
+            "CharterLoopWorkerLoop interval in seconds (default 1 hour). The "
+            "tick RATE is not the schedule: each declared loop fires on its "
+            "own cron clause, and this only bounds how promptly a due window "
+            "is noticed. An hour means a loop scheduled for 09:00 dispatches "
+            "by 10:00 at worst (ADR-0145)."
+        ),
+    )
+
     collaborator_check_enabled: bool = Field(
         default=True,
         description="When True, skip issues from non-collaborators at fetch time",
@@ -3159,6 +3185,22 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-find"],
         description="Labels for new issues to discover and triage into planning (OR logic)",
     )
+    bugsink_base_url: str = Field(
+        default="",
+        description=(
+            "Base URL of the Bugsink instance, used to fetch a group's stack "
+            "trace at intake (ADR-0146). Empty disables enrichment."
+        ),
+    )
+    exception_sensor_label: list[str] = Field(
+        default=["bugsink"],
+        description=(
+            "Labels marking an issue as an incoming system exception filed by "
+            "the exception sensor's backend (ADR-0146). Provenance only — the "
+            "issue still needs a find_label to enter the pipeline. Triage "
+            "routes these as system exceptions rather than authored findings."
+        ),
+    )
     regulated_labels: str = Field(
         default="",
         description=(
@@ -3218,10 +3260,6 @@ class HydraFlowConfig(BaseModel):
         ge=5,
         le=1440,
         description="Minutes to wait for human response before timing out shape conversation",
-    )
-    whatsapp_enabled: bool = Field(
-        default=False,
-        description="Enable WhatsApp notifications for shape conversations",
     )
     dashboard_url: str = Field(
         default="http://localhost:5555",
@@ -6412,6 +6450,19 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for GateActivatorLoop.",
     )
+    charter_loop_worker_loop_enabled: bool = Field(
+        default=False,
+        description=(
+            "Deploy-time kill-switch for CharterLoopWorkerLoop (ADR-0145). "
+            "Defaults OFF, and that default is the ruling rather than caution: "
+            "this loop DISPATCHES AGENT WORK from a target repo's declaration, "
+            "so turning it on enlarges what the factory will run on someone "
+            "else's say-so. That is an ENACT belonging to a human (ADR-0143 "
+            "Ruling 6 guard 4). Set "
+            "HYDRAFLOW_CHARTER_LOOP_WORKER_LOOP_ENABLED=true to arm it."
+        ),
+    )
+
     charter_drift_caretaker_loop_enabled: bool = Field(
         default=False,
         description=(
@@ -6720,6 +6771,19 @@ class HydraFlowConfig(BaseModel):
             "enumerate-and-reap phase (#10698). When False the loop keeps its "
             "legacy state/orphan-dir/branch phases but does NOT enumerate "
             "worktrees across every root."
+        ),
+    )
+
+    worktree_gc_sibling_clones_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for enumerating worktrees that live in a "
+            "SIBLING CLONE of this project (#11931). `git worktree list` "
+            "reports only the repo it runs in, so a factory workspace could "
+            "never see the dev checkout's worktrees at any predicate width — "
+            "4.5 GB across 15 of them, with no collector. Scoped by remote: "
+            "every clone of THIS project, never another. When False the loop "
+            "enumerates only `repo_root`, which is the pre-#11931 behaviour."
         ),
     )
 
@@ -7249,18 +7313,15 @@ class HydraFlowConfig(BaseModel):
 # _dotenv_lookup falls back on.
 _GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 # 1:1 credential-field → env-key. Read with empty-string defaults.
-_WHATSAPP_ENV_KEYS: dict[str, str] = {
-    "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
-    "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
-    "whatsapp_recipient": "HYDRAFLOW_WHATSAPP_RECIPIENT",
-    "whatsapp_verify_token": "HYDRAFLOW_WHATSAPP_VERIFY_TOKEN",
-    "whatsapp_app_secret": "HYDRAFLOW_WHATSAPP_APP_SECRET",
-}
+_SENTRY_ENV_KEYS: dict[str, str] = {"sentry_dsn": "SENTRY_DSN"}
+_BUGSINK_ENV_KEYS: dict[str, str] = {"bugsink_api_token": "BUGSINK_API_TOKEN"}
 #: Every env var :func:`build_credentials` reads, as one enumerable surface so
 #: test isolation and .env/documentation generators don't hand-list the
 #: credential keys (#10885). Folded into :func:`declared_env_keys`.
-CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(_GH_TOKEN_ENV_KEYS) | frozenset(
-    _WHATSAPP_ENV_KEYS.values()
+CREDENTIAL_ENV_KEYS: frozenset[str] = (
+    frozenset(_GH_TOKEN_ENV_KEYS)
+    | frozenset(_SENTRY_ENV_KEYS.values())
+    | frozenset(_BUGSINK_ENV_KEYS.values())
 )
 
 
@@ -7269,8 +7330,8 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
 
     Resolution priority for ``gh_token``: each key in :data:`_GH_TOKEN_ENV_KEYS`
     (``HYDRAFLOW_GH_TOKEN`` → ``GH_TOKEN`` → ``GITHUB_TOKEN``) in ``os.environ``,
-    then the ``.env`` file in ``config.repo_root``. Other credential fields are
-    read from :data:`_WHATSAPP_ENV_KEYS` with empty-string defaults. The full key
+    then the ``.env`` file in ``config.repo_root``. The DSN and the Bugsink API
+    token use that same os.environ-then-``.env`` resolution. The full key
     surface is exported as :data:`CREDENTIAL_ENV_KEYS` (#10885).
     """
     gh_token = ""
@@ -7280,12 +7341,20 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
             break
     if not gh_token:
         gh_token = _dotenv_lookup(config.repo_root, *_GH_TOKEN_ENV_KEYS)
+    # Same os.environ-then-.env resolution as gh_token: the DSN lives in the
+    # repo's `.env` on this deployment and is NOT exported to the shell, so an
+    # os.environ-only read would leave the adapter permanently inert while
+    # looking configured (ADR-0146).
+    sentry_dsn = os.environ.get(_SENTRY_ENV_KEYS["sentry_dsn"], "") or _dotenv_lookup(
+        config.repo_root, _SENTRY_ENV_KEYS["sentry_dsn"]
+    )
+    bugsink_api_token = os.environ.get(
+        _BUGSINK_ENV_KEYS["bugsink_api_token"], ""
+    ) or _dotenv_lookup(config.repo_root, _BUGSINK_ENV_KEYS["bugsink_api_token"])
     return Credentials(
         gh_token=gh_token,
-        **{
-            field: os.environ.get(env_key, "")
-            for field, env_key in _WHATSAPP_ENV_KEYS.items()
-        },
+        sentry_dsn=sentry_dsn,
+        bugsink_api_token=bugsink_api_token,
     )
 
 
@@ -7508,6 +7577,76 @@ _FABLE_CANARY_DIALS: tuple[str, ...] = (
     "fable_implement_canary_repo",
     "fable_review_canary_repo",
 )
+
+
+def _validate_governed_repo_has_no_ungoverned_face(config: HydraFlowConfig) -> None:
+    """A governed repository may not route a spawn face around the gateway.
+
+    #11992's config-time half. The runtime gauge counts a bypass after it
+    happened and the architecture gate refuses a bypass in the source; this is
+    the one that refuses the *configuration* that would produce one, where the
+    mistake is still free to fix.
+
+    Scoped to the config OF the governed repository. Each registered repo gets
+    its own ``HydraFlowConfig`` from ``load_runtime_config`` (see
+    ``RepoRuntime``), so this cannot force ``gateway`` on a host that merely
+    shares a process with a locked repo — the objection that stalled this
+    criterion, and it rested on the dials being global, which they are not.
+
+    Every ``*_provider`` dial is read from the model rather than listed: a new
+    dial is a new face, and a hand-written list is a face nobody checks.
+    """
+    from hydraflow_gateway.routing_policy import canonicalize_repo
+
+    canary = canonicalize_repo(str(config.gateway_enforcement_canary_repo or ""))
+    if canary is None:
+        return
+    repo = canonicalize_repo(str(getattr(config, "repo", "") or ""))
+    if repo is None or repo != canary:
+        return
+
+    # Dials are only half the faces. Seven of the eleven concrete `BaseRunner`
+    # subclasses declare no `PROVIDER_FIELD`, so `_resolve_provider` returns a
+    # hardcoded "claude" for them — BugReproducer, DiagnosticRunner,
+    # DiscoverRunner, HITLRunner, PlanReviewer, ResearchRunner, ShapeRunner.
+    # Only AgentRunner, PlannerRunner, ReviewRunner and TriageRunner carry one.
+    # No `*_provider` setting can move the other seven;
+    # the only thing that routes them to the gateway is the fleet ratchet,
+    # which rewrites a still-claude spawn to "gateway" in `base_runner`.
+    #
+    # So a canary repo with every dial on "gateway" and the ratchet off still
+    # sends seven runners straight to Anthropic, and this gate passed it. That
+    # is the exact shape the gate exists to refuse — an ungoverned face that no
+    # configuration names.
+    if not getattr(config, "gateway_fleet_ratchet_enabled", False):
+        msg = (
+            f"{repo} is the gateway enforcement canary, so it needs "
+            f"gateway_fleet_ratchet_enabled=True. Twenty of twenty-four "
+            f"runners declare no provider dial and resolve to 'claude' by "
+            f"default; the fleet ratchet is the only thing that routes them "
+            f"through the gateway, so without it they reach Anthropic "
+            f"directly however the dials are set."
+        )
+        raise ValueError(msg)
+
+    ungoverned = sorted(
+        name
+        for name in type(config).model_fields
+        if name.endswith("_provider")
+        and str(getattr(config, name, "")).strip() not in ("", "gateway")
+    )
+    if not ungoverned:
+        return
+
+    named = ", ".join(f"{n}={getattr(config, n)!r}" for n in ungoverned)
+    msg = (
+        f"{repo} is the gateway enforcement canary, so every spawn face must "
+        f"resolve through the gateway; these do not: {named}. A face naming a "
+        f"provider directly cannot be moved by policy, so the lock stops being "
+        f"true for it silently. Set them to 'gateway', or clear "
+        f"gateway_enforcement_canary_repo to enforce nothing."
+    )
+    raise ValueError(msg)
 
 
 def _validate_fable_plan_canary(config: HydraFlowConfig) -> None:
@@ -7780,6 +7919,7 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
 
     _validate_gateway_capture_policy(config)
     _validate_gateway_enforcement_canary(config)
+    _validate_governed_repo_has_no_ungoverned_face(config)
     _validate_fable_plan_canary(config)
     _validate_gateway_fleet_profile(config)
     _validate_gateway_pr_unstick_tool(config)
@@ -8089,8 +8229,9 @@ def declared_env_keys() -> frozenset[str]:
     these keys elsewhere. Callers needing a hermetic environment (e.g. the
     test suite's session-scoped isolation fixture) should scrub this whole
     set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
-    several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
-    third-party naming conventions instead (#10876). Credential keys are
+    the tables are not guaranteed to stay behind one prefix (#10876; the
+    former third-party-named entries ``OTEL_SERVICE_NAME`` and ``HF_ENV``
+    were removed with ADR-0118, but the rule outlives its examples). Credential keys are
     *deliberately excluded* — they are read directly by
     :func:`build_credentials` (not a table) and are enumerated separately as
     :data:`CREDENTIAL_ENV_KEYS`, which the isolation fixture scrubs in addition

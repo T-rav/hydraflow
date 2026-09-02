@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from flows import FlowState
+from flows import FLOW_STOP_KEY, FlowState
 from issue_cache import classification_complexity
 from models import PlanResult, Task
 from plan_constants import PlanScale
@@ -225,6 +225,6 @@ class PlanTieringMixin:
                 f"(complexity {complexity}; #11298)"
             ),
         )
-        state["_stop"] = True
+        state[FLOW_STOP_KEY] = True
         state["_skip_tail"] = True
         return True

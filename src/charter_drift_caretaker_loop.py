@@ -23,8 +23,10 @@ observation; every filesystem read lives here, in :func:`observe_repo`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +42,9 @@ from charter import (
 from exception_classify import reraise_on_credit_or_bug
 from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from package_resources import checkout_root
+from policy.facts import collect_purpose_facts
+from policy.models import DecisionStatus, StandardDecision
+from policy.python_engine import PythonDecisionEngine
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -59,6 +64,25 @@ _LAYER_MARKERS: dict[str, tuple[str, ...]] = {
     "language_pack": ("pyproject.toml", "package.json", "go.mod", "Cargo.toml"),
     "domain_rails": ("docs/standards",),
 }
+
+
+def _unanchored_goal_body(decision: StandardDecision) -> str:
+    return (
+        f"## `{decision.subject}` is declared and cited by nothing\n\n"
+        f"{decision.reason}\n\n"
+        "A goal no Article claims to serve is decoration. Two ways to close "
+        "this, and either is a real answer:\n\n"
+        "1. **Cite it** — add the goal id to a `## Goals served` section in the "
+        "standard that genuinely carries it, or name it in an ADR. Cited by "
+        "id, so the link is greppable rather than implied.\n"
+        "2. **Drop it** — remove the goal from `charter.yaml` if the repo does "
+        "not pursue it. A shorter honest purpose beats a longer aspirational "
+        "one.\n\n"
+        "This does not block anything. It is governance hygiene, filed for a "
+        "human, per `docs/standards/purpose/README.md`.\n\n"
+        "---\n*Automated by `CharterDriftCaretakerLoop` (ADR-0143 Amendment "
+        "2026-09-01, #11856)*\n"
+    )
 
 
 def _dedup_key(repo: str, finding_class: str) -> str:
@@ -107,6 +131,9 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
         dedup: DedupStore,
         deps: LoopDeps,
         auditor: Callable[[], Awaitable[list[CharterDriftReport]]],
+        purpose_auditor: (
+            Callable[[], Awaitable[list[StandardDecision]]] | None
+        ) = None,
     ) -> None:
         super().__init__(
             worker_name="charter_drift_caretaker", config=config, deps=deps
@@ -114,6 +141,7 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
         self._prs = pr_manager
         self._dedup = dedup
         self._auditor = auditor
+        self._purpose_auditor = purpose_auditor
 
     def _get_default_interval(self) -> int:
         return self._config.charter_drift_caretaker_interval
@@ -167,6 +195,9 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
             deduped += d
             resolved += await self._reconcile_resolved(report, dedup)
 
+        unanchored = await self._file_unanchored_goals(dedup)
+        filed += unanchored
+
         self._dedup.set_all(dedup)
         status = "drift" if filed or deduped else "clean"
         return {
@@ -175,6 +206,63 @@ class CharterDriftCaretakerLoop(BaseBackgroundLoop):
             "deduped": deduped,
             "resolved": resolved,
         }
+
+    async def _file_unanchored_goals(self, dedup: set[str]) -> int:
+        """File one deduped issue per goal nothing claims to serve (#11856).
+
+        Actuation only. The verdict comes from `PythonDecisionEngine` over
+        facts a collector gathered — this loop never re-derives it, exactly as
+        `AdrConformanceLoop` acts on `decision.remediation` without
+        re-classifying. Keeping the two apart is what lets a second engine be
+        parity-tested against the first.
+
+        One issue PER GOAL, not per repo: each unanchored goal is independently
+        fixable (cite it, or drop it), and folding three into one issue would
+        make closing it ambiguous.
+
+        Never blocking, by the standard's own rule — this files for a human and
+        returns.
+        """
+        if self._purpose_auditor is None:
+            return 0
+        try:
+            decisions = await self._purpose_auditor()
+        except (RuntimeError, OSError) as exc:
+            # Narrow so the suppressions ratchet is satisfied without a blind
+            # `except Exception`, and so a ValueError (a bug) still propagates.
+            #
+            # The re-raise is kept as the file's convention rather than because
+            # this path can hit it: `CreditExhaustedError` subclasses
+            # RuntimeError, so a narrow catch WOULD absorb one — but it is
+            # raised only on the LLM runner paths in `runner_utils`, and a
+            # filesystem read plus a pure engine cannot produce one. Cheap
+            # insurance against this call growing a runner later, not a live
+            # hazard today.
+            reraise_on_credit_or_bug(exc)
+            logger.warning("purpose audit failed", exc_info=True)
+            return 0
+
+        filed = 0
+        for decision in decisions:
+            if decision.status is not DecisionStatus.VIOLATED:
+                continue
+            key = f"{_KEY_PREFIX}:{self._config.repo}:purpose:{decision.subject}"
+            if key in dedup:
+                continue
+            try:
+                issue = await self._prs.create_issue(
+                    f"[charter] goal '{decision.subject}' is cited by nothing",
+                    _unanchored_goal_body(decision),
+                    labels=_DRIFT_LABELS,
+                )
+            except (RuntimeError, OSError) as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning("could not file unanchored-goal issue", exc_info=True)
+                continue
+            if issue:
+                dedup.add(key)
+                filed += 1
+        return filed
 
     async def _file_repo_drift(
         self, report: CharterDriftReport, dedup: set[str]
@@ -350,6 +438,39 @@ def audit_repo_charter(repo: str, repo_root: Path) -> CharterDriftReport:
     return compute_charter_drift(charter, observed, repo=repo)
 
 
+def audit_repo_purpose(repo_root: Path) -> list[StandardDecision]:
+    """Judge one repo's declared goals through the policy seam (#11856).
+
+    Deliberately NOT a drift finding. ADR-0143's 2026-09-01 amendment puts
+    presence in drift (it is pure over `(charter, observed)`) and referential
+    integrity in the seam (a `(standard, subject)` judgement over facts from
+    several surfaces). Putting it in `compute_charter_drift` would grow the
+    bespoke decision path the seam exists to absorb.
+
+    `Charter.governs()` filters, so a repo that does not declare `purpose`
+    produces nothing — the mandate is the operator's act, recorded, not implied
+    by this function existing.
+    """
+    charter = load_charter(repo_root)
+    if charter is None:
+        return []
+    facts = collect_purpose_facts(
+        charter, repo_root=repo_root, observed_at=datetime.now(UTC)
+    )
+    return PythonDecisionEngine().decide(facts, charter)
+
+
+def build_purpose_auditor(
+    config: HydraFlowConfig,
+) -> Callable[[], Awaitable[list[StandardDecision]]]:
+    """Build the real purpose auditor for the factory's managed checkout."""
+
+    async def _audit() -> list[StandardDecision]:
+        return await asyncio.to_thread(audit_repo_purpose, config.repo_root)
+
+    return _audit
+
+
 def build_charter_auditor(
     config: HydraFlowConfig,
 ) -> Callable[[], Awaitable[list[CharterDriftReport]]]:
@@ -359,7 +480,6 @@ def build_charter_auditor(
     one-element list so the loop's per-repo shape generalises to multi-repo.
     Offloaded to a thread — filesystem reads must not stall the event loop.
     """
-    import asyncio  # noqa: PLC0415
 
     async def _audit() -> list[CharterDriftReport]:
         report = await asyncio.to_thread(

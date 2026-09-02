@@ -154,3 +154,157 @@ class TestMemoryBacklogScenario:
         assert result["status"] == "ok"
         assert result["filed"] == 1
         assert len(github._issues) == 1
+
+
+class TestARecloneDoesNotReFile:
+    """#11963 — the guard has to survive losing the local frontmatter.
+
+    Unit tests see the loop's decision against a mocked board. Only this layer
+    replays the sequence that actually happened: file an issue, lose the
+    write-back (the commit went into a workspace nothing pushes), come back on
+    a checkout that still reads `pending`, and tick again.
+
+    `FakeGitHub` is the board here, not a mock — the second tick has to find the
+    first tick's own issue through the same port a live run would.
+    """
+
+    async def test_a_second_tick_on_a_reset_checkout_files_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        first = await loop._do_work()
+        assert first["filed"] == 1
+
+        # The re-clone: frontmatter back to `pending`, dedup gone. The issue
+        # the first tick filed is still open on the board.
+        _write_entry(mirror, "feedback-alpha", status="pending")
+        loop._dedup.set_all(set())
+
+        second = await loop._do_work()
+
+        assert second["filed"] == 0
+
+    async def test_the_reset_checkout_heals_its_own_frontmatter(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        path = _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        await loop._do_work()
+        _write_entry(mirror, "feedback-alpha", status="pending")
+        loop._dedup.set_all(set())
+
+        await loop._do_work()
+
+        assert "status: issue-open" in path.read_text()
+
+    async def test_only_one_issue_exists_on_the_board_afterwards(
+        self, tmp_path: Path
+    ) -> None:
+        # The symptom a human would have seen: a duplicate of an issue that was
+        # never closed.
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        await loop._do_work()
+        _write_entry(mirror, "feedback-alpha", status="pending")
+        loop._dedup.set_all(set())
+        await loop._do_work()
+
+        issues = await github.list_issues_by_label("hydraflow-memory-backlog")
+        assert len(issues) == 1
+
+    async def test_a_genuinely_new_entry_still_files(self, tmp_path: Path) -> None:
+        # The decoy: a guard that skipped everything after the first tick would
+        # pass all three tests above and file nothing again, ever.
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-alpha")
+        loop, github = _make_loop(repo)
+
+        await loop._do_work()
+        _write_entry(mirror, "feedback-beta")
+
+        second = await loop._do_work()
+
+        assert second["filed"] == 1
+
+
+class TestASimulatedBoardNeverCommits:
+    """#11972 — the write is fine, the COMMIT is what did the damage.
+
+    A sandbox run of this loop wrote #25-#44 into the real repo's mirrors and
+    they were MERGED (PR #8989). Unit tests see the refusal branch; only this
+    layer sees the thing that made those numbers durable — whether git history
+    gained a commit.
+
+    `FakeGitHub` is the board here and declares itself simulated, exactly as it
+    would in a sandbox run pointed at a live checkout.
+    """
+
+    @staticmethod
+    def _commits(repo: Path) -> int:
+        out = _sp.run(
+            ["git", "-C", str(repo), "rev-list", "--count", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return int(out or 0)
+
+    async def test_the_frontmatter_is_still_written(self, tmp_path: Path) -> None:
+        # The write must survive: the scenario layer and the loop's own
+        # re-filing guard both depend on the mirror being updated.
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        path = _write_entry(mirror, "feedback-alpha")
+        loop, _github = _make_loop(repo)
+
+        await loop._do_work()
+
+        assert "status: issue-open" in path.read_text()
+
+    async def test_git_history_does_not_gain_the_fake_number(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        _write_entry(repo / "docs" / "wiki" / "memory-feedback", "feedback-alpha")
+        loop, _github = _make_loop(repo)
+        before = self._commits(repo)
+
+        await loop._do_work()
+
+        assert self._commits(repo) == before
+
+    async def test_the_change_is_left_visible_in_the_working_tree(
+        self, tmp_path: Path
+    ) -> None:
+        # Refused, not hidden. An operator who lands here should SEE an
+        # uncommitted change rather than wonder why nothing happened.
+        #
+        # Asserted on `docs`, not on the mirror's full path: the directory is
+        # untracked in this throwaway repo, so git reports the parent (`?? docs/`)
+        # rather than each file. Pinning the longer string would be pinning
+        # git's porcelain formatting, not the property.
+        repo = _make_repo_with_mirror(tmp_path)
+        _write_entry(repo / "docs" / "wiki" / "memory-feedback", "feedback-alpha")
+        loop, _github = _make_loop(repo)
+
+        await loop._do_work()
+
+        dirty = _sp.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert dirty.strip()
+        assert "docs" in dirty

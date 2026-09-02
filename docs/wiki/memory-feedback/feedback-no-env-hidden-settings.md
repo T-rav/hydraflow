@@ -3,8 +3,8 @@ source: feedback_no_env_hidden_settings.md
 name: User-facing config belongs in the System tab, not .env
 description: Runtime-tunable config must be exposed as a settings card in the System
   tab; .env is for secrets and boot-time wiring only
-status: issue-open
-issue: 36
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-04-18'

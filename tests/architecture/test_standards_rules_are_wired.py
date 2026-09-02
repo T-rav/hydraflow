@@ -179,3 +179,101 @@ class TestTheGapOnlyShrinks:
             f"baseline {UNENFORCED_RULES_BASELINE} but {total} are declared "
             "unenforced — tighten it."
         )
+
+
+#: The "Properties:" line every standard.yaml carries names the registry that
+#: validates the standards themselves. It is a property of the format, not an
+#: enforcer of any one standard's rules.
+_FORMAT_BOILERPLATE = frozenset({"tests/architecture/test_standards_registry.py"})
+
+#: README-named test files not cited by any rule. SHRINK-ONLY.
+UNCITED_README_ENFORCERS_BASELINE = 0
+
+
+def _readme_named_tests(name: str) -> set[str]:
+    """Test files a standard's README names, keeping only files that hold tests."""
+    import re
+
+    readme = STANDARDS / name / "README.md"
+    if not readme.exists():
+        return set()
+    found: set[str] = set()
+    for ref in set(re.findall(r"tests/[\w/]+\.py", readme.read_text(encoding="utf-8"))):
+        path = REPO_ROOT / ref
+        if not path.exists():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        if any(
+            isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+            and n.name.startswith("test_")
+            for n in ast.walk(tree)
+        ):
+            found.add(ref)
+    return found
+
+
+def _cited_files(data: dict[str, Any]) -> set[str]:
+    cited = {
+        str(r.get("enforced_by", "")).partition("::")[0]
+        for r in (data.get("rules") or [])
+    }
+    enf = data.get("enforced_by") or []
+    cited |= {
+        str(e).partition("::")[0] for e in (enf if isinstance(enf, list) else [enf])
+    }
+    return cited
+
+
+class TestReadmeCrossReferencesAreHonoured:
+    """A README that names its own enforcer is ground truth for the citation.
+
+    This is the check that would have caught the real mistake: a rule about
+    FakeGitHub side effects in scenarios cited a Port-argument ratchet, while
+    the README sentence stating that rule ended "…test_mockworld_scenario_fake
+    _boundaries.py enforces this."
+
+    A resolving-but-wrong citation is invisible to every other assertion here.
+    Vocabulary overlap does not separate them — measured, the wrong citation
+    scored 0.88 against the right one's 0.89 — but the document's own
+    cross-reference does.
+    """
+
+    @pytest.mark.parametrize(("name", "data"), ALL, ids=[n for n, _ in ALL])
+    def test_every_readme_named_enforcer_is_cited_or_excused(
+        self, name: str, data: dict
+    ):
+        excused = {
+            str(e.get("path"))
+            for e in (data.get("readme_mentions_not_enforcers") or [])
+        }
+        uncited = (
+            _readme_named_tests(name)
+            - _cited_files(data)
+            - excused
+            - _FORMAT_BOILERPLATE
+        )
+
+        assert not uncited, (
+            f"{name}: the README names {sorted(uncited)} but no rule cites them. "
+            "Either they enforce a rule (cite them) or they are examples "
+            "(list them under readme_mentions_not_enforcers with a reason)."
+        )
+
+    @pytest.mark.parametrize(("name", "data"), ALL, ids=[n for n, _ in ALL])
+    def test_every_non_enforcer_states_why(self, name: str, data: dict):
+        blank = [
+            e.get("path")
+            for e in (data.get("readme_mentions_not_enforcers") or [])
+            if len(str(e.get("why", "")).strip()) < 20
+        ]
+
+        assert not blank, f"{name}: non-enforcers with no reason: {blank}"
+
+    def test_the_scan_finds_readme_references_at_all(self):
+        """Guard the guard: a regex that matches nothing passes vacuously."""
+        total = sum(len(_readme_named_tests(n)) for n, _ in ALL)
+
+        assert total >= 10, f"only {total} README-named test files found — scan broken"

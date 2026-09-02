@@ -246,6 +246,96 @@ def unenumerable_roots(
     return reported
 
 
+def normalized_remote(url: str) -> str:
+    """A clone's project identity, for deciding whether two checkouts are siblings.
+
+    Collecting worktrees that live in another clone means discovering other
+    repositories, and `repo_root.parent` is a configured GC root — on this
+    machine that directory holds 35 unrelated projects. Reaching them would
+    turn a project's collector into a collector for everything the operator
+    owns, which no amount of per-candidate proof makes acceptable.
+
+    So the boundary is the PROJECT, not the checkout: every worktree of this
+    repository, wherever it lives; nothing belonging to another. Normalizes the
+    spellings the same remote is written in — scheme, `git@host:` form, a
+    trailing `.git`, a trailing slash, case — so two clones of one project are
+    recognised as siblings and two projects never are.
+    """
+    text = url.strip().lower()
+    if not text:
+        return ""
+    for prefix in ("git+",):
+        text = text.removeprefix(prefix)
+    # `git@host:owner/repo` -> `host/owner/repo`
+    if "://" not in text and "@" in text and ":" in text:
+        _, _, rest = text.partition("@")
+        host, _, path = rest.partition(":")
+        text = f"{host}/{path}"
+    else:
+        _, _, after = text.partition("://")
+        text = after or text
+        if "@" in text.split("/", 1)[0]:
+            text = text.partition("@")[2]
+    return text.rstrip("/").removesuffix(".git").rstrip("/")
+
+
+def repo_root_from_common_dir(output: str, *, cwd: Path) -> Path | None:
+    """The MAIN repo root that owns a checkout, from ``git rev-parse --git-common-dir``.
+
+    `git worktree list` only ever reports the worktrees of the repo it is run
+    in, so collecting worktrees that belong to another clone means finding that
+    clone first. ``--git-common-dir`` is the one git command that answers it
+    from inside a linked worktree: it returns the MAIN repository's ``.git``,
+    where ``--show-toplevel`` returns the linked worktree itself and would send
+    the enumeration straight back where it started.
+
+    Both output shapes are handled: an absolute ``<main>/.git`` from inside a
+    linked worktree, and a bare relative ``.git`` when run in the main repo.
+    """
+    text = output.strip()
+    if not text:
+        return None
+    common = Path(text)
+    if not common.is_absolute():
+        common = cwd / common
+    try:
+        resolved = common.expanduser().resolve()
+    except OSError:  # pragma: no cover - unresolvable path owns nothing
+        return None
+    # `.git` may be a directory (normal clone) or, for a bare repo, the repo
+    # itself. Only the former has a working tree worth collecting under.
+    return resolved.parent if resolved.name == ".git" else None
+
+
+def child_directories(roots: Iterable[Path]) -> list[Path]:
+    """Direct children of each root — the places an owning repo may be found.
+
+    Deliberately shallow. A recursive walk would descend into every worktree's
+    own contents looking for repos, which is both slow and wrong: a nested
+    checkout inside somebody's worktree is their business, not the collector's.
+    """
+    seen: set[Path] = set()
+    children: list[Path] = []
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            entries = sorted(root.iterdir())
+        except OSError:  # pragma: no cover - unreadable root yields nothing
+            continue
+        for child in entries:
+            try:
+                if not child.is_dir():
+                    continue
+                resolved = child.resolve()
+            except OSError:  # pragma: no cover
+                continue
+            if resolved not in seen:
+                seen.add(resolved)
+                children.append(resolved)
+    return children
+
+
 def worktree_too_new(path: Path, min_age_seconds: int) -> bool:
     """Return whether age policy blocks collection; stat errors fail closed."""
     if min_age_seconds <= 0:

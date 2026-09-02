@@ -21,3 +21,13 @@ rules:
   - id: generated-gates-are-committed
     claim: The generated gate config matches the committed tree and regenerates idempotently
     enforced_by: tests/test_gen_gates_cli.py::test_check_passes_on_committed_tree
+  - id: required-contexts-are-not-matrix-keys
+    claim: A required status check names the aggregator job, never a runtime-expanded matrix key
+    enforced_by: tests/regressions/test_stamped_required_check_aggregator_11715.py::test_no_required_context_is_a_matrix_job_key
+  - id: the-aggregator-gates-every-matrix-job
+    claim: The aggregator job gates every matrix job and still runs when an upstream fails
+    enforced_by: tests/regressions/test_stamped_required_check_aggregator_11715.py::test_aggregator_gates_every_matrix_job
+  - id: required-checks-are-producible
+    claim: Every required status check is producible by a job that really exists in the workflow
+    enforced_by: tests/architecture/test_required_matrix_contexts.py::test_required_quality_matrix_contexts_are_producible
+

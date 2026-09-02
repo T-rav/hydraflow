@@ -31,6 +31,16 @@
             "timeout": 30,
             "statusMessage": "Validating functional-areas schema...",
             "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.block-generic-scratchpad-names.sh",
+            "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.require-convergence-before-merge.sh",
+            "_hydraflow": true
           }
         ]
       },
@@ -63,6 +73,11 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.check-cross-service-impact.sh",
             "timeout": 15,
             "statusMessage": "Checking cross-service impact for shared/ changes...",
+            "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.guard-overwriting-tracked-source.sh",
             "_hydraflow": true
           }
         ]

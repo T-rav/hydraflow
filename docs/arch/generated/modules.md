@@ -56,11 +56,11 @@ graph LR
     src -- "10" --> src_escape
     src -- "4" --> src_flows
     src -- "1" --> src_health_monitor_loop
-    src -- "26" --> src_hydraflow_gateway
+    src -- "31" --> src_hydraflow_gateway
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
-    src -- "2" --> src_policy
+    src -- "5" --> src_policy
     src -- "2" --> src_pr_unsticker
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
@@ -72,8 +72,10 @@ graph LR
     src -- "10" --> src_wiki_compiler
     src -- "5" --> src_workspace
     src_arch -- "1" --> src_disturbance
+    src_arch -- "3" --> src_policy
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "16" --> src_arch
+    src_arch_generators -- "1" --> src_policy
     src_arch_generators -- "1" --> src_vitals
     src_audit -- "1" --> src_escape
     src_dashboard_routes -- "2" --> src_audit

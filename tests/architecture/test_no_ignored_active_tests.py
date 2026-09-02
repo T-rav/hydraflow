@@ -251,7 +251,7 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: ability to observe it. They are the #6408–#6975 batch of pinned-bug
 #: regressions, all written ``strict=False`` with "fix not yet landed", all
 #: silently uncollected until #9801/#9872 widened ``python_files`` and now
-#: silently xfailing. Fixing 109 open bugs is not this change; making them
+#: silently xfailing. Fixing 107 open bugs is not this change; making them
 #: countable, named, and shrink-only is.
 #:
 #: SHRINK ONLY. An entry leaves when its bug is fixed and the marker comes off.
@@ -272,7 +272,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: xfail AND its grandfather entry together and both gate tests would stay
 #: green. Growth now costs a second, obviously-named edit that a reviewer reads
 #: as what it is.
-DEFERRED_XFAILS_MAX = 109
+#: 109 -> 107 when the WhatsApp bridge was removed: deleting
+#: regression_issue_6494 took two grandfathered xfails with it. The cap
+#: falls in the same change by design — a cap left above the live count is
+#: slack a later PR can spend without anything reddening.
+DEFERRED_XFAILS_MAX = 107
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -280,8 +284,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6476.py::TestProcWaitAlwaysCalledInFinally.test_unexpected_error_after_stderr_task_calls_proc_wait",
         "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_drain_failure_calls_proc_wait",
         "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_write_failure_calls_proc_wait",
-        "tests/regressions/regression_issue_6494.py::TestMalformedDistinguishableFromEmpty.test_malformed_payload_is_not_identical_to_valid_empty",
-        "tests/regressions/regression_issue_6494.py::TestMalformedWebhookLogsError.test_malformed_payload_logs_parse_failure",
         "tests/regressions/regression_issue_6496.py::TestFinalizeDoesNotMaskProgrammingErrors.test_finalize_propagates_attribute_error",
         "tests/regressions/regression_issue_6496.py::TestRecordDoesNotMaskProgrammingErrors.test_record_propagates_assertion_error",
         "tests/regressions/regression_issue_6496.py::TestRecordDoesNotMaskProgrammingErrors.test_record_propagates_attribute_error",

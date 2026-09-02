@@ -4,8 +4,8 @@ name: ruff strips unused imports during TDD cycles
 description: HydraFlow's post-tool-use formatter hook runs ruff, which removes imports
   that aren't yet referenced — breaks the standard "add import, write failing test,
   add impl" sequence
-status: issue-open
-issue: 39
+status: pending
+issue: null
 promoted_in: null
 wontfix_reason: null
 created: '2026-04-21'

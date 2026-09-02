@@ -8,7 +8,7 @@ finder→loop from the per-loop rollup and drives the status.
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -34,7 +34,13 @@ from finder_faceplate import (  # noqa: E402
     baseline_ledger_path,
 )
 
-_NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+#: Now-relative, NOT a literal. This was `datetime(2026, 8, 3, ...)` against a
+#: 30-day DEFAULT_MAX_BASELINE_AGE, so the baseline it vouches for went stale on
+#: 2026-09-02 and `test_populated_ledger_surfaces_floor` began asserting
+#: `baseline_stale is False` against a baseline that genuinely was. A fuse lit
+#: the day the fixture was written. Anchoring to now keeps the fixture's MEANING
+#: — "recently vetted" — instead of the date on which that happened to be true.
+_NOW = datetime.now(UTC) - timedelta(days=1)
 
 
 def _config(tmp_path: Path) -> MagicMock:

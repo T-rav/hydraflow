@@ -11,7 +11,7 @@
 # surfaces the UI does not group (Ports, persistence, the harness, the
 # dashboard itself, the orchestration pipeline, discovery engines).
 #
-# Loop membership is validated against the live extractor: 65 loops, 10 Ports.
+# Loop membership is validated against the live extractor: 66 loops, 10 Ports.
 
 areas:
   repo_health:
@@ -84,6 +84,7 @@ areas:
       - LiveCorpusReplayLoop
       - PrinciplesAuditLoop
       - CharterDriftCaretakerLoop
+      - CharterLoopWorkerLoop
       - WikiRotDetectorLoop
     related_adrs: ['0045', '0082', '0100', '0101', '0121']
 

@@ -41,7 +41,9 @@ from caching_issue_store import CachingIssueStore
 from charter_drift_caretaker_loop import (  # noqa: TCH001
     CharterDriftCaretakerLoop,
     build_charter_auditor,
+    build_purpose_auditor,
 )
+from charter_loop_worker_loop import CharterLoopWorkerLoop, managed_repo_roots
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
@@ -103,7 +105,7 @@ from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
 from models import StatusCallback
-from observability.noop_adapter import NoOpObservabilityAdapter
+from observability.sentry_adapter import build_observability_adapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
 from plan_touchpoint_expander import PlanTouchpointExpander
@@ -324,6 +326,7 @@ class ServiceRegistry:
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
     goal_supervisor_loop: GoalSupervisorLoop
     charter_drift_caretaker_loop: CharterDriftCaretakerLoop
+    charter_loop_worker_loop: CharterLoopWorkerLoop
     gate_activator_loop: GateActivatorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
@@ -956,6 +959,30 @@ def _build_driver_manager(
     )
 
 
+def _build_charter_loop_runner(
+    config: HydraFlowConfig,
+    repo: str,
+    repo_root: Path,
+    metrics: MetricsManager,
+):
+    """One `CharterLoopRunner` per repo, with its own receipts path.
+
+    Built here rather than in the loop so the loop never constructs a runner:
+    the runner needs a receipt writer and (later) a dispatch surface, and
+    wiring the factory's broker inside a caretaker would put dispatch machinery
+    in a loop whose job is scheduling.
+    """
+    from charter_loop_runner import CharterLoopRunner
+
+    slug = repo.replace("/", "-")
+    return CharterLoopRunner(
+        repo=repo,
+        repo_root=repo_root,
+        receipts_path=config.data_root / slug / "metrics" / "charter_loops.jsonl",
+        receipt_writer=metrics.append_receipt,
+    )
+
+
 def build_services(
     config: HydraFlowConfig,
     event_bus: EventBus,
@@ -1037,11 +1064,13 @@ def build_services(
     # been extracted via scripts/extract_hindsight_to_wiki.py before merge.
 
     # Observability port — constructed once and injected throughout.
-    # Production path: NoOpObservabilityAdapter (discards events until the SRE
-    # agent wires a real backend, ADR-0118). Sandbox/test path: caller passes
-    # FakeObservability.
+    # Production path: Sentry when a DSN is configured, the no-op otherwise
+    # (ADR-0146 supersedes ADR-0118's backend direction). The DSN's presence IS
+    # the switch, so tests, CI and the air-gapped sandbox get the no-op without
+    # a flag anyone has to remember. Sandbox/test path: caller passes
+    # FakeObservability, which still wins over both.
     if observability is None:
-        observability = NoOpObservabilityAdapter()
+        observability = build_observability_adapter(credentials)
 
     # Core runners
     if workspaces is None:
@@ -2022,12 +2051,33 @@ def build_services(
         "charter_drift_caretaker",
         config.data_root / "dedup" / "charter_drift_caretaker.json",
     )
+    charter_loop_worker_dedup = DedupStore(
+        "charter_loop_worker",
+        config.data_root / "dedup" / "charter_loop_worker.json",
+    )
+    charter_loop_worker_loop = CharterLoopWorkerLoop(
+        config=config,
+        dedup=charter_loop_worker_dedup,
+        deps=loop_deps,
+        # The runner factory, not a runner: each repo gets its own receipts
+        # path, and the dispatch surface is deliberately absent until the
+        # broker wiring lands. A runner with no dispatch still SELECTS and
+        # RECEIPTS, which is the observable half — and shipping the driver
+        # armed with a live dispatch it had never been run against would be
+        # the thing the kill switch exists to prevent.
+        runner_for=lambda repo, repo_root: _build_charter_loop_runner(
+            config, repo, repo_root, metrics_manager
+        ),
+        repos=lambda: managed_repo_roots(config),
+    )
+
     charter_drift_caretaker_loop = CharterDriftCaretakerLoop(  # noqa: F841
         config=config,
         pr_manager=prs,
         dedup=charter_drift_caretaker_dedup,
         deps=loop_deps,
         auditor=build_charter_auditor(config),
+        purpose_auditor=build_purpose_auditor(config),
     )
 
     gate_activator_dedup = DedupStore(
@@ -2439,6 +2489,7 @@ def build_services(
         branch_protection_auditor_loop=branch_protection_auditor_loop,
         goal_supervisor_loop=goal_supervisor_loop,
         charter_drift_caretaker_loop=charter_drift_caretaker_loop,
+        charter_loop_worker_loop=charter_loop_worker_loop,
         gate_activator_loop=gate_activator_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,

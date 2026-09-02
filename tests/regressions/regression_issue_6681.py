@@ -72,6 +72,10 @@ def _make_gc_loop(
     workspaces = MagicMock()
 
     workspaces.prune_dead_registrations = AsyncMock(return_value=[])
+    # Enumeration moved behind the Port (#11931); this file's subject is error
+    # HANDLING, so an empty world keeps phase 5 out of the way of the
+    # RuntimeError each test is actually about.
+    workspaces.list_project_worktrees = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
 

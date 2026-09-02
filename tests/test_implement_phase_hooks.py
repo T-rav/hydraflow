@@ -11,6 +11,7 @@ import pytest
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 from implement_phase import ImplementPhase
+from ports import IssueStorePort, PRPort, WorkspacePort
 from state import StateTracker
 from tests.conftest import WorkerResultFactory
 from tests.helpers import make_worker_result
@@ -23,10 +24,10 @@ def _build_phase(config: HydraFlowConfig) -> ImplementPhase:
     phase = ImplementPhase(
         config=config,
         state=StateTracker(config.state_file),
-        workspaces=MagicMock(),
+        workspaces=MagicMock(spec=WorkspacePort),
         agents=MagicMock(),
-        prs=MagicMock(),
-        store=MagicMock(),
+        prs=MagicMock(spec=PRPort),
+        store=MagicMock(spec=IssueStorePort),
         stop_event=asyncio.Event(),
         transcript_summarizer=summarizer,
     )
@@ -150,10 +151,10 @@ class TestPostImplTranscript:
         phase = ImplementPhase(
             config=config,
             state=StateTracker(config.state_file),
-            workspaces=MagicMock(),
+            workspaces=MagicMock(spec=WorkspacePort),
             agents=MagicMock(),
-            prs=MagicMock(),
-            store=MagicMock(),
+            prs=MagicMock(spec=PRPort),
+            store=MagicMock(spec=IssueStorePort),
             stop_event=asyncio.Event(),
             # No transcript_summarizer
         )

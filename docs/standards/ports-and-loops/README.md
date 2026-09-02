@@ -40,7 +40,7 @@ depend on ports, not adapters.
 | `ConformanceRunnerPort` | `src/ports.py` | `FakeConformanceRunner` | — | — |
 | `IssueFetcherPort` | `src/ports.py` | `FakeIssueFetcher` | 0067, 0081 | [issue-fetcher-port.md](../../wiki/terms/issue-fetcher-port.md) |
 | `IssueStorePort` | `src/ports.py` | `FakeIssueStore` | 0041 | [issue-store-port.md](../../wiki/terms/issue-store-port.md) |
-| `ObservabilityPort` | `src/ports.py` | `FakeObservability` | 0072 | [observability-port.md](../../wiki/terms/observability-port.md) |
+| `ObservabilityPort` | `src/ports.py` | `FakeObservability` | 0072, 0146 | [observability-port.md](../../wiki/terms/observability-port.md) |
 | `PRPort` | `src/ports.py` | `FakeGitHub` | 0002, 0045, 0052, 0056, 0068, 0069, 0075, 0077, 0109, 0115 | [pr-port.md](../../wiki/terms/pr-port.md) |
 | `ReviewInsightStorePort` | `src/ports.py` | `FakeReviewInsightStore` | 0070 | [review-insight-store-port.md](../../wiki/terms/review-insight-store-port.md) |
 | `RouteBackCounterPort` | `src/route_back.py` | `FakeRouteBackCounter` | 0071 | [route-back-counter-port.md](../../wiki/terms/route-back-counter-port.md) |
@@ -87,6 +87,7 @@ each is responsible for one caretaking concern.
 | `BranchProtectionAuditorLoop` | `src/branch_protection_auditor_loop.py` | 604800 | 0082 | — |
 | `CIMonitorLoop` | `src/ci_monitor_loop.py` | 300 | 0029, 0065 | [ci-monitor-loop.md](../../wiki/terms/ci-monitor-loop.md) |
 | `CharterDriftCaretakerLoop` | `src/charter_drift_caretaker_loop.py` | 86400 | 0121 | [charter-drift-caretaker-loop.md](../../wiki/terms/charter-drift-caretaker-loop.md) |
+| `CharterLoopWorkerLoop` | `src/charter_loop_worker_loop.py` | 3600 | — | — |
 | `ContractRefreshLoop` | `src/contract_refresh_loop.py` | 604800 | 0045, 0047 | [contract-refresh-loop.md](../../wiki/terms/contract-refresh-loop.md) |
 | `ConvergenceOscillationLoop` | `src/convergence_oscillation_loop.py` | 3600 | 0096, 0097, 0098 | — |
 | `CorpusLearningLoop` | `src/corpus_learning_loop.py` | 3600 | 0045 | [corpus-learning-loop.md](../../wiki/terms/corpus-learning-loop.md) |
@@ -165,3 +166,13 @@ gate that exists but never runs is a citation to nothing.
 <!-- standard:enforced-by -->
 - `tests/architecture/test_ports_and_loops_standard_drift.py`
 <!-- /standard:enforced-by -->
+
+## Goals served
+
+Charter purpose goals this standard carries (ADR-0143 Amendment 2026-09-01,
+#11856). Cited by id so the link is greppable rather than implied — an
+uncited goal is decoration, and `STANDARD_PURPOSE` says so.
+
+- `reduce_the_cost_of_improving_itself`
+
+One structural contract means a new port or loop costs its author the work and not the rediscovery, and costs a reviewer nothing to check.

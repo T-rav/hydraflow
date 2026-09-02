@@ -25,6 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from tests.helpers import make_bg_loop_deps
+from ports import IssueFetcherPort, PRPort
 
 
 def _workspace_mock() -> MagicMock:
@@ -90,7 +91,7 @@ def _ci_monitor_loop(tmp_path: Path):
     from ci_monitor_loop import CIMonitorLoop
 
     d = _deps(tmp_path, "ci_monitor_loop_enabled")
-    return CIMonitorLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
+    return CIMonitorLoop(config=d.config, pr_manager=MagicMock(spec=PRPort), deps=d.loop_deps)
 
 
 def _contract_refresh_loop(tmp_path: Path):
@@ -137,7 +138,7 @@ def _dependabot_merge_loop(tmp_path: Path):
     return DependabotMergeLoop(
         config=d.config,
         cache=MagicMock(),
-        prs=MagicMock(),
+        prs=MagicMock(spec=PRPort),
         state=MagicMock(),
         deps=d.loop_deps,
     )
@@ -150,7 +151,7 @@ def _diagnostic_loop(tmp_path: Path):
     return DiagnosticLoop(
         config=d.config,
         runner=MagicMock(),
-        prs=MagicMock(),
+        prs=MagicMock(spec=PRPort),
         state=MagicMock(),
         deps=d.loop_deps,
     )
@@ -176,8 +177,8 @@ def _epic_sweeper_loop(tmp_path: Path):
     d = _deps(tmp_path, "epic_sweeper_loop_enabled")
     return EpicSweeperLoop(
         config=d.config,
-        fetcher=MagicMock(),
-        prs=MagicMock(),
+        fetcher=MagicMock(spec=IssueFetcherPort),
+        prs=MagicMock(spec=PRPort),
         state=MagicMock(),
         deps=d.loop_deps,
     )
@@ -229,7 +230,7 @@ def _label_drift_watcher_loop(tmp_path: Path):
 
     d = _deps(tmp_path, "label_drift_watcher_loop_enabled")
     return LabelDriftWatcherLoop(
-        config=d.config, pr_manager=MagicMock(), deps=d.loop_deps
+        config=d.config, pr_manager=MagicMock(spec=PRPort), deps=d.loop_deps
     )
 
 
@@ -250,7 +251,7 @@ def _merge_state_watcher_loop(tmp_path: Path):
     from merge_state_watcher_loop import MergeStateWatcherLoop
 
     d = _deps(tmp_path, "merge_state_watcher_loop_enabled")
-    return MergeStateWatcherLoop(config=d.config, prs=MagicMock(), deps=d.loop_deps)
+    return MergeStateWatcherLoop(config=d.config, prs=MagicMock(spec=PRPort), deps=d.loop_deps)
 
 
 def _pr_unsticker_loop(tmp_path: Path):
@@ -260,7 +261,7 @@ def _pr_unsticker_loop(tmp_path: Path):
     return PRUnstickerLoop(
         config=d.config,
         pr_unsticker=MagicMock(),
-        prs=MagicMock(),
+        prs=MagicMock(spec=PRPort),
         deps=d.loop_deps,
     )
 
@@ -330,7 +331,7 @@ def _security_patch_loop(tmp_path: Path):
 
     d = _deps(tmp_path, "security_patch_loop_enabled")
     return SecurityPatchLoop(
-        config=d.config, pr_manager=MagicMock(), state=MagicMock(), deps=d.loop_deps
+        config=d.config, pr_manager=MagicMock(spec=PRPort), state=MagicMock(), deps=d.loop_deps
     )
 
 
@@ -353,7 +354,7 @@ def _charter_drift_caretaker_loop(tmp_path: Path):
     d = _deps(tmp_path, "charter_drift_caretaker_loop_enabled")
     return CharterDriftCaretakerLoop(
         config=d.config,
-        pr_manager=MagicMock(),
+        pr_manager=MagicMock(spec=PRPort),
         dedup=MagicMock(),
         deps=d.loop_deps,
         auditor=MagicMock(),
@@ -364,7 +365,7 @@ def _gate_health_loop(tmp_path: Path):
     from gate_health_loop import GateHealthLoop
 
     d = _deps(tmp_path, "gate_health_loop_enabled")
-    return GateHealthLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
+    return GateHealthLoop(config=d.config, pr_manager=MagicMock(spec=PRPort), deps=d.loop_deps)
 
 
 def _issue_refinement_loop(tmp_path: Path):
@@ -385,7 +386,7 @@ def _stale_issue_gc_loop(tmp_path: Path):
 
     d = _deps(tmp_path, "stale_issue_gc_loop_enabled")
     return StaleIssueGCLoop(
-        config=d.config, pr_manager=MagicMock(), state=MagicMock(), deps=d.loop_deps
+        config=d.config, pr_manager=MagicMock(spec=PRPort), state=MagicMock(), deps=d.loop_deps
     )
 
 
@@ -436,7 +437,7 @@ def _workspace_gc_loop(tmp_path: Path):
     return WorkspaceGCLoop(
         config=d.config,
         workspaces=_workspace_mock(),
-        prs=MagicMock(),
+        prs=MagicMock(spec=PRPort),
         state=MagicMock(),
         deps=d.loop_deps,
     )

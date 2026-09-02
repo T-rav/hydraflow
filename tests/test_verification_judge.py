@@ -18,6 +18,7 @@ from models import (
     InstructionsQuality,
     VerificationJudgeVerdict,
 )
+from ports import IssueStorePort
 from tests.conftest import PRInfoFactory, ReviewResultFactory, TaskFactory
 from tests.helpers import ConfigFactory, CredentialsFactory
 from verification_judge import VerificationJudge
@@ -1228,7 +1229,7 @@ class TestReviewPhaseWiring:
             reviewers=mock_reviewers,
             prs=mock_prs,
             stop_event=stop_event,
-            store=MagicMock(),
+            store=MagicMock(spec=IssueStorePort),
             conflict_resolver=conflict_resolver,
             post_merge=post_merge,
             review_insights=ReviewInsightStore(config.memory_dir),
@@ -1322,7 +1323,7 @@ class TestReviewPhaseWiring:
             reviewers=mock_reviewers,
             prs=mock_prs,
             stop_event=stop_event,
-            store=MagicMock(),
+            store=MagicMock(spec=IssueStorePort),
             conflict_resolver=conflict_resolver,
             post_merge=post_merge,
             review_insights=ReviewInsightStore(config.memory_dir),

@@ -23,6 +23,7 @@ from exception_classify import reraise_on_credit_or_bug
 from filing_budget import FilingBudget, file_overflow_summary, overflow_line
 from memory_backlog_mirror import (
     dedup_key_for,
+    filed_slugs,
     pending_entries,
     render_issue_body,
     update_status,
@@ -122,6 +123,42 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         skipped = 0
         escalated = 0
         filed_issue_numbers: list[int] = []
+        # The ISSUE is the guard, not the file (#11963). ADR-0089 made the
+        # mirror frontmatter authoritative, which put the guard in whichever
+        # checkout happened to be running: this loop filed #11947-#11949, wrote
+        # `status: issue-open`, and committed it into a workspace nothing
+        # pushes — so `staging` still read `pending`, and a re-clone would have
+        # re-filed all three as duplicates of issues that were still open.
+        #
+        # Querying the board answers the question the frontmatter was standing
+        # in for, and survives a re-clone, a reset workspace and a lost
+        # DedupStore. The frontmatter becomes a cache, healed below.
+        try:
+            already_filed = filed_slugs(
+                await self._pr.list_issues_by_label(
+                    self._config.memory_backlog_label[0]
+                )
+            )
+        except (RuntimeError, OSError):
+            # Narrow on purpose. These are the shapes a `gh` read fails with —
+            # non-zero exit and a broken pipe/socket. A `ValueError` from a
+            # malformed payload is a BUG and must propagate rather than be
+            # rendered as "the board is unavailable"; a broad catch here would
+            # also have needed a new `noqa: BLE001`, and that ratchet only
+            # shrinks.
+            #
+            # Fail CLOSED, and in the direction that costs least: a tick that
+            # files nothing costs a delay, while a tick that files blind costs
+            # duplicate issues a human has to close. The guard is unavailable,
+            # so the answer is "not now", never "probably fine".
+            logger.warning(
+                "memory_backlog: could not read filed issues — skipping this "
+                "tick rather than risking duplicates",
+                exc_info=True,
+            )
+            return {"status": "guard-unavailable", "filed": 0, "skipped": 0}
+
+        healed_issue_numbers: list[int] = []
         dedup = self._dedup.get()
         # Per-tick filing cap (#10777): a batch of newly-pending mirror entries
         # would otherwise file one issue each. Over the cap, entries are
@@ -130,6 +167,18 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         budget = FilingBudget(cap=self._config.memory_backlog_max_issues_per_tick)
         for entry in pending_entries(mirror):
             key = dedup_key_for(entry.slug)
+            open_issue = already_filed.get(entry.slug)
+            if open_issue is not None:
+                # Heal the cache rather than only skipping: this is the exact
+                # state a re-clone lands in, and leaving the row `pending`
+                # would make every future tick pay for the same query to reach
+                # the same answer.
+                update_status(entry.path, status="issue-open", issue=open_issue)
+                healed_issue_numbers.append(open_issue)
+                dedup.add(key)
+                self._dedup.set_all(dedup)
+                skipped += 1
+                continue
             if key in dedup:
                 skipped += 1
                 continue
@@ -181,8 +230,13 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             intro="**Automated — MemoryBacklogLoop per-tick filing cap (#10777).**",
         )
 
-        if filed_issue_numbers:
-            await self._commit_mirror_updates(filed_issue_numbers)
+        # Healed rows changed the same files, so they need the same commit —
+        # otherwise they sit as uncommitted modifications in the orchestrator's
+        # tree, which is what `_commit_mirror_updates` exists to prevent.
+        if filed_issue_numbers or healed_issue_numbers:
+            await self._commit_mirror_updates(
+                filed_issue_numbers, healed=healed_issue_numbers
+            )
 
         return {
             "status": "ok",
@@ -192,7 +246,9 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             "summarized": summarized,
         }
 
-    async def _commit_mirror_updates(self, issue_numbers: list[int]) -> None:
+    async def _commit_mirror_updates(
+        self, issue_numbers: list[int], *, healed: list[int] | None = None
+    ) -> None:
         """Commit `pending → issue-open` frontmatter updates to git history.
 
         Per ADR-0089: the loop commits status transitions so the audit trail
@@ -205,13 +261,35 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         is the primary re-filing guard, so a missed commit doesn't cause
         duplicate filings on restart. Surfaces as drift in `git status`.
         """
+        # A simulated board's issue numbers come from a counter, not GitHub.
+        # Writing them to disk is harmless in a tmp repo; COMMITTING them is
+        # what put twenty fake pins (#25-#44) into tracked files and merged
+        # them in PR #8989 (#11972). So the frontmatter still updates — the
+        # scenario layer depends on it — and only the git write is refused.
+        if getattr(self._pr, "is_simulated", False) is True:
+            logger.info(
+                "memory_backlog: simulated board — frontmatter updated but NOT "
+                "committed; a fake issue number must never reach tracked files"
+            )
+            return
+
         repo_root = str(self._config.repo_root)
         mirror_relpath = "/".join(_MIRROR_SUBPATH)
-        if len(issue_numbers) == 1:
+        healed = healed or []
+        if issue_numbers and len(issue_numbers) == 1 and not healed:
             title = f"chore(memory-backlog): file issue #{issue_numbers[0]}"
-        else:
+        elif issue_numbers and not healed:
             joined = ", ".join(f"#{n}" for n in issue_numbers)
             title = f"chore(memory-backlog): file issues {joined}"
+        else:
+            # Healing writes the same transition for an issue that already
+            # exists, so the verb differs: nothing was filed for those rows.
+            parts = []
+            if issue_numbers:
+                parts.append("file " + ", ".join(f"#{n}" for n in issue_numbers))
+            if healed:
+                parts.append("record " + ", ".join(f"#{n}" for n in healed))
+            title = f"chore(memory-backlog): {' and '.join(parts)}"
 
         try:
             add_result = await run_subprocess_result(

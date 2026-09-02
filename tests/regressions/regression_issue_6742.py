@@ -1,7 +1,7 @@
 """Regression test for issue #6742.
 
 Bug: Phase classes use implicit truthiness checks (``if self._summarizer and ...``,
-``if self._beads_manager:``, ``if self._whatsapp and ...``) on attributes typed as
+``if self._beads_manager:``) on attributes typed as
 ``X | None``.  This violates the avoided-patterns doc because a mock with
 ``__bool__`` returning False (or any object with a falsy ``__bool__``) will silently
 short-circuit the guarded code path even though the object is not None.

@@ -35,6 +35,7 @@ from policy.facts import (
     STANDARD_ADR_CONFORMANCE,
     STANDARD_ADR_ENFORCEMENT,
     STANDARD_CHARTER,
+    STANDARD_PURPOSE,
     STANDARD_TEST_PYRAMID,
 )
 from policy.models import Charter, DecisionStatus, StandardDecision
@@ -147,6 +148,8 @@ class PythonDecisionEngine:
                 decisions.append(self._decide_test_pyramid(subject, subject_facts))
             elif standard == STANDARD_CHARTER:
                 decisions.append(self._decide_charter(subject, subject_facts))
+            elif standard == STANDARD_PURPOSE:
+                decisions.append(self._decide_purpose(subject, subject_facts))
             else:
                 raise UnsupportedStandardError(
                     f"no ruleset for standard {standard!r} (subject {subject!r}). "
@@ -154,6 +157,63 @@ class PythonDecisionEngine:
                     "return silence that reads as compliance."
                 )
         return decisions
+
+    #: Every surface a goal may be cited from. The engine ORs them itself; the
+    #: collector emits one primitive fact per surface and never the disjunction,
+    #: so two engines reaching the same verdict have reached it independently.
+    _PURPOSE_CITATIONS: tuple[str, ...] = (
+        "cited_in_standards",
+        "cited_in_adrs",
+        "cited_in_local_articles",
+    )
+
+    @staticmethod
+    def _decide_purpose(subject: str, facts: Sequence[Fact]) -> StandardDecision:
+        """Is this goal cited by any Article, or is it decoration?
+
+        The subject is a GOAL ID, not the charter: referential integrity is a
+        per-goal property, and naming the charter as subject would collapse
+        three independent answers into one and lose which goal is unanchored.
+
+        Never blocking. An unanchored goal is a governance-hygiene finding for a
+        human to resolve — by citing the goal where it is genuinely served, or
+        by dropping a goal the repo does not pursue. Gating a merge on it would
+        make every PR answerable for the charter's editorial state, which is
+        neither the PR author's business nor decidable at merge time.
+
+        Semantic conformance stays refused (ADR-0143 Amendment 2026-09-01):
+        this says a goal is CITED, never that the work serves it. A goal cited
+        in one README and pursued by nothing passes here, and should — the
+        alternative needs a judge model, which would rest a conformance claim on
+        an external service (#11687).
+        """
+        by_key = _indexed(facts, PythonDecisionEngine._PURPOSE_CITATIONS)
+        cited_in = [
+            key for key in PythonDecisionEngine._PURPOSE_CITATIONS if bool(by_key[key])
+        ]
+        if cited_in:
+            return StandardDecision(
+                standard=STANDARD_PURPOSE,
+                subject=subject,
+                status=DecisionStatus.COMPLIANT,
+                blocking=False,
+                reason=f"goal is cited by {', '.join(cited_in)}",
+                remediation=RemediationAction.NONE,
+                facts=list(facts),
+            )
+        return StandardDecision(
+            standard=STANDARD_PURPOSE,
+            subject=subject,
+            status=DecisionStatus.VIOLATED,
+            blocking=False,
+            reason=(
+                f"goal '{subject}' is declared in the charter and cited by no "
+                "standard README, no ADR, and no local article — it is "
+                "decoration until something claims to serve it"
+            ),
+            remediation=RemediationAction.FILE_ISSUE,
+            facts=list(facts),
+        )
 
     @staticmethod
     def _decide_charter(subject: str, facts: Sequence[Fact]) -> StandardDecision:

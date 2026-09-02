@@ -18,6 +18,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from false_close import closing_issue_refs
 from merge_state_watcher import ConflictingPR
 from models import PRDiffStats, PRInfo
 
@@ -558,7 +559,17 @@ class PRManagerPRQueriesMixin:
     async def get_pr_for_issue(self, issue_number: int) -> int:
         """Find the merged (or open) PR number for *issue_number*.
 
-        Searches for a PR whose branch matches the ``agent/issue-{N}`` pattern.
+        Tries the ``agent/issue-{N}`` branch first, then falls back to what the
+        PRs SAY: a closing-keyword scan of title and body, the same evidence
+        ``pr_manager_drift.find_open_resolving_pr`` uses.
+
+        The fallback exists because the branch pattern is a convention, not a
+        rule (#11986). A fix branched as ``feat/{N}-slug`` — every manually
+        opened one — was invisible here, and the only consumer is
+        ``changelog.py``, which then wrote the entry with PR number 0. A silent
+        0 in a generated changelog is worse than a missing entry: it reads as
+        an answer.
+
         Returns the PR number, or ``0`` when not found.
         """
         if self._config.dry_run:
@@ -601,4 +612,62 @@ class PRManagerPRQueriesMixin:
             if prs:
                 return int(prs[0]["number"])
 
-        return 0
+        return await self._pr_declaring_it_closes(issue_number)
+
+    async def _pr_declaring_it_closes(self, issue_number: int) -> int:
+        """The PR that says it closes *issue_number*, by title or body.
+
+        Searched across every state, merged included: the branch-name lookup
+        already covers closed and open, so the case this exists for is a PR it
+        could not name at all.
+
+        Prefers the most recently updated match. Two PRs can both declare the
+        same issue — an epic PR resolving several, and the one that actually
+        did the work — and the later one is the fix a changelog entry means.
+        """
+        raw = await self._gh_json_query(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "all",
+            "--search",
+            f"{issue_number} in:title,body",
+            "--limit",
+            "50",
+            "--json",
+            "number,title,body,updatedAt",
+            dry_run_return=[],
+            error_log=(
+                f"Could not resolve PR by declaration for issue #{issue_number}"
+            ),
+            error_level="debug",
+            exceptions=(
+                RuntimeError,
+                ValueError,
+                KeyError,
+                TypeError,
+                json.JSONDecodeError,
+            ),
+            log_exc_info=True,
+        )
+        if not isinstance(raw, list):
+            return 0
+
+        matches: list[tuple[str, int]] = []
+        for pr in raw:
+            if not isinstance(pr, dict):
+                continue
+            declared = f"{pr.get('title') or ''}\n{pr.get('body') or ''}"
+            if issue_number not in closing_issue_refs(declared):
+                continue
+            try:
+                number = int(pr.get("number", 0))
+            except (TypeError, ValueError):
+                continue
+            if number > 0:
+                matches.append((str(pr.get("updatedAt") or ""), number))
+
+        return max(matches)[1] if matches else 0

@@ -39,6 +39,7 @@ from escape_ledger_loop import (
     EscapeLedgerLoop,  # noqa: E402
 )
 from mockworld.fakes.fake_github import FakeGitHub  # noqa: E402
+from ports import PRPort
 
 
 class _FakeDiagnoser:
@@ -77,7 +78,7 @@ def _loop_with_diagnoser(tmp_path: Path, diagnoser: _FakeDiagnoser) -> EscapeLed
 
     return EscapeLedgerLoop(
         config=bg.config,
-        pr_manager=MagicMock(),
+        pr_manager=MagicMock(spec=PRPort),
         state=MagicMock(),
         dedup=MagicMock(),
         deps=bg.loop_deps,

@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from models import Task
 from review_insights import ReviewInsightStore
 from review_phase import ReviewPhase
+from ports import AgentPort
 
 
 def _make_review_phase(tmp_path: Path) -> ReviewPhase:
@@ -76,7 +77,7 @@ def _make_review_phase(tmp_path: Path) -> ReviewPhase:
     conflict_resolver = MergeConflictResolver(
         config=config,
         workspaces=mock_wt,
-        agents=MagicMock(),
+        agents=MagicMock(spec=AgentPort),
         prs=mock_prs,
         event_bus=bus,
         state=state,

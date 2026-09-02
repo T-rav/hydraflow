@@ -58,6 +58,10 @@ def _make_gc_loop(
     workspaces = MagicMock()
 
     workspaces.prune_dead_registrations = AsyncMock(return_value=[])
+    # Worktree enumeration moved behind the Port (#11931). These tests are
+    # about phase scheduling, not discovery, so an empty world is the honest
+    # answer — not a canned listing they never asked for.
+    workspaces.list_project_worktrees = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
 

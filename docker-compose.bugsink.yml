@@ -1,0 +1,59 @@
+# Bugsink — the exception sensor's backend (ADR-0146).
+#
+# Adapted from the upstream docker-compose-sample.yaml. Two deliberate changes:
+# every secret is required from the environment instead of carrying a default,
+# and the web port binds to loopback only.
+#
+#   make bugsink-up      # start
+#   make bugsink-logs    # follow
+#   make bugsink-down    # stop (data survives; -v would not)
+#
+# First run: see docs/wiki/dark-factory.md "Exception sensor" for creating the
+# project, taking its DSN into .env, and pointing the webhook back at HydraFlow.
+
+services:
+  bugsink-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bugsink
+      # No default: an unset password must fail the stack, not silently ship a
+      # known one. Same reasoning as the SECRET_KEY below.
+      POSTGRES_PASSWORD: ${BUGSINK_DB_PASSWORD:?set BUGSINK_DB_PASSWORD in .env}
+      POSTGRES_DB: bugsink
+    volumes:
+      - bugsink-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -h localhost -U bugsink
+      retries: 5
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+
+  bugsink:
+    image: bugsink/bugsink:2
+    depends_on:
+      bugsink-db:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      # Loopback only. The ingest endpoint takes unauthenticated POSTs by
+      # design (the DSN is the credential), so it is not something to expose on
+      # every interface by default.
+      - "127.0.0.1:${BUGSINK_PORT:-8000}:8000"
+    environment:
+      SECRET_KEY: ${BUGSINK_SECRET_KEY:?set BUGSINK_SECRET_KEY in .env (openssl rand -base64 50)}
+      CREATE_SUPERUSER: ${BUGSINK_SUPERUSER:?set BUGSINK_SUPERUSER in .env as email:password}
+      PORT: 8000
+      DATABASE_URL: postgresql://bugsink:${BUGSINK_DB_PASSWORD:?set BUGSINK_DB_PASSWORD in .env}@bugsink-db:5432/bugsink
+      BEHIND_HTTPS_PROXY: "false"
+      USE_X_FORWARDED_HOST: "false"
+      BASE_URL: ${BUGSINK_BASE_URL:-http://localhost:8000}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import requests; requests.get(\"http://localhost:8000/health/ready\").raise_for_status()'"]
+      interval: 5s
+      timeout: 20s
+      retries: 10
+
+volumes:
+  bugsink-db-data:

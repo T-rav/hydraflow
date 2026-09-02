@@ -78,6 +78,11 @@ async def test_s65_workspace_gc_collects_seeded_stale_worktree(mock_world) -> No
             return f"# branch.oid {'a' * 40}\n# branch.head agent/issue-{s65._ISSUE}\n"
         if cmd[:2] == ("git", "rev-list"):
             return "0\n"
+        if cmd[:3] == ("git", "remote", "get-url"):
+            # No remote -> sibling-clone discovery (#11931) short-circuits to
+            # this repo alone, which is what this scenario is about. Discovery
+            # itself is covered by its own tests, not smuggled in here.
+            return ""
         if cmd[:3] in {
             ("git", "branch", "--list"),
             ("git", "worktree", "list"),

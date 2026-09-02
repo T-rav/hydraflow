@@ -230,11 +230,34 @@ jobs:
             -t "${IMAGE_NAME}:${{ github.sha }}" \
             $(printf "${IMAGE_NAME}@sha256:%s " *)
 
+      # PARSED, not grepped (#11980). This check used
+      # `grep '"architecture":"amd64"'` — no space after the colon — while the
+      # two base-image checks above it in this same file use the tolerant
+      # `'"architecture": *"..."'`. `imagetools inspect --raw` pretty-prints,
+      # so the strict pattern matches NOTHING against a complete manifest, and
+      # the guard's verdict depended on which buildx version the runner had
+      # rather than on what was published. That is how a correct 2-digest
+      # publish reported "published manifest has no amd64" once and passed on
+      # every other runner.
+      #
+      # A guard whose answer depends on someone else's output formatting is not
+      # a guard, so this reads the platforms out of the JSON. Same refusal,
+      # same message, no dependence on spacing.
       - name: Verify both architectures are published
         run: |
-          manifest=$(docker buildx imagetools inspect "${IMAGE_NAME}:latest" --raw)
-          echo "$manifest" | grep -q '"architecture":"amd64"' \
-            || { echo "::error::published manifest has no amd64"; exit 1; }
-          echo "$manifest" | grep -q '"architecture":"arm64"' \
-            || { echo "::error::published manifest has no arm64"; exit 1; }
-          echo "manifest carries both amd64 and arm64"
+          docker buildx imagetools inspect "${IMAGE_NAME}:latest" --raw \
+            | python3 -c '
+          import json, sys
+
+          manifest = json.load(sys.stdin)
+          published = {
+              entry.get("platform", {}).get("architecture")
+              for entry in manifest.get("manifests", [])
+          }
+          for arch in ("amd64", "arm64"):
+              if arch not in published:
+                  print(f"::error::published manifest has no {arch} "
+                        f"(found: {sorted(a for a in published if a)})")
+                  raise SystemExit(1)
+          print("manifest carries both amd64 and arm64")
+          '

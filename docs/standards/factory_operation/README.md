@@ -58,6 +58,7 @@ promises a standard the child repo never receives.
 |---|---|---|
 | **ADR enforcement** | [`docs/standards/adr_enforcement/`](../adr_enforcement/README.md) | An Accepted ADR must bind to a check that really asserts its decision, or carry a justified exemption; the debt ratchet only falls. |
 | **Branch protection** | [`docs/standards/branch_protection/`](../branch_protection/README.md) | Two-tier branch model (integration + release reference) with versioned ruleset configs and a re-applyable apply-script. |
+| **Exception sensor** | [`docs/standards/exception_sensor/`](../exception_sensor/README.md) | Errors leave the process, become issues on the tracker, and re-enter the factory as routable work. The SRE v1 agent. |
 | **Factory autonomy** | [`docs/standards/factory_autonomy/`](../factory_autonomy/README.md) | When agents act vs ask. Tractable + reversible work is factory work, not a permission gate. |
 | **Factory operation** | [`docs/standards/factory_operation/`](../factory_operation/README.md) | This document. How the standards compose into one operating contract, and how the factory absorbs its own recurring patterns. |
 | **Ports and loops** | [`docs/standards/ports-and-loops/`](../ports-and-loops/README.md) | Structural contract for every hexagonal port and background loop: kill-switch, fake, wiki term, ADR, registry row. |
@@ -75,6 +76,8 @@ Removing any one breaks the contract:
   which means the operator becomes QA.
 - Without **ADR enforcement**: decisions stay prose, and the code drifts
   away from them with nothing going red.
+- Without **the exception sensor**: an unattended failure is invisible, and
+  the factory cannot tell "no errors" from "nothing is reporting errors".
 - Without **ports and loops**: each new port or loop is a bespoke shape a
   reviewer has to catch by eye.
 - Without **self-modifying maintenance** (this document,
@@ -95,6 +98,7 @@ so a new standard directory cannot appear in neither table.
 |---|---|---|
 | **Parametrised guards** | [`docs/standards/parametrised_guards/`](../parametrised_guards/README.md) | Its gate is a registry of *this* repo's architecture guards (`tests/architecture/guard_enumeration_registry.py`). A repo with no such guards inherits an empty rule. |
 | **Vitals vs conformance** | [`docs/standards/vitals_conformance/`](../vitals_conformance/README.md) | Its enforcement is a classification of this repo's own checks plus an egress-blocked CI lane. Stamping the prose without the lane ships a claim nothing answers. |
+| **Purpose** | [`docs/standards/purpose/`](../purpose/README.md) | Its second rule asks that every declared goal be CITED by some Article. A freshly stamped repo has a charter but no standards that cite anything yet, so shipping this would hand it a rule it cannot satisfy on day one — a goal is decoration until something claims to serve it, and a new repo has nothing to claim with. |
 <!-- /standards:local -->
 
 Moving one of these into the kernel means shipping its enforcement too:
@@ -212,3 +216,14 @@ gate that exists but never runs is a citation to nothing.
 <!-- standard:enforced-by -->
 - `tests/architecture/test_factory_operation_standard_drift.py`
 <!-- /standard:enforced-by -->
+
+## Goals served
+
+Charter purpose goals this standard carries (ADR-0143 Amendment 2026-09-01,
+#11856). Cited by id so the link is greppable rather than implied — an
+uncited goal is decoration, and `STANDARD_PURPOSE` says so.
+
+- `lights_off_operation`
+- `reduce_the_cost_of_improving_itself`
+
+The kernel exists so designs become software reliably and repeatably without the operator becoming the bottleneck.

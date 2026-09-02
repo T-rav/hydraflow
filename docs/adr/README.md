@@ -205,6 +205,7 @@ cadence and files remediation issues on drift.
 | [0143](0143-paaa-governance-model-and-the-decision-seam.md) | PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam | Accepted |
 | [0144](0144-trace-grounded-retrospective-findings.md) | Trace-grounded retrospective findings — anchors, not advice | Proposed |
 | [0145](0145-charter-declared-loops.md) | Charter-declared loops — the repo owns the workflow, the factory owns governance | Proposed |
+| [0146](0146-sre-v1-the-exception-sensor.md) | SRE v1 — the exception sensor | Accepted |
 
 ## Adding a new ADR
 

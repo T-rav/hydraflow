@@ -17,6 +17,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
 | `CharterDriftCaretakerLoop` | ✅ [0121] | ✅ [charter-drift-caretaker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_charter_drift_caretaker_loop.py` | ✅ in catalog | ✅ `s94_onboarding_writes_charter.py` |
+| `CharterLoopWorkerLoop` | ❌ | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_charter_loop_worker_loop.py` | ✅ in catalog | ❌ |
 | `ContractRefreshLoop` | ✅ [0045, 0047] | ✅ [contract-refresh-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ✅ `s30_contract_refresh_clean.py` |
 | `ConvergenceOscillationLoop` | ✅ [0096, 0097, 0098] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_convergence_oscillation_loop.py` | ✅ in catalog | ❌ |
 | `CorpusLearningLoop` | ✅ [0045] | ✅ [corpus-learning-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ✅ `s22_corpus_learning_no_escape_issues.py` |
@@ -86,7 +87,7 @@ per-adapter, not per-port).
 | `ConformanceRunnerPort` | ❌ | ❌ | ✅ ports.md | ✅ README.md | ✅ `FakeConformanceRunner` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueFetcherPort` | ✅ [0067, 0081] | ✅ [architecture-async-control.md, issue-fetcher-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `ObservabilityPort` | ✅ [0072] | ✅ [observability-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeObservability` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `ObservabilityPort` | ✅ [0072, 0146] | ✅ [observability-port.md] | ✅ ports.md | ✅ RUNBOOK.md | ✅ `FakeObservability` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `PRPort` | ✅ [0002, 0045, 0052, 0056, 0068, 0069, 0075, 0077, 0109, 0115] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, diagram-loop.md, fake-coverage-auditor-loop.md, gotchas.md, hitl-item.md, pr-port.md, testing.md] | ✅ ports.md | ✅ README.md | ✅ `FakeGitHub` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ReviewInsightStorePort` | ✅ [0070] | ✅ [review-insight-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeReviewInsightStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `RouteBackCounterPort` | ✅ [0071] | ✅ [route-back-counter-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeRouteBackCounter` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |

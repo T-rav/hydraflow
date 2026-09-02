@@ -7,6 +7,35 @@ what a tag promises, and the cut recipe live in
 
 ## Unreleased
 
+- `make env` renamed to `make deps-heal` (#12041): the old name read as dotenv
+  setup while `.env` seeding lives in `make setup`; `make env` remains as a
+  deprecated alias for one cycle. The factory launcher, help text, wiki, and
+  launcher-service test move to the new name.
+- Docs/release hygiene: `.env.sample` rewritten around a QUICK START block (the
+  required repo target, the gh-CLI-first auth story, `CLAUDE_CODE_OAUTH_TOKEN`
+  for Docker mode, per-tool provider keys) and purged of vars nothing reads —
+  the OTel/Honeycomb block (dead since ADR-0118 superseded ADR-0055),
+  `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`, the phantom combos `HYDRAFLOW_SENTRY`/
+  `HYDRAFLOW_CODE_GROOMING` (whose migration note told operators to set a var
+  nothing read), and `HYDRAFLOW_ENV`. README release pins move to v1.0.1 and
+  the dead `HYDRAFLOW_DASHBOARD_ENABLED` instruction is corrected (the
+  dashboard is on by default). A new guard,
+  `tests/architecture/test_env_sample_documents_read_keys.py`, closes the
+  doc→code drift direction with a named allowlist for the deliberate
+  #11541/ADR-0141 documentation-only vars. `pyproject.toml`/`src/__init__.py`
+  bumped to 1.0.1 — the v1.0.1 tag shipped with the version string unbumped.
+
+## v1.0.1 — 2026-08-29 — governance refinements
+
+- PAAA governance (epic #11752): ADR-0143 — Purpose/Articles/Actors/Artifacts
+  and the declare/decide/act seam — Accepted with real enforcement;
+  `charter.yaml` becomes the repo's governing declaration with the ADR-0121
+  rails fields under `rails:` (#11748); the typed decision seam lands in
+  `src/policy/` (`Fact`, `StandardDecision`, `DecisionEngine`,
+  `PythonDecisionEngine`, #11749); four prose-only standards gain
+  machine-checked artifacts (#11751); the OPA pilot was built, parity-tested
+  across every Accepted ADR, measured, and **not adopted** — verdict and
+  measurements in `docs/proposals/opa-pilot-findings.md` (#11750).
 - Ubiquitous language: the **adversarial planning ensemble** is renamed off "Council", so
   "Council" now names exactly one thing in this repo — the `agents/council/` governance
   layer (ADR-0053). `PlanCouncil`→`PlanEnsemble`, `DecompositionCouncil`→`DecompositionEnsemble`,

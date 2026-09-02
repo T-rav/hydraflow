@@ -4,10 +4,10 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (89 ADRs)
+- **Population:** Accepted (90 ADRs)
 - **Mean density** (per-ADR, unweighted): 97%
-- **Executable fraction** (check-weighted): 99% (231 of 234 cited checks)
-- **Check kinds:** pytest 230, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 99% (234 of 237 cited checks)
+- **Check kinds:** pytest 233, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.58
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -106,6 +106,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0141 | Bounded, reversible routing enforcement — the resolve-and-mint canary | 100% | 6 | 0 |
 | ADR-0142 | Multi-account pools and bounded fallback | 100% | 9 | 0 |
 | ADR-0143 | PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam | 100% | 7 | 0 |
+| ADR-0146 | SRE v1 — the exception sensor | 100% | 3 | 0 |
 
 
 <!-- arch:generated -->

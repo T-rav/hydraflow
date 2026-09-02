@@ -38,6 +38,7 @@ from escape_ledger_loop import (
     surfacing_fingerprint,
 )
 from mockworld.fakes.fake_github import FakeGitHub
+from ports import PRPort
 from subprocess_util import CreditExhaustedError
 from tests.helpers import make_bg_loop_deps
 
@@ -182,7 +183,7 @@ class TestKillSwitch:
         object.__setattr__(bg.config, "data_root", tmp_path / "data")
         loop = EscapeLedgerLoop(
             config=bg.config,
-            pr_manager=MagicMock(),
+            pr_manager=MagicMock(spec=PRPort),
             state=_make_state(),
             dedup=_make_dedup(),
             deps=bg.loop_deps,
@@ -197,7 +198,7 @@ class TestKillSwitch:
         object.__setattr__(bg.config, "escape_ledger_loop_enabled", False)
         loop = EscapeLedgerLoop(
             config=bg.config,
-            pr_manager=MagicMock(),
+            pr_manager=MagicMock(spec=PRPort),
             state=_make_state(),
             dedup=_make_dedup(),
             deps=bg.loop_deps,
@@ -565,7 +566,7 @@ def _make_loop_with_diagnoser(
     object.__setattr__(bg.config, "escape_ledger_loop_enabled", True)
     return EscapeLedgerLoop(
         config=bg.config,
-        pr_manager=MagicMock(),
+        pr_manager=MagicMock(spec=PRPort),
         state=_make_state(),
         dedup=_make_dedup(),
         deps=bg.loop_deps,
