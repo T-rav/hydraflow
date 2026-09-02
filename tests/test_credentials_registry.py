@@ -16,9 +16,9 @@ from config import (
 
 def test_registry_covers_every_key_build_credentials_reads() -> None:
     # The exported surface must enumerate every key build_credentials reads —
-    # the gh-token priority chain and all five whatsapp keys.
+    # the gh-token priority chain, the DSN, and the Bugsink API token.
     assert {"HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} <= CREDENTIAL_ENV_KEYS
-    assert "HYDRAFLOW_WHATSAPP_TOKEN" in CREDENTIAL_ENV_KEYS
+    assert "SENTRY_DSN" in CREDENTIAL_ENV_KEYS
 
 
 def test_registry_is_separate_from_table_declared_keys() -> None:
@@ -52,11 +52,3 @@ def test_gh_token_falls_through_to_next_key(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("GH_TOKEN", "middle")
     monkeypatch.setenv("GITHUB_TOKEN", "lowest")
     assert build_credentials(HydraFlowConfig()).gh_token == "middle"
-
-
-def test_whatsapp_fields_read_from_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HYDRAFLOW_WHATSAPP_TOKEN", "wa-token")
-    monkeypatch.setenv("HYDRAFLOW_WHATSAPP_PHONE_ID", "wa-phone")
-    creds = build_credentials(HydraFlowConfig())
-    assert creds.whatsapp_token == "wa-token"
-    assert creds.whatsapp_phone_id == "wa-phone"

@@ -75,26 +75,6 @@ class Credentials(BaseModel):
             "Optional: enrichment is best-effort and never blocks filing."
         ),
     )
-    whatsapp_token: str = Field(
-        default="",
-        description="WhatsApp Business API access token",
-    )
-    whatsapp_phone_id: str = Field(
-        default="",
-        description="WhatsApp Business API phone number ID",
-    )
-    whatsapp_recipient: str = Field(
-        default="",
-        description="WhatsApp recipient phone number (with country code)",
-    )
-    whatsapp_verify_token: str = Field(
-        default="",
-        description="WhatsApp webhook verification token",
-    )
-    whatsapp_app_secret: str = Field(
-        default="",
-        description="WhatsApp app secret used to verify X-Hub-Signature-256 webhook signatures",
-    )
 
 
 class ManagedRepo(BaseModel):
@@ -896,7 +876,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
-    ("whatsapp_enabled", "HYDRAFLOW_WHATSAPP_ENABLED", False),
     (
         "sandbox_failure_fixer_enabled",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
@@ -3285,10 +3264,6 @@ class HydraFlowConfig(BaseModel):
         ge=5,
         le=1440,
         description="Minutes to wait for human response before timing out shape conversation",
-    )
-    whatsapp_enabled: bool = Field(
-        default=False,
-        description="Enable WhatsApp notifications for shape conversations",
     )
     dashboard_url: str = Field(
         default="http://localhost:5555",
@@ -7344,19 +7319,11 @@ _GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB
 # 1:1 credential-field → env-key. Read with empty-string defaults.
 _SENTRY_ENV_KEYS: dict[str, str] = {"sentry_dsn": "SENTRY_DSN"}
 _BUGSINK_ENV_KEYS: dict[str, str] = {"bugsink_api_token": "BUGSINK_API_TOKEN"}
-_WHATSAPP_ENV_KEYS: dict[str, str] = {
-    "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
-    "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
-    "whatsapp_recipient": "HYDRAFLOW_WHATSAPP_RECIPIENT",
-    "whatsapp_verify_token": "HYDRAFLOW_WHATSAPP_VERIFY_TOKEN",
-    "whatsapp_app_secret": "HYDRAFLOW_WHATSAPP_APP_SECRET",
-}
 #: Every env var :func:`build_credentials` reads, as one enumerable surface so
 #: test isolation and .env/documentation generators don't hand-list the
 #: credential keys (#10885). Folded into :func:`declared_env_keys`.
 CREDENTIAL_ENV_KEYS: frozenset[str] = (
     frozenset(_GH_TOKEN_ENV_KEYS)
-    | frozenset(_WHATSAPP_ENV_KEYS.values())
     | frozenset(_SENTRY_ENV_KEYS.values())
     | frozenset(_BUGSINK_ENV_KEYS.values())
 )
@@ -7367,8 +7334,8 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
 
     Resolution priority for ``gh_token``: each key in :data:`_GH_TOKEN_ENV_KEYS`
     (``HYDRAFLOW_GH_TOKEN`` → ``GH_TOKEN`` → ``GITHUB_TOKEN``) in ``os.environ``,
-    then the ``.env`` file in ``config.repo_root``. Other credential fields are
-    read from :data:`_WHATSAPP_ENV_KEYS` with empty-string defaults. The full key
+    then the ``.env`` file in ``config.repo_root``. The DSN and the Bugsink API
+    token use that same os.environ-then-``.env`` resolution. The full key
     surface is exported as :data:`CREDENTIAL_ENV_KEYS` (#10885).
     """
     gh_token = ""
@@ -7392,10 +7359,6 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
         gh_token=gh_token,
         sentry_dsn=sentry_dsn,
         bugsink_api_token=bugsink_api_token,
-        **{
-            field: os.environ.get(env_key, "")
-            for field, env_key in _WHATSAPP_ENV_KEYS.items()
-        },
     )
 
 

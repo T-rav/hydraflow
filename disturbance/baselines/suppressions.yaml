@@ -1,61 +1,64 @@
-comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increase);\
-  \ MAY shrink (prune when fixed). re-snapshot 2026-07: +human_steering BLE001 degradation\
-  \ handler (intentional, sanctioned broad-except pattern for per-issue tick resilience).\
-  \ re-snapshot 2026-07: +triage injection honeypot (triage_honeypot.py PLC0415 lazy\
-  \ run_lightweight_agent import + BLE001 fail-open; triage.py BLE001 fail-open +\
-  \ alert-never-crash) \u2014 sanctioned per honeypot fail-open/defence-in-depth design.\
-  \ re-snapshot 2026-07-11: +runner_utils PLC0415 lazy imports for the inlined one-shot\
-  \ LLM provider backends (agent_cli/httpx/execution/subprocess \u2014 circular-safe\
-  \ + import-cost pattern, matches the file's existing lazy-import convention). re-snapshot\
-  \ 2026-07-11: +_control_routes PLC0415 lazy import of provider_key_presence for\
-  \ the settings-schema key-status badge (matches the route module's existing deferred-import\
-  \ convention). re-snapshot 2026-07-11: -1 term_proposer_runtime PLC0415 \u2014 ClaudeCLIClient\
-  \ now routes the drafter through run_lightweight_agent (one seam import replaces\
-  \ build_lightweight_command+raise_if_credit_exhausted), making it dial-able + gated\
-  \ + telemetried (dropped from both CH-6 grandfather lists). re-snapshot 2026-07-12:\
-  \ +decompose-to-converge PLC0415 lazy imports (decomposition_ensemble/issue_decomposer/decompose_terminal/decomposition_docs\
-  \ deferred run_lightweight_agent + models imports \u2014 circular-safe convention).\
-  \ re-snapshot 2026-07-12: +1 sandbox_main type-ignore[attr-defined] (6\u21927) for\
-  \ the s54 DecompositionEnsemble fake-LLM sentinel attach \u2014 same dynamic-attach\
-  \ idiom as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
-  \ decompose_terminal imports no longer need the noqa after the b8ed6d8f cast fix).\
-  \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) \u2014 _apply_sandbox_config_overrides\
-  \ sets config.merge_policy_enabled=False for the air-gap (#9754), same frozen-field\
-  \ assignment idiom as the 3 sibling overrides it now sits beside. re-snapshot 2026-07-19:\
-  \ -2 staging_bisect_loop.py PLC0415 (#9554/#10028 \u2014 _run_bisect_probe/_run_gh\
-  \ migrated onto the shared subprocess_util.run_subprocess_result/run_subprocess\
-  \ bounded helper; each dropped a now-redundant local 'import asyncio' re-import\
-  \ that shadowed the module-level import). re-snapshot 2026-08: god-file decomposition\
-  \ moved 3 BLE001 suppressions verbatim from dashboard_routes/_routes.py to the extracted\
-  \ dashboard_routes/_ws_stream.py (net-zero move, no new suppressions). re-snapshot\
-  \ 2026-08-02: +1 _diagnostics_routes PLC0415 (5\u21926) for the supervisor-ack endpoint's\
-  \ lazy import of supervisor_observation.append_ack (#11002) \u2014 matches the route\
-  \ module's existing deferred-import convention (the sibling supervisor/thread endpoint\
-  \ lazy-imports read_thread the same way). re-snapshot  2026-08-22 (#11600, ADR-0136):\
-  \ -4 adr_touchpoint_auditor_loop (PLC0415 1,  PLR0915 1, TCH001 2) with the deleted\
-  \ module, and -1 service_registry F841  (34\u219233) with the AdrTouchpointAuditorLoop\
-  \ construction it guarded. Pure  shrink \u2014 no suppression was moved or added.\
-  \ re-snapshot 2026-08-22: god-class decomposition (Refs #11547) moved 88 suppressions\
-  \ verbatim out of pr_manager.py and review_phase/_phase.py into the extracted mixin\
-  \ modules \u2014 net-zero move, total unchanged at 770 and every untouched file\
-  \ byte-identical; no suppression was added, removed, widened, or rewritten. re-snapshot\
-  \ 2026-08-22: god-class decomposition batch 2 (Refs #11547) moved 11 suppressions\
-  \ verbatim out of orchestrator.py and plan_phase.py into the extracted mixin modules\
-  \ \u2014 net-zero move, total unchanged at 768 (+11 new keys, -11 resolved keys,\
-  \ all inside the two touched families) and every untouched file byte-identical;\
-  \ no suppression was added, removed, widened, or rewritten. re-snapshot 2026-08-23:\
-  \ god-class decomposition batch 4 (Refs #11547) moved 36 suppressions verbatim out\
-  \ of agent.py and health_monitor_loop.py into the extracted package modules \u2014\
-  \ net MINUS ONE, 767 -> 766 (+11 new keys / 36 occurrences, -8 resolved keys / 37\
-  \ occurrences, all inside the two touched families) and every untouched file byte-identical.\
-  \ The -1 is agent.py's `# noqa: F401` re-export block, which became an explicit\
-  \ `__all__` in agent/__init__.py and needs no suppression; no other suppression\
-  \ was added, removed, widened, or rewritten. re-key 2026-08-24: god-class decomposition
-  \ batch 7 (Refs #11547) moved 4 suppressions verbatim out of pr_unsticker.py and
-  \ epic.py into the extracted package modules \u2014 the 3 PLC0415 occurrences split
-  \ 1/2 across _reflection.py and _unsticker.py because their lazy imports live in
-  \ different slices now. Net ZERO occurrences; every untouched file byte-identical;
-  \ no suppression was added, removed, widened, or rewritten. re-snapshot 2026-09-01: +2 observability/sentry_adapter.py BLE001 (ADR-0146 exception sensor) \u2014 sanctioned broad-except: an error reporter that raises into the code it observes turns a diagnostic into an outage, so the catch must stay blind. Already minimised: five call-site catches were funnelled through one _never_raises helper and three PLC0415 deferred imports were hoisted away, taking the delta from 8 to 2."
+comment: 'suppressions disturbance baseline. MUST NOT grow (gate fails on increase); MAY shrink
+  (prune when fixed). re-snapshot 2026-07: +human_steering BLE001 degradation handler (intentional,
+  sanctioned broad-except pattern for per-issue tick resilience). re-snapshot 2026-07: +triage
+  injection honeypot (triage_honeypot.py PLC0415 lazy run_lightweight_agent import + BLE001
+  fail-open; triage.py BLE001 fail-open + alert-never-crash) — sanctioned per honeypot fail-open/defence-in-depth
+  design. re-snapshot 2026-07-11: +runner_utils PLC0415 lazy imports for the inlined one-shot
+  LLM provider backends (agent_cli/httpx/execution/subprocess — circular-safe + import-cost
+  pattern, matches the file''s existing lazy-import convention). re-snapshot 2026-07-11: +_control_routes
+  PLC0415 lazy import of provider_key_presence for the settings-schema key-status badge (matches
+  the route module''s existing deferred-import convention). re-snapshot 2026-07-11: -1 term_proposer_runtime
+  PLC0415 — ClaudeCLIClient now routes the drafter through run_lightweight_agent (one seam
+  import replaces build_lightweight_command+raise_if_credit_exhausted), making it dial-able
+  + gated + telemetried (dropped from both CH-6 grandfather lists). re-snapshot 2026-07-12:
+  +decompose-to-converge PLC0415 lazy imports (decomposition_ensemble/issue_decomposer/decompose_terminal/decomposition_docs
+  deferred run_lightweight_agent + models imports — circular-safe convention). re-snapshot
+  2026-07-12: +1 sandbox_main type-ignore[attr-defined] (6→7) for the s54 DecompositionEnsemble
+  fake-LLM sentinel attach — same dynamic-attach idiom as the 6 existing sentinel wirings;
+  -1 decision.py PLC0415 (the deferred decompose_terminal imports no longer need the noqa
+  after the b8ed6d8f cast fix). re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc]
+  (3->4) — _apply_sandbox_config_overrides sets config.merge_policy_enabled=False for the
+  air-gap (#9754), same frozen-field assignment idiom as the 3 sibling overrides it now sits
+  beside. re-snapshot 2026-07-19: -2 staging_bisect_loop.py PLC0415 (#9554/#10028 — _run_bisect_probe/_run_gh
+  migrated onto the shared subprocess_util.run_subprocess_result/run_subprocess bounded helper;
+  each dropped a now-redundant local ''import asyncio'' re-import that shadowed the module-level
+  import). re-snapshot 2026-08: god-file decomposition moved 3 BLE001 suppressions verbatim
+  from dashboard_routes/_routes.py to the extracted dashboard_routes/_ws_stream.py (net-zero
+  move, no new suppressions). re-snapshot 2026-08-02: +1 _diagnostics_routes PLC0415 (5→6)
+  for the supervisor-ack endpoint''s lazy import of supervisor_observation.append_ack (#11002)
+  — matches the route module''s existing deferred-import convention (the sibling supervisor/thread
+  endpoint lazy-imports read_thread the same way). re-snapshot  2026-08-22 (#11600, ADR-0136):
+  -4 adr_touchpoint_auditor_loop (PLC0415 1,  PLR0915 1, TCH001 2) with the deleted module,
+  and -1 service_registry F841  (34→33) with the AdrTouchpointAuditorLoop construction it
+  guarded. Pure  shrink — no suppression was moved or added. re-snapshot 2026-08-22: god-class
+  decomposition (Refs #11547) moved 88 suppressions verbatim out of pr_manager.py and review_phase/_phase.py
+  into the extracted mixin modules — net-zero move, total unchanged at 770 and every untouched
+  file byte-identical; no suppression was added, removed, widened, or rewritten. re-snapshot
+  2026-08-22: god-class decomposition batch 2 (Refs #11547) moved 11 suppressions verbatim
+  out of orchestrator.py and plan_phase.py into the extracted mixin modules — net-zero move,
+  total unchanged at 768 (+11 new keys, -11 resolved keys, all inside the two touched families)
+  and every untouched file byte-identical; no suppression was added, removed, widened, or
+  rewritten. re-snapshot 2026-08-23: god-class decomposition batch 4 (Refs #11547) moved 36
+  suppressions verbatim out of agent.py and health_monitor_loop.py into the extracted package
+  modules — net MINUS ONE, 767 -> 766 (+11 new keys / 36 occurrences, -8 resolved keys / 37
+  occurrences, all inside the two touched families) and every untouched file byte-identical.
+  The -1 is agent.py''s `# noqa: F401` re-export block, which became an explicit `__all__`
+  in agent/__init__.py and needs no suppression; no other suppression was added, removed,
+  widened, or rewritten. re-key 2026-08-24: god-class decomposition  batch 7 (Refs #11547)
+  moved 4 suppressions verbatim out of pr_unsticker.py and  epic.py into the extracted package
+  modules — the 3 PLC0415 occurrences split  1/2 across _reflection.py and _unsticker.py because
+  their lazy imports live in  different slices now. Net ZERO occurrences; every untouched
+  file byte-identical;  no suppression was added, removed, widened, or rewritten. re-snapshot
+  2026-09-01: +2 observability/sentry_adapter.py BLE001 (ADR-0146 exception sensor) — sanctioned
+  broad-except: an error reporter that raises into the code it observes turns a diagnostic
+  into an outage, so the catch must stay blind. Already minimised: five call-site catches
+  were funnelled through one _never_raises helper and three PLC0415 deferred imports were
+  hoisted away, taking the delta from 8 to 2. re-snapshot 2026-09-02: -2 for the WhatsApp
+  bridge removal (whatsapp_bridge.py''s entry deleted; _routes.py DECREMENTED 3->2, not deleted
+  — it keeps two deferred imports unrelated to WhatsApp, and deleting the entry read as 2
+  new violations) (whatsapp_bridge.py deleted; its deferred import in _routes.py went with
+  the two webhook routes). A resolved entry left in the baseline is a claim that the file
+  still needs the suppression.'
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -68,22 +71,22 @@ entries:
   src/adversarial_retry_loop.py::noqa:S101: 4
   src/agent/_context.py::noqa:BLE001: 2
   src/agent/_context.py::type-ignore[no-any-return]: 1
-  "src/agent/_prompts.py::noqa:F841\u2014usedinf-stringprompt": 1
+  src/agent/_prompts.py::noqa:F841—usedinf-stringprompt: 1
   src/agent/_prompts.py::noqa:PLC0415: 4
   src/arch/generators/coverage_matrix.py::noqa:BLE001: 1
   src/arch/generators/coverage_matrix.py::type-ignore[import-untyped]: 1
   src/arch/runner.py::noqa:PLC0415: 1
   src/auto_agent_preflight_loop.py::noqa:PLC0415: 2
-  "src/auto_pr.py::noqa:BLE001\u2014classifythenconverttoaresult": 1
+  src/auto_pr.py::noqa:BLE001—classifythenconverttoaresult: 1
   src/auto_pr.py::noqa:PLC0415: 3
-  "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfail/outcomepath": 1
-  "src/auto_pr.py::noqa:PLR0911\u2014linearstep-by-stepguards,eachwithitsownfailpath": 1
+  src/auto_pr.py::noqa:PLR0911—linearstep-by-stepguards,eachwithitsownfail/outcomepath: 1
+  src/auto_pr.py::noqa:PLR0911—linearstep-by-stepguards,eachwithitsownfailpath: 1
   src/auto_tighten/pr_author.py::noqa:PLC0415: 2
   src/auto_tighten_loop.py::noqa:PLC0415: 1
   src/base_background_loop.py::noqa:BLE001: 2
   src/base_background_loop.py::noqa:TCH002: 1
   src/base_runner.py::noqa:BLE001: 1
-  "src/base_runner.py::noqa:F401\u2014usedin_inject_adr_index": 1
+  src/base_runner.py::noqa:F401—usedin_inject_adr_index: 1
   src/base_runner.py::noqa:PLC0415: 2
   src/base_runner.py::noqa:TCH004: 1
   src/baseline_policy.py::noqa:BLE001: 3
@@ -107,11 +110,11 @@ entries:
   src/corpus_learning_loop.py::noqa:TCH001: 2
   src/cost_budget_alerts.py::noqa:PLC0415: 2
   src/cost_budget_watcher_loop.py::noqa:BLE001: 2
-  "src/cost_budget_watcher_loop.py::noqa:BLE001\u2014telemetryshouldn'tkillthegate": 1
+  src/cost_budget_watcher_loop.py::noqa:BLE001—telemetryshouldn'tkillthegate: 1
   src/cost_budget_watcher_loop.py::noqa:PLC0415: 1
   src/cost_budget_watcher_loop.py::noqa:PLR0911: 1
   src/coverage_delta.py::noqa:S314: 1
-  "src/dashboard_routes/_atlas_routes.py::noqa:BLE001\u2014diagnosticsendpoint,neverfail": 1
+  src/dashboard_routes/_atlas_routes.py::noqa:BLE001—diagnosticsendpoint,neverfail: 1
   src/dashboard_routes/_common.py::noqa:F401(re-exportedforhandlers): 1
   src/dashboard_routes/_control_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_control_routes.py::noqa:PLC0415: 6
@@ -123,27 +126,27 @@ entries:
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_onboarding_routes.py::noqa:PLC0415: 1
   src/dashboard_routes/_routes.py::noqa:BLE001: 3
-  src/dashboard_routes/_routes.py::noqa:PLC0415: 3
+  src/dashboard_routes/_routes.py::noqa:PLC0415: 2
   src/dashboard_routes/_state_routes.py::noqa:BLE001: 7
   src/dashboard_routes/_state_routes.py::noqa:PLC0415: 3
   src/dashboard_routes/_state_routes.py::noqa:PLR0911: 3
   src/dashboard_routes/_state_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_trust_routes.py::noqa:BLE001: 5
   src/dashboard_routes/_trust_routes.py::noqa:PLC0415: 1
-  "src/dashboard_routes/_trust_routes.py::noqa:S404\u2014wrappedcallsaretrusted`gh`invocations": 1
-  "src/dashboard_routes/_trust_routes.py::noqa:S603\u2014trusted``gh``invocation": 2
+  src/dashboard_routes/_trust_routes.py::noqa:S404—wrappedcallsaretrusted`gh`invocations: 1
+  src/dashboard_routes/_trust_routes.py::noqa:S603—trusted``gh``invocation: 2
   src/dashboard_routes/_waterfall_builder.py::noqa:PLC0415: 1
   src/dashboard_routes/_wiki_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_wiki_routes.py::noqa:PLC0415: 2
-  "src/dashboard_routes/_wiki_routes.py::noqa:SLF001\u2014read-onlydiagnostics": 1
+  src/dashboard_routes/_wiki_routes.py::noqa:SLF001—read-onlydiagnostics: 1
   src/dashboard_routes/_ws_stream.py::noqa:BLE001: 1
-  "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
-  "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
+  src/dashboard_routes/_ws_stream.py::noqa:BLE001—adownrepomustnotsinkthemerge: 1
+  src/dashboard_routes/_ws_stream.py::noqa:BLE001—skipadownrepo,keepthesocket: 1
   src/decomposition_ensemble.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
   src/diagnostic_loop.py::noqa:UP007: 1
   src/diagram_loop.py::noqa:PLC0415: 6
-  "src/discover_expander.py::noqa:BLE001\u2014logandfallthrough": 1
+  src/discover_expander.py::noqa:BLE001—logandfallthrough: 1
   src/discover_runner.py::type-ignore[attr-defined]: 1
   src/discover_runner.py::type-ignore[override]: 1
   src/disturbance_dampener_loop.py::noqa:BLE001: 1
@@ -159,8 +162,8 @@ entries:
   src/events.py::noqa:S101: 1
   src/execution.py::noqa:A002: 2
   src/execution.py::noqa:PLW0603: 1
-  "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014auditmustnotcrashtheloop": 1
-  "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014issuefilingfailure\u2260loopfailure": 1
+  src/fake_coverage_auditor_loop.py::noqa:BLE001—auditmustnotcrashtheloop: 1
+  src/fake_coverage_auditor_loop.py::noqa:BLE001—issuefilingfailure≠loopfailure: 1
   src/fake_coverage_auditor_loop.py::noqa:PLC0415: 2
   src/fake_coverage_auditor_loop.py::noqa:TCH001: 2
   src/fitness_report.py::noqa:PLC0415: 1
@@ -194,17 +197,17 @@ entries:
   src/implement_phase/_screen.py::noqa:PLC0415: 1
   src/implement_phase/_spec_review.py::noqa:PLC0415: 2
   src/implement_phase/_spec_review.py::type-ignore[arg-type]: 1
-  "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typed": 1
-  "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typedrun_simplecallable": 2
+  src/implement_spec_reviewer.py::noqa:ANN001—duck-typed: 1
+  src/implement_spec_reviewer.py::noqa:ANN001—duck-typedrun_simplecallable: 2
   src/implement_spec_reviewer.py::noqa:PLC0415: 2
   src/issue_store.py::type-ignore[assignment]: 1
   src/issue_store.py::type-ignore[typeddict-item]: 2
-  "src/judge_calibration.py::noqa:BLE001\u2014fail-soft:observingmustneverbreakreview": 1
+  src/judge_calibration.py::noqa:BLE001—fail-soft:observingmustneverbreakreview: 1
   src/label_drift_watcher_loop.py::noqa:TCH001: 2
-  "src/live_corpus_replay_loop.py::noqa:BLE001\u2014replaymustcontinueondispatchererror": 1
+  src/live_corpus_replay_loop.py::noqa:BLE001—replaymustcontinueondispatchererror: 1
   src/live_corpus_replay_loop.py::noqa:TCH001: 3
   src/log_ingest_loop.py::noqa:BLE001: 2
-  "src/log_ingest_loop.py::noqa:TCH004\u2014usedin__init__signature": 1
+  src/log_ingest_loop.py::noqa:TCH004—usedin__init__signature: 1
   src/log_ingestion.py::noqa:BLE001: 2
   src/log_ingestion.py::noqa:TCH002: 1
   src/makefile_contract.py::noqa:PLC0415: 4
@@ -221,12 +224,12 @@ entries:
   src/mockworld/fakes/fake_wiki_compiler.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::type-ignore[attr-defined]: 7
   src/mockworld/sandbox_main.py::type-ignore[misc]: 4
-  "src/models.py::noqa:F401\u2014usedinField(validation_alias=...)": 1
-  "src/models.py::noqa:UP035\u2014neededatruntimeforPydantictoexcludefromfields": 1
+  src/models.py::noqa:F401—usedinField(validation_alias=...): 1
+  src/models.py::noqa:UP035—neededatruntimeforPydantictoexcludefromfields: 1
   src/models.py::type-ignore[assignment]: 2
   src/models.py::type-ignore[return-value]: 2
-  "src/observability/sentry_adapter.py::noqa:BLE001-abrokenreportermustnotstopboot": 1
-  "src/observability/sentry_adapter.py::noqa:BLE001-seethedocstring;thisisthepoint": 1
+  src/observability/sentry_adapter.py::noqa:BLE001-abrokenreportermustnotstopboot: 1
+  src/observability/sentry_adapter.py::noqa:BLE001-seethedocstring;thisisthepoint: 1
   src/orchestrator.py::noqa:PLC0415: 1
   src/orchestrator_lifecycle.py::noqa:BLE001: 1
   src/phase_utils.py::noqa:BLE001: 2
@@ -248,7 +251,7 @@ entries:
   src/polyglot_prep.py::noqa:PLC0415: 8
   src/ports.py::noqa:TCH004: 3
   src/post_merge_handler.py::noqa:BLE001: 2
-  "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
+  src/post_merge_handler.py::noqa:BLE001—neverblockmergepathonwikiI/O: 1
   src/post_merge_handler.py::noqa:PLC0415: 5
   src/pr_manager.py::noqa:BLE001: 1
   src/pr_manager.py::noqa:PLC0415: 4
@@ -265,23 +268,23 @@ entries:
   src/precheck.py::noqa:BLE001: 1
   src/precondition_gate.py::noqa:BLE001: 1
   src/preflight/__init__.py::noqa:PLC0415: 3
-  "src/preflight/__init__.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
+  src/preflight/__init__.py::noqa:PLR0911—lineargatechecks,eachwithitsownreturnpath: 1
   src/preflight/__init__.py::noqa:S603: 1
   src/preflight/__init__.py::noqa:S603,S607: 1
   src/prep.py::type-ignore[arg-type]: 1
   src/pricing_refresh_loop.py::noqa:PLC0415: 1
-  "src/pricing_refresh_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
+  src/pricing_refresh_loop.py::noqa:PLR0911—lineargatechecks,eachwithitsownreturnpath: 1
   src/pricing_refresh_loop.py::noqa:S101: 1
   src/principles_audit_loop.py::noqa:BLE001: 4
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3
   src/repo_wiki.py::noqa:PLC0415: 6
-  "src/repo_wiki.py::noqa:PLC0415\u2014isolatedhere,notamodule-leveldep": 1
+  src/repo_wiki.py::noqa:PLC0415—isolatedhere,notamodule-leveldep: 1
   src/repo_wiki.py::type-ignore[return-value]: 1
   src/repo_wiki_ingest.py::noqa:BLE001: 1
   src/repo_wiki_loop.py::noqa:BLE001: 7
-  "src/repo_wiki_loop.py::noqa:PLR0911\u2014linearstate-machineguards": 1
+  src/repo_wiki_loop.py::noqa:PLR0911—linearstate-machineguards: 1
   src/repo_wiki_loop.py::type-ignore[arg-type]: 1
   src/report_issue_loop.py::noqa:PLC0415: 3
   src/report_issue_loop.py::noqa:PLR0911: 1
@@ -306,10 +309,10 @@ entries:
   src/review_phase/_judge.py::type-ignore[arg-type]: 2
   src/review_phase/_outcome.py::noqa:PLC0415: 4
   src/review_phase/_phase.py::noqa:BLE001: 1
-  "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
+  src/review_phase/_phase.py::noqa:E402,F401—usedbycallsitesbelow: 1
   src/review_phase/_phase.py::noqa:PLC0415: 10
-  "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
-  "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
+  src/review_phase/_phase.py::noqa:TCH004—usedin__init__+sig: 1
+  src/review_phase/_phase.py::noqa:TCH004—usedin__init__signature: 1
   src/review_phase/_ultra.py::noqa:PLC0415: 1
   src/review_phase/_visual_gate.py::noqa:ARG002: 2
   src/review_phase/_visual_gate.py::noqa:PLC0415: 1
@@ -328,8 +331,8 @@ entries:
   src/service_registry.py::noqa:F841: 33
   src/service_registry.py::noqa:PLC0415: 12
   src/service_registry.py::noqa:TCH001: 14
-  "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
-  "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 1
+  src/service_registry.py::noqa:TCH001—dataclassannotation: 1
+  src/service_registry.py::noqa:TCH001—usedindataclassfield: 1
   src/service_registry.py::type-ignore[arg-type]: 2
   src/service_registry.py::type-ignore[assignment]: 1
   src/service_registry.py::type-ignore[attr-defined]: 4
@@ -345,7 +348,7 @@ entries:
   src/state/_diagnostic.py::noqa:PLC0415: 1
   src/state/_rc_budget.py::noqa:PLC0415: 1
   src/stream_parser.py::noqa:PLR0911: 1
-  "src/subprocess_util.py::noqa:BLE001\u2014observabilitymustneverbreakthecallpath": 1
+  src/subprocess_util.py::noqa:BLE001—observabilitymustneverbreakthecallpath: 1
   src/subprocess_util.py::noqa:PLC0415: 1
   src/subprocess_util.py::noqa:PLW0603: 10
   src/subprocess_util.py::noqa:PLW2901: 2
@@ -355,14 +358,14 @@ entries:
   src/term_proposer_runtime.py::noqa:PLC0415: 3
   src/test_scaffold.py::noqa:BLE001: 1
   src/trace_collector.py::noqa:E402: 2
-  "src/trace_collector.py::noqa:E402\u2014intentionallynearhelperstosurviveruffunused-importsweeps": 1
+  src/trace_collector.py::noqa:E402—intentionallynearhelperstosurviveruffunused-importsweeps: 1
   src/trace_collector.py::noqa:PLC0415: 1
   src/trace_rollup.py::noqa:PLC0415: 2
-  "src/trace_rollup.py::noqa:PLR0911\u2014early-returnguardsformissing/malformedtracefiles": 1
+  src/trace_rollup.py::noqa:PLR0911—early-returnguardsformissing/malformedtracefiles: 1
   src/transcript_summarizer.py::noqa:PLC0415: 1
-  "src/triage.py::noqa:BLE001\u2014alertingmustnotcrashtriage": 1
-  "src/triage.py::noqa:BLE001\u2014classify,elsefailopen": 1
-  "src/triage_honeypot.py::noqa:BLE001\u2014classifythenfailopen": 1
+  src/triage.py::noqa:BLE001—alertingmustnotcrashtriage: 1
+  src/triage.py::noqa:BLE001—classify,elsefailopen: 1
+  src/triage_honeypot.py::noqa:BLE001—classifythenfailopen: 1
   src/triage_honeypot.py::noqa:PLC0415: 1
   src/triage_phase.py::noqa:BLE001: 1
   src/triage_phase.py::noqa:PLC0415: 3
@@ -374,10 +377,9 @@ entries:
   src/trust_fleet_anomaly_detectors.py::noqa:BLE001: 1
   src/trust_fleet_sanity_loop.py::noqa:BLE001: 3
   src/trust_fleet_sanity_loop.py::noqa:PLC0415: 3
-  "src/ubiquitous_language.py::noqa:PLR0911\u2014linearF1guards,eachwithitsownfailpath": 1
+  src/ubiquitous_language.py::noqa:PLR0911—linearF1guards,eachwithitsownfailpath: 1
   src/ultra_review.py::noqa:PLC0415: 2
   src/verification_judge.py::noqa:PLC0415: 1
-  src/whatsapp_bridge.py::noqa:PLC0415: 1
   src/wiki_anchor_gate.py::noqa:PLC0415: 1
   src/wiki_compiler/_compiler.py::noqa:BLE001: 1
   src/wiki_compiler/_compiler.py::noqa:PLC0415: 1
