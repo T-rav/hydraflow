@@ -89,9 +89,13 @@ from hydraflow_gateway.routing_accounts import AccountRegistry, GatewayAccount
 from hydraflow_gateway.routing_policy import (
     AccountAvailability,
     LegacyRoute,
+    ModelRequirement,
+    RequirementMapping,
     RouteContext,
     RouteDecision,
     RouteExplanation,
+    RoutingAction,
+    RoutingMatch,
     RoutingPolicy,
 )
 from hydraflow_gateway.routing_workspace import MutationIntent, PolicyMutation
@@ -339,6 +343,16 @@ async def test_every_payload_section_actually_returned_a_row(
         RouteDecision,
         RouteExplanation,
         RoutingPolicy,
+        # #11994. ``RoutingPolicy`` was listed; the models its two operator-facing
+        # halves are made of were not. A per-model sweep reads every field of the
+        # model it is given and none of its children, so a credential-shaped
+        # field added to ``RoutingAction`` — the half that names accounts and
+        # models — would have serialized onto every policy-plane response with
+        # this guard still green. The nesting, not the model, is the blind spot.
+        RoutingAction,
+        RoutingMatch,
+        RequirementMapping,
+        ModelRequirement,
         RouteStage,
         ShadowDecision,
         # ADR-0140's write plane. A mutation body and its write-ahead journal
@@ -504,7 +518,18 @@ def _policy_client(tmp_path: Path) -> TestClient:
 
 
 def _policy_plane_payloads(tmp_path: Path) -> str:
-    """Every policy-plane response, including the authenticated write's own."""
+    """Every policy-plane response, including the authenticated write's own.
+
+    #11994 extends the walk through a **rollback**, because a rollback is the
+    one mutation whose content comes from history rather than from the request
+    body. Everything else on this plane can only republish a value the current
+    revision already carries; a rollback republishes a value some earlier
+    revision carried, which is the shape "without exposing stale credentials"
+    names. Reading the surfaces *after* the rollback rather than only the
+    rollback's own response is deliberate: the restored set lands on the list,
+    the effective matrix and the audit chain, and a leak on any of those is a
+    leak.
+    """
     client = _policy_client(tmp_path)
     auth = {"Authorization": f"Bearer {_OPERATOR_TOKEN}"}
     bodies = [
@@ -525,12 +550,40 @@ def _policy_plane_payloads(tmp_path: Path) -> str:
                 "policy": _policy_body("second"),
             },
         ).text,
+        client.post(
+            "/api/gateway/policies/mutations",
+            json={
+                "kind": "create",
+                "expected_revision": 1,
+                "policy": _policy_body("second"),
+            },
+            headers=auth,
+        ).text,
+        client.post(
+            "/api/gateway/policies/mutations",
+            json={"kind": "rollback", "expected_revision": 2, "target_revision": 1},
+            headers=auth,
+        ).text,
     ]
     bodies.extend(
         client.get(f"/api/gateway/policies{suffix}").text
         for suffix in ("", "/effective", "/audit")
     )
     return "\n".join(bodies)
+
+
+def test_the_policy_plane_walk_actually_performed_a_rollback(tmp_path: Path) -> None:
+    """Guards the absence assertions above from going quiet.
+
+    A rollback rejected for a stale ``expected_revision`` still returns a body,
+    and a sweep over it would find no credential and prove nothing about the
+    path it was written for. So the walk's own rollback is asserted to have
+    committed before anything is scanned for what it must not contain.
+    """
+    payload = _policy_plane_payloads(tmp_path)
+
+    assert '"kind": "rollback"' in payload or '"kind":"rollback"' in payload
+    assert '"revision": 3' in payload or '"revision":3' in payload
 
 
 def test_policy_plane_payloads_carry_no_operator_token(tmp_path: Path) -> None:
@@ -775,3 +828,76 @@ async def test_the_admin_plane_publishes_what_it_is_meant_to(
     payload = await _admin_plane_payloads(tmp_path)
 
     assert published in payload
+
+
+# --------------------------------------------------------------------------
+# #11994's rollback: what a restored revision can supply, and what it cannot
+# --------------------------------------------------------------------------
+
+
+def _credential_bearing_field_names() -> frozenset[str]:
+    """The field names that actually carry credential material, by reference.
+
+    Hand-typing this list is what makes a sweep narrower than it reads: a model
+    that grows a new secret field would not appear in it, and the assertion
+    below would keep passing while the thing it guards had changed. So the names
+    are read off the models that hold the material — the upstream and control
+    credentials the gateway is configured with, and the token the mint issues.
+    """
+    names = {
+        name
+        for model in (UpstreamSettings, GatewaySettings)
+        for name, field in model.model_fields.items()
+        if field.annotation is SecretStr
+    }
+    names.add("token")
+    return frozenset(names)
+
+
+def test_the_names_that_carry_credentials_were_actually_found() -> None:
+    """The derived corpus is not empty, which would make the sweep vacuous."""
+    assert _credential_bearing_field_names() >= {"api_key", "control_token", "token"}
+
+
+def test_a_rollback_reads_back_a_payload_with_no_credential_to_reissue(
+    tmp_path: Path,
+) -> None:
+    """AC3, structurally: there is nothing in history to re-mint from.
+
+    "A key minted after a rollback is minted against current account state" is
+    usually written as a rule the mint must follow. It is stronger as a property
+    of the thing the rollback reads: ``_policies_at`` recovers a revision's
+    policies from one committed audit payload and nothing else, so if that
+    payload holds no credential-bearing key, re-issuing from it is not a
+    mistake the mint could make. A policy names accounts by id; the lease that
+    reaches one is minted afterwards, from the live pool.
+    """
+    client = _policy_client(tmp_path)
+    auth = {"Authorization": f"Bearer {_OPERATOR_TOKEN}"}
+    client.post(
+        "/api/gateway/policies/mutations",
+        json={"kind": "create", "expected_revision": 0, "policy": _policy_body()},
+        headers=auth,
+    )
+    records = client.get("/api/gateway/policies/audit").json()["records"]
+    committed = [r for r in records if r["payload"].get("outcome") == "committed"]
+
+    assert committed, "no committed record — the rollback source was never written"
+    forbidden = _credential_bearing_field_names()
+    for record in committed:
+        assert _keys_in(record["payload"]).isdisjoint(forbidden), record["payload"]
+
+
+def _keys_in(value: object) -> frozenset[str]:
+    """Every mapping key anywhere inside *value*, at any depth."""
+    if isinstance(value, dict):
+        found = set(value)
+        for nested in value.values():
+            found |= _keys_in(nested)
+        return frozenset(found)
+    if isinstance(value, list | tuple):
+        found = set()
+        for item in value:
+            found |= _keys_in(item)
+        return frozenset(found)
+    return frozenset()
