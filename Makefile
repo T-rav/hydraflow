@@ -175,7 +175,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory factory-service-install factory-service-uninstall env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
+.PHONY: help run dev factory factory-service-install factory-service-uninstall env deps-heal dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -219,7 +219,8 @@ help:
 	@echo "  make soak           Run soak/load tests"
 	@echo "  make hot            Send config update to running instance"
 	@echo "  make deps           Sync dependencies via uv (stamp-gated on pyproject)"
-	@echo "  make env            Heal/verify the environment (force uv sync --all-extras + sanity check)"
+	@echo "  make deps-heal      Heal/verify the environment (force uv sync --all-extras + sanity check)"
+	@echo "  make env            DEPRECATED alias for deps-heal (.env seeding is 'make setup', not this)"
 	@echo "  make docker-build   Build Hydra agent Docker image"
 	@echo "  make docker-test    Build + smoke-test the agent image"
 	@echo "  make arch-regen-stage  Regenerate arch artifacts and git-add them (pre-commit fix)"
@@ -341,12 +342,20 @@ deps: $(DEPS_STAMP)
 # `uv sync`). Run it yourself whenever the environment feels off; the factory
 # launcher (scripts/run-factory-isolated.sh) also calls it on every boot so the
 # factory self-heals its dependencies. Idempotent + near-instant when in sync.
-env:
+deps-heal:
 	@echo "$(BLUE)Healing environment (uv sync --all-extras)...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && uv sync --all-extras
 	@touch $(DEPS_STAMP)
-	@cd $(HYDRAFLOW_DIR) && $(UV) python -c "import pytest, sys; print('[env OK] python', sys.version.split()[0], '- pytest', pytest.__version__)" \
-	  || { echo "$(RED)[env FAIL] pytest not importable after sync - environment is broken$(RESET)"; exit 1; }
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -c "import pytest, sys; print('[deps-heal OK] python', sys.version.split()[0], '- pytest', pytest.__version__)" \
+	  || { echo "$(RED)[deps-heal FAIL] pytest not importable after sync - environment is broken$(RESET)"; exit 1; }
+
+# Deprecated alias (#12041): 'env' read as dotenv setup, but .env seeding lives
+# in 'make setup' — this target only syncs python deps. Kept for one cycle so
+# older factory workspaces and muscle memory keep working.
+env:
+	@echo "$(YELLOW)'make env' is deprecated — renamed to 'make deps-heal' (#12041).$(RESET)"
+	@echo "$(YELLOW)(.env seeding is 'make setup'; this target only heals python deps.)$(RESET)"
+	@$(MAKE) deps-heal
 
 TEST_COVERAGE := $(word 2,$(MAKECMDGOALS))
 TEST_COVERAGE_IS_NUM := $(shell printf '%s' "$(TEST_COVERAGE)" | grep -Eq '^[0-9]+$$' && echo 1 || echo 0)

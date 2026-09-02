@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,9 +14,11 @@ from preflight import (
     _check_agent_cli,
     _check_disk_space,
     _check_docker,
+    _check_docker_agent_credential,
     _check_gh_auth,
     _check_gh_cli,
     _check_git,
+    _check_pipeline_target,
     _check_repo_root,
     log_preflight_results,
     run_preflight_checks,
@@ -41,6 +44,7 @@ from tests.helpers import config_mock
 #: is not about.
 _MODE_INDEPENDENT_CHECKS = {
     "disk-space",
+    "pipeline-target",
     "gh-auth",
     "gh-cli",
     "git",
@@ -340,6 +344,7 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
         "gh-cli",
         "gh-auth",
         "repo-root",
+        "pipeline-target",
         "disk-space",
         "agent-cli-claude",
         "plugins",
@@ -378,6 +383,9 @@ async def test_run_preflight_checks_docker_mode(tmp_path: Path) -> None:
 
     names = {r.name for r in results}
     assert "docker" in names, "docker mode must add the docker daemon check"
+    assert "docker-agent-credential" in names, (
+        "docker mode must add the claude-credential check (#12040)"
+    )
     # Docker mode is host mode PLUS docker — nothing may be dropped.
     assert names >= _MODE_INDEPENDENT_CHECKS
 
@@ -497,3 +505,206 @@ async def test_server_run_proceeds_on_preflight_success() -> None:
         await _run(config)
 
     mock_dash.assert_called_once_with(config)
+
+
+# ---------------------------------------------------------------------------
+# _check_pipeline_target (#12040)
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_target_set_passes() -> None:
+    config = config_mock()
+    config.repo = "acme/project-x"
+    result = _check_pipeline_target(config)
+    assert result.status == CheckStatus.PASS
+    assert "acme/project-x" in result.message
+
+
+def test_pipeline_target_unset_warns_with_detected_remote(tmp_path: Path) -> None:
+    config = config_mock()
+    config.repo = ""
+    config.repo_root = tmp_path
+    with patch("preflight._detect_repo_slug", return_value="acme/checkout"):
+        result = _check_pipeline_target(config)
+    assert result.status == CheckStatus.WARN
+    assert "HYDRAFLOW_GITHUB_REPO" in result.message
+    assert "idle" in result.message
+    assert "acme/checkout" in result.message
+    assert "never targeted automatically" in result.message
+
+
+def test_pipeline_target_unset_warns_without_remote(tmp_path: Path) -> None:
+    config = config_mock()
+    config.repo = ""
+    config.repo_root = tmp_path
+    with patch("preflight._detect_repo_slug", return_value=""):
+        result = _check_pipeline_target(config)
+    assert result.status == CheckStatus.WARN
+    assert "never targeted automatically" not in result.message
+
+
+# ---------------------------------------------------------------------------
+# _check_docker_agent_credential (#12040)
+# ---------------------------------------------------------------------------
+
+
+_ALL_CREDENTIAL_KEYS = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ZAI_CODING_PLAN_KEY",
+    "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+    "ZAI_API_KEY",
+    "HYDRAFLOW_ZAI_API_KEY",
+)
+
+
+def _clear_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in _ALL_CREDENTIAL_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def _docker_cred_config(tmp_path: Path, provider: str = "claude") -> Any:
+    config = config_mock()
+    config.repo_root = tmp_path
+    config.implementation_tool = "claude"
+    config.review_tool = "codex"
+    config.planner_tool = "claude"
+    config.implementation_provider = provider
+    config.review_provider = provider
+    config.planner_provider = provider
+    return config
+
+
+def test_docker_credential_missing_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_credentials(monkeypatch)
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.FAIL
+    assert "claude setup-token" in result.message
+    # Operator-facing stage vars, not internal field names.
+    assert "HYDRAFLOW_IMPLEMENT" in result.message
+    assert "HYDRAFLOW_PLANNER" in result.message
+    assert "HYDRAFLOW_REVIEW" not in result.message  # codex role is not claude
+
+
+def test_docker_credential_from_process_env_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_credentials(monkeypatch)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.PASS
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in result.message
+
+
+def test_docker_credential_api_key_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_credentials(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.PASS
+
+
+def test_docker_credential_from_dotenv_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented home for the token is repo_root/.env, read with the SAME
+    parser that builds the container env (subprocess_util._read_dotenv)."""
+    _clear_credentials(monkeypatch)
+    (tmp_path / ".env").write_text(
+        "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-dotenv\n", encoding="utf-8"
+    )
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.PASS
+
+
+def test_docker_credential_export_prefixed_dotenv_line_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parity with the container is the whole point: make_docker_env's parser
+    does not understand ``export KEY=...`` lines, so the container would never
+    receive this token — preflight must not report PASS on it."""
+    _clear_credentials(monkeypatch)
+    (tmp_path / ".env").write_text(
+        "export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-invisible\n", encoding="utf-8"
+    )
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.FAIL
+
+
+def test_docker_credential_gateway_roles_exempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A role routed via the gateway gets per-spawn virtual keys — no host
+    credential is required, and the check must not fail the boot."""
+    _clear_credentials(monkeypatch)
+    result = _check_docker_agent_credential(
+        _docker_cred_config(tmp_path, provider="gateway")
+    )
+    assert result.status == CheckStatus.PASS
+    assert "no direct claude-harness roles" in result.message
+
+
+def test_docker_credential_zai_key_passes_without_anthropic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """provider='zai' is a first-class harness (Claude CLI against GLM): its
+    own key chain satisfies the role with NO Anthropic credential present."""
+    _clear_credentials(monkeypatch)
+    monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+    result = _check_docker_agent_credential(
+        _docker_cred_config(tmp_path, provider="zai")
+    )
+    assert result.status == CheckStatus.PASS
+    assert "ZAI_API_KEY" in result.message
+
+
+def test_docker_credential_zai_missing_fails_naming_zai_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_credentials(monkeypatch)
+    result = _check_docker_agent_credential(
+        _docker_cred_config(tmp_path, provider="zai")
+    )
+    assert result.status == CheckStatus.FAIL
+    assert "ZAI_CODING_PLAN_KEY" in result.message
+    assert "claude setup-token" not in result.message  # wrong remedy for zai
+
+
+def test_docker_credential_zai_falls_open_to_anthropic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No zai key but a native Anthropic credential: resolve_harness_env falls
+    open to the native endpoint, so preflight passes and says so."""
+    _clear_credentials(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    result = _check_docker_agent_credential(
+        _docker_cred_config(tmp_path, provider="zai")
+    )
+    assert result.status == CheckStatus.PASS
+    assert "fall-open" in result.message
+
+
+def test_docker_credential_mixed_claude_and_zai_roles_both_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_credentials(monkeypatch)
+    config = _docker_cred_config(tmp_path, provider="claude")
+    config.planner_provider = "zai"
+    result = _check_docker_agent_credential(config)
+    assert result.status == CheckStatus.FAIL
+    assert "HYDRAFLOW_IMPLEMENT" in result.message
+    assert "HYDRAFLOW_PLANNER" in result.message
+
+
+def test_docker_credential_non_claude_tools_exempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_credentials(monkeypatch)
+    config = _docker_cred_config(tmp_path)
+    config.implementation_tool = "codex"
+    config.planner_tool = "gemini"
+    result = _check_docker_agent_credential(config)
+    assert result.status == CheckStatus.PASS
