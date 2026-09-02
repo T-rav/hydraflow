@@ -703,10 +703,11 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - name: Run scenario tests
-        run: make scenario
-      - name: Run scenario loop tests
-        run: make scenario-loops
+      # One invocation over both markers. Two runs paid a second interpreter
+      # start, a second collection of all 1379 tests and a second xdist pool,
+      # and split the work into two pools that each idled at the tail.
+      - name: Run scenario + scenario-loop tests
+        run: make scenario-all
 
   regression:
     name: Regression Tests

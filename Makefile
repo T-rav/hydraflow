@@ -415,6 +415,26 @@ scenario: deps
 		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario.xml,)
 	@echo "$(GREEN)Scenario tests passed$(RESET)"
 
+# One invocation over both scenario markers, for CI's `Scenario Tests` job.
+#
+# `scenario` and `scenario-loops` stay as they are: the RC promotion workflow
+# runs them separately for a junit file each, and running one marker at a time
+# is what you want when bisecting. This target exists because running them as
+# two processes costs a second interpreter start, a second collection of all
+# 1379 tests, and a second xdist pool spin-up — and splits the work into two
+# pools that each idle at the tail instead of one that balances across both.
+# Measured 2026-09-02: 100s as two runs, 69s as one.
+#
+# The marker expression is checked against the two targets above by
+# tests/architecture/test_scenario_targets_cover_every_marker.py, so a third
+# scenario marker cannot be added to a target and silently skipped by CI.
+scenario-all: deps
+	@echo "$(BLUE)Running scenario + scenario-loop tests...$(RESET)"
+	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m "scenario or scenario_loops" $(SCENARIO_PARALLEL) \
+		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario-all.xml,)
+	@echo "$(GREEN)Scenario tests passed$(RESET)"
+
 scenario-loops: deps
 	@echo "$(BLUE)Running scenario loop tests...$(RESET)"
 	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
