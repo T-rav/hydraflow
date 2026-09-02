@@ -31,6 +31,11 @@
             "timeout": 30,
             "statusMessage": "Validating functional-areas schema...",
             "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.block-generic-scratchpad-names.sh",
+            "_hydraflow": true
           }
         ]
       },
