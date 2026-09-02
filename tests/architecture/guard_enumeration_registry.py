@@ -894,7 +894,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     def _baseline_dial_drop_is_caught(member: str) -> bool:
         """A dial dropped from the generator's maps reddens the parity gate.
 
-        `_GENERATABLE` derives from `routing_baseline._ROLE_DIALS` and
+        `_GENERATABLE` derives from `routing_baseline._PRINCIPAL_DIALS` and
         `_PRINCIPAL_DIALS`, and the generator's own
         `test_every_dial_is_either_generated_or_registered_as_a_gap` compares
         their union with `UNGENERATED_DIALS` against every `*_provider` field
@@ -931,11 +931,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         # --- SUBJECTS, derived ------------------------------------------
         GuardedEnumeration(
             name="test_routing_baseline_generator._GENERATABLE",
-            members=tuple(
-                sorted(
-                    {*routing_baseline._ROLE_DIALS, *routing_baseline._PRINCIPAL_DIALS}
-                )  # noqa: SLF001
-            ),
+            members=tuple(sorted(routing_baseline._PRINCIPAL_DIALS)),  # noqa: SLF001
             kind=EnumerationKind.SUBJECT,
             detects_drop=_baseline_dial_drop_is_caught,
             why=(
