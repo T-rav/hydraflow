@@ -33,6 +33,13 @@ payloads from a repo full of unreleased work stay on infrastructure the operator
 owns. Pointing a repo at sentry.io instead is a DSN change, not a code change,
 and this standard is satisfied either way.
 
+## Configuring an application
+
+[`RUNBOOK.md`](RUNBOOK.md), stamped into every HydraFlow-format repo alongside
+this file: SDK init for Python and Node, the check at each step, how Bugsink's
+grouping differs from Sentry's, and a symptom table for "we get no error
+issues". This file states the rules; the runbook states how to satisfy them.
+
 ## Rules
 
 1. **The sensor is off without a target.** No DSN means the no-op adapter. Tests,
