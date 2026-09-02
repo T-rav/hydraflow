@@ -7,6 +7,7 @@ trace-grounded pipeline: gather → signals → finder → validate → emit.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -203,3 +204,80 @@ class TestEvidenceAnalysis:
 
         assert counts["signals"] == 1
         assert find.await_args.kwargs["issue_labels"] == []
+
+
+class TestACompletelyUnparseableTickIsVisible:
+    """#11984: the two integration tests #11983 deferred to this child.
+
+    Both drive the REAL `parse_findings` through the real collector, stubbing
+    only the model call. The sibling tests set `finder.unparseable` directly,
+    which proves the wiring but not that anything ever produces the number —
+    exactly the gap #11984's anti-stall guard warns about.
+    """
+
+    async def test_findings_dropped_rises_when_the_model_returns_no_array(
+        self, tmp_path: Path
+    ) -> None:
+        collector, _ = _collector(tmp_path)
+
+        with (
+            patch("retrospective.extract", return_value=[SIGNAL]),
+            patch(
+                "retro_finder.RetroFinder._call_model",
+                new=AsyncMock(return_value="I could not find anything useful."),
+            ),
+        ):
+            counts = await collector.analyze_evidence([_entry(1)])
+
+        assert counts["dropped"] >= 1, (
+            "a tick whose model returned nothing parseable reported "
+            f"dropped={counts['dropped']}, which a reader cannot tell from a "
+            "tick that correctly found nothing"
+        )
+        assert counts["filed"] == 0
+
+    async def test_a_clean_tick_then_a_confabulating_tick_shows_the_jump(
+        self, tmp_path: Path
+    ) -> None:
+        """The property in isolation is weaker than the property over time.
+
+        An operator reads this as a series: the number has to be zero when the
+        model behaved and non-zero when it did not, from the same collector.
+        """
+        collector, _ = _collector(tmp_path)
+        valid = json.dumps(
+            [
+                {
+                    "kind": "gate",
+                    "signal_id": SIGNAL.id,
+                    "title": "Guard repeated quality failures",
+                    "guard_path": "tests/architecture/test_q.py",
+                    "observed": "7 occurrences",
+                }
+            ]
+        )
+
+        with (
+            patch("retrospective.extract", return_value=[SIGNAL]),
+            patch("retro_emitter.file_or_fold", new=AsyncMock(return_value=55)),
+            patch(
+                "retro_finder.RetroFinder._call_model",
+                new=AsyncMock(return_value=valid),
+            ),
+        ):
+            clean = await collector.analyze_evidence([_entry(1)])
+
+        with (
+            patch("retrospective.extract", return_value=[SIGNAL]),
+            patch(
+                "retro_finder.RetroFinder._call_model",
+                new=AsyncMock(return_value="Sorry — nothing to report."),
+            ),
+        ):
+            confabulating = await collector.analyze_evidence([_entry(2)])
+
+        assert clean["dropped"] == 0, "a tick the model handled correctly showed drops"
+        assert confabulating["dropped"] > clean["dropped"], (
+            "findings_dropped did not move between a clean tick and one whose "
+            "response could not be parsed at all"
+        )
