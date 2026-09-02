@@ -262,6 +262,23 @@ endif
 
 dev: run
 
+## bugsink-up — start the exception sensor's backend (ADR-0146).
+## Needs BUGSINK_SECRET_KEY, BUGSINK_SUPERUSER and BUGSINK_DB_PASSWORD in .env;
+## the compose file refuses to start rather than defaulting them.
+bugsink-up:
+	@echo "$(BLUE)Starting Bugsink (exception sensor backend) on :$${BUGSINK_PORT:-8000}$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml up -d
+	@echo "$(GREEN)Bugsink at http://localhost:$${BUGSINK_PORT:-8000}/$(RESET)"
+
+## bugsink-down — stop Bugsink. Data survives (the volume is not removed).
+bugsink-down:
+	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml down
+	@echo "$(GREEN)Bugsink stopped; bugsink-db-data volume kept$(RESET)"
+
+## bugsink-logs — follow Bugsink's logs.
+bugsink-logs:
+	@cd $(HYDRAFLOW_DIR) && docker compose --env-file .env -f docker-compose.bugsink.yml logs -f
+
 factory:
 	@echo "$(BLUE)Starting HydraFlow factory in an isolated workspace (dev checkout stays clean)$(RESET)"
 	@$(HYDRAFLOW_DIR)scripts/run-factory-isolated.sh

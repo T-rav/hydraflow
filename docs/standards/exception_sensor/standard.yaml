@@ -4,6 +4,9 @@ id: exception_sensor
 enforced_by:
   - tests/test_sentry_observability_adapter.py
   - tests/test_triage_phase.py
+  - tests/test_issue_intake_boundary.py
+  - tests/architecture/test_intake_proxy_config.py
+  - tests/scenarios/test_exception_sensor_triage_scenario.py
 
 # Each normative rule in README.md names the check that catches its violation.
 # Properties: tests/architecture/test_standards_rules_are_wired.py
@@ -33,6 +36,18 @@ rules:
   - id: sensor-issues-declare-their-provenance
     claim: An issue filed by the sensor is recognised by its label, so the board distinguishes an observed failure from an authored finding
     enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_label_is_matched_case_insensitively
+  - id: the-intake-refuses-anonymous-callers
+    claim: Filing an issue from outside a loop requires the ADR-0140 operator credential, and a non-loopback deployment has no intake endpoint at all
+    enforced_by: tests/test_issue_intake_boundary.py::TestTheBoundaryUsesTheHouseCredential::test_no_token_is_refused
+  - id: the-caller-does-not-choose-its-own-provenance
+    claim: Each exposed lane pins its source at the proxy, so a caller cannot label its report as a system exception
+    enforced_by: tests/architecture/test_intake_proxy_config.py::TestTheLanesArePinned::test_no_lane_pins_another_lanes_source
+  - id: only-the-intake-lanes-are-exposed
+    claim: The proxy is default-deny and publishes no dashboard route, including the intake itself
+    enforced_by: tests/architecture/test_intake_proxy_config.py::TestNothingElseIsReachable::test_the_intake_is_not_exposed_directly
+  - id: one-issue-per-error-group
+    claim: A redelivered alert for a group already on the board does not file a second issue
+    enforced_by: tests/test_issue_intake_boundary.py::TestOneIssuePerErrorGroup::test_a_redelivery_does_not_file_a_second_issue
   - id: triage-routes-them-as-system-exceptions
     claim: A sensor issue that fails triage is auto-closed as a transient rather than parked for clarification no author will supply
     enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close

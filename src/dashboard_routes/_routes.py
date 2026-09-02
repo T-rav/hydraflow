@@ -2242,6 +2242,11 @@ def create_router(
     _register_reports(router, ctx)
 
     # --- Headless onboarding draft routes (merged from main) ---
+    # --- Issue intake boundary (ADR-0140 auth; ADR-0146 sensor inbound) ---
+    from dashboard_routes._issue_intake_routes import register as _register_intake
+
+    _register_intake(router, ctx)
+
     from dashboard_routes._onboarding_routes import register as _register_onboarding
 
     _register_onboarding(router, ctx)

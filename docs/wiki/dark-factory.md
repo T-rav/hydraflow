@@ -430,6 +430,158 @@ them (two 2026-07 sessions nearly did):
 
 Still open: subagent-verify wrapper, pre-commit arch-regen.
 
+## Exception sensor — standing Bugsink up (ADR-0146)
+
+**There is no single `make start`.** The sensor is separate infrastructure on
+purpose — HydraFlow runs perfectly well without it, because an absent DSN gets
+the no-op adapter — so it is its own command:
+
+| Command | Starts | Port |
+|---|---|---|
+| `make run` | dashboard + UI | 5555 (loopback) |
+| `make factory` | the factory loops | — |
+| `make bugsink-up` | Bugsink, its database, **and the nginx proxy** | 8000 loopback / 8443 exposed |
+
+`make run` and `make factory` do **not** start nginx or Bugsink. Order does not
+matter: the proxy retries its upstream, and HydraFlow only reads the DSN at
+boot. The one thing that must line up is the port — the proxy's upstream
+defaults to the dashboard's `5555`, and a test pins that against
+`config.dashboard_port` so the two cannot drift.
+
+The factory runs unattended, so an unreported exception is invisible rather than
+quiet. The sensor closes the loop from *the software failed* to *the board
+knows*. Two halves, both ours.
+
+### 1. Start the backend
+
+```bash
+# .env — the compose file REFUSES to start without these, by design
+BUGSINK_SECRET_KEY=$(openssl rand -base64 50)
+BUGSINK_SUPERUSER=you@example.com:a-real-password
+BUGSINK_DB_PASSWORD=$(openssl rand -base64 24)
+
+make bugsink-up      # http://localhost:8000/  (loopback only)
+make bugsink-logs
+make bugsink-down    # data survives; the volume is not removed
+```
+
+### 2. Outbound — point HydraFlow at it
+
+Create a project in the Bugsink UI, copy its DSN, and put it in `.env`:
+
+```bash
+SENTRY_DSN=http://<key>@localhost:8000/<project-id>
+```
+
+The DSN's presence is the switch: absent, the composition root returns the no-op
+adapter, which is what tests, CI and the air-gapped sandbox get. The client is
+the Sentry SDK, so this same setting can point at sentry.io instead — Bugsink is
+the house default because self-hosting keeps error payloads from a repo full of
+unreleased work on infrastructure you own.
+
+`HYDRAFLOW_SENTRY_DISABLED=1` overrides a configured DSN, always toward off.
+
+### How Bugsink groups (it is not Sentry's algorithm)
+
+Bugsink aggregates events into issues, but keys on **exception type + message**
+with variable-ish parts normalised (UUIDs, hashes, numbers, URLs, emails,
+dates), where Sentry keys primarily on the **stack trace**. Two consequences,
+both worth knowing before reading the board:
+
+- The same type and message raised from **two different code paths collapses
+  into one issue**. Sentry would have split them.
+- A bug whose stack varies stays **one** issue. Sentry would have split that
+  too, and for a factory this is usually the better failure.
+
+Custom fingerprints are supported (`"{{ default }}"` includes the automatic
+grouping and refines it) if under-splitting ever bites.
+
+This is also why the intake deduplicates on the Bugsink issue **id** rather than
+the rendered message: the backend has already decided what one group is, and
+re-keying on text here would second-guess it — and split a group whose message
+Bugsink deliberately normalised.
+
+### 3. Inbound — point it back at HydraFlow
+
+**Bugsink has no GitHub integration.** Its only outbound path is a custom
+webhook, and that webhook's config is a bare URL: no signing secret, no auth
+header. So it cannot present the operator credential the intake boundary
+requires, and the stack ships a proxy that adds one.
+
+```bash
+# ADR-0140's operator token — the SAME credential the policy write plane uses.
+HYDRAFLOW_OPERATOR_TOKEN=$(python -c "import secrets; print('hfop_' + secrets.token_urlsafe(32))")
+# One path token per lane, so they rotate independently.
+HF_EXCEPTION_PATH_TOKEN=$(openssl rand -hex 32)
+HF_REPORT_PATH_TOKEN=$(openssl rand -hex 32)
+
+# then in Bugsink: Alerts -> Custom webhook ->
+#   https://<host>:8443/exception/<HF_EXCEPTION_PATH_TOKEN>
+```
+
+### Two isolated lanes, one method
+
+The application keeps **one** intake handler. The separation is at the proxy:
+
+| Lane | External path | Becomes | Default rate |
+|---|---|---|---|
+| Exceptions | `/exception/<token>` | `?source=bugsink` | 30r/m, burst 20 |
+| People / UI | `/report/<token>` | `?source=ui` | 10r/m, burst 5 |
+
+`/api/issues/intake` is **not** reachable directly, and that is the point:
+
+- **`source` is pinned per lane.** Passing the intake through untouched would
+  let anyone holding either token file an issue labelled as a system exception —
+  and triage treats those differently, auto-closing the ones that fail.
+  Provenance you can set yourself is not provenance.
+- **The tokens rotate independently.** Re-keying Bugsink does not disturb the
+  UI, and a leaked report token buys nothing on the exception lane.
+- **Separate rate limits.** An error storm cannot exhaust the budget a person
+  needs, and neither lane can flood the board on its own.
+
+### Remote deploys — expose the intake, never the dashboard
+
+`make bugsink-up` includes an nginx front door (`docker/hydraflow-proxy/`). It is
+**default-deny** and opens exactly two lanes, both landing on the one intake
+method: `/exception/<token>` and `/report/<token>` (see below).
+
+Everything else returns 404, and that is not conservatism — it is required.
+HydraFlow's dashboard has **no in-process authentication**: ADR-0138 §D5 records
+that its operator boundary *is* the loopback bind, and of ~169 dashboard routes,
+8 mention the operator token. Publishing the dashboard would expose the control
+plane, not the UI.
+
+So on a remote deploy:
+
+```bash
+HYDRAFLOW_DASHBOARD_HOST=127.0.0.1     # keep it. Also what keeps ADR-0140's gate open.
+HF_TLS_CERT_DIR=/etc/letsencrypt/live/<host>   # holds fullchain.pem + privkey.pem
+HF_SERVER_NAME=hydraflow.example.com
+HF_INTAKE_PROXY_PORT=8443              # the ONLY published port
+```
+
+If you ever find yourself setting `HYDRAFLOW_DASHBOARD_HOST=0.0.0.0` to make
+something reachable, that is the signal to put it behind this proxy instead —
+the intake gate will 404 rather than let the bind go public, deliberately.
+
+Keep the `hfop_` prefix: `src/secret_scrub.py` (ADR-0085) redacts that grammar
+from the audit, transcript and event streams, and a token without it is only
+redactable when printed next to its variable name.
+
+The intake boundary is generic — the UI files through the same door with
+`?source=ui` — and it does not exist at all unless the dashboard is bound to
+loopback. That is ADR-0140's rule, not a new one: a credential checked on an
+interface the world can reach is a credential the world can brute-force.
+
+### What arrives on the board
+
+One issue per error group, labelled `hydraflow-find` (so triage picks it up) and
+`bugsink` (so a human reading the board can tell an observed failure from an
+authored finding). Bugsink re-fires the same group on regression and unmute; the
+receiver deduplicates on the group id, so those land as no-ops rather than
+duplicates. A sensor issue that fails triage is auto-closed as a transient
+rather than parked for clarification no author will supply.
+
 ## Onboarding a foreign managed repo
 
 The first foreign managed repo is `T-rav/poop-scoop-hero` (PSH, a Phaser.js game). Onboarding flow:
