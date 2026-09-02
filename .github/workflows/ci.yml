@@ -518,7 +518,8 @@ jobs:
             --user "$(id -u):$(id -g)" -- \
             env PYTHONPATH=src HOME="$HOME" PATH="$PWD/.venv/bin:$PATH" \
             ./.venv/bin/python -m pytest tests/architecture \
-            --ignore=tests/architecture/test_mkdocs_strict.py --tb=short
+            --ignore=tests/architecture/test_mkdocs_strict.py --tb=short \
+            -n auto --dist loadscope
       - name: Architecture egress-lane exclusion (NOT isolated)
         run: uv run pytest tests/architecture/test_mkdocs_strict.py --tb=short
 
