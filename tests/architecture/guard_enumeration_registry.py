@@ -729,6 +729,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_policy_charter_parity as charter_parity
     from tests.architecture import test_policy_engine_is_pure as policy_purity
     from tests.architecture import test_producer_probe_gate as probe_gate
+    from tests.architecture import test_provider_dial_source_map as dial_sources
     from tests.architecture import test_standards_rules_are_wired as rules_wired
     from tests.architecture import (
         test_ungoverned_spawn_faces as ungoverned_faces,
@@ -1387,6 +1388,13 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             ),
             kind=EnumerationKind.CORPUS,
             why="Mirror files discovered on disk by frontmatter shape.",
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_provider_dial_source_map._UNRESOLVED_KEYS",
+            members=tuple(dial_sources._UNRESOLVED_KEYS),  # noqa: SLF001
+            kind=EnumerationKind.CORPUS,
+            why="Spawn sites swept from the tree whose principal is not literal.",
             undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
         GuardedEnumeration(
