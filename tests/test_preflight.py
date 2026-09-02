@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,9 +14,11 @@ from preflight import (
     _check_agent_cli,
     _check_disk_space,
     _check_docker,
+    _check_docker_agent_credential,
     _check_gh_auth,
     _check_gh_cli,
     _check_git,
+    _check_pipeline_target,
     _check_repo_root,
     log_preflight_results,
     run_preflight_checks,
@@ -41,6 +44,7 @@ from tests.helpers import config_mock
 #: is not about.
 _MODE_INDEPENDENT_CHECKS = {
     "disk-space",
+    "pipeline-target",
     "gh-auth",
     "gh-cli",
     "git",
@@ -340,6 +344,7 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
         "gh-cli",
         "gh-auth",
         "repo-root",
+        "pipeline-target",
         "disk-space",
         "agent-cli-claude",
         "plugins",
@@ -378,6 +383,9 @@ async def test_run_preflight_checks_docker_mode(tmp_path: Path) -> None:
 
     names = {r.name for r in results}
     assert "docker" in names, "docker mode must add the docker daemon check"
+    assert "docker-agent-credential" in names, (
+        "docker mode must add the claude-credential check (#12040)"
+    )
     # Docker mode is host mode PLUS docker — nothing may be dropped.
     assert names >= _MODE_INDEPENDENT_CHECKS
 
@@ -497,3 +505,130 @@ async def test_server_run_proceeds_on_preflight_success() -> None:
         await _run(config)
 
     mock_dash.assert_called_once_with(config)
+
+
+# ---------------------------------------------------------------------------
+# _check_pipeline_target (#12040)
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_target_set_passes() -> None:
+    config = config_mock()
+    config.repo = "acme/project-x"
+    result = _check_pipeline_target(config)
+    assert result.status == CheckStatus.PASS
+    assert "acme/project-x" in result.message
+
+
+def test_pipeline_target_unset_warns_with_detected_remote(tmp_path: Path) -> None:
+    config = config_mock()
+    config.repo = ""
+    config.repo_root = tmp_path
+    with patch("preflight._detect_repo_slug", return_value="acme/checkout"):
+        result = _check_pipeline_target(config)
+    assert result.status == CheckStatus.WARN
+    assert "HYDRAFLOW_GITHUB_REPO" in result.message
+    assert "idle" in result.message
+    assert "acme/checkout" in result.message
+    assert "never targeted automatically" in result.message
+
+
+def test_pipeline_target_unset_warns_without_remote(tmp_path: Path) -> None:
+    config = config_mock()
+    config.repo = ""
+    config.repo_root = tmp_path
+    with patch("preflight._detect_repo_slug", return_value=""):
+        result = _check_pipeline_target(config)
+    assert result.status == CheckStatus.WARN
+    assert "never targeted automatically" not in result.message
+
+
+# ---------------------------------------------------------------------------
+# _check_docker_agent_credential (#12040)
+# ---------------------------------------------------------------------------
+
+
+def _docker_cred_config(tmp_path: Path, provider: str = "direct") -> Any:
+    config = config_mock()
+    config.repo_root = tmp_path
+    config.implementation_tool = "claude"
+    config.review_tool = "codex"
+    config.planner_tool = "claude"
+    config.implementation_provider = provider
+    config.review_provider = provider
+    config.planner_provider = provider
+    return config
+
+
+def test_docker_credential_missing_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.FAIL
+    assert "claude setup-token" in result.message
+    assert "implementation_tool" in result.message
+    assert "planner_tool" in result.message
+    assert "review_tool" not in result.message  # codex role is not claude
+
+
+def test_docker_credential_from_process_env_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.PASS
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in result.message
+
+
+def test_docker_credential_api_key_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.PASS
+
+
+def test_docker_credential_from_dotenv_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented home for the token is repo_root/.env — same lookup
+    make_docker_env uses, so preflight and the container agree."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with patch(
+        "preflight._dotenv_lookup",
+        side_effect=lambda _root, *keys: (
+            "sk-ant-oat01-dotenv" if "CLAUDE_CODE_OAUTH_TOKEN" in keys else ""
+        ),
+    ):
+        result = _check_docker_agent_credential(_docker_cred_config(tmp_path))
+    assert result.status == CheckStatus.PASS
+
+
+def test_docker_credential_gateway_roles_exempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A role routed via the gateway gets per-spawn virtual keys — no host
+    credential is required, and the check must not fail the boot."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    result = _check_docker_agent_credential(
+        _docker_cred_config(tmp_path, provider="gateway")
+    )
+    assert result.status == CheckStatus.PASS
+    assert "no direct-claude roles" in result.message
+
+
+def test_docker_credential_non_claude_tools_exempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = _docker_cred_config(tmp_path)
+    config.implementation_tool = "codex"
+    config.planner_tool = "gemini"
+    result = _check_docker_agent_credential(config)
+    assert result.status == CheckStatus.PASS

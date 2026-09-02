@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from config import HydraFlowConfig
+from config import HydraFlowConfig, _detect_repo_slug, _dotenv_lookup
 
 logger = logging.getLogger("hydraflow.preflight")
 
@@ -42,9 +43,11 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     results.append(_check_gh_cli())
     results.append(await _check_gh_auth())
     results.append(_check_repo_root(config.repo_root))
+    results.append(_check_pipeline_target(config))
     results.append(_check_disk_space(config.data_root))
     if config.execution_mode == "docker":
         results.append(_check_docker())
+        results.append(_check_docker_agent_credential(config))
     # Check configured agent CLIs
     for tool_field in ("implementation_tool", "review_tool", "planner_tool"):
         tool = getattr(config, tool_field)
@@ -64,6 +67,93 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
     results.append(_check_contracts_sandbox(config))
 
     return results
+
+
+#: Either credential lets a containerized claude worker authenticate; the
+#: resolution order (process env, then repo_root/.env) mirrors
+#: subprocess_util.make_docker_env, which is what actually feeds the container.
+_CLAUDE_CREDENTIAL_KEYS: tuple[str, ...] = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+)
+
+#: The three dispatching roles preflight already checks CLIs for, paired with
+#: the provider dial that exempts them: a role resolved to the gateway gets a
+#: per-spawn virtual key, never a host credential — and under
+#: gateway_fleet_ratchet_enabled the dials are promoted to "gateway" during
+#: config resolution, before preflight ever sees them.
+_CLAUDE_ROLE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("implementation_tool", "implementation_provider"),
+    ("review_tool", "review_provider"),
+    ("planner_tool", "planner_provider"),
+)
+
+
+def _check_pipeline_target(config: HydraFlowConfig) -> CheckResult:
+    """WARN when no repo is targeted — the factory otherwise idles silently.
+
+    WARN rather than FAIL: booting untargeted and registering repos through
+    the dashboard afterwards is a legal path. But the consequence belongs in
+    the preflight report the operator reads, not only in an import-time
+    ``logger.warning`` inside a pydantic validator (#12040).
+    """
+    if config.repo:
+        return CheckResult(
+            "pipeline-target", CheckStatus.PASS, f"pipeline target: {config.repo}"
+        )
+    detected = _detect_repo_slug(config.repo_root)
+    remote_note = (
+        f" (The checkout's own remote is {detected!r}; it is never targeted"
+        " automatically.)"
+        if detected
+        else ""
+    )
+    return CheckResult(
+        "pipeline-target",
+        CheckStatus.WARN,
+        "HYDRAFLOW_GITHUB_REPO is unset — the triage/plan/implement/review "
+        "loops will idle. Set HYDRAFLOW_GITHUB_REPO=<owner>/<repo> or register "
+        f"a repo via the dashboard.{remote_note}",
+    )
+
+
+def _check_docker_agent_credential(config: HydraFlowConfig) -> CheckResult:
+    """FAIL when docker mode dispatches direct-claude workers with no credential.
+
+    Containers cannot reach the host keychain, so a host-mode login does not
+    travel; unlike an unset repo there is no post-boot UI path that fixes
+    this, and every dispatched claude worker fails mid-run with the
+    "Agent CLI authentication failed" string in ``runner_utils`` (#12040).
+    """
+    direct_claude_roles = [
+        tool_field
+        for tool_field, provider_field in _CLAUDE_ROLE_FIELDS
+        if getattr(config, tool_field) == "claude"
+        and getattr(config, provider_field) != "gateway"
+    ]
+    if not direct_claude_roles:
+        return CheckResult(
+            "docker-agent-credential",
+            CheckStatus.PASS,
+            "no direct-claude roles configured — no host claude credential needed",
+        )
+    for key in _CLAUDE_CREDENTIAL_KEYS:
+        if os.environ.get(key, "") or _dotenv_lookup(config.repo_root, key):
+            return CheckResult(
+                "docker-agent-credential",
+                CheckStatus.PASS,
+                f"{key} present for docker-mode claude workers "
+                f"({', '.join(direct_claude_roles)})",
+            )
+    return CheckResult(
+        "docker-agent-credential",
+        CheckStatus.FAIL,
+        "docker mode dispatches claude workers ("
+        + ", ".join(direct_claude_roles)
+        + ") but neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set "
+        "in the environment or .env — containers cannot reach the host "
+        "keychain. Run 'claude setup-token' and put the token in .env.",
+    )
 
 
 def _check_git() -> CheckResult:
