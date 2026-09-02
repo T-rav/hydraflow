@@ -432,6 +432,22 @@ Still open: subagent-verify wrapper, pre-commit arch-regen.
 
 ## Exception sensor — standing Bugsink up (ADR-0146)
 
+**There is no single `make start`.** The sensor is separate infrastructure on
+purpose — HydraFlow runs perfectly well without it, because an absent DSN gets
+the no-op adapter — so it is its own command:
+
+| Command | Starts | Port |
+|---|---|---|
+| `make run` | dashboard + UI | 5555 (loopback) |
+| `make factory` | the factory loops | — |
+| `make bugsink-up` | Bugsink, its database, **and the nginx proxy** | 8000 loopback / 8443 exposed |
+
+`make run` and `make factory` do **not** start nginx or Bugsink. Order does not
+matter: the proxy retries its upstream, and HydraFlow only reads the DSN at
+boot. The one thing that must line up is the port — the proxy's upstream
+defaults to the dashboard's `5555`, and a test pins that against
+`config.dashboard_port` so the two cannot drift.
+
 The factory runs unattended, so an unreported exception is invisible rather than
 quiet. The sensor closes the loop from *the software failed* to *the board
 knows*. Two halves, both ours.
@@ -495,23 +511,39 @@ requires, and the stack ships a proxy that adds one.
 ```bash
 # ADR-0140's operator token — the SAME credential the policy write plane uses.
 HYDRAFLOW_OPERATOR_TOKEN=$(python -c "import secrets; print('hfop_' + secrets.token_urlsafe(32))")
-# The path token Bugsink puts in its URL; the proxy trades it for the bearer.
-BUGSINK_WEBHOOK_PATH_TOKEN=$(openssl rand -hex 32)
+# One path token per lane, so they rotate independently.
+HF_EXCEPTION_PATH_TOKEN=$(openssl rand -hex 32)
+HF_REPORT_PATH_TOKEN=$(openssl rand -hex 32)
 
 # then in Bugsink: Alerts -> Custom webhook ->
-#   http://localhost:8081/hook/<BUGSINK_WEBHOOK_PATH_TOKEN>
+#   https://<host>:8443/exception/<HF_EXCEPTION_PATH_TOKEN>
 ```
 
-```
-Bugsink --POST /hook/{token}--> nginx --Bearer hfop_...--> 127.0.0.1 /api/issues/intake
-```
+### Two isolated lanes, one method
+
+The application keeps **one** intake handler. The separation is at the proxy:
+
+| Lane | External path | Becomes | Default rate |
+|---|---|---|---|
+| Exceptions | `/exception/<token>` | `?source=bugsink` | 30r/m, burst 20 |
+| People / UI | `/report/<token>` | `?source=ui` | 10r/m, burst 5 |
+
+`/api/issues/intake` is **not** reachable directly, and that is the point:
+
+- **`source` is pinned per lane.** Passing the intake through untouched would
+  let anyone holding either token file an issue labelled as a system exception —
+  and triage treats those differently, auto-closing the ones that fail.
+  Provenance you can set yourself is not provenance.
+- **The tokens rotate independently.** Re-keying Bugsink does not disturb the
+  UI, and a leaked report token buys nothing on the exception lane.
+- **Separate rate limits.** An error storm cannot exhaust the budget a person
+  needs, and neither lane can flood the board on its own.
 
 ### Remote deploys — expose the intake, never the dashboard
 
 `make bugsink-up` includes an nginx front door (`docker/hydraflow-proxy/`). It is
-**default-deny** and opens exactly two locations, both landing on the intake:
-`/hook/<path-token>` for Bugsink, and `/api/issues/intake` for callers that can
-present the bearer themselves.
+**default-deny** and opens exactly two lanes, both landing on the one intake
+method: `/exception/<token>` and `/report/<token>` (see below).
 
 Everything else returns 404, and that is not conservatism — it is required.
 HydraFlow's dashboard has **no in-process authentication**: ADR-0138 §D5 records

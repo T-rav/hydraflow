@@ -105,7 +105,13 @@ door (`docker/hydraflow-proxy/`) turns its URL token into an `Authorization`
 header. The application keeps exactly one way in.
 
 That proxy is also the answer for a remote deploy, and it is default-deny: it
-opens the two intake locations and 404s everything else. The dashboard is not
+opens two ISOLATED lanes onto the single intake method — `/exception/<token>`
+pinned to `source=bugsink`, `/report/<token>` pinned to `source=ui` — and 404s
+everything else, `/api/issues/intake` included. Pinning `source` at the edge is
+not decoration: triage auto-closes sensor issues that fail, so a caller able to
+choose its own provenance could get a report discarded as a transient. The
+lanes also carry separate tokens and separate rate limits, so an error storm
+cannot starve the lane a person uses. The dashboard is not
 publishable — ADR-0138 §D5 makes the loopback bind its only boundary, and of
 ~169 dashboard routes 8 carry a credential — so exposing "the UI" would expose
 the control plane. Only the issue-logging surface is reachable.

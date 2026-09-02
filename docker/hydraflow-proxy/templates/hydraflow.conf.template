@@ -6,17 +6,33 @@
 # 8 mention the operator token. Publishing the dashboard would therefore not
 # expose "the UI" — it would expose the control plane, unauthenticated.
 #
-# So this proxy is default-deny with exactly two locations open, both of which
-# land on the intake boundary. The dashboard stays on 127.0.0.1, which is also
-# what keeps ADR-0140's write gate open: the app must not be the thing facing
-# the world.
+# So this proxy is default-deny, and opens two ISOLATED lanes onto the single
+# intake method. The application keeps one handler; the separation is here:
+#
+#   /exception/<token>  -> /api/issues/intake?source=bugsink
+#   /report/<token>     -> /api/issues/intake?source=ui
+#
+# Why isolate lanes rather than expose the intake directly:
+#
+#   * `source` is PINNED per lane (`set $args`), so a caller cannot choose its
+#     own provenance. Passing the intake through untouched would let anyone
+#     holding the report token file an issue labelled as a system exception,
+#     and triage treats those differently — it auto-closes the ones that fail.
+#   * The two tokens rotate independently. Re-keying Bugsink does not disturb
+#     the UI, and a leaked report token buys nothing on the exception lane.
+#   * Each lane gets its own rate limit. An error storm on the exception lane
+#     cannot exhaust the budget the UI needs, and neither can flood the board.
 #
 # Substitution is restricted to HF_-prefixed variables (NGINX_ENVSUBST_FILTER),
-# so nginx's own $host / $remote_addr survive the template pass.
+# so nginx's own $host / $remote_addr / $args survive the template pass.
 
 upstream hydraflow_dashboard {
     server ${HF_UPSTREAM};
 }
+
+# Separate zones, so one lane's burst cannot starve the other.
+limit_req_zone $binary_remote_addr zone=hf_exception:1m rate=${HF_EXCEPTION_RATE};
+limit_req_zone $binary_remote_addr zone=hf_report:1m rate=${HF_REPORT_RATE};
 
 server {
     listen 8443 ssl;
@@ -31,35 +47,40 @@ server {
     client_max_body_size 1m;
 
     # Default deny. Anything not named below does not exist as far as the
-    # network is concerned — including every dashboard route.
+    # network is concerned — including /api/issues/intake itself, which is
+    # deliberately NOT reachable directly: reaching it would mean choosing
+    # your own `source`.
     location / {
         return 404;
     }
 
-    # --- The exception sensor's webhook -----------------------------------
-    # Bugsink's alert config is a bare URL: no signing secret, no auth header.
-    # This hop trades its URL path token for the ADR-0140 bearer, so the
-    # application still sees exactly one credential type.
-    location = /hook/${HF_WEBHOOK_PATH_TOKEN} {
+    # --- Lane 1: the exception sensor -------------------------------------
+    # Bugsink's alert config is a bare URL — no signing secret, no auth header —
+    # so this lane trades its path token for the ADR-0140 bearer.
+    location = /exception/${HF_EXCEPTION_PATH_TOKEN} {
         limit_except POST {
             deny all;
         }
+        limit_req zone=hf_exception burst=${HF_EXCEPTION_BURST} nodelay;
+
+        set $args source=bugsink;
         proxy_set_header Authorization "Bearer ${HF_OPERATOR_TOKEN}";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_pass http://hydraflow_dashboard/api/issues/intake?source=bugsink;
+        proxy_pass http://hydraflow_dashboard/api/issues/intake;
     }
 
-    # --- Direct intake, for callers that CAN present a bearer --------------
-    # The client's own Authorization is forwarded untouched: this location
-    # proxies the credential, it does not mint one. A caller without a valid
-    # operator token gets the app's 401, not a way in.
-    location = /api/issues/intake {
+    # --- Lane 2: people and the UI ----------------------------------------
+    location = /report/${HF_REPORT_PATH_TOKEN} {
         limit_except POST {
             deny all;
         }
+        limit_req zone=hf_report burst=${HF_REPORT_BURST} nodelay;
+
+        set $args source=ui;
+        proxy_set_header Authorization "Bearer ${HF_OPERATOR_TOKEN}";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_pass http://hydraflow_dashboard;
+        proxy_pass http://hydraflow_dashboard/api/issues/intake;
     }
 }

@@ -69,10 +69,21 @@ services:
       # Restrict substitution to our own variables so nginx's $host and
       # $remote_addr survive the template pass.
       NGINX_ENVSUBST_FILTER: "^HF_"
-      HF_UPSTREAM: ${HF_UPSTREAM:-host.docker.internal:8000}
+      # 5555 is the dashboard's port (config.dashboard_port / Makefile PORT),
+      # NOT Bugsink's 8000. Pinned by test_intake_proxy_config so the two
+      # cannot drift apart silently.
+      HF_UPSTREAM: ${HF_UPSTREAM:-host.docker.internal:5555}
       HF_SERVER_NAME: ${HF_SERVER_NAME:-_}
-      HF_WEBHOOK_PATH_TOKEN: ${BUGSINK_WEBHOOK_PATH_TOKEN:?set BUGSINK_WEBHOOK_PATH_TOKEN in .env (openssl rand -hex 32)}
+      # One token per lane, so they rotate independently.
+      HF_EXCEPTION_PATH_TOKEN: ${HF_EXCEPTION_PATH_TOKEN:?set HF_EXCEPTION_PATH_TOKEN in .env (openssl rand -hex 32)}
+      HF_REPORT_PATH_TOKEN: ${HF_REPORT_PATH_TOKEN:?set HF_REPORT_PATH_TOKEN in .env (openssl rand -hex 32)}
       HF_OPERATOR_TOKEN: ${HYDRAFLOW_OPERATOR_TOKEN:?set HYDRAFLOW_OPERATOR_TOKEN in .env (hfop_ + token_urlsafe(32), ADR-0140)}
+      # An error storm is the realistic flood, so the exception lane gets the
+      # larger burst; a person filing reports needs almost nothing.
+      HF_EXCEPTION_RATE: ${HF_EXCEPTION_RATE:-30r/m}
+      HF_EXCEPTION_BURST: ${HF_EXCEPTION_BURST:-20}
+      HF_REPORT_RATE: ${HF_REPORT_RATE:-10r/m}
+      HF_REPORT_BURST: ${HF_REPORT_BURST:-5}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

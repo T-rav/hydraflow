@@ -10,7 +10,7 @@
       "content_sha": "62f4e7c9da5c5f37046084bd91e4bfd0ff35fb4e70a17f76aa2adc0af7a73d0d"
     },
     "adr-falsifiability.md": {
-      "content_sha": "bcef8a43c2fd15c52dca023861e7902c1ce2e0f5f14d78fd5084963b02ccd7ae"
+      "content_sha": "4108542db4ae952ad30ed992968edf251612b51b7eadec36ec0e0cd557470b5e"
     },
     "adr_xref.md": {
       "content_sha": "a221185d9f4fa90c358582efc9e692aacbb4b26ada6c06b270272c0fa20b1203"
@@ -58,5 +58,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "9a148ae1a330045f40e82fdb9796c2451d0d1893c044373014877462a9fb40ed"
+  "content_sha": "5864bbd7231f38e09773ed712ce7e39f0faca103c51f6ba4e5fd20fc4b840006"
 }

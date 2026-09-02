@@ -61,17 +61,23 @@ and this standard is satisfied either way.
     that cannot set an `Authorization` header — Bugsink's webhook config is a
     bare URL — gets a proxy in front of it, not a second credential path
     through the application.
-11. **One issue per error group.** The backend re-fires the same group on
+11. **The caller does not choose its own provenance.** Each exposed lane pins
+    its `source` at the proxy. Triage treats sensor issues differently, so a
+    report able to label itself as a system exception is a report that can get
+    itself auto-closed.
+12. **One issue per error group.** The backend re-fires the same group on
     regression and unmute; the receiver deduplicates on the group id rather than
     the rendered message, which varies within a group.
 
-Rules 8-11 are why the label matters more than it looks: the label is what
+Rules 8-12 are why the label matters more than it looks: the label is what
 makes an error a routable piece of work rather than a notification.
 
 <!-- standard:enforced-by -->
 - `tests/test_sentry_observability_adapter.py`
 - `tests/test_triage_phase.py`
 - `tests/test_issue_intake_boundary.py`
+- `tests/architecture/test_intake_proxy_config.py`
+- `tests/scenarios/test_exception_sensor_triage_scenario.py`
 <!-- /standard:enforced-by -->
 
 ## Why a standard and not just an ADR
