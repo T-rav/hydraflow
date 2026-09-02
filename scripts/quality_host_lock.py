@@ -44,6 +44,11 @@ from pathlib import Path
 
 LOCK_PATH = Path(os.environ.get("TMPDIR", "/tmp")) / "hydraflow-quality.lock"  # nosec B108
 DEFAULT_TIMEOUT_S = 3600
+#: How many suites may run at once (#12036). ONE keeps today's behaviour
+#: exactly: a single mutex, which is what `LOCK_PATH` alone expressed. Raising
+#: it makes verification a budget an operator sets, rather than a number that
+#: falls out of however many agents happen to be dispatched.
+DEFAULT_SLOTS = 1
 POLL_INTERVAL_S = 2
 ABANDONED_EXIT_CODE = 75  # sysexits.h EX_TEMPFAIL: orphaned, nobody to report to
 
@@ -126,35 +131,49 @@ def _run_command(command: list[str], parent_pid: int) -> int:
             signal.signal(sig, handler)
 
 
-def _acquire(handle, timeout_s: int, parent_pid: int) -> str:
-    """Block until the lock is held, the wait times out, or *parent_pid* dies.
+def _slot_paths(slots: int) -> list[Path]:
+    """The lock file for each verification slot.
 
-    Returns "acquired", "timeout", or "abandoned". Comparing the live
-    ``os.getppid()`` against the caller-recorded *parent_pid* — rather than
-    testing ``os.getppid() == 1`` — is what keeps this correct under a
-    subreaper, where an orphan is reparented onto the subreaper's pid
-    instead of onto init's.
+    Slot 0 keeps `LOCK_PATH`'s exact name, so a host running the old
+    single-slot build and a host running this one contend on the SAME file
+    rather than silently running two suites at once during a rollout.
+    """
+    return [LOCK_PATH] + [
+        LOCK_PATH.with_name(f"{LOCK_PATH.stem}.{n}{LOCK_PATH.suffix}")
+        for n in range(1, slots)
+    ]
+
+
+def _acquire_any_slot(handles: list, timeout_s: int, parent_pid: int):
+    """Take the first free slot, or report why not.
+
+    Returns ``(handle, state)`` — ``handle`` is None unless a slot was taken.
+    Every slot is tried on each pass before sleeping, so N suites run
+    concurrently and the N+1th queues; with ``slots == 1`` this is exactly the
+    single mutex it replaces.
     """
     deadline = time.monotonic() + timeout_s
     announced = False
     while True:
         if os.getppid() != parent_pid:
-            return "abandoned"
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return "acquired"
-        except OSError:
-            if not announced:
-                print(
-                    f"[quality-lock] another full suite is running on this "
-                    f"host; waiting (up to {timeout_s}s) rather than racing "
-                    f"it — concurrent suites SIGTERM each other (#11219)",
-                    flush=True,
-                )
-                announced = True
-            if time.monotonic() >= deadline:
-                return "timeout"
-            time.sleep(POLL_INTERVAL_S)
+            return None, "abandoned"
+        for handle in handles:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                continue
+            return handle, "acquired"
+        if not announced:
+            print(
+                f"[quality-lock] all {len(handles)} verification slot(s) on "
+                f"this host are busy; waiting (up to {timeout_s}s) rather than "
+                f"racing — concurrent suites SIGTERM each other (#11219)",
+                flush=True,
+            )
+            announced = True
+        if time.monotonic() >= deadline:
+            return None, "timeout"
+        time.sleep(POLL_INTERVAL_S)
 
 
 def main(argv: list[str]) -> int:
@@ -179,13 +198,20 @@ def main(argv: list[str]) -> int:
         timeout_s = DEFAULT_TIMEOUT_S
 
     try:
-        handle = LOCK_PATH.open("w")
+        slots = max(1, int(os.environ.get("HYDRAFLOW_QUALITY_SLOTS", DEFAULT_SLOTS)))
+    except ValueError:
+        slots = DEFAULT_SLOTS
+
+    try:
+        handles = [path.open("w") for path in _slot_paths(slots)]
     except OSError:
         # Unwritable lock path is never a reason to block a developer.
         return _run_command(command, parent_pid)
 
-    with handle:
-        state = _acquire(handle, timeout_s, parent_pid)
+    with contextlib.ExitStack() as stack:
+        for handle in handles:
+            stack.enter_context(handle)
+        held, state = _acquire_any_slot(handles, timeout_s, parent_pid)
         if state == "abandoned":
             print(
                 f"[quality-lock] parent process ({parent_pid}) exited while "
@@ -203,8 +229,9 @@ def main(argv: list[str]) -> int:
         try:
             return _run_command(command, parent_pid)
         finally:
-            with contextlib.suppress(OSError):
-                fcntl.flock(handle, fcntl.LOCK_UN)
+            if held is not None:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(held, fcntl.LOCK_UN)
 
 
 if __name__ == "__main__":
