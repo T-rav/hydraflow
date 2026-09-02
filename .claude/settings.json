@@ -69,6 +69,11 @@
             "timeout": 15,
             "statusMessage": "Checking cross-service impact for shared/ changes...",
             "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.guard-overwriting-tracked-source.sh",
+            "_hydraflow": true
           }
         ]
       },
