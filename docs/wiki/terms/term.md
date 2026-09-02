@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ubiquitous_language.py:Term"
 aliases: ["ul term", "glossary term"]
 related: []
-evidence: []
+evidence: ["01KQP0XFBGMB32VFGNPV8GZ26A"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-24T10:13:36.338150+00:00"
-updated_at: "2026-07-24T10:13:36.338154+00:00"
+updated_at: "2026-09-02T21:39:55.176717+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-24T10:13:36.338021+00:00"
 proposal_signals: ["S2"]
