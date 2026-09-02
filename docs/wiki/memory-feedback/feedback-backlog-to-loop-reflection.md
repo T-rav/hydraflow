@@ -1,9 +1,10 @@
 ---
 source: feedback_backlog_to_loop_reflection.md
 name: feedback_backlog_to_loop_reflection
-description: When manually clearing a recurring backlog a bg worker should own, run the backlog-to-loop reflection and spec a resolver
-status: pending
-issue: null
+description: When manually clearing a recurring backlog a bg worker should own, run
+  the backlog-to-loop reflection and spec a resolver
+status: issue-open
+issue: 12054
 promoted_in: null
 wontfix_reason: null
 created: '2026-07-18'
