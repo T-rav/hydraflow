@@ -18,7 +18,7 @@ Two halves, and only the first is code in this repo:
 | Half | Where it lives | What it does |
 |---|---|---|
 | Outbound | `src/observability/sentry_adapter.py` | Ships exceptions to an ingest endpoint |
-| Inbound | `src/dashboard_routes/_bugsink_routes.py` | Receives the backend's alert webhook and files the issue |
+| Inbound | `src/dashboard_routes/_issue_intake_routes.py` | One authenticated boundary that files the issue |
 
 The inbound half is deliberately *not* a HydraFlow loop — but it is code, which
 an earlier draft of ADR-0146 denied. Bugsink has **no** GitHub integration; its
@@ -55,9 +55,12 @@ and this standard is satisfied either way.
 9. **Triage routes them as incoming system exceptions.** A sensor issue that
    fails triage is a transient, not a bug report, and is auto-closed rather than
    parked for clarification that no author will ever supply.
-10. **The receiver refuses anonymous callers.** The alert webhook's config is a
-    bare URL — no signing secret, no auth header — so the URL is the credential.
-    Unconfigured means closed, never open.
+10. **The intake refuses anonymous callers.** Filing an issue from outside a
+    loop requires the operator credential the repo already has (ADR-0140), and
+    a deployment not bound to loopback has no intake endpoint at all. A backend
+    that cannot set an `Authorization` header — Bugsink's webhook config is a
+    bare URL — gets a proxy in front of it, not a second credential path
+    through the application.
 11. **One issue per error group.** The backend re-fires the same group on
     regression and unmute; the receiver deduplicates on the group id rather than
     the rendered message, which varies within a group.
@@ -68,7 +71,7 @@ makes an error a routable piece of work rather than a notification.
 <!-- standard:enforced-by -->
 - `tests/test_sentry_observability_adapter.py`
 - `tests/test_triage_phase.py`
-- `tests/test_bugsink_alert_receiver.py`
+- `tests/test_issue_intake_boundary.py`
 <!-- /standard:enforced-by -->
 
 ## Why a standard and not just an ADR

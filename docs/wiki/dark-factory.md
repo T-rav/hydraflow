@@ -468,18 +468,32 @@ unreleased work on infrastructure you own.
 ### 3. Inbound — point it back at HydraFlow
 
 **Bugsink has no GitHub integration.** Its only outbound path is a custom
-webhook. Generate a token, put it in `.env`, and configure the webhook in
-Bugsink's project alert settings:
+webhook, and that webhook's config is a bare URL: no signing secret, no auth
+header. So it cannot present the operator credential the intake boundary
+requires, and the stack ships a proxy that adds one.
 
 ```bash
-HYDRAFLOW_BUGSINK_WEBHOOK_TOKEN=$(openssl rand -hex 32)
+# ADR-0140's operator token — the SAME credential the policy write plane uses.
+HYDRAFLOW_OPERATOR_TOKEN=$(python -c "import secrets; print('hfop_' + secrets.token_urlsafe(32))")
+# The path token Bugsink puts in its URL; the proxy trades it for the bearer.
+BUGSINK_WEBHOOK_PATH_TOKEN=$(openssl rand -hex 32)
+
 # then in Bugsink: Alerts -> Custom webhook ->
-#   http://<hydraflow-host>:8000/api/bugsink/alert/<that-token>
+#   http://localhost:8081/hook/<BUGSINK_WEBHOOK_PATH_TOKEN>
 ```
 
-The URL **is** the credential — Bugsink's webhook config carries no signing
-secret and no auth header — so treat it like one. Unconfigured means the
-receiver 404s every request; it never falls open.
+```
+Bugsink --POST /hook/{token}--> Caddy proxy --Bearer hfop_...--> /api/issues/intake
+```
+
+Keep the `hfop_` prefix: `src/secret_scrub.py` (ADR-0085) redacts that grammar
+from the audit, transcript and event streams, and a token without it is only
+redactable when printed next to its variable name.
+
+The intake boundary is generic — the UI files through the same door with
+`?source=ui` — and it does not exist at all unless the dashboard is bound to
+loopback. That is ADR-0140's rule, not a new one: a credential checked on an
+interface the world can reach is a credential the world can brute-force.
 
 ### What arrives on the board
 

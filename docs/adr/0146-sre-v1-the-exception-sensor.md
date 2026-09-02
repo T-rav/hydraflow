@@ -87,15 +87,22 @@ entire argument for why the inbound half needed no code. It did.
 
 **What stands:** still no polling loop. Bugsink pushes, so there is no interval,
 no cursor and no backoff to keep correct — the receiver is a route
-(`dashboard_routes/_bugsink_routes.py`), and the original objection to a loop
+(`dashboard_routes/_issue_intake_routes.py`), and the original objection to a loop
 (a second implementation of somebody else's state machine) never applied to a
 webhook endpoint.
 
-**The URL is the credential.** Bugsink's webhook config is a bare URL — no
-signing secret, no auth header — so an endpoint that files GitHub issues from
-anonymous POSTs would be an open invitation. The token is a path segment
-compared in constant time; unconfigured means closed; a mismatch is a 404 rather
-than a 401 so the endpoint does not confirm its own existence.
+**Authentication is ADR-0140's, not a new one.** The receiver is a *generic*
+issue-intake boundary (`/api/issues/intake`) shared by the UI and the sensor,
+guarded by `operator_identity.authenticate_operator` and a gate with
+`write_gate`'s shape: loopback bind first, then the credential.
+
+A first draft invented a bespoke URL token for this. It was worse than the
+mechanism already in the repo on two counts — it imposed no loopback
+requirement, and it was invisible to the ADR-0085 secret scrubber, which only
+redacts the `hfop_` grammar. Bugsink's webhook config is a bare URL and cannot
+present a bearer token, so **the concession lives at the edge**: a proxy
+(`docker/bugsink-proxy/Caddyfile`) turns its URL token into an `Authorization`
+header. The application keeps exactly one way in.
 
 **Dedup is ours now, not the backend's.** Bugsink fires the *same* issue id on
 new/regression/unmute, so the receiver keys the issue title on that id and
@@ -139,8 +146,8 @@ decorative. The dead triage route gets a producer, and a test that fails when it
 loses one. #11879 gets a shipped first rung instead of a blocked epic.
 
 **Costs.** A `sentry-sdk` dependency. An operator must run a Bugsink instance
-(`make bugsink-up`) and point its custom webhook at this deployment's receiver
-with the shared token. The webhook's delivery is deployment, not code, so CI
+(`make bugsink-up`), which now includes a webhook proxy, and point its custom
+webhook at that proxy. The webhook's delivery is deployment, not code, so CI
 cannot prove the round trip; the standard's rules cover both halves we own. Error
 payloads leave the process, which is why PII is off by default (ADR-0085).
 
