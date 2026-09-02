@@ -523,24 +523,31 @@ async def _live_account_ids(config: Any) -> frozenset[str] | None:
     answer that on its own — the registry lives in the gateway — but the
     dashboard can already READ it, through the same `reader_from_config` path
     the accounts view uses. Owning a registry and being able to read one are
-    different questions, and only the second one had to be true.
+    different questions, and only the second had to be true.
 
     Read at mutation time rather than cached: an account can be deleted between
     an operator loading a revision and rolling back to it.
 
-    `None` means the read failed, and the workspace refuses on it. That is the
-    right default for a rollback specifically — it is what an operator reaches
-    for when something has already gone wrong, and applying a policy naming
+    `None` means unreadable, and the workspace refuses on it. That is the right
+    default for a rollback specifically — it is what an operator reaches for
+    when something has already gone wrong, and applying a policy naming
     accounts nobody could verify is the wrong move at that moment.
+
+    No try/except: `GatewayControlReader._read` already turns every transport
+    failure into a result whose `available` is False. Wrapping it was how this
+    first shipped, and it was wrong twice over — it added an unbaselined
+    BLE001 suppression, and it read a `.value` attribute that does not exist,
+    so it returned None unconditionally and refused every rollback.
     """
-    try:
-        result = await reader_from_config(config).accounts()
-    except Exception:  # noqa: BLE001 - any transport failure is "unverifiable"
+    result = await reader_from_config(config).accounts()
+    if not result.available or not result.data:
         return None
-    view = getattr(result, "value", None)
-    if view is None:
-        return None
-    return frozenset(account.account_id for account in view.accounts)
+    accounts = result.data.get("accounts") or []
+    return frozenset(
+        str(entry["account_id"])
+        for entry in accounts
+        if isinstance(entry, dict) and entry.get("account_id")
+    )
 
 
 def _rejection(rejected: PolicyMutationRejected) -> JSONResponse:
