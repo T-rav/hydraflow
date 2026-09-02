@@ -48,23 +48,37 @@ if TYPE_CHECKING:
 #: The provider value a dial carries when nobody has moved it.
 _DEFAULT = "claude"
 
-#: Dials whose spawn is a `BaseRunner` carrying a `PROVIDER_FIELD`, mapped to
-#: the `WorkerRole` that runner takes. `triage_provider` is deliberately absent:
-#: `WorkerRole` has no `triage` member, so it cannot join this way.
-_ROLE_DIALS: dict[str, WorkerRole] = {
-    "implementation_provider": WorkerRole.IMPLEMENTER,
-    "planner_provider": WorkerRole.PLANNER,
-    "review_provider": WorkerRole.REVIEWER,
-}
-
-#: Dials whose spawn goes through `run_lightweight_agent`, which passes
-#: `principal_id=source`. Swept from the tree by #12023's source map; a dial can
-#: govern more than one principal, so the value is a set.
+#: Every routing dial, mapped to the `principal_id` set its spawns carry.
+#:
+#: `principal_ids`, not `roles`, and that is a correction (#11991). Three dials
+#: were joined on `WorkerRole` because their runner names one — but a role is a
+#: LOSSY projection of the principal: `canonical_worker_role` is an exact match
+#: against ADR-0137's vocabulary, so `reviewer` resolves and `review_fixer` and
+#: `verification_judge` do not. A `roles=[REVIEWER]` policy therefore claimed one
+#: of `review_provider`'s three spawn sites and left the other two on the legacy
+#: path — one dial, split silently down the middle. `planner_provider` had the
+#: same hole for `planner-gap-review`.
+#:
+#: Match dimensions AND (`evaluate_match` yields a rejection per unsatisfied
+#: dimension), so naming both `roles` and `principal_ids` would NARROW to their
+#: intersection rather than widen. One dimension, complete sets.
+#:
+#: Provenance: read off the `event_data["source"]` / `source=` literal at each
+#: spawn, which `base_runner` turns into `principal_id`
+#: (`principal_id = str(event_data.get("source", self._phase_name))`).
+#: `test_every_declared_principal_exists_in_the_tree` fails if one is renamed.
 _PRINCIPAL_DIALS: dict[str, frozenset[str]] = {
+    "ac_provider": frozenset({"ac_generator", "ac_precheck", "ac_precheck_debug"}),
     "adr_review_provider": frozenset({"adr_reviewer", "decomposition_ensemble"}),
+    "implementation_provider": frozenset({"implementer"}),
+    "planner_provider": frozenset({"planner", "planner-gap-review"}),
     "pr_unstick_provider": frozenset({"pr_unsticker"}),
     "retro_finder_provider": frozenset({"retro_finder"}),
+    "review_provider": frozenset({"reviewer", "review_fixer", "verification_judge"}),
+    "term_proposer_provider": frozenset({"term_proposer"}),
     "transcript_summary_provider": frozenset({"transcript_summary"}),
+    "triage_honeypot_provider": frozenset({"triage_honeypot"}),
+    "triage_provider": frozenset({"triage"}),
     "wiki_compilation_provider": frozenset({"wiki_compilation"}),
 }
 
@@ -72,22 +86,6 @@ _PRINCIPAL_DIALS: dict[str, frozenset[str]] = {
 #: gap is assertable: `test_every_dial_is_generated_or_registered` fails when a
 #: fifteenth dial appears in neither map nor here.
 UNGENERATED_DIALS: dict[str, str] = {
-    "triage_provider": (
-        "no `WorkerRole.triage` exists to join on, and #12023 found triage.py's "
-        "spawn carries source='triage_honeypot' — a different dial's principal"
-    ),
-    "triage_honeypot_provider": (
-        "its spawn passes `source=source`, a parameter rather than a literal, "
-        "so the principal is not knowable from the call site alone"
-    ),
-    "ac_provider": (
-        "spawns through `stream_claude_with_telemetry`, not "
-        "`run_lightweight_agent`, so it carries no `principal_id=source` to join"
-    ),
-    "term_proposer_provider": (
-        "the dial is handed to a `ClaudeCLIClient` at construction; the "
-        "principal belongs to whatever later invokes that client"
-    ),
     "maintenance_provider": (
         "not a role rule — it is the value a caller naming NO provider "
         "inherits, so it becomes a default-rung policy, not a scoped one"
@@ -110,10 +108,6 @@ def baseline_policies(config: HydraFlowConfig) -> tuple[RoutingPolicy, ...]:
         return ()
 
     policies: list[RoutingPolicy] = []
-    for dial, role in sorted(_ROLE_DIALS.items()):
-        binding = _moved_binding(config, dial)
-        if binding is not None:
-            policies.append(_policy(dial, repo=repo, binding=binding, roles=(role,)))
     for dial, principals in sorted(_PRINCIPAL_DIALS.items()):
         binding = _moved_binding(config, dial)
         if binding is not None:
