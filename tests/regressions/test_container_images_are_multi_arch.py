@@ -19,6 +19,9 @@ is in scope — so a fourth image cannot be added without meeting the rule.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +137,79 @@ def test_a_partial_manifest_is_refused(workflow: Path) -> None:
     assert "refusing to publish a partial manifest" in runs, (
         f"{workflow.name}'s merge job does not refuse a partial manifest"
     )
-    assert '"architecture":"arm64"' in runs, (
-        f"{workflow.name}'s merge job does not verify arm64 reached the registry"
+
+
+@pytest.mark.parametrize("workflow", _image_workflows(), ids=lambda p: p.stem)
+@pytest.mark.parametrize(
+    ("published", "accepted"),
+    [
+        pytest.param(("amd64", "arm64"), True, id="both-arches"),
+        pytest.param(("arm64",), False, id="amd64-missing"),
+        pytest.param(("amd64",), False, id="arm64-missing"),
+        pytest.param((), False, id="empty-manifest"),
+    ],
+)
+def test_the_verify_step_refuses_what_it_should(
+    workflow: Path, published: tuple[str, ...], accepted: bool, tmp_path: Path
+) -> None:
+    """The verify step is EXECUTED, against manifests it must accept and refuse.
+
+    This used to assert that the literal string `'"architecture":"arm64"'`
+    appeared in the merge job — the spelling of the check rather than its
+    behaviour. That pinned a bug in place (#11980): the guard grepped
+    `'"architecture":"amd64"'` with no space after the colon, while
+    `imagetools inspect --raw` pretty-prints, so it matched NOTHING against a
+    COMPLETE manifest and its verdict depended on the runner's buildx version.
+    A spelling assertion cannot see that, and reddened on the fix instead.
+
+    So the step is run for real, with `docker` stubbed to emit the manifest
+    under test. The `both-arches` case is the one the old form could not make:
+    a guard that refuses a complete manifest fails here.
+    """
+    step = next(
+        (
+            s
+            for s in _merge_steps(workflow)
+            if "verify" in str(s.get("name", "")).lower()
+        ),
+        None,
     )
+    assert step is not None, f"{workflow.name} has no manifest verification step"
+
+    manifest = json.dumps(
+        {
+            "manifests": [
+                {"platform": {"architecture": arch, "os": "linux"}}
+                for arch in published
+            ]
+        },
+        indent=2,  # pretty-printed, as `imagetools inspect --raw` emits
+    )
+    stub = tmp_path / "docker"
+    stub.write_text(f"#!/bin/bash\ncat <<'MANIFEST'\n{manifest}\nMANIFEST\n")
+    stub.chmod(0o755)
+
+    result = subprocess.run(  # noqa: S603
+        ["bash", "-c", step["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "IMAGE_NAME": "example.test/image",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert (result.returncode == 0) is accepted, (
+        f"{workflow.name}: published={published or '()'} should "
+        f"{'pass' if accepted else 'be refused'}; exit={result.returncode}\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
+
+
+def _merge_steps(workflow: Path) -> list[dict[str, Any]]:
+    doc = _doc(workflow)
+    merge = next((j for n, j in doc["jobs"].items() if "merge" in n.lower()), None)
+    return list(merge["steps"]) if merge else []
