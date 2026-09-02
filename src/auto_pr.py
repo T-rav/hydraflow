@@ -219,10 +219,8 @@ def open_automated_pr(
         body: PR body.
         base: Base branch the PR targets. Defaults to ``"main"``.
         auto_merge: If True, attempt to enable auto-merge via
-            ``gh pr merge --auto --squash``, falling back to a direct
-            ``gh pr merge --squash`` when ``--auto`` is not allowed on the
-            repo (#12053).  Best-effort — failure of both is logged but does
-            not raise.
+            ``gh pr merge --auto --squash``.  Best-effort — failure here is
+            logged but does not raise.
         worktree_parent: Directory to create the ephemeral worktree under.
             Defaults to ``repo_root.parent``. Callers that keep worktrees in
             a dedicated workspace (e.g. HydraFlow's ``workspace_base``) pass
@@ -367,7 +365,18 @@ def open_automated_pr(
             and pr_url is not None
             and _auto_merge_allowed(pr_url, worktree_path=worktree_path)
         ):
-            _merge_pr_best_effort(pr_url, worktree_path=worktree_path)
+            merge_proc = _run_gh(
+                ["gh", "pr", "merge", pr_url, "--auto", "--squash"],
+                cwd=worktree_path,
+            )
+            if merge_proc.returncode != 0:
+                # Auto-merge is best-effort; many repos disallow it and that
+                # shouldn't fail the whole flow.
+                logger.warning(
+                    "gh pr merge --auto failed for %s: %s",
+                    pr_url,
+                    merge_proc.stderr or merge_proc.stdout,
+                )
 
         return AutoPrResult(status="opened", pr_url=pr_url, branch=branch)
 
@@ -552,97 +561,6 @@ async def _auto_merge_allowed_async(
         )
         return False
     return _rollup_payload_is_green(stdout, pr_url)
-
-
-# ---------------------------------------------------------------------------
-# Direct-merge fallback when auto-merge is not allowed (#12053)
-# ---------------------------------------------------------------------------
-#
-# ``gh pr merge --auto`` needs the repo-level "Allow auto-merge" setting. With
-# it off, GitHub answers ``GraphQL: Auto merge is not allowed for this
-# repository (enablePullRequestAutoMerge)`` — and the old code logged a warning
-# and gave up, so every PR opened through this path was left open with nobody
-# following up. Toggling the repo setting needs admin, so the code side takes
-# the fallback instead.
-#
-# The fallback needs no CI poll loop: ``_auto_merge_allowed`` (#10672) has
-# already confirmed every non-skipped check settled SUCCESS, so a direct
-# ``gh pr merge --squash`` now makes exactly the decision ``--auto`` would have
-# made on the next check event. Blanket fallback on ANY ``--auto`` failure
-# rather than message-matching the GraphQL text: the green-gate has passed, and
-# a direct merge is still enforced server-side by branch protection (required
-# checks, required reviews), so it cannot merge anything ``--auto`` wouldn't.
-# Failure modes ``--auto`` reports for other reasons (conflicts, draft PR) fail
-# the direct merge too, which lands on the same best-effort warning as before.
-
-_MERGE_ARMED_LOG = "auto_pr: armed auto-merge for %s"
-_MERGE_DIRECT_LOG = "auto_pr: direct squash-merge succeeded for %s"
-_MERGE_FALLBACK_LOG = (
-    "auto_pr: gh pr merge --auto failed for %s (%s); the green-gate already "
-    "confirmed CI is green, retrying as a direct squash-merge"
-)
-# Both paths exhausted. Stays a warning, not a raise: an unmergeable bot PR is
-# an operational condition for the shepherd loops to pick up, not a reason to
-# fail a flow that already pushed the branch and opened the PR.
-_MERGE_FAILED_LOG = "gh pr merge failed for %s (--auto, then direct --squash): %s"
-
-
-def _merge_pr_best_effort(pr_url: str, *, worktree_path: Path) -> None:
-    """Arm auto-merge, falling back to a direct squash-merge. Never raises."""
-    auto_proc = _run_gh(
-        ["gh", "pr", "merge", pr_url, "--auto", "--squash"], cwd=worktree_path
-    )
-    if auto_proc.returncode == 0:
-        logger.info(_MERGE_ARMED_LOG, pr_url)
-        return
-
-    logger.info(
-        _MERGE_FALLBACK_LOG, pr_url, (auto_proc.stderr or auto_proc.stdout).strip()
-    )
-    direct_proc = _run_gh(["gh", "pr", "merge", pr_url, "--squash"], cwd=worktree_path)
-    if direct_proc.returncode != 0:
-        logger.warning(
-            _MERGE_FAILED_LOG,
-            pr_url,
-            (direct_proc.stderr or direct_proc.stdout).strip(),
-        )
-        return
-    logger.info(_MERGE_DIRECT_LOG, pr_url)
-
-
-async def _merge_pr_best_effort_async(
-    pr_url: str, *, worktree_path: Path, gh_token: str
-) -> None:
-    """Async twin of :func:`_merge_pr_best_effort`. Never raises."""
-    from subprocess_util import run_subprocess  # local import: avoids cycles
-
-    async def _merge(*flags: str) -> str | None:
-        """Run ``gh pr merge`` with *flags*; return the error text, or None."""
-        try:
-            await run_subprocess(
-                "gh",
-                "pr",
-                "merge",
-                pr_url,
-                *flags,
-                cwd=worktree_path,
-                gh_token=gh_token,
-            )
-        except RuntimeError as exc:
-            return str(exc)
-        return None
-
-    auto_error = await _merge("--auto", "--squash")
-    if auto_error is None:
-        logger.info(_MERGE_ARMED_LOG, pr_url)
-        return
-
-    logger.info(_MERGE_FALLBACK_LOG, pr_url, auto_error)
-    direct_error = await _merge("--squash")
-    if direct_error is not None:
-        logger.warning(_MERGE_FAILED_LOG, pr_url, direct_error)
-        return
-    logger.info(_MERGE_DIRECT_LOG, pr_url)
 
 
 # ---------------------------------------------------------------------------
@@ -988,9 +906,19 @@ async def _finalize_pr_from_worktree(
             pr_url, worktree_path=worktree_path, gh_token=gh_token
         )
     ):
-        await _merge_pr_best_effort_async(
-            pr_url, worktree_path=worktree_path, gh_token=gh_token
-        )
+        try:
+            await run_subprocess(
+                "gh",
+                "pr",
+                "merge",
+                pr_url,
+                "--auto",
+                "--squash",
+                cwd=worktree_path,
+                gh_token=gh_token,
+            )
+        except RuntimeError as exc:
+            logger.warning("gh pr merge --auto failed for %s: %s", pr_url, exc)
 
     return AutoPrResult(status="opened", pr_url=pr_url, branch=branch)
 
@@ -1041,9 +969,7 @@ async def open_automated_pr_async(  # noqa: PLR0911 — linear step-by-step guar
         pr_body: Body for the PR.
         commit_message: Commit message; defaults to `pr_title` when None.
         base: Base branch. Defaults to ``"main"``.
-        auto_merge: If True, attempt `gh pr merge --auto --squash`, falling
-            back to a direct `gh pr merge --squash` when `--auto` is not
-            allowed on the repo (#12053).
+        auto_merge: If True, attempt `gh pr merge --auto --squash`.
         gh_token: Value injected as GH_TOKEN for each subprocess call.
         raise_on_failure: If False, failures become
             ``AutoPrResult(status="failed")`` instead of raising.
