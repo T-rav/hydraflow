@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -707,12 +708,40 @@ class BaseRunner:
             restricted=not self._config.agent_unrestricted_tools,
         )
 
+    #: Share of ``quality_timeout`` the host lock may spend QUEUING (#12036).
+    #: The rest is what the suite itself gets. Any value < 1.0 fixes the
+    #: composition; a half keeps a queued agent's remaining budget comfortably
+    #: above the suite's own runtime.
+    _LOCK_WAIT_SHARE = 0.5
+
+    def _quality_env(self) -> dict[str, str]:
+        """Environment for ``make quality``, bounding the lock's wait (#12036).
+
+        `quality_timeout` covers the WHOLE `make quality` invocation, and that
+        invocation begins by waiting on `scripts/quality_host_lock.py`. The lock
+        defaults to a 3600s wait and `quality_timeout` defaults to 3600s, so an
+        agent that queues for the bound has its suite killed at the exact moment
+        the lock would have stopped waiting and let it run — reported as
+        ``make quality timed out``, indistinguishable from a genuine hang.
+
+        The lock cannot fix this alone: it has no idea what budget its caller is
+        holding. So the caller tells it, and the two stop being independent
+        numbers that happen to be equal.
+        """
+        return {
+            **os.environ,
+            "HYDRAFLOW_QUALITY_LOCK_TIMEOUT": str(
+                int(self._config.quality_timeout * self._LOCK_WAIT_SHARE)
+            ),
+        }
+
     async def _verify_quality(self, worktree_path: Path) -> LoopResult:
         """Run ``make quality`` and return a :class:`LoopResult`."""
         try:
             result = await self._runner.run_simple(
                 ["make", "quality"],
                 cwd=str(worktree_path),
+                env=self._quality_env(),
                 timeout=self._config.quality_timeout,
             )
         except FileNotFoundError:

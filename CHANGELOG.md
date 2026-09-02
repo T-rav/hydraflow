@@ -7,6 +7,10 @@ what a tag promises, and the cut recipe live in
 
 ## Unreleased
 
+- `make env` renamed to `make deps-heal` (#12041): the old name read as dotenv
+  setup while `.env` seeding lives in `make setup`; `make env` remains as a
+  deprecated alias for one cycle. The factory launcher, help text, wiki, and
+  launcher-service test move to the new name.
 - Docs/release hygiene: `.env.sample` rewritten around a QUICK START block (the
   required repo target, the gh-CLI-first auth story, `CLAUDE_CODE_OAUTH_TOKEN`
   for Docker mode, per-tool provider keys) and purged of vars nothing reads —
