@@ -1,0 +1,65 @@
+# Exposes the issue-logging surface, and nothing else.
+#
+# HydraFlow's dashboard has NO in-process authentication. ADR-0138 §D5 records
+# that its operator boundary IS the loopback socket bind, and ADR-0140 confirms
+# only one route ever gained a credential of its own: of ~169 dashboard routes,
+# 8 mention the operator token. Publishing the dashboard would therefore not
+# expose "the UI" — it would expose the control plane, unauthenticated.
+#
+# So this proxy is default-deny with exactly two locations open, both of which
+# land on the intake boundary. The dashboard stays on 127.0.0.1, which is also
+# what keeps ADR-0140's write gate open: the app must not be the thing facing
+# the world.
+#
+# Substitution is restricted to HF_-prefixed variables (NGINX_ENVSUBST_FILTER),
+# so nginx's own $host / $remote_addr survive the template pass.
+
+upstream hydraflow_dashboard {
+    server ${HF_UPSTREAM};
+}
+
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name ${HF_SERVER_NAME};
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    server_tokens off;
+    client_max_body_size 1m;
+
+    # Default deny. Anything not named below does not exist as far as the
+    # network is concerned — including every dashboard route.
+    location / {
+        return 404;
+    }
+
+    # --- The exception sensor's webhook -----------------------------------
+    # Bugsink's alert config is a bare URL: no signing secret, no auth header.
+    # This hop trades its URL path token for the ADR-0140 bearer, so the
+    # application still sees exactly one credential type.
+    location = /hook/${HF_WEBHOOK_PATH_TOKEN} {
+        limit_except POST {
+            deny all;
+        }
+        proxy_set_header Authorization "Bearer ${HF_OPERATOR_TOKEN}";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://hydraflow_dashboard/api/issues/intake?source=bugsink;
+    }
+
+    # --- Direct intake, for callers that CAN present a bearer --------------
+    # The client's own Authorization is forwarded untouched: this location
+    # proxies the credential, it does not mint one. A caller without a valid
+    # operator token gets the app's 401, not a way in.
+    location = /api/issues/intake {
+        limit_except POST {
+            deny all;
+        }
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://hydraflow_dashboard;
+    }
+}

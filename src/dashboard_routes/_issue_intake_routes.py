@@ -27,6 +27,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 
@@ -91,6 +92,54 @@ def _bugsink_issue(payload: dict[str, Any]) -> tuple[str, str]:
         f"{table}{link}\n"
     )
     return f"[bugsink] {title} ({issue_id})", body
+
+
+async def _stacktrace_for(
+    issue_id: str, base_url: str, token: str, *, timeout: float = 5.0
+) -> str:
+    """The group's latest stack trace as Markdown, or "" if it cannot be had.
+
+    **Why this exists.** The alert webhook carries no frames: Bugsink's
+    ``IssueSerializer`` explicitly comments out ``last_frame_filename``,
+    ``last_frame_module`` and ``last_frame_function``, so the payload is a type,
+    a message, a transaction path and some counts. Triage classifies on the
+    issue body, so without this it decides whether a production exception is
+    real from one line of text — and a sensor issue that fails triage is
+    AUTO-CLOSED as a transient (``triage_phase._flow_route``). Thin evidence
+    would therefore not just misfile bugs, it would silently discard them.
+
+    **Best-effort, always.** Every failure returns "" and the issue is filed
+    without the trace. An enrichment that could block filing would make the
+    sensor worse than no sensor: the signal is the issue, the trace is a bonus.
+    """
+    if not (base_url and token and issue_id):
+        return ""
+    headers = {"Authorization": f"Bearer {token}"}
+    root = base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            listing = await client.get(
+                f"{root}/api/canonical/0/events/",
+                params={"issue": issue_id},
+                headers=headers,
+            )
+            listing.raise_for_status()
+            body = listing.json()
+            events = body.get("results") if isinstance(body, dict) else body
+            if not isinstance(events, list) or not events:
+                return ""
+            event_id = str((events[-1] or {}).get("id") or "")
+            if not event_id:
+                return ""
+            trace = await client.get(
+                f"{root}/api/canonical/0/events/{event_id}/stacktrace/",
+                headers={**headers, "Accept": "text/markdown"},
+            )
+            trace.raise_for_status()
+            return trace.text.strip()
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        logger.debug("bugsink stack-trace enrichment failed", exc_info=True)
+        return ""
 
 
 def _ui_issue(payload: dict[str, Any]) -> tuple[str, str]:
@@ -160,6 +209,15 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         title, body = normalise(payload)
         if not title:
             return JSONResponse({"detail": "a title is required"}, status_code=400)
+
+        if source == "bugsink":
+            trace = await _stacktrace_for(
+                str(payload.get("id") or ""),
+                str(getattr(ctx.config, "bugsink_base_url", "") or ""),
+                str(getattr(ctx.credentials, "bugsink_api_token", "") or ""),
+            )
+            if trace:
+                body += f"\n\n### Stack trace\n\n{trace}\n"
 
         existing = await ctx.pr_manager.find_existing_issue(title)
         if existing:

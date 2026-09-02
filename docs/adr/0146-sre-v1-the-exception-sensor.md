@@ -100,9 +100,15 @@ A first draft invented a bespoke URL token for this. It was worse than the
 mechanism already in the repo on two counts — it imposed no loopback
 requirement, and it was invisible to the ADR-0085 secret scrubber, which only
 redacts the `hfop_` grammar. Bugsink's webhook config is a bare URL and cannot
-present a bearer token, so **the concession lives at the edge**: a proxy
-(`docker/bugsink-proxy/Caddyfile`) turns its URL token into an `Authorization`
+present a bearer token, so **the concession lives at the edge**: an nginx front
+door (`docker/hydraflow-proxy/`) turns its URL token into an `Authorization`
 header. The application keeps exactly one way in.
+
+That proxy is also the answer for a remote deploy, and it is default-deny: it
+opens the two intake locations and 404s everything else. The dashboard is not
+publishable — ADR-0138 §D5 makes the loopback bind its only boundary, and of
+~169 dashboard routes 8 carry a credential — so exposing "the UI" would expose
+the control plane. Only the issue-logging surface is reachable.
 
 **Dedup is ours now, not the backend's.** Bugsink fires the *same* issue id on
 new/regression/unmute, so the receiver keys the issue title on that id and

@@ -65,6 +65,16 @@ class Credentials(BaseModel):
             "what tests, CI and the air-gapped sandbox get."
         ),
     )
+    bugsink_api_token: str = Field(
+        default="",
+        description=(
+            "Bugsink API token used to fetch an error group's stack trace at "
+            "intake (ADR-0146). The alert webhook carries no frames — Bugsink's "
+            "IssueSerializer comments out last_frame_* — so without this the "
+            "board gets a one-line message and triage classifies blind. "
+            "Optional: enrichment is best-effort and never blocks filing."
+        ),
+    )
     whatsapp_token: str = Field(
         default="",
         description="WhatsApp Business API access token",
@@ -3195,6 +3205,13 @@ class HydraFlowConfig(BaseModel):
     find_label: list[str] = Field(
         default=["hydraflow-find"],
         description="Labels for new issues to discover and triage into planning (OR logic)",
+    )
+    bugsink_base_url: str = Field(
+        default="",
+        description=(
+            "Base URL of the Bugsink instance, used to fetch a group's stack "
+            "trace at intake (ADR-0146). Empty disables enrichment."
+        ),
     )
     exception_sensor_label: list[str] = Field(
         default=["bugsink"],
@@ -7322,6 +7339,7 @@ class HydraFlowConfig(BaseModel):
 _GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 # 1:1 credential-field → env-key. Read with empty-string defaults.
 _SENTRY_ENV_KEYS: dict[str, str] = {"sentry_dsn": "SENTRY_DSN"}
+_BUGSINK_ENV_KEYS: dict[str, str] = {"bugsink_api_token": "BUGSINK_API_TOKEN"}
 _WHATSAPP_ENV_KEYS: dict[str, str] = {
     "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
     "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
@@ -7336,6 +7354,7 @@ CREDENTIAL_ENV_KEYS: frozenset[str] = (
     frozenset(_GH_TOKEN_ENV_KEYS)
     | frozenset(_WHATSAPP_ENV_KEYS.values())
     | frozenset(_SENTRY_ENV_KEYS.values())
+    | frozenset(_BUGSINK_ENV_KEYS.values())
 )
 
 
@@ -7362,9 +7381,13 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
     sentry_dsn = os.environ.get(_SENTRY_ENV_KEYS["sentry_dsn"], "") or _dotenv_lookup(
         config.repo_root, _SENTRY_ENV_KEYS["sentry_dsn"]
     )
+    bugsink_api_token = os.environ.get(
+        _BUGSINK_ENV_KEYS["bugsink_api_token"], ""
+    ) or _dotenv_lookup(config.repo_root, _BUGSINK_ENV_KEYS["bugsink_api_token"])
     return Credentials(
         gh_token=gh_token,
         sentry_dsn=sentry_dsn,
+        bugsink_api_token=bugsink_api_token,
         **{
             field: os.environ.get(env_key, "")
             for field, env_key in _WHATSAPP_ENV_KEYS.items()

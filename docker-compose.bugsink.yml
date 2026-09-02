@@ -55,25 +55,29 @@ services:
       timeout: 20s
       retries: 10
 
-  # The webhook proxy (see docker/bugsink-proxy/Caddyfile). Bugsink cannot set
-  # an Authorization header, so this hop adds the ADR-0140 operator token and
-  # the application keeps exactly one way in.
-  bugsink-webhook-proxy:
-    image: caddy:2-alpine
+  # The only service that faces the network. Default-deny; the ONLY things it
+  # exposes are the two issue-intake locations. The dashboard itself stays on
+  # 127.0.0.1 — it has no in-process auth on ~160 of its routes (ADR-0138 §D5),
+  # so publishing it would expose the control plane, not just the UI.
+  hydraflow-intake-proxy:
+    image: nginx:1.27-alpine
     restart: unless-stopped
-    depends_on: [bugsink]
     volumes:
-      - ./docker/bugsink-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/hydraflow-proxy/templates:/etc/nginx/templates:ro
+      - ${HF_TLS_CERT_DIR:?set HF_TLS_CERT_DIR in .env — a dir holding fullchain.pem and privkey.pem}:/etc/nginx/certs:ro
     environment:
-      BUGSINK_WEBHOOK_PATH_TOKEN: ${BUGSINK_WEBHOOK_PATH_TOKEN:?set BUGSINK_WEBHOOK_PATH_TOKEN in .env (openssl rand -hex 32)}
-      HYDRAFLOW_OPERATOR_TOKEN: ${HYDRAFLOW_OPERATOR_TOKEN:?set HYDRAFLOW_OPERATOR_TOKEN in .env (hfop_ + token_urlsafe(32), ADR-0140)}
-      # The dashboard binds to loopback (ADR-0140 requires it), which from a
-      # container is the HOST's loopback, not our own.
-      HYDRAFLOW_INTAKE_UPSTREAM: ${HYDRAFLOW_INTAKE_UPSTREAM:-host.docker.internal:8000}
+      # Restrict substitution to our own variables so nginx's $host and
+      # $remote_addr survive the template pass.
+      NGINX_ENVSUBST_FILTER: "^HF_"
+      HF_UPSTREAM: ${HF_UPSTREAM:-host.docker.internal:8000}
+      HF_SERVER_NAME: ${HF_SERVER_NAME:-_}
+      HF_WEBHOOK_PATH_TOKEN: ${BUGSINK_WEBHOOK_PATH_TOKEN:?set BUGSINK_WEBHOOK_PATH_TOKEN in .env (openssl rand -hex 32)}
+      HF_OPERATOR_TOKEN: ${HYDRAFLOW_OPERATOR_TOKEN:?set HYDRAFLOW_OPERATOR_TOKEN in .env (hfop_ + token_urlsafe(32), ADR-0140)}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:${BUGSINK_WEBHOOK_PROXY_PORT:-8081}:8081"
+      # Deliberately NOT loopback-bound: this is the exposed surface.
+      - "${HF_INTAKE_PROXY_PORT:-8443}:8443"
 
 volumes:
   bugsink-db-data:

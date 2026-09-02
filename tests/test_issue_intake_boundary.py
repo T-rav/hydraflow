@@ -13,13 +13,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from dashboard_routes import _issue_intake_routes as intake_module  # noqa: E402
 from dashboard_routes._issue_intake_routes import (  # noqa: E402
+    _stacktrace_for,
     intake_open,
     register,
 )
@@ -53,7 +56,14 @@ def _configured_operator(monkeypatch):
     monkeypatch.setenv(OPERATOR_TOKEN_ENV, TOKEN)
 
 
-def _client(*, host: str = "127.0.0.1", existing: int = 0, created: int = 4242):
+def _client(
+    *,
+    host: str = "127.0.0.1",
+    existing: int = 0,
+    created: int = 4242,
+    base_url: str = "",
+    api_token: str = "",
+):
     prs = SimpleNamespace(
         find_existing_issue=AsyncMock(return_value=existing),
         create_issue=AsyncMock(return_value=created),
@@ -63,7 +73,11 @@ def _client(*, host: str = "127.0.0.1", existing: int = 0, created: int = 4242):
             dashboard_host=host,
             find_label=["hydraflow-find"],
             exception_sensor_label=["bugsink"],
+            # Empty by default: enrichment is off unless a test opts in, so no
+            # test reaches the network.
+            bugsink_base_url=base_url,
         ),
+        credentials=SimpleNamespace(bugsink_api_token=api_token),
         pr_manager=prs,
     )
     router = APIRouter()
@@ -184,6 +198,74 @@ class TestOneIssuePerErrorGroup:
 
         assert first == second, "dedup key must not move when the message does"
         assert ALERT["id"] in first
+
+
+class TestStackTraceEnrichment:
+    """The alert payload carries no frames, so triage would classify blind.
+
+    Bugsink's IssueSerializer comments out last_frame_filename / _module /
+    _function, so the webhook body is a type, a message, a transaction path and
+    some counts. That matters more than it looks: a sensor issue that FAILS
+    triage is auto-closed as a transient, so thin evidence does not just misfile
+    a bug, it discards one.
+    """
+
+    def test_the_trace_is_appended_to_the_body(self, monkeypatch) -> None:
+        async def _fake(issue_id, base_url, token, *, timeout=5.0):
+            assert issue_id == ALERT["id"]
+            return "```\nFile 'x.py', line 1\n```"
+
+        monkeypatch.setattr(intake_module, "_stacktrace_for", _fake)
+        client, prs = _client(base_url="http://bugsink:8000", api_token="tok")
+
+        client.post("/api/issues/intake?source=bugsink", json=ALERT, headers=AUTH)
+
+        body = prs.create_issue.await_args.args[1]
+        assert "Stack trace" in body
+        assert "File 'x.py', line 1" in body
+
+    def test_an_unreachable_backend_still_files_the_issue(self, monkeypatch) -> None:
+        """The signal is the issue; the trace is a bonus.
+
+        Exercises the REAL failure — a transport error out of httpx — rather
+        than monkeypatching the helper to raise. An earlier version did the
+        latter, which tested the call site's robustness against an exception the
+        helper cannot actually produce, and would have argued for a blind catch
+        that `httpx.HTTPError` (the base of every transport AND status error)
+        already covers.
+        """
+
+        class _DeadClient:
+            def __init__(self, *_a, **_k) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_exc) -> bool:
+                return False
+
+            async def get(self, *_a, **_k):
+                raise httpx.ConnectError("bugsink unreachable")
+
+        monkeypatch.setattr(httpx, "AsyncClient", _DeadClient)
+        client, prs = _client(base_url="http://bugsink:8000", api_token="tok")
+
+        response = client.post(
+            "/api/issues/intake?source=bugsink", json=ALERT, headers=AUTH
+        )
+
+        assert response.status_code == 200, "a dead backend must not lose the signal"
+        prs.create_issue.assert_awaited_once()
+        body = prs.create_issue.await_args.args[1]
+        assert "Stack trace" not in body, "no trace, but the issue still lands"
+
+    @pytest.mark.asyncio
+    async def test_enrichment_is_off_without_a_token_or_url(self) -> None:
+        """No network call is even attempted when unconfigured."""
+        assert await _stacktrace_for("abc", "", "tok") == ""
+        assert await _stacktrace_for("abc", "http://bugsink:8000", "") == ""
+        assert await _stacktrace_for("", "http://bugsink:8000", "tok") == ""
 
 
 class TestBadInput:

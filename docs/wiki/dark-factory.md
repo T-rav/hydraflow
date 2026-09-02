@@ -465,6 +465,26 @@ unreleased work on infrastructure you own.
 
 `HYDRAFLOW_SENTRY_DISABLED=1` overrides a configured DSN, always toward off.
 
+### How Bugsink groups (it is not Sentry's algorithm)
+
+Bugsink aggregates events into issues, but keys on **exception type + message**
+with variable-ish parts normalised (UUIDs, hashes, numbers, URLs, emails,
+dates), where Sentry keys primarily on the **stack trace**. Two consequences,
+both worth knowing before reading the board:
+
+- The same type and message raised from **two different code paths collapses
+  into one issue**. Sentry would have split them.
+- A bug whose stack varies stays **one** issue. Sentry would have split that
+  too, and for a factory this is usually the better failure.
+
+Custom fingerprints are supported (`"{{ default }}"` includes the automatic
+grouping and refines it) if under-splitting ever bites.
+
+This is also why the intake deduplicates on the Bugsink issue **id** rather than
+the rendered message: the backend has already decided what one group is, and
+re-keying on text here would second-guess it — and split a group whose message
+Bugsink deliberately normalised.
+
 ### 3. Inbound — point it back at HydraFlow
 
 **Bugsink has no GitHub integration.** Its only outbound path is a custom
@@ -483,8 +503,34 @@ BUGSINK_WEBHOOK_PATH_TOKEN=$(openssl rand -hex 32)
 ```
 
 ```
-Bugsink --POST /hook/{token}--> Caddy proxy --Bearer hfop_...--> /api/issues/intake
+Bugsink --POST /hook/{token}--> nginx --Bearer hfop_...--> 127.0.0.1 /api/issues/intake
 ```
+
+### Remote deploys — expose the intake, never the dashboard
+
+`make bugsink-up` includes an nginx front door (`docker/hydraflow-proxy/`). It is
+**default-deny** and opens exactly two locations, both landing on the intake:
+`/hook/<path-token>` for Bugsink, and `/api/issues/intake` for callers that can
+present the bearer themselves.
+
+Everything else returns 404, and that is not conservatism — it is required.
+HydraFlow's dashboard has **no in-process authentication**: ADR-0138 §D5 records
+that its operator boundary *is* the loopback bind, and of ~169 dashboard routes,
+8 mention the operator token. Publishing the dashboard would expose the control
+plane, not the UI.
+
+So on a remote deploy:
+
+```bash
+HYDRAFLOW_DASHBOARD_HOST=127.0.0.1     # keep it. Also what keeps ADR-0140's gate open.
+HF_TLS_CERT_DIR=/etc/letsencrypt/live/<host>   # holds fullchain.pem + privkey.pem
+HF_SERVER_NAME=hydraflow.example.com
+HF_INTAKE_PROXY_PORT=8443              # the ONLY published port
+```
+
+If you ever find yourself setting `HYDRAFLOW_DASHBOARD_HOST=0.0.0.0` to make
+something reachable, that is the signal to put it behind this proxy instead —
+the intake gate will 404 rather than let the bind go public, deliberately.
 
 Keep the `hfop_` prefix: `src/secret_scrub.py` (ADR-0085) redacts that grammar
 from the audit, transcript and event streams, and a token without it is only
