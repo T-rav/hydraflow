@@ -6,9 +6,11 @@ guarded doc→code, which is how eleven dead vars accumulated in `.env.sample`
 — the OTel/Honeycomb block outlived its removal (ADR-0055 → Superseded by
 ADR-0118) and two phantom combo vars carried a migration note instructing
 operators to set values nothing read. This test closes that direction:
-every ``UPPER_CASE=`` name the sample documents must be read by the runtime
-(config override tables, credentials, docker passthrough, provider keys,
-gateway control plane) or sit on the named allowlist below with a reason.
+every ``UPPER_CASE=`` name the sample documents must be known to the runtime
+by name (config override tables, credentials, docker passthrough, provider
+keys, gateway control plane — for the ``GATEWAY_*`` names the runtime is the
+scrub registry, not a consumer) or sit on the named allowlist below with a
+reason.
 """
 
 from __future__ import annotations
@@ -18,6 +20,10 @@ from pathlib import Path
 
 from config import CREDENTIAL_ENV_KEYS, env_override_keys
 from operator_identity import OPERATOR_TOKEN_ENV
+
+# _DOCKER_ENV_PASSTHROUGH_KEYS is private but IS the docker read surface this
+# guard exists to compare against; promoting it to public API for one test
+# would widen subprocess_util's contract for no runtime caller.
 from subprocess_util import (
     _DOCKER_ENV_PASSTHROUGH_KEYS,
     GATEWAY_CONTROL_PLANE_ENV_KEYS,

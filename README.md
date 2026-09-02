@@ -120,7 +120,7 @@ make setup
 # gh + your logged-in Claude CLI; Docker mode also needs CLAUDE_CODE_OAUTH_TOKEN
 # (see "Claude Authentication"). The QUICK START block at the top of
 # .env.sample maps every stage tool to the key it needs.
-$EDITOR .env   # set HYDRAFLOW_GITHUB_REPO=owner/repo
+${EDITOR:-nano} .env   # set HYDRAFLOW_GITHUB_REPO=owner/repo
 
 # scaffold quality gates in the target repo (CI/make/tests/lint where missing)
 make prep

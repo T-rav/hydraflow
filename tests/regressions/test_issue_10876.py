@@ -11,6 +11,12 @@ configuration into every ``HydraFlowConfig`` built during the test session —
 observed live while investigating #10859, where ``sentry_org`` resolved to a
 real org value instead of the declared default.
 
+(2026-08-31: both example keys are historical — ``otel_environment``/``HF_ENV``
+went with ADR-0118 and ``sentry_org``/``SENTRY_ORG`` with the Sentry
+release-upload path. The class this guards against is any non-prefixed table
+key, and the fixture scrubs ``declared_env_keys()`` wholesale, so the guard
+holds regardless of which keys populate the tables.)
+
 The same fixture also independently clobbered ``HYDRAFLOW_SENTRY_DISABLED``:
 ``tests/conftest.py`` sets it at import time, but the old ``HYDRAFLOW_*``
 prefix-pop swept it up and never re-seeded it, so the Sentry kill switch was
