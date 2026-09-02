@@ -1197,3 +1197,112 @@ def test_an_aborted_record_never_pairs_a_revision_with_another_revisions_hash(
     payload = workspace.history().records[-1].payload
 
     assert (payload["new_revision"], payload["new_content_hash"]) == (1, landed)
+
+
+def _pool_policy(
+    policy_id: str = "pool", *, accounts: tuple[str, ...]
+) -> RoutingPolicy:
+    """A policy that NAMES accounts — the shape a rollback can strand."""
+    return RoutingPolicy(
+        id=policy_id,
+        match=RoutingMatch(repo_ids=(_REPO,)),
+        action=RoutingAction(account_pool=accounts),
+    )
+
+
+class TestARollbackCannotStrandADeletedAccount:
+    """#11994 AC4: refuse, naming the account, rather than partially applying.
+
+    A rolled-back policy may name accounts that were valid when it was written
+    and are not now. Reminting against one would issue a live credential from a
+    revision the operator is explicitly abandoning.
+    """
+
+    def _staged(self, tmp_path: Path):
+        """revision 1 names two accounts; revision 2 removes the policy."""
+        workspace = _workspace(tmp_path)
+        _create(workspace, _pool_policy(accounts=("acct-a", "acct-b")))
+        # DISABLE, not delete: the four kinds are create/update/disable/rollback.
+        workspace.apply(
+            PolicyMutation(
+                kind=PolicyMutationKind.DISABLE,
+                policy_id="pool",
+                expected_revision=1,
+            ),
+            actor=_ACTOR,
+            now=_NOW,
+        )
+        return workspace
+
+    def _rollback(self, workspace, known):
+        return workspace.apply(
+            PolicyMutation(
+                kind=PolicyMutationKind.ROLLBACK,
+                expected_revision=2,
+                target_revision=1,
+            ),
+            actor=_ACTOR,
+            now=_NOW,
+            known_accounts=known,
+        )
+
+    def test_a_missing_account_refuses_and_names_it(self, tmp_path: Path) -> None:
+        workspace = self._staged(tmp_path)
+
+        with pytest.raises(PolicyMutationRejected) as caught:
+            self._rollback(workspace, frozenset({"acct-a"}))
+
+        assert caught.value.code is MutationRejection.UNKNOWN_ACCOUNT
+        assert "acct-b" in str(caught.value), (
+            "the refusal must say WHICH account; an operator cannot act on "
+            "'some account is missing'"
+        )
+
+    def test_the_refusal_leaves_the_revision_alone(self, tmp_path: Path) -> None:
+        """Refusing is only worth something if it did not half-apply."""
+        workspace = self._staged(tmp_path)
+        before = workspace.read().revision
+
+        with pytest.raises(PolicyMutationRejected):
+            self._rollback(workspace, frozenset({"acct-a"}))
+
+        assert workspace.read().revision == before
+
+    def test_every_account_still_present_rolls_back(self, tmp_path: Path) -> None:
+        workspace = self._staged(tmp_path)
+
+        self._rollback(workspace, frozenset({"acct-a", "acct-b"}))
+
+        assert [p.id for p in workspace.read().policies] == ["pool"]
+
+    def test_an_unverifiable_account_set_refuses(self, tmp_path: Path) -> None:
+        """`None` means the caller could not read the registry.
+
+        Fail closed: a rollback is what an operator reaches for when something
+        has already gone wrong, and applying a policy naming accounts nobody
+        could verify is the wrong move at that moment.
+        """
+        workspace = self._staged(tmp_path)
+
+        with pytest.raises(PolicyMutationRejected) as caught:
+            self._rollback(workspace, None)
+
+        assert caught.value.code is MutationRejection.UNKNOWN_ACCOUNT
+
+    def test_a_rollback_naming_no_accounts_is_unaffected(self, tmp_path: Path) -> None:
+        """The common case must not start failing: most policies name none."""
+        workspace = _workspace(tmp_path)
+        _create(workspace, _policy())
+        _create(workspace, _policy("second"), expected_revision=1)
+
+        workspace.apply(
+            PolicyMutation(
+                kind=PolicyMutationKind.ROLLBACK,
+                expected_revision=2,
+                target_revision=1,
+            ),
+            actor=_ACTOR,
+            now=_NOW,
+        )
+
+        assert workspace.read().policies == (_policy(),)
