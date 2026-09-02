@@ -1,0 +1,50 @@
+# The exposed half of the exception sensor — a SEPARATE file on purpose.
+#
+# Compose interpolates every service's variables even when you name a subset on
+# the command line, so while this lived in docker-compose.bugsink.yml its
+# required TLS/token variables made a purely local `make bugsink-up` impossible.
+# Found by running it, not by reading it.
+#
+# Splitting it also keeps the `:?` guards honest. The obvious alternative —
+# giving the tokens empty defaults — is worse than it looks: an empty
+# HF_EXCEPTION_PATH_TOKEN renders `location = /exception/`, which is a real,
+# reachable path. A missing token must stop the stack, not open a lane.
+#
+#   make bugsink-up           # local only, no certs needed
+#   make bugsink-up-exposed   # this file too
+
+services:
+  # The only service that faces the network. Default-deny; the ONLY things it
+  # exposes are the two issue-intake locations. The dashboard itself stays on
+  # 127.0.0.1 — it has no in-process auth on ~160 of its routes (ADR-0138 §D5),
+  # so publishing it would expose the control plane, not just the UI.
+  hydraflow-intake-proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./docker/hydraflow-proxy/templates:/etc/nginx/templates:ro
+      - ${HF_TLS_CERT_DIR:?set HF_TLS_CERT_DIR in .env — a dir holding fullchain.pem and privkey.pem}:/etc/nginx/certs:ro
+    environment:
+      # Restrict substitution to our own variables so nginx's $host and
+      # $remote_addr survive the template pass.
+      NGINX_ENVSUBST_FILTER: "^HF_"
+      # 5555 is the dashboard's port (config.dashboard_port / Makefile PORT),
+      # NOT Bugsink's 8000. Pinned by test_intake_proxy_config so the two
+      # cannot drift apart silently.
+      HF_UPSTREAM: ${HF_UPSTREAM:-host.docker.internal:5555}
+      HF_SERVER_NAME: ${HF_SERVER_NAME:-_}
+      # One token per lane, so they rotate independently.
+      HF_EXCEPTION_PATH_TOKEN: ${HF_EXCEPTION_PATH_TOKEN:?set HF_EXCEPTION_PATH_TOKEN in .env (openssl rand -hex 32)}
+      HF_REPORT_PATH_TOKEN: ${HF_REPORT_PATH_TOKEN:?set HF_REPORT_PATH_TOKEN in .env (openssl rand -hex 32)}
+      HF_OPERATOR_TOKEN: ${HYDRAFLOW_OPERATOR_TOKEN:?set HYDRAFLOW_OPERATOR_TOKEN in .env (hfop_ + token_urlsafe(32), ADR-0140)}
+      # An error storm is the realistic flood, so the exception lane gets the
+      # larger burst; a person filing reports needs almost nothing.
+      HF_EXCEPTION_RATE: ${HF_EXCEPTION_RATE:-30r/m}
+      HF_EXCEPTION_BURST: ${HF_EXCEPTION_BURST:-20}
+      HF_REPORT_RATE: ${HF_REPORT_RATE:-10r/m}
+      HF_REPORT_BURST: ${HF_REPORT_BURST:-5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Deliberately NOT loopback-bound: this is the exposed surface.
+      - "${HF_INTAKE_PROXY_PORT:-8443}:8443"

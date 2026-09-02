@@ -98,6 +98,27 @@ def test_copies_every_kernel_standards_directory_from_hydraflow(tmp_path) -> Non
     )
 
 
+def test_the_exception_sensor_runbook_ships_with_the_kernel(tmp_path) -> None:
+    """The SRE runbook must reach a stamped repo, not just HydraFlow.
+
+    It began life in `.claude/agents/`, which nothing stamps — so a repo
+    onboarded to the format inherited the exception_sensor RULES with no
+    instructions for satisfying them. The stamper copies every file under a
+    kernel standard's directory, so living beside the standard is what makes it
+    ship; this pins that rather than trusting it.
+    """
+    result = stamp_kernel(_spec(), tmp_path / "game1")
+
+    runbook = result.root / "docs" / "standards" / "exception_sensor" / "RUNBOOK.md"
+
+    assert runbook.is_file(), "the exception-sensor runbook did not ship"
+    text = runbook.read_text(encoding="utf-8")
+    assert "traces_sample_rate" in text, "must tell an app how to init the SDK"
+    assert "no GitHub integration" in text, (
+        "must carry the fact that makes the webhook necessary"
+    )
+
+
 def test_pyproject_and_cli_carry_package_substitution(tmp_path) -> None:
     result = stamp_kernel(_spec(), tmp_path / "game1")
 

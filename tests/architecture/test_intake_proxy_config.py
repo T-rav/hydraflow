@@ -145,9 +145,14 @@ class TestTheProxyPointsAtTheDashboard:
         from config import HydraFlowConfig
 
         expected = HydraFlowConfig.model_fields["dashboard_port"].default
-        compose = (
-            Path(__file__).resolve().parents[2] / "docker-compose.bugsink.yml"
-        ).read_text(encoding="utf-8")
+        compose_path = (
+            Path(__file__).resolve().parents[2] / "docker-compose.intake-proxy.yml"
+        )
+        assert compose_path.is_file(), (
+            f"{compose_path.name} missing — the proxy service moved and this "
+            "guard would silently stop checking anything"
+        )
+        compose = compose_path.read_text(encoding="utf-8")
 
         match = re.search(r"HF_UPSTREAM:\s*\$\{HF_UPSTREAM:-([^}]+)\}", compose)
 
