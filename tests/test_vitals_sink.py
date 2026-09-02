@@ -12,13 +12,19 @@ import ast
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from vitals_sink.degrading import read_tree, regressions, report  # noqa: E402
+from vitals_sink.degrading import (  # noqa: E402
+    read_tree,
+    regressions,
+    report,
+    silent,
+)
 from vitals_sink.layout import (  # noqa: E402
     SCHEMA_VERSION,
     VITALS_KIND,
@@ -277,7 +283,12 @@ class TestWhichFactoryIsDegradingAndSinceWhen:
     def test_an_empty_tree_says_so_rather_than_claiming_health(
         self, tmp_path: Path
     ) -> None:
-        assert report(tmp_path) == "no factory is degrading"
+        """The all-clear now answers BOTH questions.
+
+        "No factory is degrading" alone was the sentence a dead fleet produces,
+        which is why silence became its own reported fact (#11690 AC4).
+        """
+        assert report(tmp_path) == "no factory is degrading; none has gone quiet"
 
     def test_the_report_names_the_metric_and_when(self, tmp_path: Path) -> None:
         root = self._tree(
@@ -292,3 +303,109 @@ class TestWhichFactoryIsDegradingAndSinceWhen:
 
         assert "suppressions.entries.count" in text
         assert "since 2026-09-02T00:00:00+00:00" in text
+
+
+class TestSilenceDoesNotReadAsHealth:
+    """#11690 AC4: a factory that stops emitting is detectable as ABSENT.
+
+    A degradation report over a tree that stopped being written says "no
+    factory is degrading" — true of the data, and exactly wrong about the
+    world. Absence has to be its own reported fact, not inferred from the lack
+    of a finding.
+    """
+
+    _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+
+    def _tree(self, tmp_path: Path, docs: list[dict]) -> Path:
+        for document in docs:
+            place(document, root=tmp_path)
+        return tmp_path
+
+    def test_a_factory_past_the_floor_is_reported_silent(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path, [_doc(emitted_at="2026-09-01T00:00:00+00:00")])
+
+        quiet = silent(read_tree(root), now=self._NOW, floor_seconds=86_400)
+
+        assert [(s.repo, s.host) for s in quiet] == [("acme/hydraflow", "box-1")]
+
+    def test_a_recent_factory_is_not_silent(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path, [_doc(emitted_at="2026-09-03T11:00:00+00:00")])
+
+        assert silent(read_tree(root), now=self._NOW, floor_seconds=86_400) == ()
+
+    def test_one_host_going_quiet_is_seen_beside_a_live_one(
+        self, tmp_path: Path
+    ) -> None:
+        """The case that matters: a fleet where only one has died."""
+        root = self._tree(
+            tmp_path,
+            [
+                _doc(host="live", emitted_at="2026-09-03T11:00:00+00:00"),
+                _doc(host="dead", emitted_at="2026-09-01T00:00:00+00:00"),
+            ],
+        )
+
+        quiet = silent(read_tree(root), now=self._NOW, floor_seconds=86_400)
+
+        assert [s.host for s in quiet] == ["dead"]
+
+    def test_the_newest_reading_decides_not_the_oldest(self, tmp_path: Path) -> None:
+        """A long history must not make a currently-live factory look dead."""
+        root = self._tree(
+            tmp_path,
+            [
+                _doc(emitted_at="2026-08-01T00:00:00+00:00"),
+                _doc(emitted_at="2026-09-03T11:00:00+00:00"),
+            ],
+        )
+
+        assert silent(read_tree(root), now=self._NOW, floor_seconds=86_400) == ()
+
+    def test_the_report_names_a_silent_factory_when_nothing_is_degrading(
+        self, tmp_path: Path
+    ) -> None:
+        """The headline: a healthy-looking report over a dead fleet."""
+        root = self._tree(tmp_path, [_doc(emitted_at="2026-09-01T00:00:00+00:00")])
+
+        text = report(root, now=self._NOW, floor_seconds=86_400)
+
+        assert "silent:" in text
+        assert "box-1" in text
+        assert text != "no factory is degrading"
+
+    def test_an_all_clear_says_both_things(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path, [_doc(emitted_at="2026-09-03T11:00:00+00:00")])
+
+        assert report(root, now=self._NOW, floor_seconds=86_400) == (
+            "no factory is degrading; none has gone quiet"
+        )
+
+
+class TestTheSinkCarriesNoConformanceClaim:
+    """#11690 AC5: losing the sink must lose vitals only.
+
+    The emitter is deliberately a VITALS emitter — it says what the counters
+    read, never that a gate holds. A sink that inferred compliance would make a
+    conformance claim auditable only through a data plane's uptime, which
+    #11688 rules out.
+    """
+
+    def test_no_module_here_renders_a_verdict(self) -> None:
+        from vitals_sink import degrading, layout
+
+        for module in (degrading, layout):
+            source = Path(module.__file__).read_text(encoding="utf-8")
+            names = {
+                node.name
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.FunctionDef | ast.ClassDef)
+            }
+            offenders = {
+                n
+                for n in names
+                if any(w in n.lower() for w in ("conform", "complian", "verdict"))
+            }
+            assert not offenders, (
+                f"{module.__name__} exposes {offenders}; the sink reports what "
+                f"the counters read, never whether a gate holds (#11688)"
+            )

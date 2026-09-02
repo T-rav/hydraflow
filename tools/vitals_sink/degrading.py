@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -142,17 +143,92 @@ def regressions(readings: tuple[Reading, ...]) -> tuple[Regression, ...]:
     return tuple(found)
 
 
-def report(root: Path) -> str:
-    """A human line per regression, worst delta first, or an explicit all-clear."""
-    found = regressions(read_tree(root))
-    if not found:
-        return "no factory is degrading"
-    lines = ["degrading:"]
-    lines.extend(
-        f"  {r.repo} {r.host}  {r.metric}  {r.was:g} -> {r.now:g} "
-        f"(+{r.delta:g}) since {r.since}"
-        for r in sorted(found, key=lambda r: -r.delta)
-    )
+@dataclass(frozen=True, slots=True)
+class Silent:
+    """One factory that has stopped emitting, and how long it has been quiet."""
+
+    repo: str
+    host: str
+    last_seen: str
+    quiet_seconds: float
+
+
+def silent(
+    readings: tuple[Reading, ...], *, now: datetime, floor_seconds: float
+) -> tuple[Silent, ...]:
+    """Identities whose newest reading is older than the emission floor.
+
+    D2 pairs the RC-cut trigger with a time floor precisely so this question is
+    answerable: without a floor, a factory that emits only on RC cuts and a
+    factory that has died look identical, because both are simply not sending.
+    The floor is the longest silence that is still normal.
+
+    **This is the half that makes the whole plane honest.** A degradation report
+    over a tree that stopped being written reads "no factory is degrading" —
+    perfectly true of the data, and exactly wrong about the world. Absence has
+    to be reported as its own fact, not inferred from the lack of a finding.
+
+    Push, not pull (D1), is what makes it detectable at all: a scraper cannot
+    miss a host it never knew existed, but a host that has emitted before and
+    stopped leaves a gap that is visible in its own partition.
+    """
+    newest: dict[tuple[str, str], Reading] = {}
+    for reading in readings:
+        key = reading.identity
+        if key not in newest or reading.emitted_at > newest[key].emitted_at:
+            newest[key] = reading
+
+    quiet = []
+    for (repo, host), reading in sorted(newest.items()):
+        try:
+            seen = datetime.fromisoformat(reading.emitted_at)
+        except ValueError:
+            continue
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=UTC)
+        gap = (now - seen).total_seconds()
+        if gap > floor_seconds:
+            quiet.append(
+                Silent(
+                    repo=repo,
+                    host=host,
+                    last_seen=reading.emitted_at,
+                    quiet_seconds=gap,
+                )
+            )
+    return tuple(quiet)
+
+
+def report(
+    root: Path, *, now: datetime | None = None, floor_seconds: float = 86_400.0
+) -> str:
+    """Both facts: what is degrading, and who has gone quiet.
+
+    Silence is reported even when nothing is degrading, because "no factory is
+    degrading" over a tree that stopped being written is true of the data and
+    wrong about the world.
+    """
+    readings = read_tree(root)
+    found = regressions(readings)
+    quiet = silent(readings, now=now or datetime.now(UTC), floor_seconds=floor_seconds)
+
+    lines: list[str] = []
+    if found:
+        lines.append("degrading:")
+        lines.extend(
+            f"  {r.repo} {r.host}  {r.metric}  {r.was:g} -> {r.now:g} "
+            f"(+{r.delta:g}) since {r.since}"
+            for r in sorted(found, key=lambda r: -r.delta)
+        )
+    if quiet:
+        lines.append("silent:")
+        lines.extend(
+            f"  {s.repo} {s.host}  last seen {s.last_seen} "
+            f"({s.quiet_seconds / 3600:.1f}h ago)"
+            for s in sorted(quiet, key=lambda s: -s.quiet_seconds)
+        )
+    if not lines:
+        return "no factory is degrading; none has gone quiet"
     return "\n".join(lines)
 
 
