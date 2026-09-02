@@ -663,6 +663,10 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ),
     ("sampled_audit_model", "HYDRAFLOW_SAMPLED_AUDIT_MODEL", ""),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
+    # Without this the field is unreachable from the environment, so the
+    # intake's stack-trace enrichment could never be switched on in a real
+    # deployment — it would read "" and return no trace, silently.
+    ("bugsink_base_url", "HYDRAFLOW_BUGSINK_BASE_URL", ""),
     ("github_host", "HYDRAFLOW_GITHUB_HOST", "github.com"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
