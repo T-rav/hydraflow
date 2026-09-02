@@ -7593,6 +7593,52 @@ _FABLE_CANARY_DIALS: tuple[str, ...] = (
 )
 
 
+def _validate_governed_repo_has_no_ungoverned_face(config: HydraFlowConfig) -> None:
+    """A governed repository may not route a spawn face around the gateway.
+
+    #11992's config-time half. The runtime gauge counts a bypass after it
+    happened and the architecture gate refuses a bypass in the source; this is
+    the one that refuses the *configuration* that would produce one, where the
+    mistake is still free to fix.
+
+    Scoped to the config OF the governed repository. Each registered repo gets
+    its own ``HydraFlowConfig`` from ``load_runtime_config`` (see
+    ``RepoRuntime``), so this cannot force ``gateway`` on a host that merely
+    shares a process with a locked repo — the objection that stalled this
+    criterion, and it rested on the dials being global, which they are not.
+
+    Every ``*_provider`` dial is read from the model rather than listed: a new
+    dial is a new face, and a hand-written list is a face nobody checks.
+    """
+    from hydraflow_gateway.routing_policy import canonicalize_repo
+
+    canary = canonicalize_repo(str(config.gateway_enforcement_canary_repo or ""))
+    if canary is None:
+        return
+    repo = canonicalize_repo(str(getattr(config, "repo", "") or ""))
+    if repo is None or repo != canary:
+        return
+
+    ungoverned = sorted(
+        name
+        for name in type(config).model_fields
+        if name.endswith("_provider")
+        and str(getattr(config, name, "")).strip() not in ("", "gateway")
+    )
+    if not ungoverned:
+        return
+
+    named = ", ".join(f"{n}={getattr(config, n)!r}" for n in ungoverned)
+    msg = (
+        f"{repo} is the gateway enforcement canary, so every spawn face must "
+        f"resolve through the gateway; these do not: {named}. A face naming a "
+        f"provider directly cannot be moved by policy, so the lock stops being "
+        f"true for it silently. Set them to 'gateway', or clear "
+        f"gateway_enforcement_canary_repo to enforce nothing."
+    )
+    raise ValueError(msg)
+
+
 def _validate_fable_plan_canary(config: HydraFlowConfig) -> None:
     """A Fable canary dial that arms nothing must say so at load (#11541/#11542).
 
@@ -7863,6 +7909,7 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
 
     _validate_gateway_capture_policy(config)
     _validate_gateway_enforcement_canary(config)
+    _validate_governed_repo_has_no_ungoverned_face(config)
     _validate_fable_plan_canary(config)
     _validate_gateway_fleet_profile(config)
     _validate_gateway_pr_unstick_tool(config)
