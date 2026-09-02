@@ -118,6 +118,15 @@ class RetroFinder:
         prompt = _PROMPT.format(signals=self._render(signals))
         raw = await self._call_model(prompt, issue_labels=issue_labels)
         if not raw:
+            # Reset, or this tick reports the PREVIOUS tick's drops. The empty
+            # path returned without touching the counter, so a find() that
+            # dropped three items followed by one that never got a response at
+            # all published three drops the second tick did not have. Not
+            # counted as a drop: an empty `raw` is a timeout or a refusal, which
+            # is an error rather than something that failed to parse, and
+            # inflating a parse counter with it would make the number mean two
+            # things.
+            self.unparseable = 0
             return []
         findings, self.unparseable = parse_findings(raw)
         return findings
@@ -199,7 +208,17 @@ def parse_findings(raw: str) -> tuple[list[RetroFinding], int]:
     payload = _extract_array(raw)
     if payload is None:
         logger.warning("Retro finder returned no parseable JSON array")
-        return [], 0
+        # ONE drop, not zero (#11978). This is the whole-response failure —
+        # prose, a truncated fence, an apology — and returning 0 made it
+        # indistinguishable from a model that correctly reported nothing. That
+        # is the exact silence the docstring above promises not to keep, and it
+        # survived because the per-ITEM count below was already correct, so the
+        # counter looked implemented.
+        #
+        # One, because the response is the unit that was lost: how many
+        # findings it would have contained is unknowable, and inventing a
+        # larger number would make the count a guess rather than a fact.
+        return [], 1
 
     findings: list[RetroFinding] = []
     unparseable = 0

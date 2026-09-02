@@ -122,6 +122,54 @@ class TestEvidenceAnalysis:
         fof.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_items_the_finder_could_not_parse_are_counted_as_dropped(
+        self, tmp_path: Path
+    ):
+        """#11983: `unparseable` was computed and surfaced nowhere.
+
+        `findings_dropped` is threaded from `counts["dropped"]`, which counted
+        only items that parsed and then failed `validate`. A tick whose model
+        confabulated every item therefore reported zero drops — identical to a
+        clean tick, which is the #11965 audit escape.
+        """
+        collector, _ = _collector(tmp_path)
+
+        async def _find_dropping_two(*args, **kwargs):
+            collector._finder.unparseable = 2  # noqa: SLF001
+            return [FINDING]
+
+        with (
+            patch("retrospective.extract", return_value=[SIGNAL]),
+            patch("retro_finder.RetroFinder.find", new=_find_dropping_two),
+            patch("retro_emitter.file_or_fold", new=AsyncMock(return_value=55)),
+        ):
+            counts = await collector.analyze_evidence([_entry(1)])
+
+        # One valid finding filed, two items the finder never parsed.
+        assert counts["dropped"] == 2
+        assert counts["unparseable"] == 2
+        assert counts["filed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_clean_tick_reports_no_drops(self, tmp_path: Path):
+        """The other half: no false positives, or the count means nothing."""
+        collector, _ = _collector(tmp_path)
+
+        async def _find_cleanly(*args, **kwargs):
+            collector._finder.unparseable = 0  # noqa: SLF001
+            return [FINDING]
+
+        with (
+            patch("retrospective.extract", return_value=[SIGNAL]),
+            patch("retro_finder.RetroFinder.find", new=_find_cleanly),
+            patch("retro_emitter.file_or_fold", new=AsyncMock(return_value=55)),
+        ):
+            counts = await collector.analyze_evidence([_entry(1)])
+
+        assert counts["dropped"] == 0
+        assert counts["filed"] == 1
+
+    @pytest.mark.asyncio
     async def test_issue_labels_are_unioned_across_the_window(self, tmp_path: Path):
         """CH-6 elevation must see every issue whose evidence was read."""
         collector, _ = _collector(tmp_path)

@@ -10,13 +10,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from retro_finder import RetroFinder  # noqa: E402
+from retro_finder import RetroFinder, parse_findings  # noqa: E402
 from retro_signals import EvidenceRef, RetroSignal  # noqa: E402
 from subprocess_util import CreditExhaustedError  # noqa: E402
 from tests.helpers import ConfigFactory  # noqa: E402
@@ -202,3 +202,83 @@ class TestDataClassElevation:
             await _finder().find([SIGNAL], issue_labels=["data-class:secret"])
 
         assert spawn.await_args.kwargs["issue_labels"] == ["data-class:secret"]
+
+
+class TestParseTimeDropsAreCounted:
+    """#11978: every way a response can fail to become findings is counted.
+
+    The per-ITEM count was already right (#11903), which is exactly why the
+    whole-response failure went unnoticed for so long: the counter existed and
+    looked implemented, while the path that loses the most returned zero.
+    """
+
+    _VALID = {
+        "kind": "gate",
+        "signal_id": "tool_error-abc1234567",
+        "title": "Guard the recurring failure",
+        "guard_path": "tests/architecture/test_q.py",
+        "observed": "7 occurrences",
+    }
+
+    def test_a_valid_response_reports_no_drops(self) -> None:
+        findings, dropped = parse_findings(json.dumps([self._VALID]))
+
+        assert (len(findings), dropped) == (1, 0)
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param("I could not find anything useful.", id="prose"),
+            pytest.param('```json\n[{"kind"', id="truncated_fence"),
+            pytest.param("", id="empty"),
+            pytest.param('{"kind": "gate"}', id="object_not_array"),
+        ],
+    )
+    def test_a_response_with_no_extractable_array_is_a_drop(self, raw: str) -> None:
+        """The headline case: returning 0 here made a confabulating tick look clean."""
+        findings, dropped = parse_findings(raw)
+
+        assert findings == []
+        assert dropped > 0, (
+            "a response that yielded no findings at all reported zero drops, "
+            "which a reader cannot tell from a model that correctly found nothing"
+        )
+
+    def test_items_failing_validation_are_counted_individually(self) -> None:
+        findings, dropped = parse_findings(json.dumps([{"kind": "gate"}, {"nope": 1}]))
+
+        assert (findings, dropped) == ([], 2)
+
+    def test_a_mixed_response_keeps_the_valid_and_counts_the_rest(self) -> None:
+        findings, dropped = parse_findings(json.dumps([self._VALID, {"nope": 1}]))
+
+        assert (len(findings), dropped) == (1, 1)
+
+
+class TestTheDropCountIsPerTick:
+    """A counter that survives a tick reports drops that tick did not have."""
+
+    async def test_an_empty_response_does_not_inherit_the_previous_count(
+        self, tmp_path
+    ) -> None:
+        """#11978: the empty path returned without touching `unparseable`.
+
+        A tick that dropped three items followed by one that got no response at
+        all published three drops for the second tick. Found while wiring the
+        scenario: the early `if not raw: return []` skips `parse_findings`
+        entirely, so the attribute simply kept its old value.
+        """
+        finder = RetroFinder(
+            ConfigFactory.create(repo_root=tmp_path),
+            AsyncMock(),
+            MagicMock(gh_token=""),
+        )
+        finder.unparseable = 3
+
+        with patch.object(RetroFinder, "_call_model", new=AsyncMock(return_value="")):
+            findings = await finder.find([SIGNAL])
+
+        assert findings == []
+        assert finder.unparseable == 0, (
+            "an empty response inherited the previous tick's drop count"
+        )
