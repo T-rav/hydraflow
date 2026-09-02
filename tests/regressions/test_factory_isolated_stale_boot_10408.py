@@ -35,7 +35,7 @@ Two guards, so the drift can never silently recur:
    future edit that reintroduces the bare ``checkout "$BRANCH"`` fails here
    instead of silently stranding the factory again.
 
-The script's clone / ``.env`` copy / ``make env`` / ``make run`` steps are not
+The script's clone / ``.env`` copy / ``make deps-heal`` / ``make run`` steps are not
 exercised (heavy, side-effectful); this pins the git sync mechanic that broke.
 """
 

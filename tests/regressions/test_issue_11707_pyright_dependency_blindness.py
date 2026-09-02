@@ -28,7 +28,7 @@ the ``node`` that ``make typecheck`` already needs.
 
 Portable across checkouts that keep their venv elsewhere — the agent image
 puts it at ``/opt/hydraflow-venv``, a fresh worktree has none until
-``make env``. That is handled by retargeting the derived config onto the
+``make deps-heal``. That is handled by retargeting the derived config onto the
 interpreter actually running the tests (see ``_derive_canary_config``), NOT by
 pyright's PATH fallback, which ``_hermetic_bin_dir`` deliberately starves. The
 canary reddens only where pyright genuinely cannot see the dependency.
@@ -221,7 +221,7 @@ def _derive_canary_config(config_dir: Path) -> None:
     config["ignore"] = []
 
     # A checkout whose venv is not at the declared path — the agent image keeps
-    # it at /opt/hydraflow-venv, a fresh worktree has none until `make env` —
+    # it at /opt/hydraflow-venv, a fresh worktree has none until `make deps-heal` —
     # still has ONE: the interpreter running this test. Retarget onto it so the
     # canary asserts "the config points pyright at a real environment" rather
     # than "the environment sits at this exact path".
@@ -295,7 +295,7 @@ def _venv_state_hint() -> str:
 
     A deleted config key and an unsynced checkout both end as "pyright cannot
     see pydantic". They need opposite fixes, and an earlier version of this
-    hint told the reader to run `make env` in the first case — which cannot
+    hint told the reader to run `make deps-heal` in the first case — which cannot
     fix a deleted key, and whose closing "before reading anything else into
     this failure" sent them away from the real cause.
     """
@@ -307,7 +307,7 @@ def _venv_state_hint() -> str:
             f"venvPath={declared[0]!r} venv={declared[1]!r} — an incomplete pair, so "
             "pyright has no environment to resolve against. THIS IS THE REGRESSION, "
             'not a local environment problem: restore `venvPath = "."` and '
-            '`venv = ".venv"`. Running `make env` will not help.'
+            '`venv = ".venv"`. Running `make deps-heal` will not help.'
         )
     venv_dir = _declared_venv_dir(config)
     if venv_dir is None or venv_dir.is_dir():
@@ -322,7 +322,7 @@ def _venv_state_hint() -> str:
         f"\nNOTE: the declared venv {venv_dir} does not exist, so the canary retargeted "
         f"onto the interpreter running these tests ({sys.prefix}) — and that one cannot "
         "import pydantic either. A fresh git worktree has no .venv until something "
-        "syncs one: try `make env` in this checkout."
+        "syncs one: try `make deps-heal` in this checkout."
     )
 
 
