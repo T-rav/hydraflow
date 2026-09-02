@@ -34,6 +34,22 @@ def _all_gateway() -> dict[str, str]:
     return dict.fromkeys(_PROVIDER_DIALS, "gateway")
 
 
+def _governed(**overrides: object) -> dict[str, object]:
+    """A canary config that has already satisfied the fleet-ratchet clause.
+
+    The ratchet is checked before the dials, because a repo without it has
+    ungoverned faces no dial can name. These fixtures turn it on so the dial
+    assertions reach the dial check rather than stopping short of it.
+    """
+    return {
+        "repo": _GOVERNED,
+        "gateway_enforcement_canary_repo": _GOVERNED,
+        "gateway_fleet_ratchet_enabled": True,
+        "execution_mode": "docker",
+        **overrides,
+    }
+
+
 def test_the_dial_set_is_derived_and_non_empty() -> None:
     """Anti-vacuity: an empty set would make every assertion below pass."""
     assert len(_PROVIDER_DIALS) >= 13
@@ -43,25 +59,19 @@ def test_the_dial_set_is_derived_and_non_empty() -> None:
 class TestAGovernedRepoMustRouteEveryFaceThroughTheGateway:
     def test_a_direct_face_is_refused_at_load(self) -> None:
         with pytest.raises(ValueError, match="must resolve through the gateway"):
-            HydraFlowConfig(repo=_GOVERNED, gateway_enforcement_canary_repo=_GOVERNED)
+            HydraFlowConfig(**_governed())
 
     def test_the_refusal_names_the_offending_face(self) -> None:
         """ "Something is ungoverned" is not something an operator can act on."""
         with pytest.raises(ValueError) as caught:
             HydraFlowConfig(
-                repo=_GOVERNED,
-                gateway_enforcement_canary_repo=_GOVERNED,
-                **{**_all_gateway(), "review_provider": "claude"},
+                **_governed(**{**_all_gateway(), "review_provider": "claude"})
             )
 
         assert "review_provider='claude'" in str(caught.value)
 
     def test_all_faces_on_the_gateway_loads(self) -> None:
-        config = HydraFlowConfig(
-            repo=_GOVERNED,
-            gateway_enforcement_canary_repo=_GOVERNED,
-            **_all_gateway(),
-        )
+        config = HydraFlowConfig(**_governed(**_all_gateway()))
 
         assert config.maintenance_provider == "gateway"
 
@@ -87,3 +97,56 @@ class TestTheGateIsScopedToTheGovernedRepo:
         config = HydraFlowConfig(gateway_enforcement_canary_repo=_GOVERNED)
 
         assert config.maintenance_provider == "claude"
+
+
+class TestAGovernedRepoNeedsTheFleetRatchet:
+    """Dials are only half the faces (#11992).
+
+    Twenty of twenty-four `BaseRunner` subclasses declare no `PROVIDER_FIELD`,
+    so `_resolve_provider` returns a hardcoded "claude" — bug_reproducer, hitl,
+    research, discover, shape, plan_reviewer, diagnostic. No `*_provider`
+    setting can move them. The fleet ratchet is the only thing that rewrites a
+    still-claude spawn to "gateway".
+
+    The first version of this gate checked the dials alone, so a canary with
+    every dial on "gateway" and the ratchet off passed while seven runners went
+    straight to Anthropic — an ungoverned face no configuration named, which is
+    what the gate exists to refuse.
+    """
+
+    def test_every_dial_on_the_gateway_is_not_enough(self) -> None:
+        with pytest.raises(ValueError, match="gateway_fleet_ratchet_enabled"):
+            HydraFlowConfig(
+                repo=_GOVERNED,
+                gateway_enforcement_canary_repo=_GOVERNED,
+                **_all_gateway(),
+            )
+
+    def test_the_refusal_says_why_the_dials_are_insufficient(self) -> None:
+        with pytest.raises(ValueError) as caught:
+            HydraFlowConfig(
+                repo=_GOVERNED,
+                gateway_enforcement_canary_repo=_GOVERNED,
+                **_all_gateway(),
+            )
+
+        assert "declare no provider dial" in str(caught.value)
+
+    def test_the_ratchet_plus_every_dial_loads(self) -> None:
+        config = HydraFlowConfig(
+            repo=_GOVERNED,
+            gateway_enforcement_canary_repo=_GOVERNED,
+            gateway_fleet_ratchet_enabled=True,
+            execution_mode="docker",
+            **_all_gateway(),
+        )
+
+        assert config.gateway_fleet_ratchet_enabled is True
+
+    def test_an_ungoverned_repo_needs_no_ratchet(self) -> None:
+        """Scoped like the dial check: only the canary repo is judged."""
+        config = HydraFlowConfig(
+            repo="acme/other", gateway_enforcement_canary_repo=_GOVERNED
+        )
+
+        assert config.gateway_fleet_ratchet_enabled is False

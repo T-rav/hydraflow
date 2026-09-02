@@ -7642,6 +7642,30 @@ def _validate_governed_repo_has_no_ungoverned_face(config: HydraFlowConfig) -> N
     if repo is None or repo != canary:
         return
 
+    # Dials are only half the faces. Seven of the eleven concrete `BaseRunner`
+    # subclasses declare no `PROVIDER_FIELD`, so `_resolve_provider` returns a
+    # hardcoded "claude" for them — BugReproducer, DiagnosticRunner,
+    # DiscoverRunner, HITLRunner, PlanReviewer, ResearchRunner, ShapeRunner.
+    # Only AgentRunner, PlannerRunner, ReviewRunner and TriageRunner carry one.
+    # No `*_provider` setting can move the other seven;
+    # the only thing that routes them to the gateway is the fleet ratchet,
+    # which rewrites a still-claude spawn to "gateway" in `base_runner`.
+    #
+    # So a canary repo with every dial on "gateway" and the ratchet off still
+    # sends seven runners straight to Anthropic, and this gate passed it. That
+    # is the exact shape the gate exists to refuse — an ungoverned face that no
+    # configuration names.
+    if not getattr(config, "gateway_fleet_ratchet_enabled", False):
+        msg = (
+            f"{repo} is the gateway enforcement canary, so it needs "
+            f"gateway_fleet_ratchet_enabled=True. Twenty of twenty-four "
+            f"runners declare no provider dial and resolve to 'claude' by "
+            f"default; the fleet ratchet is the only thing that routes them "
+            f"through the gateway, so without it they reach Anthropic "
+            f"directly however the dials are set."
+        )
+        raise ValueError(msg)
+
     ungoverned = sorted(
         name
         for name in type(config).model_fields
