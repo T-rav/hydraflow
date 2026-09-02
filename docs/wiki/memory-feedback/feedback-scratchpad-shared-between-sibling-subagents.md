@@ -6,7 +6,7 @@ description: Parallel implementer subagents spawned by one orchestrator all get 
   silently overwritten by siblings — one PR shipped with another task's body
 status: issue-open
 issue: 11949
-promoted_in: null
+promoted_in: 12015
 wontfix_reason: null
 created: '2026-08-21'
 ---
