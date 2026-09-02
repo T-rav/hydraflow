@@ -77,6 +77,62 @@ class TestL9ADRReviewerLoop:
 
 
 # ---------------------------------------------------------------------------
+def _seed_failed_bash_trace(config, *, issue: int) -> None:
+    """One failed Bash call in `issue`'s implement trace.
+
+    Shared by the scenarios that need a signal to exist at all. It was inlined
+    twice as a sixty-line literal; two copies of a fixture drift the same way
+    two copies of a guard do.
+    """
+    import json  # noqa: PLC0415
+
+    run_dir = config.data_root / "traces" / str(issue) / "implement" / "run-1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "subprocess-0.json").write_text(
+        json.dumps(
+            {
+                "issue_number": issue,
+                "phase": "implement",
+                "source": "implementer",
+                "run_id": 1,
+                "subprocess_idx": 0,
+                "backend": "claude",
+                "started_at": "2026-08-31T00:00:00+00:00",
+                "ended_at": "2026-08-31T00:01:00+00:00",
+                "success": False,
+                "crashed": False,
+                "error": None,
+                "tokens": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cache_read_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_hit_rate": 0.0,
+                },
+                "tools": {
+                    "tool_counts": {"Bash": 1},
+                    "tool_errors": {"Bash": 1},
+                    "total_invocations": 1,
+                },
+                "tool_calls": [
+                    {
+                        "tool_name": "Bash",
+                        "started_at": "2026-08-31T00:00:01+00:00",
+                        "duration_ms": 10,
+                        "input_summary": "make quality",
+                        "succeeded": False,
+                        "error": "make: *** [quality] Error 1",
+                        "tool_use_id": "t1",
+                    }
+                ],
+                "skill_results": [],
+                "turn_count": 1,
+                "inference_count": 1,
+            }
+        )
+    )
+
+
 # L11: Retrospective loop processes queue items
 # ---------------------------------------------------------------------------
 
@@ -171,7 +227,6 @@ class TestL11RetrospectiveLoop:
         over the same evidence must fold, not file twice — the finding is
         pattern-shaped by construction, so siblings belong on one class issue.
         """
-        import json  # noqa: PLC0415
         from unittest.mock import patch  # noqa: PLC0415
 
         from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
@@ -179,53 +234,8 @@ class TestL11RetrospectiveLoop:
         world = MockWorld(tmp_path)
         config = world._harness.config
 
-        # A failed Bash call, twice, in two different issues' traces.
         for issue in (301, 302):
-            run_dir = config.data_root / "traces" / str(issue) / "implement" / "run-1"
-            run_dir.mkdir(parents=True, exist_ok=True)
-            (run_dir / "subprocess-0.json").write_text(
-                json.dumps(
-                    {
-                        "issue_number": issue,
-                        "phase": "implement",
-                        "source": "implementer",
-                        "run_id": 1,
-                        "subprocess_idx": 0,
-                        "backend": "claude",
-                        "started_at": "2026-08-31T00:00:00+00:00",
-                        "ended_at": "2026-08-31T00:01:00+00:00",
-                        "success": False,
-                        "crashed": False,
-                        "error": None,
-                        "tokens": {
-                            "prompt_tokens": 1,
-                            "completion_tokens": 1,
-                            "cache_read_tokens": 0,
-                            "cache_creation_tokens": 0,
-                            "cache_hit_rate": 0.0,
-                        },
-                        "tools": {
-                            "tool_counts": {"Bash": 1},
-                            "tool_errors": {"Bash": 1},
-                            "total_invocations": 1,
-                        },
-                        "tool_calls": [
-                            {
-                                "tool_name": "Bash",
-                                "started_at": "2026-08-31T00:00:01+00:00",
-                                "duration_ms": 10,
-                                "input_summary": "make quality",
-                                "succeeded": False,
-                                "error": "make: *** [quality] Error 1",
-                                "tool_use_id": "t1",
-                            }
-                        ],
-                        "skill_results": [],
-                        "turn_count": 1,
-                        "inference_count": 1,
-                    }
-                )
-            )
+            _seed_failed_bash_trace(config, issue=issue)
 
         entries = [
             RetrospectiveEntry(
@@ -369,6 +379,54 @@ class TestL11RetrospectiveLoop:
             "a tick whose every finding failed to parse published "
             f"findings_dropped={stats['retrospective']['findings_dropped']}, "
             "which a reader cannot tell from a clean tick"
+        )
+
+    async def test_a_response_with_no_array_reaches_the_drop_counter(
+        self, tmp_path
+    ) -> None:
+        """#11978's headline, deferred here by #11983 because it needs both halves.
+
+        The producer must count a response it could not parse at all, AND the
+        consumer must surface that count. Either alone leaves a confabulating
+        tick publishing `findings_dropped: 0`. This drives the real finder's
+        parse path — only the model call is stubbed — so the number is produced
+        rather than injected, which the sibling unit tests cannot show.
+        """
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+        config = world._harness.config
+        _seed_failed_bash_trace(config, issue=402)
+
+        fake_queue = MagicMock()
+        fake_queue.load.return_value = [QueueItem(kind=QueueKind.RETRO_PATTERNS)]
+
+        collector = RetrospectiveCollector(config, MagicMock(), world._github)
+        collector._load_recent = MagicMock(
+            return_value=[
+                RetrospectiveEntry(
+                    issue_number=402,
+                    pr_number=502,
+                    timestamp="2026-08-31T00:00:00+00:00",
+                )
+            ]
+        )
+        _seed_ports(world, retrospective_queue=fake_queue, retrospective=collector)
+
+        # The model answers in prose. `_extract_array` finds nothing, which
+        # used to return zero drops.
+        with patch(
+            "retro_finder.RetroFinder._call_model",
+            new=AsyncMock(return_value="I could not find anything useful."),
+        ):
+            stats = await world.run_with_loops(["retrospective"], cycles=1)
+
+        assert stats["retrospective"]["findings_dropped"] >= 1, (
+            "a tick whose model returned no parseable array published "
+            f"findings_dropped={stats['retrospective']['findings_dropped']} — "
+            "indistinguishable from a tick that correctly found nothing"
         )
 
     async def test_stale_insight_dedup_across_ticks(self, tmp_path) -> None:
