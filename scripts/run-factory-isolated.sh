@@ -34,7 +34,7 @@
 # exist (the interactive installer clones it; the service never clones). The
 # origin URL then comes from the workspace's own remote, the .env copy is
 # skipped (the workspace's gitignored .env is the one in use), and the
-# fetch / force-discard / reset / `make env` / `exec make run` path runs
+# fetch / force-discard / reset / `make deps-heal` / `exec make run` path runs
 # unchanged. The non-service path is untouched.
 #
 # Usage:  scripts/run-factory-isolated.sh        (or: make factory)
@@ -145,15 +145,15 @@ fi
 
 cd "$WORKSPACE"
 
-# Self-heal the workspace environment on every boot via the canonical `make env`
+# Self-heal the workspace environment on every boot via the canonical `make deps-heal`
 # (uv sync --all-extras + pytest-importable sanity check). `make run` has NO
 # `deps` prerequisite and `uv run` only auto-syncs base deps, so the test extra
 # (pytest, …) can silently be absent — a pytest-less venv makes pytest-kind
 # sensors misfire (the ADR conformance loop storms "No module named pytest" on
-# every enforced ADR at once, #10243). `make env` is the same command a human
+# every enforced ADR at once, #10243). `make deps-heal` is the same command a human
 # runs to sanitize their own checkout, so boot-heal and manual-heal never drift.
-echo "[factory] healing environment (make env)"
-make env
+echo "[factory] healing environment (make deps-heal)"
+make deps-heal
 
 echo "[factory] launching from $WORKSPACE (branch: $BRANCH)"
 exec make run

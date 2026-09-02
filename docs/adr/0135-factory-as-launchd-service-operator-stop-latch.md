@@ -63,7 +63,7 @@ Two further gaps surfaced once the kernel was armed with `--workspace`:
    live under `$HOME/.hydraflow/` and must already exist; the origin URL comes
    from the workspace's own remote; the `.env` copy is skipped (the workspace's
    gitignored `.env` is the one in use); the fetch → force-discard → reset →
-   `make env` → `exec make run` path runs unchanged. The non-service path and
+   `make deps-heal` (renamed from `make env`, #12041) → `exec make run` path runs unchanged. The non-service path and
    every existing guard are untouched.
 3. **Operator Stop is a latch that *both* autostart and the liveness kernel
    honour.** `ControlStatusResponse.operator_stopped` (`src/models.py`) exposes

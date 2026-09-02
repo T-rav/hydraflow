@@ -9,7 +9,7 @@ replaces it with a narrower invariant: the workspace must live under
 ``$HOME/.hydraflow/`` (the only place a throwaway factory workspace may live),
 and it must already exist (the interactive installer clones it; the service
 never does). Everything else — fetch, force-discard, reset to origin/$BRANCH,
-``make env``, ``exec make run`` — is the unchanged non-service path.
+``make deps-heal``, ``exec make run`` — is the unchanged non-service path.
 
 Hermetic: a temp ``HOME``, a throwaway git origin, a real clone under
 ``$HOME/.hydraflow/``, and a fake ``make`` on ``PATH`` that records its
@@ -143,7 +143,7 @@ def test_service_mode_runs_in_place_and_syncs_to_origin(service_env) -> None:
     assert result.returncode == 0, result.stderr
     # In one snapshot: DEV_ROOT == WORKSPACE accepted (no in-place abort),
     # force-synced to the origin tip, untracked leftovers dropped, the
-    # gitignored .env preserved, and `make env` then `exec make run` ran.
+    # gitignored .env preserved, and `make deps-heal` then `exec make run` ran.
     make_log: Path = service_env["make_log"]  # type: ignore[assignment]
     observed = (
         "dev checkout itself" in result.stderr,
@@ -159,7 +159,7 @@ def test_service_mode_runs_in_place_and_syncs_to_origin(service_env) -> None:
         "v2\n",
         False,
         "TOKEN=secret\n",
-        ["env", "run"],
+        ["deps-heal", "run"],
     )
 
 
