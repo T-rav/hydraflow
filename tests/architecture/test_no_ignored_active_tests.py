@@ -272,6 +272,10 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: xfail AND its grandfather entry together and both gate tests would stay
 #: green. Growth now costs a second, obviously-named edit that a reviewer reads
 #: as what it is.
+#: 109 -> 107 when the WhatsApp bridge was removed: deleting
+#: regression_issue_6494 took two grandfathered xfails with it. The cap
+#: falls in the same change by design — a cap left above the live count is
+#: slack a later PR can spend without anything reddening.
 DEFERRED_XFAILS_MAX = 107
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
