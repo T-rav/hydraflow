@@ -113,11 +113,7 @@ def baseline_policies(config: HydraFlowConfig) -> tuple[RoutingPolicy, ...]:
     for dial, role in sorted(_ROLE_DIALS.items()):
         binding = _moved_binding(config, dial)
         if binding is not None:
-            policies.append(
-                _policy(
-                    dial, repo=repo, binding=binding, match_extra={"roles": (role,)}
-                )
-            )
+            policies.append(_policy(dial, repo=repo, binding=binding, roles=(role,)))
     for dial, principals in sorted(_PRINCIPAL_DIALS.items()):
         binding = _moved_binding(config, dial)
         if binding is not None:
@@ -126,7 +122,7 @@ def baseline_policies(config: HydraFlowConfig) -> tuple[RoutingPolicy, ...]:
                     dial,
                     repo=repo,
                     binding=binding,
-                    match_extra={"principal_ids": tuple(sorted(principals))},
+                    principal_ids=tuple(sorted(principals)),
                 )
             )
     return tuple(policies)
@@ -141,11 +137,23 @@ def _moved_binding(config: HydraFlowConfig, dial: str) -> ProviderBinding | None
 
 
 def _policy(
-    dial: str, *, repo: str, binding: ProviderBinding, match_extra: dict[str, object]
+    dial: str,
+    *,
+    repo: str,
+    binding: ProviderBinding,
+    roles: tuple[WorkerRole, ...] = (),
+    principal_ids: tuple[str, ...] = (),
 ) -> RoutingPolicy:
-    """One generated policy, always naming its repo — see the module docstring."""
+    """One generated policy, always naming its repo — see the module docstring.
+
+    The two join dimensions are separate typed parameters rather than one
+    `**match_extra` mapping. A `dict[str, object]` unpacked into `RoutingMatch`
+    is untypeable and needs an arg-type suppression, and this repo's
+    suppressions ratchet only shrinks — so the shape needing no suppression is
+    the shape to write.
+    """
     return RoutingPolicy(
         id=f"baseline-{dial.replace('_', '-')}",
-        match=RoutingMatch(repo_ids=(repo,), **match_extra),  # type: ignore[arg-type]
+        match=RoutingMatch(repo_ids=(repo,), roles=roles, principal_ids=principal_ids),
         action=RoutingAction(provider_lock=binding),
     )
