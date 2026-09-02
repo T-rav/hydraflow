@@ -744,7 +744,6 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.auto_agent.adversarial import test_corpus
     from tests.evals import test_term_proposer_evals, test_triage_honeypot_evals
     from tests.regressions import (
-        regression_issue_6494,
         regression_issue_10094,
         test_anchor_whitespace_is_not_content,
         test_audit_packaged_src_layout_11709,
@@ -1007,15 +1006,6 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "empty `requirement_map` assertion covers directly. Dropping "
                 "one leaves the rule still checked, with one fewer example."
             ),
-            undetected_reason=_CORPUS_IS_EVIDENCE,
-        ),
-        GuardedEnumeration(
-            name="regression_issue_6494.MALFORMED_PAYLOADS",
-            members=tuple(
-                str(item) for item in regression_issue_6494.MALFORMED_PAYLOADS
-            ),
-            kind=EnumerationKind.CORPUS,
-            why="Cases regression_issue_6494 feeds its detector: malformed payloads.",
             undetected_reason=_CORPUS_IS_EVIDENCE,
         ),
         GuardedEnumeration(

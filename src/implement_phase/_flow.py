@@ -397,13 +397,7 @@ class ImplementFlowMixin:
                 ctx.save_config(
                     self._config.model_dump(
                         mode="json",
-                        exclude={
-                            "gh_token",
-                            "whatsapp_token",
-                            "whatsapp_phone_id",
-                            "whatsapp_recipient",
-                            "whatsapp_verify_token",
-                        },
+                        exclude={"gh_token"},
                     )
                 )
             except (RuntimeError, OSError):
