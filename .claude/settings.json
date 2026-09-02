@@ -36,6 +36,11 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.block-generic-scratchpad-names.sh",
             "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.require-convergence-before-merge.sh",
+            "_hydraflow": true
           }
         ]
       },
