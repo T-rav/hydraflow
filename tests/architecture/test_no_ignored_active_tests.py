@@ -280,7 +280,7 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: `.finalize` stopped swallowing AttributeError/AssertionError, so all three
 #: of that file's pins pass unmarked. Unlike the 109 -> 107 drop, nothing was
 #: deleted here — the pins are live tests now.
-#: 104 -> 96 when the docker_runner trio (#6578/#6959/#6971) was fixed:
+#: 92 -> 84 when the docker_runner trio (#6578/#6959/#6971) was fixed:
 #: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
 #: timeout now raises the house `SubprocessTimeoutError`, and container logs
 #: come from one demuxed call instead of two round-trips.
@@ -289,14 +289,14 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: unparseable item_scores.json, counts only the failure lines it parsed, and
 #: warns on an unreadable outcomes trail; `file_util.atomic_write` no longer
 #: lets a cleanup error replace the write error. All six pins are live tests.
-DEFERRED_XFAILS_MAX = 90
+#: 98 -> 92 when runner_utils' zombie-subprocess and assert-as-invariant pins
+#: (#6476/#6703) were fixed: `stream_claude_process` now kills the group and
+#: reaps on EVERY exit path, and the pipe checks survive `python -O`.
+DEFERRED_XFAILS_MAX = 84
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
         "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
-        "tests/regressions/regression_issue_6476.py::TestProcWaitAlwaysCalledInFinally.test_unexpected_error_after_stderr_task_calls_proc_wait",
-        "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_drain_failure_calls_proc_wait",
-        "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_write_failure_calls_proc_wait",
         "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
         "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_in_update_proposal_verified_does_not_skip_remaining",
         "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_midway_still_processes_earlier_and_later_proposals",
@@ -328,9 +328,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_mkdir_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_write_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_permission_error_on_write_does_not_propagate",
-        "tests/regressions/regression_issue_6703.py::test_stderr_none_raises_runtime_error",
-        "tests/regressions/regression_issue_6703.py::test_stdin_none_raises_runtime_error_when_not_prompt_arg",
-        "tests/regressions/regression_issue_6703.py::test_stdout_none_raises_runtime_error",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
         "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
