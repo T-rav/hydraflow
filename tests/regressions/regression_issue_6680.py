@@ -126,7 +126,6 @@ class TestVerifyProposalsAttributeError:
     programming bug and must propagate.  The except Exception on line 636
     currently swallows it."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6680 — fix not yet landed", strict=False)
     def test_attribute_error_propagates(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
 
