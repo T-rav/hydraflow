@@ -236,14 +236,15 @@ class GatewayProxy:
         )
 
     def _account_for(self, identity: GatewayIdentity) -> GatewayAccount | None:
-        """The pooled account behind *identity*, when this request has one."""
-        if self._pool is None:
+        """The pooled account behind *identity*, when this request has one.
+
+        Direct attribute access, matching ``_upstream_for``: a ``getattr``
+        default here would turn a renamed field into a permanent ``None``, and
+        the caller would silently report every request as ``metered``.
+        """
+        if self._pool is None or identity.route_binding is None:
             return None
-        binding = getattr(identity, "route_binding", None)
-        account_id = getattr(binding, "account_id", None)
-        if not account_id:
-            return None
-        return self._pool.account(account_id)
+        return self._pool.account(identity.route_binding.account_id)
 
     async def _resolve_subscription_token(
         self, upstream: UpstreamSettings

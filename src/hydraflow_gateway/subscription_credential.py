@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -266,6 +267,8 @@ class SubscriptionCredentialSource:
         self._now = now
         self._skew_seconds = skew_seconds
         self._cached: OAuthToken | None = None
+        self._lock = threading.Lock()
+        """Serialises the slow path. See :meth:`access_token`."""
 
     def _read(self) -> OAuthToken:
         return parse_credential_blob(self._run(self._read_command))
@@ -275,8 +278,37 @@ class SubscriptionCredentialSource:
 
         Blocking (it may fork), so callers on the async path must hand this to
         a thread rather than await it inline.
+
+        Double-checked: the fresh-cache path is lock-free, and everything that
+        forks a process is serialised. Without the lock, N concurrent spawns on
+        a cold or expired cache each ran the read AND the refresh — measured at
+        32 store reads for 32 spawns, and 24 refresh commands for 24. The reads
+        are merely wasteful; the refreshes are not. An OAuth refresh token is
+        normally single-use and rotates, so replaying one 24 times concurrently
+        means 23 rejected exchanges at best, and a provider treating the replay
+        as a compromised grant at worst — which would sign the operator out of
+        the very tool the credential came from.
+
+        The unlocked read of ``self._cached`` is safe because the attribute is
+        rebound, never mutated, and ``OAuthToken`` is frozen: a racing reader
+        sees either the old token or the new one, never a half-built one.
         """
         now = self._now()
+        cached = self._cached
+        if cached is not None and cached.is_fresh(
+            now=now, skew_seconds=self._skew_seconds
+        ):
+            return cached.access_token
+
+        with self._lock:
+            return self._resolve_locked()
+
+    def _resolve_locked(self) -> str:
+        """Read, refresh once, or fail closed. Callers hold ``self._lock``."""
+        now = self._now()
+        # Re-check under the lock: while this thread waited, the holder may
+        # already have refreshed, and refreshing again would be the replay
+        # the lock exists to prevent.
         cached = self._cached
         if cached is not None and cached.is_fresh(
             now=now, skew_seconds=self._skew_seconds

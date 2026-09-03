@@ -529,3 +529,243 @@ accounts:
 
         assert "claude-subscription" in candidates
         assert "claude-metered" in candidates
+
+
+class TestHeaderMergingSurvivesRealClientShapes:
+    """ADR-0148: what an HTTP client is actually allowed to send.
+
+    The merge keys on a lowercase name and emits one joined header, so every
+    shape a client may legitimately use has to land in the same place.
+    """
+
+    def test_a_capitalised_header_name_is_still_merged(self) -> None:
+        """HTTP header names are case-insensitive; the CLI may send any casing."""
+        headers = replace_request_headers(
+            [(b"Anthropic-Beta", b"compact-2026-01-12")],
+            _anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER),
+            access_token="t",
+        )
+        betas = [v for n, v in headers if n.lower() == b"anthropic-beta"]
+
+        assert len(betas) == 1, "a capitalised header was left beside the merged one"
+        assert b"compact-2026-01-12" in betas[0]
+        assert OAUTH_BETA_FLAG.encode() in betas[0]
+
+    def test_repeated_beta_headers_collapse_into_one(self) -> None:
+        """HTTP permits a repeated field; both values must survive the merge."""
+        headers = replace_request_headers(
+            [
+                (b"anthropic-beta", b"compact-2026-01-12"),
+                (b"anthropic-beta", b"fast-mode-2026-02-01"),
+            ],
+            _anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER),
+            access_token="t",
+        )
+        betas = [v for n, v in headers if n.lower() == b"anthropic-beta"]
+
+        assert len(betas) == 1
+        assert b"compact-2026-01-12" in betas[0]
+        assert b"fast-mode-2026-02-01" in betas[0]
+
+    def test_an_empty_beta_header_does_not_produce_a_stray_comma(self) -> None:
+        """A leading comma is a malformed field value, not a harmless one."""
+        headers = replace_request_headers(
+            [(b"anthropic-beta", b"")],
+            _anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER),
+            access_token="t",
+        )
+        betas = [v for n, v in headers if n.lower() == b"anthropic-beta"]
+
+        assert betas == [OAUTH_BETA_FLAG.encode()]
+
+    def test_whitespace_around_client_betas_is_normalised(self) -> None:
+        headers = replace_request_headers(
+            [(b"anthropic-beta", b"  compact-2026-01-12 ,  ")],
+            _anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER),
+            access_token="t",
+        )
+        betas = [v for n, v in headers if n.lower() == b"anthropic-beta"]
+
+        assert betas == [b"compact-2026-01-12, " + OAUTH_BETA_FLAG.encode()]
+
+
+class TestTheCredentialFailurePath:
+    """A refusal is still an observation, and still says which lane it was."""
+
+    async def test_a_credential_failure_still_writes_a_ledger_row(
+        self, tmp_path: Path
+    ) -> None:
+        """Otherwise a stopped factory leaves no trace of WHY it stopped."""
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            await request.aread()
+            return _ok()
+
+        expired = SubscriptionCredentialSource(
+            read_command=("read",),
+            run=lambda _c: json.dumps(
+                {
+                    "accessToken": "dead",
+                    "expiresAt": (_NOW - timedelta(hours=1)).isoformat(),
+                }
+            ),
+            now=lambda: _NOW,
+        )
+        client, token, ledger = _client(tmp_path, handler, credential=expired)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                json={"model": "claude-opus-5"},
+            )
+
+        rows = [
+            json.loads(line)
+            for line in ledger.path.read_text().splitlines()
+            if line.strip()
+        ]
+        assert rows, "a refused request left no observation"
+        assert rows[0]["billing_kind"] == "flat_rate"
+        assert rows[0]["status_code"] == 503
+
+    async def test_the_refusal_never_carries_the_credential(
+        self, tmp_path: Path
+    ) -> None:
+        """The 503 detail reaches a client and a log; a token must not ride it."""
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            await request.aread()
+            return _ok()
+
+        expired = SubscriptionCredentialSource(
+            read_command=("read",),
+            run=lambda _c: json.dumps(
+                {
+                    "accessToken": "sk-super-secret-value",
+                    "expiresAt": (_NOW - timedelta(hours=1)).isoformat(),
+                }
+            ),
+            now=lambda: _NOW,
+        )
+        client, token, ledger = _client(tmp_path, handler, credential=expired)
+        async with client:
+            response = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                json={"model": "claude-opus-5"},
+            )
+
+        assert "sk-super-secret-value" not in response.text
+        assert "sk-super-secret-value" not in ledger.path.read_text()
+
+
+class TestAPooledAccountsDeclarationWinsOverTheAuthStyle:
+    """ADR-0148: a metered key and a flat-rate plan can share a lane.
+
+    That is the whole reason accounts exist here, so the ledger must read the
+    ACCOUNT's declared `billing_kind` rather than infer one from the auth
+    style. Nothing else exercises `_billing_kind`'s account branch: the
+    end-to-end tests above run without a pool, where it correctly falls
+    through to the upstream.
+    """
+
+    def _proxy_with_pool(self, tmp_path: Path, pool: object):
+        from hydraflow_gateway.ledger import GatewayLedger
+        from hydraflow_gateway.proxy import GatewayProxy
+        from model_pricing import ModelPricingTable
+
+        return GatewayProxy(
+            settings=_subscription_settings(tmp_path),
+            client=httpx.AsyncClient(),
+            ledger=GatewayLedger(tmp_path / "l.jsonl"),
+            body_store=GatewayBodyStore(tmp_path / "b"),
+            pricing=ModelPricingTable(),
+            account_pool=pool,  # type: ignore[arg-type]
+        )
+
+    def _identity(self, account_id: str | None):
+        from hydraflow_gateway.models import (
+            BodyCapturePolicy,
+            GatewayIdentity,
+            Principal,
+            RouteBinding,
+        )
+
+        return GatewayIdentity(
+            key_id="key-1",
+            principal=Principal(kind="loop", id="implementer"),
+            repo_slug="acme/hydraflow",
+            repo_class=RepoClass.HYDRAFLOW,
+            provider_binding=ProviderBinding.ANTHROPIC,
+            body_capture_policy=BodyCapturePolicy.METADATA_ONLY,
+            issued_at=_NOW,
+            expires_at=_NOW + timedelta(minutes=5),
+            route_binding=(
+                None
+                if account_id is None
+                else RouteBinding(
+                    mint_decision_id="mint-1",
+                    route_decision_id="route-1",
+                    dispatch_id="dispatch-1",
+                    account_id=account_id,
+                    effective_model="claude-opus-5",
+                )
+            ),
+        )
+
+    def test_a_flat_rate_account_is_reported_flat_rate(self, tmp_path: Path) -> None:
+        from hydraflow_gateway.models import AccountBillingKind
+
+        class _Pool:
+            def account(self, account_id: str):
+                from hydraflow_gateway.routing_accounts import GatewayAccount
+
+                return GatewayAccount.model_validate(
+                    {
+                        "id": account_id,
+                        "provider_binding": "anthropic",
+                        "base_url": "https://upstream.test",
+                        "auth_style": "oauth-bearer",
+                        "billing_kind": "flat_rate",
+                    }
+                )
+
+        proxy = self._proxy_with_pool(tmp_path, _Pool())
+
+        assert (
+            proxy._billing_kind(self._identity("claude-subscription"))
+            is AccountBillingKind.FLAT_RATE
+        )
+
+    def test_a_metered_account_on_the_same_lane_is_reported_metered(
+        self, tmp_path: Path
+    ) -> None:
+        """The decoy that matters: same provider binding, opposite billing.
+
+        The settings' own Anthropic upstream is oauth-bearer here, so inferring
+        from the auth style would call this flat_rate and quietly stop counting
+        real dollars.
+        """
+        from hydraflow_gateway.models import AccountBillingKind
+
+        class _Pool:
+            def account(self, account_id: str):
+                from hydraflow_gateway.routing_accounts import GatewayAccount
+
+                return GatewayAccount.model_validate(
+                    {
+                        "id": account_id,
+                        "provider_binding": "anthropic",
+                        "base_url": "https://upstream.test",
+                        "auth_style": "x-api-key",
+                        "credential_env": "GATEWAY_ACCOUNT_METERED_KEY",
+                        "billing_kind": "metered",
+                    }
+                )
+
+        proxy = self._proxy_with_pool(tmp_path, _Pool())
+
+        assert (
+            proxy._billing_kind(self._identity("claude-metered"))
+            is AccountBillingKind.METERED
+        )

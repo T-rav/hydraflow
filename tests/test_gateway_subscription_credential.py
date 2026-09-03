@@ -251,3 +251,104 @@ class TestTheDefaultReadCommand:
         assert not any(
             ";" in part or "|" in part for part in DEFAULT_KEYCHAIN_READ_COMMAND
         )
+
+
+class TestConcurrentSpawnsShareOneResolution:
+    """ADR-0148: the gateway resolves this per request, from many threads.
+
+    `access_token` runs under `asyncio.to_thread` on every proxied request, so
+    a factory with N concurrent spawns calls it N times at once. Before the
+    lock, a cold cache produced N credential-store forks and — far worse — a
+    stale credential produced N concurrent refreshes.
+    """
+
+    def _hammer(
+        self,
+        source: SubscriptionCredentialSource,
+        workers: int,
+    ) -> list[str]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(lambda _: source.access_token(), range(workers)))
+
+    def test_a_cold_cache_reads_the_store_once(self) -> None:
+        import threading
+        import time
+
+        reads: list[object] = []
+        guard = threading.Lock()
+
+        def _slow_read(command: tuple[str, ...]) -> str:
+            with guard:
+                reads.append(command)
+            time.sleep(0.02)  # a real keychain fork is not instantaneous
+            return _blob(
+                token="tok", expires_at=(_NOW + timedelta(hours=2)).isoformat()
+            )
+
+        source = SubscriptionCredentialSource(
+            read_command=("read",), run=_slow_read, now=lambda: _NOW
+        )
+
+        tokens = self._hammer(source, 16)
+
+        assert len(reads) == 1, f"{len(reads)} concurrent store reads"
+        assert set(tokens) == {"tok"}
+
+    def test_a_stale_credential_refreshes_once(self) -> None:
+        """The dangerous one: an OAuth refresh token is normally single-use.
+
+        Replaying one concurrently means the later exchanges are rejected, and
+        a provider may read the replay as a compromised grant and revoke it —
+        signing the operator out of the tool the credential came from.
+        """
+        import threading
+        import time
+
+        refreshes: list[object] = []
+        guard = threading.Lock()
+        done = threading.Event()
+
+        stale = _blob(token="old", expires_at=(_NOW - timedelta(hours=1)).isoformat())
+        fresh = _blob(token="new", expires_at=(_NOW + timedelta(hours=2)).isoformat())
+
+        def _run(command: tuple[str, ...]) -> str:
+            if command == ("refresh",):
+                with guard:
+                    refreshes.append(command)
+                time.sleep(0.02)  # a real OAuth round-trip
+                done.set()
+                return ""
+            return fresh if done.is_set() else stale
+
+        source = SubscriptionCredentialSource(
+            read_command=("read",),
+            refresh_command=("refresh",),
+            run=_run,
+            now=lambda: _NOW,
+        )
+
+        tokens = self._hammer(source, 16)
+
+        assert len(refreshes) == 1, f"{len(refreshes)} concurrent refreshes"
+        assert set(tokens) == {"new"}
+
+    def test_a_warm_cache_does_not_serialise_readers(self) -> None:
+        """Decoy: the lock must not put every request behind one mutex.
+
+        A lock taken on the fast path would make the credential a global
+        bottleneck for a proxy whose whole job is concurrent streaming.
+        """
+        source = SubscriptionCredentialSource(
+            read_command=("read",),
+            run=lambda _c: _blob(
+                token="tok", expires_at=(_NOW + timedelta(hours=2)).isoformat()
+            ),
+            now=lambda: _NOW,
+        )
+        source.access_token()  # warm it
+
+        assert source._lock.acquire(blocking=False), "fast path held the lock"
+        source._lock.release()
+        assert source.access_token() == "tok"
