@@ -59,15 +59,24 @@ class TestFsListMissingDirectory:
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
         """The decoy: without it, the assertion above passes against a route
-        that 404s unconditionally."""
+        that 404s unconditionally.
+
+        It asks for an explicit path that is BOTH an allowed root and known to
+        exist. The obvious version — calling with no parameters — defaults to
+        `allowed_roots[0]`, and on a host where that directory is absent it now
+        correctly answers 404, so the decoy failed on CI while passing locally.
+        That is the very defect this file pins, one level up: an assertion that
+        silently depends on a directory the environment happens to provide.
+        """
         from fastapi.testclient import TestClient
 
         from dashboard import HydraFlowDashboard
 
+        config.repo_root.mkdir(parents=True, exist_ok=True)
         app = HydraFlowDashboard(config, event_bus, state).create_app()
         client = TestClient(app, raise_server_exceptions=False)
 
-        response = client.get("/api/fs/list")
+        response = client.get("/api/fs/list", params={"path": str(config.repo_root)})
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert "directories" in response.json()
