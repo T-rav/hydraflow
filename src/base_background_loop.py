@@ -28,9 +28,14 @@ from models import (
     WorkCycleResult,  # noqa: TCH002
 )
 from runner_utils import AuthenticationRetryError
+from secret_scrub import scrub_secrets
 from subprocess_util import AuthenticationError, CreditExhaustedError
 
 logger = logging.getLogger("hydraflow.base_background_loop")
+
+# Heartbeat details are persisted per cycle and quoted into an issue body; a
+# runaway repr (a whole diff, a serialized payload) would bloat both.
+_ERROR_DETAIL_MAX_CHARS = 500
 
 
 class LoopCycleTimeoutError(Exception):
@@ -260,13 +265,14 @@ class BaseBackgroundLoop(abc.ABC):
                 f"{self._worker_name.replace('_', ' ').capitalize()} loop "
                 "watchdog timeout"
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "%s loop iteration failed — will retry next cycle",
                 self._worker_name.replace("_", " ").capitalize(),
             )
             await self._report_cycle_failure(
-                f"{self._worker_name.replace('_', ' ').capitalize()} loop error"
+                f"{self._worker_name.replace('_', ' ').capitalize()} loop error",
+                exc=exc,
             )
         finally:
             # Never let the work task outlive the cycle. On a watchdog timeout —
@@ -279,10 +285,41 @@ class BaseBackgroundLoop(abc.ABC):
                 with contextlib.suppress(BaseException):
                     await work_task
 
-    async def _report_cycle_failure(self, message: str) -> None:
-        """Publish the error status + ERROR event for a failed/timed-out cycle."""
+    async def _report_cycle_failure(
+        self, message: str, *, exc: BaseException | None = None
+    ) -> None:
+        """Publish the error status + ERROR event for a failed/timed-out cycle.
+
+        *exc* is the cause when there is one. It is carried into the heartbeat
+        ``details`` because that is the only copy the persistent-error actuator
+        can still read when it files an issue hours later: logs roll over and
+        are per-host, so an actuator that had to say "heartbeat details carry
+        no error message" filed an undiagnosable issue every time (#12067).
+        The watchdog-timeout path passes no *exc* — a bounded overrun is not a
+        code fault (#9556) and its message already says so.
+        """
         last_run = datetime.now(UTC).isoformat()
-        self._status_cb(self._worker_name, "error", {})
+        details: dict[str, object] = {}
+        if exc is not None:
+            # Heartbeats persist to disk and are quoted verbatim into a public
+            # issue body, so an exception carrying a token must be scrubbed
+            # before it is stored, not before it is rendered.
+            # The cap comes LAST, after the scrub: capping first could cut a
+            # credential in half, leaving a fragment the pattern no longer
+            # matches. Scrub and collapse commute — `" ".join(s.split())`
+            # substitutes a space for the newline rather than closing the gap,
+            # so it can never reassemble a token a wrapped stderr split.
+            #
+            # The collapse is not cosmetic. `run_subprocess` builds its
+            # message as f"Command {cmd!r} failed (rc=...): {result.stderr}",
+            # so a multi-line body is the COMMON case, and the actuator
+            # renders this value inside a single-line markdown code span.
+            summary = scrub_secrets(" ".join(str(exc).split()))[
+                :_ERROR_DETAIL_MAX_CHARS
+            ]
+            details = {"error_type": type(exc).__name__, "error": summary}
+            message = f"{message}: {type(exc).__name__}: {summary}"
+        self._status_cb(self._worker_name, "error", details)
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.BACKGROUND_WORKER_STATUS,
@@ -290,7 +327,7 @@ class BaseBackgroundLoop(abc.ABC):
                     worker=self._worker_name,
                     status="error",
                     last_run=last_run,
-                    details={},
+                    details=dict(details),
                 ),
             )
         )
