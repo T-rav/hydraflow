@@ -172,9 +172,13 @@ async def run_concurrent_batch(
     try:
         return await _collect_batch_results(all_tasks, stop_event)
     finally:
-        for t in all_tasks:
-            if not t.done():
-                t.cancel()
+        # Cancel AND await (#6710). Cancelling without awaiting returns while
+        # the siblings are still unwinding, so a fatal error propagating out
+        # of here raced their teardown: their subprocesses were mid-spawn
+        # against the same exhausted account or dead credential that caused
+        # it. `run_refilling_pool` already drained through `_cancel_remaining`;
+        # this path just never adopted it.
+        await _cancel_remaining([t for t in all_tasks if not t.done()])
 
 
 async def run_refilling_pool(
@@ -645,6 +649,10 @@ class PipelineEscalator:
         issue_number = issue.id
         if context is None:
             context = EscalationContext(cause=cause, origin_phase=self._stage.value)
+        # False only when BOTH the escalation and its fallback fail: the
+        # harness failure is still worth recording either way, but the
+        # transition describes a label move that did not happen (#6536).
+        escalated = True
         try:
             await escalate_to_diagnostic(
                 self._state,
@@ -654,7 +662,11 @@ class PipelineEscalator:
                 origin_label=self._origin_label,
                 diagnose_label=self._diagnose_label,
             )
-        except Exception:
+        except Exception as exc:
+            # #6750: neither handler here classified, so an exhausted budget
+            # or dead credential was reported as "escalation failed" and the
+            # pipeline carried on spawning against it.
+            reraise_on_credit_or_bug(exc)
             logger.error(
                 "Escalation to diagnostic failed for issue #%d — attempting direct label swap to HITL",
                 issue_number,
@@ -664,13 +676,21 @@ class PipelineEscalator:
             # doesn't get stuck in its current pipeline stage forever.
             try:
                 await self._prs.swap_pipeline_labels(issue_number, self._hitl_label)
-            except Exception:
+            except Exception as fallback_exc:
+                reraise_on_credit_or_bug(fallback_exc)
                 logger.error(
                     "Fallback label swap also failed for issue #%d — issue may be stuck",
                     issue_number,
                     exc_info=True,
                 )
-        self._store.enqueue_transition(issue, "diagnose")
+                # #6536: the transition was enqueued unconditionally, so an
+                # issue whose label never actually moved was recorded as
+                # having entered `diagnose`. The queue then reads as the
+                # source of truth for a state GitHub never reached, and the
+                # issue is invisible to whatever would otherwise retry it.
+                escalated = False
+        if escalated:
+            self._store.enqueue_transition(issue, "diagnose")
         record_harness_failure(
             self._harness_insights,
             issue_number,

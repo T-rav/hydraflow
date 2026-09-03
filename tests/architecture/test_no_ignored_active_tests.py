@@ -292,12 +292,15 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
 #: isolation, and both loader warnings carry exc_info. All 8 pins are live.
-DEFERRED_XFAILS_MAX = 84
+#: 84 -> 74 when the escalation family (#6536/#6710/#6750/#6765) was
+#: fixed: a batch awaits its cancelled siblings, a failed escalation no longer
+#: records a transition that never happened, and the escalator and deferred
+#: pipeline start both let the infra-fatal signals through.
+DEFERRED_XFAILS_MAX = 74
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
         "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
-        "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientExhaustsThreadPool.test_thread_pool_starved_by_concurrent_retries",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientUsesBlockingSleep.test_retry_loop_calls_blocking_time_sleep",
         "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_last_lint_index_write_failure_does_not_crash",
@@ -327,9 +330,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_permission_error_on_write_does_not_propagate",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
-        "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
-        "tests/regressions/regression_issue_6710.py::test_auth_error_awaits_cancelled_siblings",
-        "tests/regressions/regression_issue_6710.py::test_credit_exhausted_awaits_cancelled_siblings",
         "tests/regressions/regression_issue_6717.py::TestGetStorageStatsConcurrentDeletion.test_stat_raises_file_not_found_mid_iteration",
         "tests/regressions/regression_issue_6717.py::TestGetStorageStatsPermissionError.test_stat_permission_error_is_skipped",
         "tests/regressions/regression_issue_6717.py::TestPurgeExpiredConcurrentDeletion.test_iterdir_raises_when_issue_dir_removed_concurrently",
@@ -345,12 +345,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6742.py::TestPlanPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
         "tests/regressions/regression_issue_6742.py::TestPlanPhaseSummarizerTruthy.test_plan_transcript_calls_summarizer_when_falsy",
         "tests/regressions/regression_issue_6742.py::TestReviewPhaseSummarizerTruthy.test_post_review_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorFallbackPathPropagatesFatalErrors.test_authentication_error_propagates_from_fallback",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorFallbackPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_fallback",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_authentication_error_propagates_from_primary",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_primary",
-        "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6782.py::TestRunRecorderCorruptManifestLogLevel.test_corrupt_manifest_logged_at_warning",
         "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
