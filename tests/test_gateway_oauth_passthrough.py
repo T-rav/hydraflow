@@ -43,8 +43,6 @@ from hydraflow_gateway.subscription_credential import (
     build_subscription_credential,
 )
 
-pytestmark = pytest.mark.asyncio
-
 _CONTROL_TOKEN = "c" * 40
 _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 
@@ -201,6 +199,105 @@ class TestSettingsRefuseAnAmbiguousCredential:
 class TestTheCredentialSourceIsBuiltOnlyWhenNeeded:
     def test_an_api_key_deployment_builds_none(self, tmp_path: Path) -> None:
         """It must not touch a credential store it does not use."""
+        upstreams = [_anthropic_upstream(UpstreamAuthStyle.X_API_KEY)]
+
+        assert build_subscription_credential(upstreams, {}) is None
+
+    def test_a_subscription_upstream_builds_one(self, tmp_path: Path) -> None:
+        upstreams = [_anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER)]
+
+        assert isinstance(
+            build_subscription_credential(upstreams, {}), SubscriptionCredentialSource
+        )
+
+    def test_an_oauth_account_alone_builds_one(self, tmp_path: Path) -> None:
+        """The helper's half of the accounts-file shape."""
+        env_level = _anthropic_upstream(UpstreamAuthStyle.X_API_KEY)
+        from_accounts_file = _anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER)
+
+        assert isinstance(
+            build_subscription_credential([env_level, from_accounts_file], {}),
+            SubscriptionCredentialSource,
+        )
+
+    def test_create_app_wires_a_source_for_an_accounts_file_subscription(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The WIRING, which is where this actually broke.
+
+        `create_app` asked `build_subscription_credential` about the env-level
+        settings only. Declaring the subscription as an account — the shape the
+        README recommends for running it beside a metered key — produced no
+        source, the mint succeeded, and every proxied request on that account
+        then failed with a message that did not name the cause.
+
+        Asserting through `app.state.gateway_proxy` rather than by calling the
+        helper: a test of the helper stays green when the call site stops
+        passing it the pool, which is exactly the mutation that reintroduces
+        this bug.
+        """
+        monkeypatch.setenv("GATEWAY_ACCOUNT_METERED_KEY", "sk-metered")
+        accounts = tmp_path / "accounts.yml"
+        accounts.write_text(
+            """
+schema_version: 1
+accounts:
+  - id: claude-subscription
+    provider_binding: anthropic
+    base_url: https://upstream.test
+    auth_style: oauth-bearer
+    billing_kind: flat_rate
+""",
+            encoding="utf-8",
+        )
+        # Env level is a plain API key: only the ACCOUNT wants a subscription.
+        settings = GatewaySettings(
+            control_token=SecretStr(_CONTROL_TOKEN),
+            upstreams={
+                ProviderBinding.ANTHROPIC: _anthropic_upstream(
+                    UpstreamAuthStyle.X_API_KEY
+                )
+            },
+            ledger_path=tmp_path / "l.jsonl",
+            body_dir=tmp_path / "b",
+            accounts_file=accounts,
+        )
+
+        app = create_app(
+            settings,
+            key_store=VirtualKeyStore(max_ttl_seconds=600),
+            client=httpx.AsyncClient(),
+            ledger=GatewayLedger(tmp_path / "l.jsonl"),
+            body_store=GatewayBodyStore(tmp_path / "b"),
+        )
+
+        assert app.state.gateway_proxy._subscription_credential is not None
+
+
+class TestABootWithNoCredentialSourceIsRefused:
+    """A gateway that starts, mints, then fails every request is a false-ready tap."""
+
+    def test_an_oauth_upstream_with_no_source_refuses_to_boot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hydraflow_gateway.app as gateway_app
+
+        # Simulate the builder failing to produce one for an oauth upstream.
+        monkeypatch.setattr(
+            gateway_app, "build_subscription_credential", lambda *a, **k: None
+        )
+
+        with pytest.raises(ValueError, match="no credential source"):
+            create_app(
+                _subscription_settings(tmp_path),
+                key_store=VirtualKeyStore(max_ttl_seconds=600),
+                client=httpx.AsyncClient(),
+                ledger=GatewayLedger(tmp_path / "l.jsonl"),
+                body_store=GatewayBodyStore(tmp_path / "b"),
+            )
+
+    def test_an_api_key_deployment_still_boots(self, tmp_path: Path) -> None:
+        """Decoy: the guard must not fire on the ordinary deployment."""
         settings = GatewaySettings(
             control_token=SecretStr(_CONTROL_TOKEN),
             upstreams={
@@ -212,12 +309,16 @@ class TestTheCredentialSourceIsBuiltOnlyWhenNeeded:
             body_dir=tmp_path / "b",
         )
 
-        assert build_subscription_credential(settings, {}) is None
-
-    def test_a_subscription_deployment_builds_one(self, tmp_path: Path) -> None:
-        source = build_subscription_credential(_subscription_settings(tmp_path), {})
-
-        assert isinstance(source, SubscriptionCredentialSource)
+        assert (
+            create_app(
+                settings,
+                key_store=VirtualKeyStore(max_ttl_seconds=600),
+                client=httpx.AsyncClient(),
+                ledger=GatewayLedger(tmp_path / "l.jsonl"),
+                body_store=GatewayBodyStore(tmp_path / "b"),
+            )
+            is not None
+        )
 
 
 class TestTheOAuthHeadersAreBuilt:
@@ -336,6 +437,7 @@ def _client(
     )
 
 
+@pytest.mark.asyncio
 class TestAProxiedRequestOnTheSubscriptionLane:
     """ADR-0148, from the outside: what the upstream actually received."""
 
@@ -524,11 +626,31 @@ accounts:
     def test_both_anthropic_accounts_are_fallback_candidates(
         self, tmp_path: Path
     ) -> None:
-        """The hop itself: one lane, two accounts, ordered."""
+        """Membership, which is the precondition for a hop.
+
+        Not ordering — `candidates_for_model` also returns the compiled legacy
+        account, so asserting a two-element sequence here would pin the wrong
+        thing. What matters is that a subscription account and a metered one
+        are BOTH eligible on the same lane; ADR-0142 owns the order.
+        """
         candidates = self._pool(tmp_path).candidates_for_model("claude-opus-5")
 
         assert "claude-subscription" in candidates
         assert "claude-metered" in candidates
+
+    def test_the_zai_account_is_not_a_candidate_for_a_claude_model(
+        self, tmp_path: Path
+    ) -> None:
+        """Fallback never crosses providers, whatever the accounts file says.
+
+        `candidates_for_model` filters by `binding_for_model`, so "sub, then a
+        key, then z.ai" is not a thing the gateway can do — moving to z.ai is a
+        spawn-side model change (ADR-0119). The ADR claimed otherwise until
+        this test was written.
+        """
+        candidates = self._pool(tmp_path).candidates_for_model("claude-opus-5")
+
+        assert "zai-metered" not in candidates
 
 
 class TestHeaderMergingSurvivesRealClientShapes:
@@ -589,6 +711,7 @@ class TestHeaderMergingSurvivesRealClientShapes:
         assert betas == [b"compact-2026-01-12, " + OAUTH_BETA_FLAG.encode()]
 
 
+@pytest.mark.asyncio
 class TestTheCredentialFailurePath:
     """A refusal is still an observation, and still says which lane it was."""
 
@@ -627,6 +750,54 @@ class TestTheCredentialFailurePath:
         assert rows, "a refused request left no observation"
         assert rows[0]["billing_kind"] == "flat_rate"
         assert rows[0]["status_code"] == 503
+        # The marker is load-bearing, not decoration: without it a credential
+        # failure reads as UNAVAILABLE evidence against the ACCOUNT, tripping
+        # its circuit and licensing a fallback hop that the gateway's own
+        # credential store manufactured.
+        assert rows[0]["refusal_reason"] == "gateway-upstream-credential-unavailable"
+
+    async def test_an_unexpected_credential_error_is_still_contained(
+        self, tmp_path: Path
+    ) -> None:
+        """Not every failure here is a SubscriptionCredentialError.
+
+        The credential path forks a process and parses a third-party document,
+        so it can also surface a decode error or a malformed expiry. Catching
+        only the expected type returns a 500 with a traceback, writes NO ledger
+        row, and leaks the request slot plus a phantom active route — strictly
+        worse than the 503 this contract promises.
+        """
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            await request.aread()
+            return _ok()
+
+        class _Exploding:
+            def access_token(self) -> str:
+                raise RuntimeError("something the credential path did not expect")
+
+        client, token, ledger = _client(
+            tmp_path,
+            handler,
+            credential=_Exploding(),  # type: ignore[arg-type]
+        )
+        async with client:
+            response = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                json={"model": "claude-opus-5"},
+            )
+
+        assert response.status_code == 503, "an unexpected error escaped as a 500"
+        rows = [
+            json.loads(line)
+            for line in ledger.path.read_text().splitlines()
+            if line.strip()
+        ]
+        assert rows, "the attempt was never finalized, so the slot leaked"
+        assert rows[0]["refusal_reason"] == "gateway-upstream-credential-unavailable"
+        # The raw message may name internals; it must not reach the client.
+        assert "something the credential path did not expect" not in response.text
 
     async def test_the_refusal_never_carries_the_credential(
         self, tmp_path: Path
@@ -769,3 +940,72 @@ class TestAPooledAccountsDeclarationWinsOverTheAuthStyle:
             proxy._billing_kind(self._identity("claude-metered"))
             is AccountBillingKind.METERED
         )
+
+
+class TestFlatRateTrafficIsNotSummedAsSpend:
+    """ADR-0148's `billing_kind` has to change a number, or it is decoration.
+
+    `.env.sample`, the wiki and this file's own docstrings all promise that a
+    subscription's rows are "not summed as dollars owed". The only reader of
+    gateway ledger cost is `_aggregate_gateway_rows`, so that promise is either
+    true there or it is false everywhere.
+    """
+
+    def _rows(self, billing_kind: str) -> list[dict[str, object]]:
+        return [
+            {
+                "timestamp": "2026-09-03T12:00:00+00:00",
+                "repo_slug": "acme/hydraflow",
+                "model_served": "claude-opus-5",
+                "input_tokens": 1_000_000,
+                "output_tokens": 1_000_000,
+                "billing_kind": billing_kind,
+            }
+        ]
+
+    def _spend(self, rows: list[dict[str, object]]) -> float:
+        from datetime import datetime
+
+        from gateway_coverage import _aggregate_gateway_rows
+        from model_pricing import ModelPricingTable
+
+        return _aggregate_gateway_rows(
+            rows,
+            since=datetime(2026, 9, 1, tzinfo=UTC),
+            until=datetime(2026, 9, 30, tzinfo=UTC),
+            repo_slug="acme/hydraflow",
+            pricing=ModelPricingTable(),
+        ).spend_usd
+
+    def test_a_metered_row_is_spend(self) -> None:
+        """Anti-vacuity floor: this model IS priced, so the decoy below means
+        something. Without it, a pricing table that returned 0.0 for everything
+        would make the flat-rate assertion pass for the wrong reason."""
+        assert self._spend(self._rows("metered")) > 0.0
+
+    def test_a_flat_rate_row_is_not_spend(self) -> None:
+        assert self._spend(self._rows("flat_rate")) == 0.0
+
+    def test_a_row_written_before_the_field_existed_is_still_spend(self) -> None:
+        """Every historical row lacks `billing_kind` and was real money."""
+        rows = self._rows("metered")
+        del rows[0]["billing_kind"]
+
+        assert self._spend(rows) > 0.0
+
+    def test_a_flat_rate_row_is_still_counted_as_a_request(self) -> None:
+        """It costs no dollars and it is still traffic — coverage must see it."""
+        from datetime import datetime
+
+        from gateway_coverage import _aggregate_gateway_rows
+        from model_pricing import ModelPricingTable
+
+        aggregate = _aggregate_gateway_rows(
+            self._rows("flat_rate"),
+            since=datetime(2026, 9, 1, tzinfo=UTC),
+            until=datetime(2026, 9, 30, tzinfo=UTC),
+            repo_slug="acme/hydraflow",
+            pricing=ModelPricingTable(),
+        )
+
+        assert aggregate.requests == 1

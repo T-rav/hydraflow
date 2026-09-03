@@ -463,8 +463,9 @@ GATEWAY_ANTHROPIC_AUTH_MODE=subscription
 ```
 
 The gateway then presents the subscription's OAuth bearer token, read from the
-credential store per request and refreshed via
-`GATEWAY_ANTHROPIC_OAUTH_REFRESH_COMMAND`. Host only (the store is the login
+credential store and cached until 120s before its expiry, then refreshed via
+`GATEWAY_ANTHROPIC_OAUTH_REFRESH_COMMAND`. Re-authenticating in Claude Code
+needs a gateway restart to take effect. Host only (the store is the login
 keychain), and the ledger marks those rows `billing_kind: flat_rate` so they are
 not summed as dollars owed. `gateway/README.md` has the full contract, the
 caveats, and the accounts-file form that runs subscription and key together for

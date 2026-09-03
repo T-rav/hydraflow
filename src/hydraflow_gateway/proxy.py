@@ -444,7 +444,24 @@ class GatewayProxy:
         )
         try:
             access_token = await self._resolve_subscription_token(upstream)
-        except (SubscriptionCredentialError, GatewayCredentialError) as exc:
+        except asyncio.CancelledError:
+            # The widest await in this handler: a read plus a refresh plus a
+            # re-read can block for a minute and a half, so a client giving up
+            # here is ordinary. Every other await in `forward` finalizes on
+            # cancel; without this one the attempt leaks its request slot and
+            # leaves a phantom "streaming" route for the process lifetime.
+            attempt.finalize(
+                self, status_code=499, completed=False, client_aborted=True
+            )
+            raise
+        except Exception as exc:
+            # Broad on purpose. `SubscriptionCredentialError` is the expected
+            # shape, but the credential path forks a process and parses a
+            # third-party document, so it can also surface a decode error or a
+            # malformed expiry. Letting one of those escape returns a 500 with
+            # a traceback, writes no ledger row, and leaks the request slot —
+            # strictly worse than the 503 this contract promises.
+            #
             # No upstream was ever asked, so this is a gateway-side refusal and
             # must not become evidence against the account — same reasoning as
             # the pool-timeout arm below. The message names the remedy; it is
@@ -456,7 +473,12 @@ class GatewayProxy:
                 completed=False,
                 client_aborted=False,
             )
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            detail = (
+                str(exc)
+                if isinstance(exc, SubscriptionCredentialError | GatewayCredentialError)
+                else "the upstream credential could not be resolved"
+            )
+            raise HTTPException(status_code=503, detail=detail) from exc
         upstream_request = httpx.Request(
             request.method,
             upstream_url,

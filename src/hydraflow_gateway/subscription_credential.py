@@ -27,7 +27,7 @@ import json
 import os
 import subprocess
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -59,6 +59,11 @@ _EXPIRY_KEYS: tuple[str, ...] = (
     "expires",
 )
 
+#: How long a token with no stated expiry is trusted after it is read. Short,
+#: because it is a guess: long enough that a burst of spawns shares one read,
+#: short enough that a revoked or rotated token is re-read within minutes.
+UNKNOWN_EXPIRY_TTL_SECONDS = 300
+
 #: Epoch values at or above this are milliseconds, not seconds. 1e11 seconds is
 #: the year 5138, so no real second-denominated expiry reaches it.
 _MILLIS_THRESHOLD = 1e11
@@ -80,16 +85,27 @@ class OAuthToken:
     access_token: str
     expires_at: datetime | None
 
+    read_at: datetime | None = None
+    """When this token came out of the store. Only used when it has no expiry."""
+
     def is_fresh(self, *, now: datetime, skew_seconds: int) -> bool:
         """Whether this token is usable for a spawn starting *now*.
 
-        An unknown expiry is NOT fresh. Treating it as valid forever is how a
-        credential store whose schema moved would look healthy right up until
-        every spawn started failing at the upstream.
+        A token whose expiry the store did not state is trusted for
+        ``UNKNOWN_EXPIRY_TTL_SECONDS`` after it was read, and no longer. Not
+        forever: a store whose schema moved would otherwise look healthy right
+        up until every spawn failed at the upstream. But not *never* either —
+        that was the original rule, and it made a bare token
+        (``ant auth print-credentials --access-token``, which this repo's own
+        docs offered) impossible to use: never fresh, so refresh, so re-read,
+        still no expiry, so fail. The refresh could not help, because the
+        re-read was judged by the same predicate that had nothing to judge.
         """
-        if self.expires_at is None:
+        if self.expires_at is not None:
+            return (self.expires_at - now).total_seconds() > skew_seconds
+        if self.read_at is None:
             return False
-        return (self.expires_at - now).total_seconds() > skew_seconds
+        return (now - self.read_at).total_seconds() < UNKNOWN_EXPIRY_TTL_SECONDS
 
 
 def _walk(node: object) -> Iterator[Mapping[str, object]]:
@@ -117,7 +133,7 @@ def _validate_token(raw: str) -> str:
     if not token:
         raise SubscriptionCredentialError(
             "the subscription credential store returned nothing — sign in to "
-            "Claude Code, or set GATEWAY_ANTHROPIC_AUTH_MODE=api_key"
+            "Claude Code, or point the affected *_provider dials back at `claude`"
         )
     if any(char in token for char in "\r\n"):
         raise SubscriptionCredentialError(
@@ -133,14 +149,25 @@ def _validate_token(raw: str) -> str:
     return token
 
 
+def _epoch_to_datetime(value: float) -> datetime | None:
+    """An epoch in seconds or milliseconds, or ``None`` if it is not a time.
+
+    `expiresAt: 1e20`, a NaN, or an infinity all reach here — `json.loads`
+    accepts the latter two by default. Raising would escape the proxy's
+    credential arm, so an unusable number is simply an unknown expiry.
+    """
+    seconds = value / 1000.0 if value >= _MILLIS_THRESHOLD else value
+    try:
+        return datetime.fromtimestamp(seconds, UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _parse_expiry(value: object) -> datetime | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        seconds = float(value)
-        if seconds >= _MILLIS_THRESHOLD:
-            seconds /= 1000.0
-        return datetime.fromtimestamp(seconds, UTC)
+        return _epoch_to_datetime(float(value))
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip()
@@ -153,7 +180,7 @@ def _parse_expiry(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def parse_credential_blob(raw: str) -> OAuthToken:
+def parse_credential_blob(raw: str, *, read_at: datetime | None = None) -> OAuthToken:
     """Read a token out of whatever the credential store printed.
 
     Accepts a JSON document (Claude Code's keychain item, at any nesting) or a
@@ -162,19 +189,24 @@ def parse_credential_blob(raw: str) -> OAuthToken:
     a refresh command, which is the honest outcome: nothing told us when it
     dies.
     """
+    read_at = datetime.now(UTC) if read_at is None else read_at
     text = raw.strip()
     if not text:
         raise SubscriptionCredentialError(
             "the subscription credential store returned nothing — sign in to "
-            "Claude Code, or set GATEWAY_ANTHROPIC_AUTH_MODE=api_key"
+            "Claude Code, or point the affected *_provider dials back at `claude`"
         )
     try:
         decoded = json.loads(text)
     except ValueError:
-        return OAuthToken(access_token=_validate_token(text), expires_at=None)
+        return OAuthToken(
+            access_token=_validate_token(text), expires_at=None, read_at=read_at
+        )
 
     if isinstance(decoded, str):
-        return OAuthToken(access_token=_validate_token(decoded), expires_at=None)
+        return OAuthToken(
+            access_token=_validate_token(decoded), expires_at=None, read_at=read_at
+        )
 
     found = _first(decoded, _ACCESS_TOKEN_KEYS)
     if not isinstance(found, str):
@@ -185,6 +217,7 @@ def parse_credential_blob(raw: str) -> OAuthToken:
     return OAuthToken(
         access_token=_validate_token(found),
         expires_at=_parse_expiry(_first(decoded, _EXPIRY_KEYS)),
+        read_at=read_at,
     )
 
 
@@ -207,7 +240,7 @@ def run_credential_command(command: tuple[str, ...]) -> str:
             check=False,
             timeout=30,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
         raise SubscriptionCredentialError(
             f"could not run the credential command {command[0]!r}: {type(exc).__name__}"
         ) from exc
@@ -218,23 +251,37 @@ def run_credential_command(command: tuple[str, ...]) -> str:
     return completed.stdout
 
 
+def needs_subscription_credential(upstreams: Iterable[object]) -> bool:
+    """Whether any of *upstreams* authenticates with a subscription token."""
+    from hydraflow_gateway.settings import UpstreamAuthStyle
+
+    return any(
+        getattr(upstream, "auth_style", None) is UpstreamAuthStyle.OAUTH_BEARER
+        for upstream in upstreams
+    )
+
+
 def build_subscription_credential(
-    settings: object, environ: Mapping[str, str] | None = None
+    upstreams: Iterable[object], environ: Mapping[str, str] | None = None
 ) -> SubscriptionCredentialSource | None:
     """A credential source when some upstream is on the subscription lane.
 
     ``None`` otherwise, so an ``api_key`` deployment never reads — or even
-    names — a credential store it does not use. Typed loosely on *settings* to
-    keep this module free of a settings import: ``settings.py`` already imports
-    ``OAUTH_BETA_FLAG`` from here, and a mutual import would be a cycle.
-    """
-    from hydraflow_gateway.settings import UpstreamAuthStyle, oauth_command
+    names — a credential store it does not use.
 
-    upstreams = getattr(settings, "upstreams", {}) or {}
-    if not any(
-        getattr(upstream, "auth_style", None) is UpstreamAuthStyle.OAUTH_BEARER
-        for upstream in upstreams.values()
-    ):
+    Takes the upstreams rather than the settings object because an oauth
+    upstream can arrive two ways: the env-level pair, or an account declared in
+    ``GATEWAY_ACCOUNTS_FILE``. Reading only the first meant the accounts-file
+    configuration — the one documented for running a subscription alongside a
+    metered key — built no source at all, and every request on that account
+    failed at the proxy with a message that did not name the cause.
+
+    Typed loosely to keep this module free of a settings import: ``settings.py``
+    already imports ``OAUTH_BETA_FLAG`` from here, and a mutual import cycles.
+    """
+    from hydraflow_gateway.settings import oauth_command
+
+    if not needs_subscription_credential(upstreams):
         return None
     env = os.environ if environ is None else environ
     return SubscriptionCredentialSource(
@@ -271,7 +318,7 @@ class SubscriptionCredentialSource:
         """Serialises the slow path. See :meth:`access_token`."""
 
     def _read(self) -> OAuthToken:
-        return parse_credential_blob(self._run(self._read_command))
+        return parse_credential_blob(self._run(self._read_command), read_at=self._now())
 
     def access_token(self) -> str:
         """A token good for a spawn starting now, or an error naming the fix.
@@ -326,7 +373,8 @@ class SubscriptionCredentialSource:
                 "the Claude subscription credential is expired or has no known "
                 "expiry, and no refresh command is configured. Set "
                 "GATEWAY_ANTHROPIC_OAUTH_REFRESH_COMMAND to something that "
-                "renews it, or set GATEWAY_ANTHROPIC_AUTH_MODE=api_key"
+                "renews it, or point the affected *_provider dials back at "
+                "`claude`"
             )
 
         # One attempt, never a loop: if the command ran and the store is still

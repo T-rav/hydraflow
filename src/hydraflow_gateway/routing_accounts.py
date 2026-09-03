@@ -434,6 +434,17 @@ class AccountPool:
         """Whether this process resolved a credential for *account_id*."""
         return account_id.strip().lower() in self._upstreams
 
+    @property
+    def upstreams(self) -> tuple[UpstreamSettings, ...]:
+        """Every configured account's upstream.
+
+        Exposed so the composition root can ask "does any account need a
+        subscription credential?" — a question it previously asked of the
+        env-level settings alone, which meant an oauth account declared in the
+        accounts file got no credential source and failed every request.
+        """
+        return tuple(self._upstreams.values())
+
     def upstream(self, account_id: str) -> UpstreamSettings | None:
         """Return the origin and credential one account is reached with."""
         return self._upstreams.get(account_id.strip().lower())

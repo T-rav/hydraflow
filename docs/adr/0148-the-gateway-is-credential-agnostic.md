@@ -41,7 +41,7 @@ the gateway supports.** Three lanes now coexist:
 
 | Lane | `auth_style` | Credential | Billing |
 |---|---|---|---|
-| Claude subscription | `oauth-bearer` | OAuth token, read per request | `flat_rate` |
+| Claude subscription | `oauth-bearer` | OAuth token from the local store, cached to 120s before expiry | `flat_rate` |
 | Claude API | `x-api-key` | static key from env | `metered` |
 | z.ai harness | `bearer` | static key from env | `metered` |
 
@@ -69,16 +69,23 @@ declared. It can now: `auth_style: oauth-bearer` with no `credential_env`, and
 `GatewayAccount` requires exactly one credential source rather than silently
 dropping an account whose secret is absent.
 
-This is what makes "subscription first, metered key second, z.ai third" a
-configuration rather than a code change.
+This is what makes "subscription first, then a metered key" a configuration
+rather than a code change. It does NOT reach z.ai: `candidates_for_model`
+filters by `binding_for_model`, so a `claude-*` request never has a
+`zai-harness` candidate. Moving between providers is a spawn-side model change
+(ADR-0119's credit failover), not a gateway hop — the gateway hops between
+accounts *on one lane*.
 
 ### `AccountBillingKind` gets its first consumer
 
-The ledger row now records `billing_kind`. Pricing a flat-rate request the same
-way as a metered one and summing both as dollars overstates spend — and the
-point of one ledger was to stop guessing at cost. `AccountBillingKind`
+The ledger row now records `billing_kind`, and `_aggregate_gateway_rows`
+excludes a `flat_rate` row from `spend_usd` while still counting it as a
+request. Pricing a flat-rate call the same way as a metered one and summing
+both as dollars overstates the bill by exactly the subscription's traffic —
+the guessing one ledger was meant to end. `AccountBillingKind`
 (`metered` / `flat_rate`) already existed in the domain with exactly this
-meaning and **no reader**; this is it, rather than a synonym (ADR-0053).
+meaning and **no reader**; writer and reader are both this ADR, rather than a
+synonym (ADR-0053).
 
 ### The refresh command is operator-supplied
 
@@ -112,10 +119,18 @@ non-ASCII before it reaches a header, because a store returning
 a long-running local proxy that serves automated spawns is not what a personal
 subscription is provisioned for, and Anthropic could refuse it at any time
 (request shape, token binding, or terms enforcement). The operator was told
-this before it was built and chose it knowingly. The rollback is one
-variable: `GATEWAY_ANTHROPIC_AUTH_MODE=api_key`, or a dial back to `claude`.
+this before it was built and chose it knowingly.
+
+The rollback is the **spawn-side dial** back to `claude`, which needs no
+gateway credential at all. `GATEWAY_ANTHROPIC_AUTH_MODE=api_key` is not a
+rollback on its own: with a base URL set and no key, `_add_upstream` refuses to
+load ("must be set together"), and the deployment this ADR was written for has
+no Anthropic key to supply. Saying otherwise would send an operator mid-incident
+to a switch that fails boot.
 
 **What this does not do.** It does not implement the OAuth refresh exchange, it
 does not consolidate the historical `inferences.jsonl` ledgers, and it does not
 make a host-mode gateway spawn *provable* — ADR-0147's isolation caveat stands
-unchanged.
+unchanged. It also does not notice a credential revoked mid-lifetime: the token
+is cached until 120s before its recorded expiry, so after re-authenticating in
+Claude Code the gateway must be restarted to pick the new one up.

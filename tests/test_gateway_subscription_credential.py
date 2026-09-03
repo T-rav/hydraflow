@@ -21,6 +21,7 @@ import pytest
 
 from hydraflow_gateway.subscription_credential import (
     DEFAULT_KEYCHAIN_READ_COMMAND,
+    UNKNOWN_EXPIRY_TTL_SECONDS,
     SubscriptionCredentialError,
     SubscriptionCredentialSource,
     parse_credential_blob,
@@ -85,11 +86,40 @@ class TestReadingTheCredentialBlob:
             == expiry
         )
 
-    def test_a_blob_with_no_expiry_is_treated_as_unknown_not_fresh(self) -> None:
-        """Unknown expiry must not read as "valid forever"."""
-        token = parse_credential_blob(_blob())
+    def test_a_blob_with_no_expiry_is_trusted_for_a_bounded_window(self) -> None:
+        """Not forever, and not never.
+
+        "Never fresh" was the original rule and it made a bare token unusable:
+        never fresh -> refresh -> re-read -> still no expiry -> fail, because
+        the re-read was judged by the same predicate that had nothing to judge.
+        `.env.sample` offered exactly such a read command.
+        """
+        token = parse_credential_blob(_blob(), read_at=_NOW)
 
         assert token.expires_at is None
+        assert token.is_fresh(now=_NOW, skew_seconds=0) is True
+
+    def test_a_blob_with_no_expiry_goes_stale_once_the_window_passes(self) -> None:
+        """The other half: an unknown expiry must not read as "valid forever".
+
+        A store whose schema moved would otherwise look healthy right up until
+        every spawn failed at the upstream.
+        """
+        token = parse_credential_blob(_blob(), read_at=_NOW)
+        later = _NOW + timedelta(seconds=UNKNOWN_EXPIRY_TTL_SECONDS + 1)
+
+        assert token.is_fresh(now=later, skew_seconds=0) is False
+
+    def test_a_stated_expiry_still_wins_over_the_window(self) -> None:
+        """Decoy: the window is a fallback, not an override.
+
+        Without this, trusting every token for the window would mask an expiry
+        the store actually gave us.
+        """
+        token = parse_credential_blob(
+            _blob(expires_at=(_NOW - timedelta(hours=1)).isoformat()), read_at=_NOW
+        )
+
         assert token.is_fresh(now=_NOW, skew_seconds=0) is False
 
     def test_an_empty_store_is_an_error_not_an_empty_token(self) -> None:
@@ -352,3 +382,70 @@ class TestConcurrentSpawnsShareOneResolution:
         assert source._lock.acquire(blocking=False), "fast path held the lock"
         source._lock.release()
         assert source.access_token() == "tok"
+
+
+class TestTheRealSubprocessPath:
+    """`run_credential_command` is the only code that touches a real store.
+
+    Every other test injects `run=`, so the default path — argv, exit codes,
+    decoding — had no coverage at all, and `test_it_does_not_print_the_secret
+    _to_a_shell` pinned a constant rather than the behaviour: swapping the
+    implementation to `shell=True` left the suite green.
+    """
+
+    def test_it_returns_the_commands_stdout(self) -> None:
+        import sys
+
+        from hydraflow_gateway.subscription_credential import run_credential_command
+
+        out = run_credential_command((sys.executable, "-c", "print('tok-from-argv')"))
+
+        assert out.strip() == "tok-from-argv"
+
+    def test_shell_metacharacters_arrive_literally(self) -> None:
+        """The property, not the constant: argv is never handed to a shell.
+
+        Under `shell=True` this argument would be split on the `;` and the
+        second half executed — which for a command whose OUTPUT is a live
+        credential is how the credential reaches somewhere it should not.
+        """
+        import sys
+
+        from hydraflow_gateway.subscription_credential import run_credential_command
+
+        out = run_credential_command(
+            (sys.executable, "-c", "import sys; print(sys.argv[1])", "a; echo pwned")
+        )
+
+        assert out.strip() == "a; echo pwned"
+
+    def test_a_non_zero_exit_becomes_a_credential_error(self) -> None:
+        import sys
+
+        from hydraflow_gateway.subscription_credential import run_credential_command
+
+        with pytest.raises(SubscriptionCredentialError, match="exited"):
+            run_credential_command((sys.executable, "-c", "raise SystemExit(3)"))
+
+    def test_a_missing_command_becomes_a_credential_error(self) -> None:
+        """Not an OSError out of the proxy's credential arm."""
+        from hydraflow_gateway.subscription_credential import run_credential_command
+
+        with pytest.raises(SubscriptionCredentialError, match="could not run"):
+            run_credential_command(("hydraflow-no-such-binary-exists",))
+
+    def test_undecodable_output_becomes_a_credential_error(self) -> None:
+        """A store emitting non-UTF-8 raised UnicodeDecodeError — a ValueError
+        the proxy's `except (OSError, SubprocessError)` did not catch."""
+        import sys
+
+        from hydraflow_gateway.subscription_credential import run_credential_command
+
+        with pytest.raises(SubscriptionCredentialError):
+            run_credential_command(
+                (
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(b'\\xff\\xfe\\x00bad')",
+                )
+            )

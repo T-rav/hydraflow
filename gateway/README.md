@@ -24,7 +24,9 @@ Required runtime configuration:
 ### Anthropic on a subscription instead of a key (ADR-0148)
 
 `GATEWAY_ANTHROPIC_AUTH_MODE=subscription` presents a Claude subscription's
-OAuth bearer token instead of an API key. `GATEWAY_ANTHROPIC_BASE_URL` is still
+OAuth bearer token instead of an API key. The token is read from the store and
+cached until 120s before its recorded expiry — not re-read per request — so
+after re-authenticating in Claude Code, restart the gateway. `GATEWAY_ANTHROPIC_BASE_URL` is still
 required — the lane changes the credential, not the destination — and
 `GATEWAY_ANTHROPIC_API_KEY` must be **unset**, so it is unambiguous which
 credential this gateway presents.
@@ -54,7 +56,9 @@ Two constraints worth knowing before you choose this lane:
 
 To run subscription **and** a metered key together — so bounded fallback can hop
 from one to the other — declare them as accounts in `GATEWAY_ACCOUNTS_FILE`
-rather than through the mode switch, which selects only one:
+rather than through the mode switch, which selects only one. Both hops stay on
+the Anthropic lane: fallback never crosses to z.ai, because candidates are
+filtered by the model's provider binding.
 
 ```yaml
 schema_version: 1

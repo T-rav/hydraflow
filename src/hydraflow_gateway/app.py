@@ -80,6 +80,7 @@ from hydraflow_gateway.settings import GatewaySettings
 from hydraflow_gateway.subscription_credential import (
     SubscriptionCredentialSource,
     build_subscription_credential,
+    needs_subscription_credential,
 )
 from model_pricing import ModelPricingTable, load_pricing
 
@@ -272,10 +273,24 @@ def create_app(
     # keyed on the key id so none of those paths can release it twice.
     resolved_store.on_release(resolved_account_state.release_lease)
     # Built only when an upstream actually asks for it, so an api_key
-    # deployment never touches a credential store it does not use.
+    # deployment never touches a credential store it does not use. Both
+    # sources are consulted: an oauth upstream can arrive from the env pair OR
+    # from an account in GATEWAY_ACCOUNTS_FILE.
+    oauth_upstreams = [
+        *resolved_settings.upstreams.values(),
+        *resolved_pool.upstreams,
+    ]
     resolved_credential = subscription_credential or build_subscription_credential(
-        resolved_settings
+        oauth_upstreams
     )
+    if resolved_credential is None and needs_subscription_credential(oauth_upstreams):
+        # Refuse at boot rather than at the first spawn. A gateway that starts,
+        # accepts mints, and then fails every proxied request is the
+        # "false-ready tap" `require_upstream` already refuses one lane down.
+        raise ValueError(
+            "an upstream authenticates with a Claude subscription but no "
+            "credential source could be built for it"
+        )
     owns_client = client is None
     resolved_client = client or _build_http_client(resolved_settings)
     proxy = GatewayProxy(
