@@ -709,7 +709,10 @@ def verify_proposals(
       caller can re-file a HITL issue for human escalation.
 
     Returns a list of category names that are stale and need HITL escalation.
-    Never raises — all errors are logged and swallowed.
+    Per-record failures are logged and skipped, but this DOES raise
+    ``INFRA_FATAL_EXCEPTIONS`` (#6680): no credential, no budget, or no
+    memory means the remaining categories cannot succeed either, so the
+    signal must reach the caller rather than repeat once per record.
     """
     from datetime import UTC, datetime  # noqa: PLC0415
 

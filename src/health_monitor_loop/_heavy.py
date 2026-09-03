@@ -376,7 +376,13 @@ class HealthMonitorHeavyPassMixin:
                 logger.info("HITL recommendation: stale review insight '%s'", category)
         except ImportError:
             pass
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # `verify_proposals` now lets the infra-fatal signals out (#6680);
+            # without this they died here, one debug line deep, and the loop
+            # carried on spawning against a dead account. Both sibling methods
+            # in this file (`_file_harness_suggestions`,
+            # `_file_one_harness_suggestion`) already do exactly this.
+            reraise_on_credit_or_bug(exc)
             logger.debug("Proposal verification failed", exc_info=True)
 
     def _run_cross_project_pattern_cycle(self) -> None:

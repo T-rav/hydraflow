@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import review_phase
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from models import HitlEscalation
 from phase_utils import publish_review_status
 from review_insights import (
@@ -216,7 +217,12 @@ class ReviewInsightsMixin:
                     except Exception:
                         self._insight_escalated_at.pop(category, None)
                         raise
-        except (RuntimeError, OSError):
+        except (RuntimeError, OSError) as exc:
+            # CreditExhaustedError and AuthenticationError are RuntimeError
+            # subclasses, so this clause caught the very exceptions
+            # `verify_proposals` now raises on purpose (#6680) and reported
+            # them as an ordinary recording failure.
+            reraise_on_credit_or_bug(exc)
             status = "error"
             details["error"] = "review insight recording failed"
             logger.warning(
