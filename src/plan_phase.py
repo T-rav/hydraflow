@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import plan_phase_wiki_ingest
 from adversarial_agents import AgentLike
@@ -124,9 +124,12 @@ class PlanPhase(
         touchpoint_expander: PlanTouchpointExpander | None = None,
         discover_runner: DiscoverRunner | None = None,
         shape_runner: ShapeRunner | None = None,
+        decomposition_ensemble: Any | None = None,
     ) -> None:
         self._config = config
         self._state = state
+        self._decomposition_ensemble = decomposition_ensemble
+        self._epic_manager = epic_manager
         self._store = store
         self._planners = planners
         # Shared across every ``plan_single_issue`` call so repeated single-item
