@@ -1049,3 +1049,34 @@ does, so each one is discovered at the most expensive possible moment.
 ```json:entry
 {"id":"01M3D15670E3B5C47C1A68DAE9","title":"Three CI gates that only fail in CI: suppressions-on-resolved, P1.17 receipts, parametrize copies","topic":null,"source_type":"manual","source_issue":11908,"source_repo":null,"created_at":"2026-08-31T00:00:00+00:00","updated_at":"2026-08-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+## A hook whose key comes from `$(...)` fails OPEN when the command is missing
+
+`hf.check-existing-infra-before-new-file.sh` keyed its one-shot marker as
+`infra-$(echo -n "$REL" | (md5sum 2>/dev/null || md5) | cut -d' ' -f1)`.
+`md5sum` is Linux; macOS ships `md5` and keeps it in **`/sbin`**. On a shell
+whose `PATH` omits `/sbin`, neither resolves, the substitution yields `""`, and
+every file collapses onto the single marker `infra-`: the first refusal writes
+it and every OTHER new file is exempted for the full 240-minute window.
+
+The guard stops guarding and nothing reddens. Its own shell test reported five
+failures that read like a broken detector, and cost a wrongly-filed "staging is
+red" issue (#12117) before the cause turned out to be the reporter's `PATH`.
+
+- **A key derived from a command substitution must never be allowed to be
+  empty.** Fall back to something unfalsifiable — the flattened path is longer
+  and uglier and cannot come back blank.
+- **Test the degraded environment, not just the happy one.** The regression is
+  pinned by running the hook with `PATH=/usr/bin:/bin` and asserting two
+  *different* paths are both still refused.
+- **An environment-dependent test result is a property of the invocation, not
+  the code.** Same shape as pyright answering differently depending on how it
+  is called (#11707). Re-run under a normal shell before believing a failure.
+
+**Why:** a guard that fails closed is noisy and safe; a guard that fails open is
+silent and useless, and this one is the parallel-build protection whose whole
+job is catching a duplicate before it lands.
+
+```json:entry
+{"id":"01M3D15670E3B5C47C1A68DAEA","title":"A hook whose key comes from $(...) fails OPEN when the command is missing","topic":null,"source_type":"manual","source_issue":12117,"source_repo":null,"created_at":"2026-09-03T00:00:00+00:00","updated_at":"2026-09-03T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

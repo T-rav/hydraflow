@@ -90,8 +90,21 @@ git ls-files --error-unmatch -- "$REL" >/dev/null 2>&1 && exit 0
 # considered "yes, this really is new" silently exempt that filename for an
 # unrelated agent days later, in a repo whose normal mode is multi-day
 # unattended runs. Expiring means the worst case is one extra tool call.
-MARKER_DIR="${HF_HOOK_MARKER_DIR:-/tmp/claude-code-markers/$(echo -n "$PROJECT_DIR" | (md5sum 2>/dev/null || md5) | cut -d' ' -f1)}"
-MARKER="$MARKER_DIR/infra-$(echo -n "$REL" | (md5sum 2>/dev/null || md5) | cut -d' ' -f1)"
+# A marker key must never come back EMPTY. `md5sum` is Linux, `md5` is macOS —
+# and macOS keeps it in /sbin, which a trimmed PATH easily omits. With neither
+# resolvable the substitution yields "", every file collapses onto the single
+# marker `infra-`, and the first refusal silently disables this guard for the
+# whole 240-minute window. A guard that quietly stops guarding is worse than
+# one that never shipped, so fall back to the flattened path: longer, uglier,
+# and still unique per file.
+_marker_key () {
+  local hashed
+  hashed=$(printf '%s' "$1" | (md5sum 2>/dev/null || md5 2>/dev/null) | cut -d' ' -f1)
+  [ -n "$hashed" ] || hashed=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s' "$hashed"
+}
+MARKER_DIR="${HF_HOOK_MARKER_DIR:-/tmp/claude-code-markers/$(_marker_key "$PROJECT_DIR")}"
+MARKER="$MARKER_DIR/infra-$(_marker_key "$REL")"
 [ -f "$MARKER" ] && [ -n "$(find "$MARKER" -mmin -240 2>/dev/null)" ] && exit 0
 
 base="${REL##*/}"; base="${base%.py}"; base="${base#test_}"
