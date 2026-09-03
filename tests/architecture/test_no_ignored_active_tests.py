@@ -296,7 +296,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
 #: timeout now raises the house `SubprocessTimeoutError`, and container logs
 #: come from one demuxed call instead of two round-trips.
-DEFERRED_XFAILS_MAX = 64
+#: 64 -> 53 when the loop/fetch family (#6653/#6709/#6728/#6735/#6862)
+#: was fixed: a repo without a slash says so, the REST fallback and the triage
+#: park no longer absorb the fatal signals, and one bad bot PR stops costing
+#: the rest of the queue its tick.
+DEFERRED_XFAILS_MAX = 53
 #: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
@@ -317,8 +321,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_caught_not_propagated",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_logged",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_write_oserror_is_caught_not_propagated",
-        "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
-        "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
         "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
         "tests/regressions/regression_issue_6681.py::TestRetrospectiveRecordTypeError.test_type_error_in_collect_propagates",
@@ -329,17 +331,11 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_mkdir_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_write_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_permission_error_on_write_does_not_propagate",
-        "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
-        "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
         "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
         "tests/regressions/regression_issue_6710.py::test_auth_error_awaits_cancelled_siblings",
         "tests/regressions/regression_issue_6710.py::test_credit_exhausted_awaits_cancelled_siblings",
-        "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6733.py::TestCanonicalEnvVarApplied.test_canonical_env_var_overrides_field",
         "tests/regressions/regression_issue_6733.py::TestEnvVarNamingConvention.test_workspace_gc_interval_env_key_matches_field_name",
-        "tests/regressions/regression_issue_6735.py::TestEpicSweeperPropagatesFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6735.py::TestEpicSweeperPropagatesFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6742.py::TestImplementPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
         "tests/regressions/regression_issue_6742.py::TestImplementPhaseSummarizerTruthy.test_post_impl_transcript_calls_summarizer_when_falsy",
         "tests/regressions/regression_issue_6742.py::TestImplementPhaseSummarizerTruthy.test_post_impl_transcript_hooks_calls_summarizer_when_falsy",
@@ -357,9 +353,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_pipeline_snapshot_entry",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_first_pr_still_processes_remaining",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_hitl_escalation_still_processes_remaining",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_merge_still_processes_remaining",
         "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_all_lines_valid_json_after_partial_write",
         "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_partial_write_cascades_to_corrupt_subsequent_event",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",

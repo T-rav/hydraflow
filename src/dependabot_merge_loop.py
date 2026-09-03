@@ -10,6 +10,7 @@ from comment_formatter import SelfReviewError
 from config import AUTO_AGENT_BRANCH_PREFIX, HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from merge_policy import (
     ROLE_ORCHESTRATOR_REVIEWER,
     MergeApproval,
@@ -334,198 +335,219 @@ class DependabotMergeLoop(BaseBackgroundLoop):
         failed = 0
 
         for pr in bot_prs:
-            passed, summary = await self._prs.wait_for_ci(
-                pr.pr,
-                timeout=60,
-                poll_interval=15,
-                stop_event=self._stop_event,
-            )
+            # Per-PR isolation (#6862). This loop had no guard, so the
+            # FIRST bot PR that raised — a flaky CI read, a merge conflict
+            # heal that threw, an escalation failure — ended the sweep, and
+            # every PR behind it went unprocessed until the next tick. A
+            # single bad PR must cost itself, not the queue.
+            try:
+                passed, summary = await self._prs.wait_for_ci(
+                    pr.pr,
+                    timeout=60,
+                    poll_interval=15,
+                    stop_event=self._stop_event,
+                )
 
-            if self._stop_event.is_set():
-                break
+                if self._stop_event.is_set():
+                    break
 
-            if passed:
-                # Class 5 opt-out: a fresh label read (not the cache — the
-                # author may attach it at any time) so ``no-auto-merge``
-                # reliably leaves the PR to its author.
-                # Guarded by merge_policy_enabled: the label read is a raw
-                # gh subprocess (#9754 — the sandbox air-gaps it by disabling
-                # the policy, and this opt-out must not reopen that escape).
-                if self._is_human_shepherd_pr(pr) and self._config.merge_policy_enabled:
-                    labels = await fetch_pr_labels(self._config, pr.pr)
-                    if _HUMAN_SHEPHERD_OPT_OUT_LABEL in labels:
-                        skipped += 1
-                        logger.info(
-                            "Human PR #%d carries %s — leaving it to its author",
+                if passed:
+                    # Class 5 opt-out: a fresh label read (not the cache — the
+                    # author may attach it at any time) so ``no-auto-merge``
+                    # reliably leaves the PR to its author.
+                    # Guarded by merge_policy_enabled: the label read is a raw
+                    # gh subprocess (#9754 — the sandbox air-gaps it by disabling
+                    # the policy, and this opt-out must not reopen that escape).
+                    if (
+                        self._is_human_shepherd_pr(pr)
+                        and self._config.merge_policy_enabled
+                    ):
+                        labels = await fetch_pr_labels(self._config, pr.pr)
+                        if _HUMAN_SHEPHERD_OPT_OUT_LABEL in labels:
+                            skipped += 1
+                            logger.info(
+                                "Human PR #%d carries %s — leaving it to its author",
+                                pr.pr,
+                                _HUMAN_SHEPHERD_OPT_OUT_LABEL,
+                            )
+                            continue
+                    # CH-3 (#9731): consult the factory-autonomy policy before
+                    # approving+merging. This lane's approval evidence is its own
+                    # CI-green auto-approval (the submit_review below); a deny
+                    # skips both, alerts, and leaves the PR unprocessed so a
+                    # later approval or policy-override:* label can land it.
+                    policy_verdict = await enforce_merge_policy(
+                        config=self._config,
+                        prs=self._prs,
+                        pr_number=pr.pr,
+                        actor="hydraflow:dependabot_merge_loop",
+                        approvals=[
+                            MergeApproval(
+                                actor="dependabot_merge_loop",
+                                role=ROLE_ORCHESTRATOR_REVIEWER,
+                                source=(
+                                    "ci_green_human_shepherd_auto_approval"
+                                    if self._is_human_shepherd_pr(pr)
+                                    else "ci_green_bot_pr_auto_approval"
+                                ),
+                            )
+                        ],
+                        lane="dependabot_merge_loop",
+                    )
+                    if not policy_verdict.allowed:
+                        failed += 1
+                        logger.warning(
+                            "Bot PR #%d merge blocked by policy: %s",
                             pr.pr,
-                            _HUMAN_SHEPHERD_OPT_OUT_LABEL,
+                            policy_verdict.reason,
+                        )
+                        await self._bus.publish(
+                            HydraFlowEvent(
+                                type=EventType.SYSTEM_ALERT,
+                                data=SystemAlertPayload(
+                                    message=(
+                                        f"Merge policy denied auto-merge of bot PR "
+                                        f"#{pr.pr}: {policy_verdict.reason}"
+                                    ),
+                                    source="merge_policy",
+                                ),
+                            )
                         )
                         continue
-                # CH-3 (#9731): consult the factory-autonomy policy before
-                # approving+merging. This lane's approval evidence is its own
-                # CI-green auto-approval (the submit_review below); a deny
-                # skips both, alerts, and leaves the PR unprocessed so a
-                # later approval or policy-override:* label can land it.
-                policy_verdict = await enforce_merge_policy(
-                    config=self._config,
-                    prs=self._prs,
-                    pr_number=pr.pr,
-                    actor="hydraflow:dependabot_merge_loop",
-                    approvals=[
-                        MergeApproval(
-                            actor="dependabot_merge_loop",
-                            role=ROLE_ORCHESTRATOR_REVIEWER,
-                            source=(
-                                "ci_green_human_shepherd_auto_approval"
+
+                    # CI green — approve (best-effort) and merge. The bot cannot
+                    # approve its OWN PR (GitHub blocks self-review), and the base
+                    # branch requires 0 approving reviews anyway, so a
+                    # ``SelfReviewError`` must never abort the merge — otherwise
+                    # every bot caretaker PR (wiki/UL/pricing) piles up unmerged
+                    # and the loop errors each cycle (#10526). Approving a *human*
+                    # shepherd's PR is not self-review and still records normally.
+                    try:
+                        await self._prs.submit_review(
+                            pr.pr,
+                            ReviewVerdict.APPROVE,
+                            (
+                                "CI passed — auto-merging shepherded human-prefix PR "
+                                "(#9889 class 5; add the no-auto-merge label to opt out)."
                                 if self._is_human_shepherd_pr(pr)
-                                else "ci_green_bot_pr_auto_approval"
+                                else "CI passed — auto-merging bot PR."
                             ),
                         )
-                    ],
-                    lane="dependabot_merge_loop",
-                )
-                if not policy_verdict.allowed:
-                    failed += 1
-                    logger.warning(
-                        "Bot PR #%d merge blocked by policy: %s",
-                        pr.pr,
-                        policy_verdict.reason,
-                    )
-                    await self._bus.publish(
-                        HydraFlowEvent(
-                            type=EventType.SYSTEM_ALERT,
-                            data=SystemAlertPayload(
-                                message=(
-                                    f"Merge policy denied auto-merge of bot PR "
-                                    f"#{pr.pr}: {policy_verdict.reason}"
-                                ),
-                                source="merge_policy",
-                            ),
+                    except SelfReviewError:
+                        logger.debug(
+                            "Bot PR #%d: cannot self-approve; base requires 0 "
+                            "approvals — proceeding to merge (#10526).",
+                            pr.pr,
                         )
-                    )
+                    merge_ok = await self._prs.merge_pr(pr.pr, auto_rebase=True)
+                    if merge_ok:
+                        merged += 1
+                        self._state.add_dependabot_merge_processed(pr.pr)
+                        logger.info("Auto-merged bot PR #%d (%s)", pr.pr, pr.title)
+                        continue
+                    # #9889 item 2: the merge failed — when the PR's mergeable
+                    # state corroborates a genuine content conflict (DIRTY), heal
+                    # it per PR class instead of log-and-give-up (the arch
+                    # self-heal below only fires on arch-staleness CI text, never
+                    # on mergeable-state conflicts, so it can't help here).
+                    heal_outcome = await self._maybe_heal_merge_conflict(pr, settings)
+                    if heal_outcome == "skipped":
+                        skipped += 1
+                    elif heal_outcome == "failed":
+                        failed += 1
+                    else:  # not a content conflict — legacy give-up
+                        failed += 1
+                        logger.warning("Failed to merge bot PR #%d", pr.pr)
                     continue
 
-                # CI green — approve (best-effort) and merge. The bot cannot
-                # approve its OWN PR (GitHub blocks self-review), and the base
-                # branch requires 0 approving reviews anyway, so a
-                # ``SelfReviewError`` must never abort the merge — otherwise
-                # every bot caretaker PR (wiki/UL/pricing) piles up unmerged
-                # and the loop errors each cycle (#10526). Approving a *human*
-                # shepherd's PR is not self-review and still records normally.
-                try:
-                    await self._prs.submit_review(
-                        pr.pr,
-                        ReviewVerdict.APPROVE,
-                        (
-                            "CI passed — auto-merging shepherded human-prefix PR "
-                            "(#9889 class 5; add the no-auto-merge label to opt out)."
-                            if self._is_human_shepherd_pr(pr)
-                            else "CI passed — auto-merging bot PR."
-                        ),
-                    )
-                except SelfReviewError:
-                    logger.debug(
-                        "Bot PR #%d: cannot self-approve; base requires 0 "
-                        "approvals — proceeding to merge (#10526).",
-                        pr.pr,
-                    )
-                merge_ok = await self._prs.merge_pr(pr.pr, auto_rebase=True)
-                if merge_ok:
-                    merged += 1
-                    self._state.add_dependabot_merge_processed(pr.pr)
-                    logger.info("Auto-merged bot PR #%d (%s)", pr.pr, pr.title)
-                    continue
-                # #9889 item 2: the merge failed — when the PR's mergeable
-                # state corroborates a genuine content conflict (DIRTY), heal
-                # it per PR class instead of log-and-give-up (the arch
-                # self-heal below only fires on arch-staleness CI text, never
-                # on mergeable-state conflicts, so it can't help here).
-                heal_outcome = await self._maybe_heal_merge_conflict(pr, settings)
-                if heal_outcome == "skipped":
+                # CI not passed — check if still pending or truly failed
+                if "timed out" in summary.lower():
+                    # CI still pending — skip for now, retry next cycle
                     skipped += 1
-                elif heal_outcome == "failed":
-                    failed += 1
-                else:  # not a content conflict — legacy give-up
-                    failed += 1
-                    logger.warning("Failed to merge bot PR #%d", pr.pr)
-                continue
+                    logger.debug(
+                        "Bot PR #%d CI still pending — will retry next cycle", pr.pr
+                    )
+                    continue
 
-            # CI not passed — check if still pending or truly failed
-            if "timed out" in summary.lower():
-                # CI still pending — skip for now, retry next cycle
-                skipped += 1
-                logger.debug(
-                    "Bot PR #%d CI still pending — will retry next cycle", pr.pr
-                )
-                continue
+                # CI truly failed. Before applying the failure strategy, try to
+                # self-heal the common stuck-pile case: a bot PR red purely on
+                # stale docs/arch/generated/ artifacts (another bot PR advanced the
+                # base, so this PR's committed generated files went stale even on
+                # files it never touched). Merge the base + regenerate + push so CI
+                # re-runs; the next tick re-evaluates. Bounded by
+                # ``dependabot_arch_autoheal_max_attempts`` (0 = disabled): if regen
+                # does not make it green, the cap is hit and the normal
+                # ``failure_strategy`` applies. Detection can be lenient — the cap
+                # is the safety net.
+                heal_cap = self._config.dependabot_arch_autoheal_max_attempts
+                if (
+                    heal_cap > 0
+                    and _is_arch_staleness_failure(summary)
+                    and self._state.get_dependabot_arch_refresh_attempts(pr.pr)
+                    < heal_cap
+                ):
+                    refreshed = await self._prs.refresh_pr_branch_with_arch_regen(
+                        pr.pr, pr.branch
+                    )
+                    if refreshed:
+                        self._state.bump_dependabot_arch_refresh_attempts(pr.pr)
+                        skipped += 1
+                        logger.info(
+                            "Bot PR #%d CI failed on stale arch artifacts — "
+                            "merged base + regenerated; CI will re-run (attempt %d/%d)",
+                            pr.pr,
+                            self._state.get_dependabot_arch_refresh_attempts(pr.pr),
+                            heal_cap,
+                        )
+                        continue
+                    logger.info(
+                        "Bot PR #%d arch self-heal did not push — applying "
+                        "failure strategy",
+                        pr.pr,
+                    )
 
-            # CI truly failed. Before applying the failure strategy, try to
-            # self-heal the common stuck-pile case: a bot PR red purely on
-            # stale docs/arch/generated/ artifacts (another bot PR advanced the
-            # base, so this PR's committed generated files went stale even on
-            # files it never touched). Merge the base + regenerate + push so CI
-            # re-runs; the next tick re-evaluates. Bounded by
-            # ``dependabot_arch_autoheal_max_attempts`` (0 = disabled): if regen
-            # does not make it green, the cap is hit and the normal
-            # ``failure_strategy`` applies. Detection can be lenient — the cap
-            # is the safety net.
-            heal_cap = self._config.dependabot_arch_autoheal_max_attempts
-            if (
-                heal_cap > 0
-                and _is_arch_staleness_failure(summary)
-                and self._state.get_dependabot_arch_refresh_attempts(pr.pr) < heal_cap
-            ):
-                refreshed = await self._prs.refresh_pr_branch_with_arch_regen(
-                    pr.pr, pr.branch
-                )
-                if refreshed:
-                    self._state.bump_dependabot_arch_refresh_attempts(pr.pr)
+                # Shepherd heal class 2 (#9889): a CI-failed bot PR that is
+                # BEHIND its base often fails on state the base already fixed
+                # (baseline advances, sibling regens) — and re-running failed
+                # jobs pins the OLD merge ref (the #9884 lesson). One bounded
+                # update-branch forces a fresh merge ref + full CI re-run.
+                # update_pr_branch returns False when already up to date or on
+                # API refusal, so this never loops on an actually-broken PR.
+                ub_cap = self._config.dependabot_update_branch_max_attempts
+                if (
+                    ub_cap > 0
+                    and self._state.get_dependabot_update_branch_attempts(pr.pr)
+                    < ub_cap
+                    and await self._prs.update_pr_branch(pr.pr, method="merge")
+                ):
+                    self._state.bump_dependabot_update_branch_attempts(pr.pr)
                     skipped += 1
                     logger.info(
-                        "Bot PR #%d CI failed on stale arch artifacts — "
-                        "merged base + regenerated; CI will re-run (attempt %d/%d)",
+                        "Bot PR #%d CI failed while behind base — updated branch "
+                        "for a fresh merge ref; CI will re-run (attempt %d/%d)",
                         pr.pr,
-                        self._state.get_dependabot_arch_refresh_attempts(pr.pr),
-                        heal_cap,
+                        self._state.get_dependabot_update_branch_attempts(pr.pr),
+                        ub_cap,
                     )
                     continue
-                logger.info(
-                    "Bot PR #%d arch self-heal did not push — applying "
-                    "failure strategy",
-                    pr.pr,
-                )
 
-            # Shepherd heal class 2 (#9889): a CI-failed bot PR that is
-            # BEHIND its base often fails on state the base already fixed
-            # (baseline advances, sibling regens) — and re-running failed
-            # jobs pins the OLD merge ref (the #9884 lesson). One bounded
-            # update-branch forces a fresh merge ref + full CI re-run.
-            # update_pr_branch returns False when already up to date or on
-            # API refusal, so this never loops on an actually-broken PR.
-            ub_cap = self._config.dependabot_update_branch_max_attempts
-            if (
-                ub_cap > 0
-                and self._state.get_dependabot_update_branch_attempts(pr.pr) < ub_cap
-                and await self._prs.update_pr_branch(pr.pr, method="merge")
-            ):
-                self._state.bump_dependabot_update_branch_attempts(pr.pr)
-                skipped += 1
-                logger.info(
-                    "Bot PR #%d CI failed while behind base — updated branch "
-                    "for a fresh merge ref; CI will re-run (attempt %d/%d)",
-                    pr.pr,
-                    self._state.get_dependabot_update_branch_attempts(pr.pr),
-                    ub_cap,
+                # CI truly failed — apply failure strategy
+                strategy_outcome = await self._apply_failure_strategy(
+                    pr, settings.failure_strategy, "CI failed on bot PR", summary
                 )
-                continue
-
-            # CI truly failed — apply failure strategy
-            strategy_outcome = await self._apply_failure_strategy(
-                pr, settings.failure_strategy, "CI failed on bot PR", summary
-            )
-            if strategy_outcome == "skipped":
-                skipped += 1
-            else:
+                if strategy_outcome == "skipped":
+                    skipped += 1
+                else:
+                    failed += 1
+            except Exception as exc:  # noqa: BLE001
+                # An exhausted budget or dead credential is not this PR's
+                # problem and will not improve on the next one.
+                reraise_on_credit_or_bug(exc)
                 failed += 1
+                logger.exception(
+                    "Bot PR #%d raised during processing — continuing with "
+                    "the rest of the queue",
+                    pr.pr,
+                )
 
         return {"merged": merged, "skipped": skipped, "failed": failed}
