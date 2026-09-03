@@ -157,3 +157,59 @@ def test_playbook_no_longer_claims_heartbeats_carry_no_error() -> None:
 
     assert "heartbeat details carry no error message" not in source
     assert "_cause_line(hb)" in source
+
+
+@pytest.mark.asyncio
+async def test_a_multiline_cause_is_collapsed_to_one_line() -> None:
+    """The actuator renders this value inside a single-line markdown span.
+
+    Not an edge case: `subprocess_util.run_subprocess` raises
+    ``f"Command {cmd!r} failed (rc=...): {result.stderr}"``, and stderr is
+    routinely multi-line — so the most common cause of a loop cycle failure
+    is exactly the one that would break the issue body's formatting.
+    """
+    bus = _Bus()
+    statuses: list[tuple[str, str, dict]] = []
+    loop = _Loop(bus=bus, statuses=statuses)
+
+    try:
+        raise RuntimeError(
+            "Command ('gh',) failed (rc=1): line one\nline two\n  indented"
+        )
+    except RuntimeError as exc:
+        await loop._report_cycle_failure("Term proposer loop error", exc=exc)
+
+    stored = str(statuses[0][2]["error"])
+    assert "\n" not in stored
+    assert "line one line two indented" in stored
+    messages = [
+        e.data["message"]
+        for e in bus.published
+        if isinstance(getattr(e, "data", None), dict) and "message" in e.data
+    ]
+    assert all("\n" not in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_the_cap_cannot_cut_a_credential_out_of_the_scrubber_s_reach() -> None:
+    """The 500-char cap runs AFTER the scrub, and the order is load-bearing.
+
+    Capping first would hand the scrubber a truncated token that its pattern
+    no longer matches, leaving the visible fragment in a heartbeat that
+    persists to disk and is quoted into a public issue body. A long stderr
+    with a credential past the cap boundary is the realistic shape.
+    """
+    bus = _Bus()
+    statuses: list[tuple[str, str, dict]] = []
+    loop = _Loop(bus=bus, statuses=statuses)
+
+    token = "ghp_" + "C" * 36
+    # Place the token so the cap would bisect it.
+    padding = "x" * (500 - len(token) // 2)
+    try:
+        raise RuntimeError(f"{padding}{token}")
+    except RuntimeError as exc:
+        await loop._report_cycle_failure("Term proposer loop error", exc=exc)
+
+    stored = str(statuses[0][2]["error"])
+    assert "ghp_" not in stored

@@ -304,7 +304,19 @@ class BaseBackgroundLoop(abc.ABC):
             # Heartbeats persist to disk and are quoted verbatim into a public
             # issue body, so an exception carrying a token must be scrubbed
             # before it is stored, not before it is rendered.
-            summary = scrub_secrets(str(exc))[:_ERROR_DETAIL_MAX_CHARS]
+            # The cap comes LAST, after the scrub: capping first could cut a
+            # credential in half, leaving a fragment the pattern no longer
+            # matches. Scrub and collapse commute — `" ".join(s.split())`
+            # substitutes a space for the newline rather than closing the gap,
+            # so it can never reassemble a token a wrapped stderr split.
+            #
+            # The collapse is not cosmetic. `run_subprocess` builds its
+            # message as f"Command {cmd!r} failed (rc=...): {result.stderr}",
+            # so a multi-line body is the COMMON case, and the actuator
+            # renders this value inside a single-line markdown code span.
+            summary = scrub_secrets(" ".join(str(exc).split()))[
+                :_ERROR_DETAIL_MAX_CHARS
+            ]
             details = {"error_type": type(exc).__name__, "error": summary}
             message = f"{message}: {type(exc).__name__}: {summary}"
         self._status_cb(self._worker_name, "error", details)
