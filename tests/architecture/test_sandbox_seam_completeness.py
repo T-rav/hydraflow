@@ -110,7 +110,14 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     # per the shrink-only rule (the module is seam-declared, not grandfathered).
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,
+    # #6961 split phase 3's two spawns: the branch listing stays here, and the
+    # delete moved to the module-level ``_delete_landed_branch`` so it can try
+    # the safe flag before the force one. SPLIT, not grown — 2 becomes 1 + 1,
+    # the same tolerated local-git class, and the helper is written with a
+    # single lexical ``run_subprocess`` precisely so trying two flags does not
+    # add a site to a shrink-only ratchet.
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 1,
+    "src/workspace_gc_loop.py::_delete_landed_branch::run_subprocess": 1,
     # _get_issue_state's raw ``gh api`` spawn was routed through
     # PRPort.get_issue_state in #9543 — entry pruned per the shrink-only rule.
     # #10698 all-root enumerate-and-reap phase: LOCAL-git worktree operations
