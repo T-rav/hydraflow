@@ -22,6 +22,37 @@ class AutoAgentStateMixin:
 
         def save(self) -> None: ...
 
+    #: Stage key for the plan-validation rejection counter (#11822). Lives on
+    #: the convergence ledger rather than the adversarial state on purpose:
+    #: `clear_adversarial_state` is called at every HITL hand-off, and this
+    #: count has to survive it. Each of #11544's eleven "failed validation"
+    #: entries was a separate HITL cycle, not a retry — a counter the hand-off
+    #: wipes can never see the second one.
+    PLAN_VALIDATION_STAGE = "plan_validation"
+
+    def get_plan_validation_rejections(self, issue: int) -> int:
+        """How many planning attempts this issue has lost to validation."""
+        cl = self._data.convergence_ledgers.get(str(issue))
+        return cl.get_attempts(self.PLAN_VALIDATION_STAGE) if cl else 0
+
+    def bump_plan_validation_rejections(self, issue: int) -> int:
+        """Record one plan-validation rejection; returns the new total."""
+        key = str(issue)
+        cl = self._data.convergence_ledgers.get(key)
+        if cl is None:
+            cl = ConvergenceLedger(issue_number=issue)
+            self._data.convergence_ledgers[key] = cl
+        n = cl.increment_attempts(self.PLAN_VALIDATION_STAGE)
+        self.save()
+        return n
+
+    def clear_plan_validation_rejections(self, issue: int) -> None:
+        """Reset after a decomposition or a successful plan."""
+        cl = self._data.convergence_ledgers.get(str(issue))
+        if cl is not None and self.PLAN_VALIDATION_STAGE in cl.stage_state:
+            cl.stage_state[self.PLAN_VALIDATION_STAGE].attempts = 0
+            self.save()
+
     def get_auto_agent_attempts(self, issue: int) -> int:
         cl = self._data.convergence_ledgers.get(str(issue))
         return cl.get_attempts("auto_agent") if cl else 0

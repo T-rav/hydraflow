@@ -2430,6 +2430,19 @@ class HydraFlowConfig(BaseModel):
         le=5,
         description="Max gap review + re-plan iterations (0 disables gap review)",
     )
+    plan_validation_decompose_threshold: int = Field(
+        default=3,
+        description=(
+            "Plan-validation rejections on one issue before the next failure "
+            "routes to ADR-0105 decomposition instead of HITL (#11822). 0 "
+            "disables. Each rejection is a separate HITL cycle, not a retry — "
+            "the planner retries once with the errors in its prompt and then "
+            "hands off, so this counts round-trips. Default 3 from the "
+            "observed run: #11544 burned 11 cycles, #11547 seven, #11803 six, "
+            "#11795 five, all on the same gate; 3 catches every one early "
+            "while leaving room for a second look to succeed."
+        ),
+    )
     epic_decompose_complexity_threshold: int = Field(
         default=8,
         ge=1,
