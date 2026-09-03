@@ -7,6 +7,7 @@ enforced_by:
   - tests/test_issue_intake_boundary.py
   - tests/architecture/test_intake_proxy_config.py
   - tests/scenarios/test_exception_sensor_triage_scenario.py
+  - tests/test_process_sentry_sensor.py
 
 # Each normative rule in README.md names the check that catches its violation.
 # Properties: tests/architecture/test_standards_rules_are_wired.py
@@ -51,3 +52,15 @@ rules:
   - id: triage-routes-them-as-system-exceptions
     claim: A sensor issue that fails triage is auto-closed as a transient rather than parked for clarification no author will supply
     enforced_by: tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close
+  - id: every-unattended-process-installs-the-sensor
+    claim: Each entrypoint installs the sensor itself, so a crash before the composition root is still reported and the gateway process is covered at all
+    enforced_by: tests/test_process_sentry_sensor.py::TestTheEntrypointsInstallIt::test_the_server_installs_the_sensor_before_loading_config
+  - id: the-sdk-is-initialised-once-per-process
+    claim: A second init is refused, because sentry_sdk.init replaces the global client and would discard the first caller's component tag
+    enforced_by: tests/test_process_sentry_sensor.py::TestTheProcessIsInitialisedOnce::test_a_second_install_does_not_reinitialise
+  - id: every-event-names-its-process
+    claim: Events carry a hydraflow.component tag set on the global scope, so one backend project can tell the server and the gateway apart
+    enforced_by: tests/test_process_sentry_sensor.py::TestEventsCarryTheirOrigin::test_the_component_is_tagged_on_the_global_scope
+  - id: incidental-log-promotion-is-not-a-bug-report
+    claim: An error-level log line carrying no exception is dropped rather than filed, while an explicit capture is kept
+    enforced_by: tests/test_process_sentry_sensor.py::TestOnlyBugsBecomeIssues::test_a_logged_line_with_no_exception_is_dropped

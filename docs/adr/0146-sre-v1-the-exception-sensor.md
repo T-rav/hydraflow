@@ -62,6 +62,16 @@ The DSN is the switch. Absent, the composition root returns the no-op, so tests,
 CI and the air-gapped sandbox never report. A DSN that fails to initialise also
 degrades to the no-op: a broken reporter must not stop the factory booting.
 
+The composition root is not the only place the sensor starts, and taking it as
+such left two holes. It runs partway through the server's boot, so a process
+that died during config load or factory start — the failure an operator most
+needs on the board — reported nothing; and the gateway is a separate process
+that never reaches this composition root at all, which ADR-0147 turned into a
+blind spot on the path every LLM spawn now takes. Each entrypoint therefore
+installs the sensor itself, as early as it can, and events carry a
+`hydraflow.component` tag so one backend project can tell those processes
+apart. The rules are `docs/standards/exception_sensor/` 13-16.
+
 `HYDRAFLOW_SENTRY_DISABLED` overrides a present DSN, always toward off. This ADR
 first argued against a second switch — one setting cannot contradict the other —
 and two facts overrode that. A live checkout keeps its DSN in `.env`, so

@@ -555,6 +555,38 @@ def _hermetic_credentials(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_sentry_sdk_state():
+    """Forget that a test initialised the Sentry SDK (#10889 pattern).
+
+    `init_sentry_sdk` is idempotent per PROCESS, which is right in production —
+    `sentry_sdk.init` replaces the global client, so a second caller would drop
+    the first one's component tag. Under pytest that same guard makes the first
+    test to build an adapter the only one that ever sees an init, and every
+    later assertion about init options silently passes against a no-op.
+    """
+    from observability.sentry_adapter import reset_sentry_sdk_state_for_tests
+
+    reset_sentry_sdk_state_for_tests()
+    yield
+    reset_sentry_sdk_state_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _reset_gateway_binding_warnings():
+    """Forget which gateway binding gaps were reported (#10889 pattern).
+
+    The warning is emitted once per gap per process so a suite building
+    thousands of configs does not emit thousands of lines. A test asserting
+    the warning fires must not depend on whether an earlier test on the same
+    xdist worker already consumed it.
+    """
+    from config import reset_gateway_binding_warnings
+
+    reset_gateway_binding_warnings()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_credit_failover():
     """Clear the credit-failover module singleton between tests (#10844).
 

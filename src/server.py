@@ -478,6 +478,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     setup_logging(level=level, json_output=not verbose, log_file=log_path)
 
+    # Before the config load, deliberately. The composition root builds the
+    # injected ObservabilityPort much later, so a process that died during
+    # config load or factory boot reported nothing at all -- and "the factory
+    # will not start" is the failure an operator most needs on the board.
+    # `load_dotenv` above has already put SENTRY_DSN in the environment.
+    from observability.sentry_adapter import install_process_sensor  # noqa: PLC0415
+
+    install_process_sensor("server")
+
     config = load_runtime_config()
 
     logging.getLogger("hydraflow.server").info(
