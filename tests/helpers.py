@@ -541,6 +541,13 @@ class ConfigFactory:
         # port (still coalesced + degrade-safe). Production default is 900.
         # Cache-behavior tests opt in explicitly.
         github_cache_issue_list_ttl_s: float = 0.0,
+        # Opt out of the `*_provider` pin below. For a test that reasons about
+        # which dials are MOVED OFF their default: the pin sets them all
+        # explicitly, and an explicit "claude" against ADR-0147's `gateway`
+        # default reads as moved, which is correct and not what such a test
+        # means. Opting out means spawns take the gateway path, so a caller
+        # needs a control token and a fake mint client.
+        pin_role_dials: bool = True,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -558,7 +565,11 @@ class ConfigFactory:
                 )
             return HydraFlowConfig(
                 # Pinned first so an explicit kwarg below still wins.
-                **_direct_role_dials(frozenset({"repo_provider"})),
+                **(
+                    _direct_role_dials(frozenset({"repo_provider"}))
+                    if pin_role_dials
+                    else {}
+                ),
                 config_file=config_file,
                 # No test should pay real auth-retry backoff. Production keeps
                 # 5s (doubling to 10s), which cost `test_A23_auth_retry_...`
