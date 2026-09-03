@@ -165,6 +165,9 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         # recorded (so they are not re-filed individually) and folded into ONE
         # summary issue below.
         budget = FilingBudget(cap=self._config.memory_backlog_max_issues_per_tick)
+        #: Over-cap subjects, recorded by `file_overflow_summary` only after
+        #: its filing is confirmed (#12070).
+        overflow_keys: list[str] = []
         for entry in pending_entries(mirror):
             key = dedup_key_for(entry.slug)
             open_issue = already_filed.get(entry.slug)
@@ -183,8 +186,10 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
                 skipped += 1
                 continue
             if not budget.allow():
-                dedup.add(key)
-                self._dedup.set_all(dedup)
+                # Collected, not recorded (#12070): `file_overflow_summary` records
+                # these only after its filing is confirmed, so a 0-sentinel retry
+                # still finds the batch.
+                overflow_keys.append(key)
                 budget.note_overflow(overflow_line(entry.slug, entry.name))
                 continue
             attempts = self._state.inc_memory_backlog_attempts(key)
@@ -220,6 +225,7 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             self._dedup.set_all(dedup)
 
         summarized = await file_overflow_summary(
+            subject_keys=overflow_keys,
             create_issue=self._pr.create_issue,
             dedup=self._dedup,
             budget=budget,
