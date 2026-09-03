@@ -35,13 +35,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from credit_failover import zai_key_present
+from credit_failover import kimi_key_present, zai_key_present
 from driver_contracts import ModelRequirement, ModelRequirementKind
 from exception_classify import exc_detail, reraise_on_credit_or_bug
 from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.models import (
     ProviderBinding,
     RepoClass,
+    binding_for_lane,
     binding_for_model,
     legacy_account_id,
 )
@@ -66,7 +67,7 @@ from hydraflow_gateway.routing_store import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from config import HydraFlowConfig
@@ -168,9 +169,7 @@ def provider_binding_for(provider: str, model: str) -> ProviderBinding:
     lane = provider.strip().lower()
     if lane == _GATEWAY:
         return binding_for_model(model)
-    if lane in {"zai", "kimi", "openrouter"}:
-        return ProviderBinding.ZAI_HARNESS
-    return ProviderBinding.ANTHROPIC
+    return binding_for_lane(lane)
 
 
 def transport_for(provider: str, face: RequestFace) -> RouteTransport:
@@ -203,6 +202,23 @@ def requirement_for_model(model: str) -> ModelRequirement:
     )
 
 
+#: How this host answers "is that lane's credential present?", per binding.
+#: Keyed by binding and iterated from `ProviderBinding` itself so a lane added
+#: to the enum without an entry here raises a KeyError on the next routed
+#: spawn. The alternative — the hand-written pair this replaced — omitted the
+#: lane silently, and an omitted account is not a visible error: it is
+#: `no-eligible-account`, which reads as a policy refusal rather than as a
+#: table nobody updated. That is exactly how the Moonshot lane was governed,
+#: locked, minted for, and still unreachable.
+_LOCAL_CREDENTIAL_PRESENT: Mapping[ProviderBinding, Callable[[], bool]] = {
+    # Anthropic is the native endpoint: the worker's own credential serves it,
+    # so there is no separate key for this host to look for.
+    ProviderBinding.ANTHROPIC: lambda: True,
+    ProviderBinding.ZAI_HARNESS: zai_key_present,
+    ProviderBinding.KIMI_HARNESS: kimi_key_present,
+}
+
+
 def local_account_availability() -> tuple[AccountAvailability, ...]:
     """What this host can honestly say about each gateway account.
 
@@ -214,19 +230,14 @@ def local_account_availability() -> tuple[AccountAvailability, ...]:
     is reconstructible. There is no administrative overlay yet (ADR-0138 §D2),
     so every account reads ``enabled``.
     """
-    return (
+    return tuple(
         AccountAvailability(
-            account_id=legacy_account_id(ProviderBinding.ANTHROPIC),
-            provider_binding=ProviderBinding.ANTHROPIC,
-            configured=True,
+            account_id=legacy_account_id(binding),
+            provider_binding=binding,
+            configured=_LOCAL_CREDENTIAL_PRESENT[binding](),
             administrative_state=AdministrativeState.ENABLED,
-        ),
-        AccountAvailability(
-            account_id=legacy_account_id(ProviderBinding.ZAI_HARNESS),
-            provider_binding=ProviderBinding.ZAI_HARNESS,
-            configured=zai_key_present(),
-            administrative_state=AdministrativeState.ENABLED,
-        ),
+        )
+        for binding in ProviderBinding
     )
 
 

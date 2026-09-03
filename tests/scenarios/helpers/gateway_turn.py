@@ -228,6 +228,7 @@ async def run_gateway_turn(
     key_id: str = "gateway-scenario-key",
     source: str = "implementer",
     zai_upstream: bool = False,
+    kimi_upstream: bool = False,
     subscription_upstream: bool = False,
     governed_repo_slugs: frozenset[str] = frozenset(),
 ) -> GatewayTurn:
@@ -246,6 +247,12 @@ async def run_gateway_turn(
         upstreams[ProviderBinding.ZAI_HARNESS] = UpstreamSettings(
             base_url="https://zai.test",
             api_key=SecretStr(f"{provider_key}-zai"),
+            auth_style=UpstreamAuthStyle.BEARER,
+        )
+    if kimi_upstream:
+        upstreams[ProviderBinding.KIMI_HARNESS] = UpstreamSettings(
+            base_url="https://kimi.test",
+            api_key=SecretStr(f"{provider_key}-kimi"),
             auth_style=UpstreamAuthStyle.BEARER,
         )
     settings = GatewaySettings(

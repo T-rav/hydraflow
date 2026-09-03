@@ -136,6 +136,23 @@ def zai_key_present() -> bool:
     return any(os.environ.get(k, "").strip() for k in _ZAI_API_KEY_ENVS)
 
 
+# The env keys the kimi harness backend reads (mirrors runner_utils
+# `_HARNESS_BACKENDS` `api_key_envs` for kimi, exactly as `_ZAI_API_KEY_ENVS`
+# above mirrors z.ai's). Moonshot sells no separate coding-plan credential, so
+# unlike z.ai there is no flat-rate key to prefer — the three names are one
+# credential under its vendor spelling and two local aliases.
+_KIMI_API_KEY_ENVS = (
+    "MOONSHOT_API_KEY",
+    "KIMI_API_KEY",
+    "HYDRAFLOW_KIMI_API_KEY",
+)
+
+
+def kimi_key_present() -> bool:
+    """Whether a Moonshot API key is available for the harness backend."""
+    return any(os.environ.get(k, "").strip() for k in _KIMI_API_KEY_ENVS)
+
+
 #: Provider values whose spend lands on the Anthropic lane, and which a Claude
 #: credit cap therefore takes out. `claude` is the direct CLI; `gateway` is the
 #: same upstream reached through the proxy (ADR-0147 made it the dial default).

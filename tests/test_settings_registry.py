@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import get_args
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -189,7 +190,13 @@ class TestRepoBackendOverride:
         assert "repo_provider" in mutable_field_names()
         row = self._schema()["repo_provider"]
         assert row["type"] == "enum"
-        assert set(row["choices"]) == {"claude", "gateway", "zai"}
+        # Read from the model for the same reason `default` is, three lines
+        # down: the lane set is a schema fact the dashboard renders, not a
+        # choice this test gets to make. Hand-listing it meant adding a
+        # provider reddened here as though the drawer had broken.
+        assert set(row["choices"]) == set(
+            get_args(HydraFlowConfig.model_fields["repo_provider"].annotation)
+        )
         assert row["live"] is True
         # Read from the model: this asserted the literal "claude" until
         # ADR-0147 moved the default to "gateway", which is a schema fact the

@@ -20,6 +20,7 @@ from hydraflow_gateway.models import (
     MintKeyRequest,
     ProviderBinding,
     RepoClass,
+    legacy_account_id,
 )
 from hydraflow_gateway.settings import (
     GatewaySettings,
@@ -116,10 +117,9 @@ async def test_accounts_endpoint_lists_every_compiled_account(
     async with _client(tmp_path) as client:
         response = await client.get("/control/v2/accounts", headers=_AUTH)
 
-    assert [account["account_id"] for account in response.json()["accounts"]] == [
-        "legacy-anthropic",
-        "legacy-zai-harness",
-    ]
+    assert [account["account_id"] for account in response.json()["accounts"]] == sorted(
+        legacy_account_id(binding) for binding in ProviderBinding
+    )
 
 
 async def test_accounts_endpoint_reports_a_live_lease(tmp_path: Path) -> None:

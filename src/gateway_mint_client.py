@@ -79,7 +79,7 @@ class GatewayMintRequest:
     session_id: str | None
     repo_slug: str
     repo_class: Literal["hydraflow", "client", "personal"]
-    provider_binding: Literal["anthropic", "zai-harness"]
+    provider_binding: Literal["anthropic", "zai-harness", "kimi-harness"]
     capture_bodies: bool
     ttl_seconds: int
     # Optional work attribution stamped onto the key's principal and hence

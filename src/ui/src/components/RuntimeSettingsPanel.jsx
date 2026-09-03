@@ -15,14 +15,21 @@ export function humanize(name) {
 
 // A `<provider>_base_url` field is annotated with whether that provider's secret
 // API key is present. `repo_provider` (the per-repo backend dial, #11211) is
-// additionally annotated when its selected value is "zai" — the field an
-// operator sets to route a repo's work to GLM, so the key-presence badge
-// belongs there too, not just on the unrelated `zai_base_url` row. Returns
-// true/false when annotated, or null for any other field/value (no badge).
+// additionally annotated when its selected value names a provider the server
+// reports a key for — the field an operator sets to route a repo's work off
+// Claude, so the key-presence badge belongs there too, not just on the
+// unrelated `<provider>_base_url` row. Returns true/false when annotated, or
+// null for any other field/value (no badge).
 // `providerKeys` maps provider name -> key-present boolean.
+//
+// The value is looked up in `providerKeys` rather than compared to "zai". The
+// literal was already one lane short the day the Moonshot harness landed:
+// `repo_provider = "kimi"` is a direct lane whose key the server reports on
+// exactly the same payload, and it rendered no badge at all — so the one
+// screen an operator uses to notice a missing key stayed silent about it.
 export function providerKeyStatus(fieldName, providerKeys, currentValue) {
   const m = /^(.+)_base_url$/.exec(fieldName)
-  const provider = m ? m[1] : fieldName === 'repo_provider' && currentValue === 'zai' ? 'zai' : null
+  const provider = m ? m[1] : fieldName === 'repo_provider' ? currentValue : null
   if (!provider) return null
   if (!providerKeys || !(provider in providerKeys)) return null
   return !!providerKeys[provider]

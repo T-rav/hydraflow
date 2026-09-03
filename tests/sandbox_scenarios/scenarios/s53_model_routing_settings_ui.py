@@ -1,9 +1,9 @@
 """s53 — Model-Routing settings UI renders the provider dials + key-status badge.
 
 Guards the schema-driven Settings ▸ Model Routing screen end-to-end: every
-one-shot role's provider dropdown must offer the ``zai`` backend (Literal-derived
-enum choices), and each ``<provider>_base_url`` row must carry the key-status
-badge (booleans-only; no key in the sandbox → "not set"). This is the sandbox
+one-shot role's provider dropdown must offer the ``zai`` backend and
+``repo_provider`` must offer ``kimi`` (Literal-derived enum choices), and each
+``<provider>_base_url`` row must carry the key-status badge (booleans-only; no key in the sandbox → "not set"). This is the sandbox
 e2e layer for the pluggable-provider UI (unit coverage: RuntimeSettingsPanel
 vitest; API coverage: test_control_routes_settings). Without it the dropdown +
 badge wiring is validated only below the browser layer.
@@ -15,8 +15,9 @@ from mockworld.seed import MockWorldSeed
 
 NAME = "s53_model_routing_settings_ui"
 DESCRIPTION = (
-    "System ▸ Settings ▸ Model Routing exposes the zai provider option in every "
-    "one-shot role dropdown and a key-status badge (no key → 'not set')."
+    "System ▸ Settings ▸ Model Routing exposes the zai option in every one-shot "
+    "role dropdown, the kimi option on repo_provider, and a key-status badge "
+    "(no key → 'not set')."
 )
 
 
@@ -51,6 +52,19 @@ async def assert_outcome(api, page) -> None:
         assert await options.count() > 0, (
             f"{field} dropdown is missing the 'zai' option"
         )
+
+    # `repo_provider` is the one agentic dial this screen renders — the other
+    # six (implementation/review/planner/triage/ac/maintenance) are not in the
+    # settings schema at all, so asserting on them here checks nothing that
+    # exists. It must offer "kimi": the dial's choices derive from the config
+    # Literal, and it is the only place an operator can point a repo's agentic
+    # work at the Moonshot harness without editing a file.
+    options = page.locator(
+        "[data-testid='input-repo_provider'] option", has_text="kimi"
+    )
+    assert await options.count() > 0, (
+        "repo_provider dropdown is missing the 'kimi' option"
+    )
 
     # The key-status badge renders. No provider key is set in the sandbox, so it
     # must read "not set" (booleans only — the secret value never reaches the UI).

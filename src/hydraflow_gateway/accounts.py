@@ -53,6 +53,7 @@ ACCOUNT_DISPLAY_NAMES: Mapping[ProviderBinding, str] = MappingProxyType(
     {
         ProviderBinding.ANTHROPIC: "Anthropic (legacy upstream)",
         ProviderBinding.ZAI_HARNESS: "z.ai harness (legacy upstream)",
+        ProviderBinding.KIMI_HARNESS: "Moonshot Kimi harness (legacy upstream)",
     }
 )
 
@@ -60,6 +61,7 @@ CREDENTIAL_ENV_NAMES: Mapping[ProviderBinding, str] = MappingProxyType(
     {
         ProviderBinding.ANTHROPIC: "GATEWAY_ANTHROPIC_API_KEY",
         ProviderBinding.ZAI_HARNESS: "GATEWAY_ZAI_HARNESS_API_KEY",
+        ProviderBinding.KIMI_HARNESS: "GATEWAY_KIMI_HARNESS_API_KEY",
     }
 )
 """The *name* of the variable that configures an account — never its value."""

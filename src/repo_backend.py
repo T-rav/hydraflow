@@ -26,11 +26,37 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from credit_failover import zai_key_present
+from config import LANE_DEFAULT_MODEL_FIELD
+from credit_failover import kimi_key_present, zai_key_present
 from prompt_telemetry import parse_command_tool_model, rewrite_command_model
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from config import HydraFlowConfig
+
+
+#: Direct harness lane a repo can be pinned to -> "is its key present here?".
+#: Membership is what makes the dial act at all: a lane absent from this map is
+#: a `repo_provider` value the operator can select and save, that renders in the
+#: UI, and that reroutes nothing. That is what `kimi` was between gaining a dial
+#: and gaining this row — configured, displayed, and inert.
+DIRECT_HARNESS_KEY_PRESENT: Mapping[str, Callable[[], bool]] = {
+    "zai": zai_key_present,
+    "kimi": kimi_key_present,
+}
+
+
+def _default_model_for(repo_provider: str, config: HydraFlowConfig) -> str:
+    """The model a repo override rewrites to when `repo_model` is unset.
+
+    Returns "" for a lane with nothing to inherit. The caller must not rewrite
+    on an empty model: `rewrite_command_model(cmd, "")` does not decline, it
+    sets `--model ""` on the spawned CLI, which fails as an opaque upstream
+    error rather than as the missing configuration it is.
+    """
+    field = LANE_DEFAULT_MODEL_FIELD.get(repo_provider)
+    return str(getattr(config, field, "")) if field else ""
 
 
 def apply_repo_provider(
@@ -49,7 +75,7 @@ def apply_repo_provider(
     if provider != "claude":
         return provider, cmd
     repo_provider = config.repo_provider
-    if repo_provider not in {"gateway", "zai"}:
+    if repo_provider not in {"gateway", *DIRECT_HARNESS_KEY_PRESENT}:
         return provider, cmd
     tool, _ = parse_command_tool_model(cmd)
     if tool == "codex":
@@ -60,7 +86,12 @@ def apply_repo_provider(
             "gateway",
             rewrite_command_model(cmd, model) if model else cmd,
         )
-    if not zai_key_present():
+    model = config.repo_model.strip() or _default_model_for(repo_provider, config)
+    # No key, or no model to ask for: leave the spawn alone. The second half is
+    # the guard the gateway branch above already had — load-time validation
+    # should have refused a lane that can resolve no model, so reaching here
+    # means something bypassed it, and rerouting while asking for `--model ""`
+    # is worse than not rerouting.
+    if not DIRECT_HARNESS_KEY_PRESENT[repo_provider]() or not model:
         return provider, cmd
-    model = config.repo_model.strip() or config.credit_failover_model
-    return "zai", rewrite_command_model(cmd, model)
+    return repo_provider, rewrite_command_model(cmd, model)

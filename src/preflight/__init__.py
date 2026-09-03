@@ -90,6 +90,30 @@ _ZAI_CREDENTIAL_KEYS: tuple[str, ...] = (
     "HYDRAFLOW_ZAI_API_KEY",
 )
 
+#: The kimi harness credential chain, same order and same fall-open rule.
+_KIMI_CREDENTIAL_KEYS: tuple[str, ...] = (
+    "MOONSHOT_API_KEY",
+    "KIMI_API_KEY",
+    "HYDRAFLOW_KIMI_API_KEY",
+)
+
+#: Non-Anthropic harness dial -> (its credential chain, how to name it to an
+#: operator). Preflight groups roles by this map instead of asking
+#: `provider == "zai"`, because the else-branch of that question was
+#: `claude_roles`: a kimi-dialled role was checked for an Anthropic credential,
+#: passed on finding one, and then fell open to Anthropic at spawn — running on
+#: a backend the operator did not choose, with no message anywhere saying so.
+_HARNESS_CREDENTIAL_CHAINS: dict[str, tuple[tuple[str, ...], str]] = {
+    "zai": (
+        _ZAI_CREDENTIAL_KEYS,
+        "ZAI_CODING_PLAN_KEY / ZAI_API_KEY (or HYDRAFLOW_-prefixed variant)",
+    ),
+    "kimi": (
+        _KIMI_CREDENTIAL_KEYS,
+        "MOONSHOT_API_KEY / KIMI_API_KEY (or HYDRAFLOW_-prefixed variant)",
+    ),
+}
+
 #: The three dispatching roles preflight already checks CLIs for, with the
 #: provider dial that routes them and the operator-facing stage var used in
 #: .env.sample — messages speak the operator's vocabulary, not field names.
@@ -150,21 +174,28 @@ def _check_docker_agent_credential(config: HydraFlowConfig) -> CheckResult:
     this, and every dispatched worker fails mid-run with the
     "Agent CLI authentication failed" string in ``runner_utils`` (#12040).
 
-    Provider dials are three-valued: "gateway" roles are exempt (per-spawn
-    virtual keys); "zai" roles need the zai key chain and fall open to the
-    native Anthropic credential exactly as ``resolve_harness_env`` does;
-    "claude" roles need the native credential.
+    "gateway" roles are exempt (per-spawn virtual keys); a role on a direct
+    harness lane needs that lane's key chain and falls open to the native
+    Anthropic credential exactly as ``resolve_harness_env`` does; "claude"
+    roles need the native credential. The lanes come from
+    ``_HARNESS_CREDENTIAL_CHAINS`` rather than being asked for by name, so a
+    dial gaining a fourth value cannot land silently in the claude branch.
     """
     claude_roles: list[str] = []
-    zai_roles: list[str] = []
+    harness_roles: dict[str, list[str]] = {
+        lane: [] for lane in _HARNESS_CREDENTIAL_CHAINS
+    }
     for tool_field, provider_field, stage_var in _CLAUDE_ROLE_FIELDS:
         if getattr(config, tool_field) != "claude":
             continue
         provider = getattr(config, provider_field)
         if provider == "gateway":
             continue
-        (zai_roles if provider == "zai" else claude_roles).append(stage_var)
-    if not claude_roles and not zai_roles:
+        if provider in harness_roles:
+            harness_roles[provider].append(stage_var)
+        else:
+            claude_roles.append(stage_var)
+    if not claude_roles and not any(harness_roles.values()):
         return CheckResult(
             "docker-agent-credential",
             CheckStatus.PASS,
@@ -173,7 +204,10 @@ def _check_docker_agent_credential(config: HydraFlowConfig) -> CheckResult:
 
     dotenv = _read_dotenv(config.repo_root)
     anthropic_key = _first_present(_CLAUDE_CREDENTIAL_KEYS, dotenv)
-    zai_key = _first_present(_ZAI_CREDENTIAL_KEYS, dotenv)
+    lane_keys = {
+        lane: _first_present(keys, dotenv)
+        for lane, (keys, _spelling) in _HARNESS_CREDENTIAL_CHAINS.items()
+    }
 
     problems: list[str] = []
     if claude_roles and not anthropic_key:
@@ -183,13 +217,14 @@ def _check_docker_agent_credential(config: HydraFlowConfig) -> CheckResult:
             "the environment or .env — run 'claude setup-token' and put the "
             "token in .env"
         )
-    if zai_roles and not zai_key and not anthropic_key:
-        problems.append(
-            f"{', '.join(zai_roles)} route via the zai harness but no "
-            "ZAI_CODING_PLAN_KEY / ZAI_API_KEY (or HYDRAFLOW_-prefixed "
-            "variant) is set, and there is no native Anthropic credential to "
-            "fall open to"
-        )
+    for lane, (_keys, spelling) in _HARNESS_CREDENTIAL_CHAINS.items():
+        roles = harness_roles[lane]
+        if roles and not lane_keys[lane] and not anthropic_key:
+            problems.append(
+                f"{', '.join(roles)} route via the {lane} harness but no "
+                f"{spelling} is set, and there is no native Anthropic "
+                "credential to fall open to"
+            )
     if problems:
         return CheckResult(
             "docker-agent-credential",
@@ -202,11 +237,10 @@ def _check_docker_agent_credential(config: HydraFlowConfig) -> CheckResult:
     covered: list[str] = []
     if claude_roles:
         covered.append(f"{anthropic_key} covers {', '.join(claude_roles)}")
-    if zai_roles:
-        covered.append(
-            f"{zai_key or anthropic_key + ' (zai fall-open)'} covers "
-            f"{', '.join(zai_roles)}"
-        )
+    for lane, roles in harness_roles.items():
+        if roles:
+            key = lane_keys[lane] or f"{anthropic_key} ({lane} fall-open)"
+            covered.append(f"{key} covers {', '.join(roles)}")
     return CheckResult("docker-agent-credential", CheckStatus.PASS, "; ".join(covered))
 
 

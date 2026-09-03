@@ -31,6 +31,7 @@ from hydraflow_gateway.models import (
     PrincipalKind,
     ProviderBinding,
     RepoClass,
+    legacy_account_id,
 )
 from hydraflow_gateway.settings import (
     GatewaySettings,
@@ -438,7 +439,10 @@ def test_accounts_are_ordered_deterministically_by_id() -> None:
     """A stable order keeps the UI and its fixtures reproducible."""
     view = _view(_settings(ProviderBinding.ANTHROPIC, ProviderBinding.ZAI_HARNESS))
 
-    assert [account.account_id for account in view.accounts] == [
-        "legacy-anthropic",
-        "legacy-zai-harness",
-    ]
+    # Every binding compiles an account whether configured or not
+    # (`compile_legacy_accounts`), so the expectation is the enum's own
+    # id-sorted image rather than the two lanes that happened to exist when
+    # this was written.
+    assert [account.account_id for account in view.accounts] == sorted(
+        legacy_account_id(binding) for binding in ProviderBinding
+    )

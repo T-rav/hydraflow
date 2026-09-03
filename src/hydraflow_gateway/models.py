@@ -40,12 +40,14 @@ class ProviderBinding(StrEnum):
 
     ANTHROPIC = "anthropic"
     ZAI_HARNESS = "zai-harness"
+    KIMI_HARNESS = "kimi-harness"
 
 
 LEGACY_ACCOUNT_IDS: Mapping[ProviderBinding, str] = MappingProxyType(
     {
         ProviderBinding.ANTHROPIC: "legacy-anthropic",
         ProviderBinding.ZAI_HARNESS: "legacy-zai-harness",
+        ProviderBinding.KIMI_HARNESS: "legacy-kimi-harness",
     }
 )
 """Stable, non-secret account identities compiled from the v1 env-pair upstreams.
@@ -62,7 +64,44 @@ def legacy_account_id(binding: ProviderBinding) -> str:
     return LEGACY_ACCOUNT_IDS[binding]
 
 
-_ZAI_MODEL_PREFIX = "glm"
+#: Model-id prefix -> the lane that serves it, first match wins. A table rather
+#: than a boolean because there is now more than one non-Anthropic lane: with an
+#: ``if glm else ANTHROPIC`` shape, adding Moonshot would have routed every
+#: ``kimi-*`` model to Anthropic — a wrong answer that bills a real account and
+#: raises nothing. Anything unmatched is Anthropic's, which keeps the default
+#: exactly where it was.
+_MODEL_PREFIX_BINDINGS: tuple[tuple[str, ProviderBinding], ...] = (
+    ("glm", ProviderBinding.ZAI_HARNESS),
+    ("kimi", ProviderBinding.KIMI_HARNESS),
+)
+
+
+#: Direct provider dial -> the lane its spend belongs to. The sibling of
+#: :data:`_MODEL_PREFIX_BINDINGS` for callers that know the dial rather than the
+#: model id, and shared so ``route_shadow`` and ``routing_baseline`` cannot
+#: answer "which lane is this dial on?" differently for one spawn (ADR-0139 §D8).
+#:
+#: ``openrouter`` maps to the z.ai lane because that is what it has always
+#: mapped to, not because it belongs there. It is a one-shot lane the gateway
+#: never mints for, so the value is very nearly unobservable; re-attributing it
+#: would move historical spend between accounts, which is a decision worth
+#: making on its own rather than as a side effect of adding Moonshot.
+_LANE_BINDINGS: Mapping[str, ProviderBinding] = MappingProxyType(
+    {
+        "zai": ProviderBinding.ZAI_HARNESS,
+        "kimi": ProviderBinding.KIMI_HARNESS,
+        "openrouter": ProviderBinding.ZAI_HARNESS,
+    }
+)
+
+
+def binding_for_lane(provider: str) -> ProviderBinding:
+    """Return the upstream lane a direct (non-gateway) provider dial binds to.
+
+    Anything unlisted is Anthropic's, which is where ``claude`` and every dial
+    still sitting on its default belong.
+    """
+    return _LANE_BINDINGS.get(provider.strip().lower(), ProviderBinding.ANTHROPIC)
 
 
 def binding_for_model(model: str) -> ProviderBinding:
@@ -73,11 +112,11 @@ def binding_for_model(model: str) -> ProviderBinding:
     §D8 warns that two copies of one mapping is a guaranteed future disagreement;
     ``route_shadow.provider_binding_for`` delegates here for its model branch.
     """
-    return (
-        ProviderBinding.ZAI_HARNESS
-        if model.strip().lower().startswith(_ZAI_MODEL_PREFIX)
-        else ProviderBinding.ANTHROPIC
-    )
+    normalised = model.strip().lower()
+    for prefix, binding in _MODEL_PREFIX_BINDINGS:
+        if normalised.startswith(prefix):
+            return binding
+    return ProviderBinding.ANTHROPIC
 
 
 class BodyCapturePolicy(StrEnum):

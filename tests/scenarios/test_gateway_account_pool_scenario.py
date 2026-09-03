@@ -379,7 +379,8 @@ async def test_the_accounts_view_publishes_the_pool_it_actually_has(
     accounts = await pool.accounts()
 
     assert [account["account_id"] for account in accounts["accounts"]] == sorted(
-        {legacy_account_id(ProviderBinding.ANTHROPIC), _PRIMARY_ID, _SECONDARY_ID}
+        {legacy_account_id(binding) for binding in ProviderBinding}
+        | {_PRIMARY_ID, _SECONDARY_ID}
     )
 
 

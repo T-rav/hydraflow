@@ -104,6 +104,38 @@ budget. The deployable gateway itself is rooted at
 the operational transport and the read-only completeness gauge independently
 auditable.
 
+**10. A third harness backend arrived, and the registry stayed deferred
+(2026-09-03).** Moonshot publishes an Anthropic-shaped face at `/anthropic`
+with bearer auth, so `kimi` — until now a one-shot-only provider — joins `zai`
+as a harness the Claude CLI can be pointed at. `ProviderBinding.KIMI_HARNESS`
+carries it through key policy, ledger attribution and credit scoping exactly
+as entry 7 describes; the mechanism is unchanged and gained a member.
+
+"Alternatives considered" below defers a full backend-profile registry *until a
+third harness backend appears*. It has appeared, and the registry is still
+deferred — but the reason it was safe to defer has expired, so something had to
+replace it. Adding the lane meant editing eight hand-maintained tables across
+five modules plus two hand-copied `Literal`s, and nothing checked that all of
+them were found. Two were not, and neither raised: `route_shadow` billed every
+kimi spawn to the z.ai account, and `local_account_availability` omitted the
+lane entirely, which surfaced as `no-eligible-account` — a refusal that reads
+as "the operator's policy excluded everything" rather than "a table nobody
+updated". The lane was governed, locked, minted for, and unreachable.
+
+The decision is therefore to keep the split and make its cost *visible* rather
+than to pay for the registry now:
+`tests/architecture/test_provider_binding_completeness.py` parametrises over
+`ProviderBinding` by reference and fails when a member is added to the enum but
+not to a table. A fourth lane is held to every table on the day its member
+lands, which is the property the registry was wanted for.
+
+This buys time; it does not close the question. The guard proves the tables
+agree with the enum, not that one table would not be better than eight. When a
+lane needs anything the current shape cannot express — per-account model
+allow-lists, more than one account per binding outside the pool, a lane whose
+auth style is not one of the two — build the registry rather than widening the
+guard again.
+
 ## Consequences
 
 - An operator routes any wired role to GLM by config alone (no code change):

@@ -35,6 +35,11 @@ from gateway_mint_client import (
     _validate_gateway_credential,
     revoke_gateway_key,
 )
+from hydraflow_gateway.models import (
+    ProviderBinding,
+    binding_for_lane,
+    binding_for_model,
+)
 from model_pricing import USAGE_SHAPE_OPENAI_COMPAT, usage_shape_for_tool
 from models import TranscriptEventData, TranscriptLinePayload
 from process_group import kill_process_group
@@ -959,16 +964,41 @@ def harness_billing_provider(provider: str, model: str) -> str:
     """Resolve a harness *transport* to its upstream billing identity.
 
     ``gateway`` is deliberately not a billing provider.  Its virtual key is
-    bound to z.ai for GLM models and Anthropic for every other Claude-harness
-    model.  Direct Claude/z.ai values are returned unchanged so their existing
-    credit behavior is byte-for-byte stable.
+    bound to the lane the *model* belongs to — z.ai for glm-*, Moonshot for
+    kimi-*, Anthropic for every other Claude-harness model.  Direct provider
+    values are returned unchanged so their existing credit behavior is
+    byte-for-byte stable.
     """
 
     if provider != _GATEWAY:
         return provider
-    if model.strip().lower().startswith("glm"):
+
+    # Delegated rather than re-tested: a second `startswith("glm")` here is the
+    # "two copies of one mapping" ADR-0139 §D8 warns about, and it is what made
+    # kimi-* invisible to this function while the gateway happily served it.
+    binding = binding_for_model(model)
+    if binding is ProviderBinding.ZAI_HARNESS:
         return _ZAI
+    if binding is ProviderBinding.KIMI_HARNESS:
+        return _KIMI
     return "claude"
+
+
+def _mint_binding(
+    billing_provider: str,
+) -> Literal["anthropic", "zai-harness", "kimi-harness"]:
+    """The mint contract's provider_binding for a resolved billing lane.
+
+    Delegates to the gateway's own lane table so a spawn's key is minted
+    against the account its spend will actually land on. The previous inline
+    ``"zai-harness" if ... else "anthropic"`` had no third answer to give, so a
+    kimi spawn would have minted an Anthropic key and billed a lane it never
+    touched.
+    """
+    return cast(
+        'Literal["anthropic", "zai-harness", "kimi-harness"]',
+        binding_for_lane(billing_provider).value,
+    )
 
 
 def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str, str]:
@@ -1001,8 +1031,8 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
 # Anthropic-compatible *harness* backends: providers the Claude CLI can be
 # pointed at via ANTHROPIC_BASE_URL so an agentic (tool-using) role runs on a
 # non-Anthropic model. Distinct from _OPENAI_COMPAT_BACKENDS (the one-shot HTTP
-# face) — z.ai appears in both, with a different URL for each. The gateway is a
-# transport-only entry with dynamic per-spawn auth; kimi stays one-shot-only.
+# face) — z.ai and Moonshot appear in both, with a different URL for each. The
+# gateway is a transport-only entry with dynamic per-spawn auth.
 _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
     _ZAI: _OpenAICompatBackend(
         base_url_field="zai_harness_base_url",
@@ -1018,6 +1048,16 @@ _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
             "ZAI_API_KEY",
             "HYDRAFLOW_ZAI_API_KEY",
         ),
+    ),
+    # Moonshot publishes an Anthropic-shaped face at /anthropic authenticated
+    # with a bearer token, which is the same shape the Claude CLI already
+    # speaks to z.ai. It reads the same keys as the one-shot lane: Moonshot
+    # sells no separate coding-plan credential, so unlike z.ai above there is
+    # no second key to prefer and no quota lane to keep background traffic out
+    # of.
+    _KIMI: _OpenAICompatBackend(
+        base_url_field="kimi_harness_base_url",
+        api_key_envs=("MOONSHOT_API_KEY", "KIMI_API_KEY", "HYDRAFLOW_KIMI_API_KEY"),
     ),
     # Unlike direct harness backends, the gateway's credential is minted for
     # each spawn.  ``api_key_envs`` is intentionally empty: a virtual worker
@@ -1161,9 +1201,7 @@ async def resolve_harness_env(
                 session_id=session_id,
                 repo_slug=str(getattr(config, "repo_slug", "") or "unknown"),
                 repo_class=repo_class,
-                provider_binding=(
-                    "zai-harness" if billing_provider == _ZAI else "anthropic"
-                ),
+                provider_binding=_mint_binding(billing_provider),
                 capture_bodies=bool(getattr(config, "gateway_capture_bodies", False)),
                 ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
                 issue_number=issue_number,
