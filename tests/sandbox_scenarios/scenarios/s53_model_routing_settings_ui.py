@@ -1,8 +1,8 @@
 """s53 — Model-Routing settings UI renders the provider dials + key-status badge.
 
 Guards the schema-driven Settings ▸ Model Routing screen end-to-end: every
-one-shot role's provider dropdown must offer the ``zai`` backend and every
-agentic role's must offer ``kimi`` (Literal-derived enum choices), and each
+one-shot role's provider dropdown must offer the ``zai`` backend and
+``repo_provider`` must offer ``kimi`` (Literal-derived enum choices), and each
 ``<provider>_base_url`` row must carry the key-status badge (booleans-only; no key in the sandbox → "not set"). This is the sandbox
 e2e layer for the pluggable-provider UI (unit coverage: RuntimeSettingsPanel
 vitest; API coverage: test_control_routes_settings). Without it the dropdown +
@@ -16,8 +16,8 @@ from mockworld.seed import MockWorldSeed
 NAME = "s53_model_routing_settings_ui"
 DESCRIPTION = (
     "System ▸ Settings ▸ Model Routing exposes the zai option in every one-shot "
-    "role dropdown, the kimi option in every agentic one, and a key-status "
-    "badge (no key → 'not set')."
+    "role dropdown, the kimi option on repo_provider, and a key-status badge "
+    "(no key → 'not set')."
 )
 
 
@@ -53,29 +53,18 @@ async def assert_outcome(api, page) -> None:
             f"{field} dropdown is missing the 'zai' option"
         )
 
-    # Every agentic role's provider dropdown offers the "kimi" backend. These
-    # dials read `claude|gateway|zai` until the Moonshot harness landed, and a
-    # harness the operator cannot select from the UI is a harness that exists
-    # only in the registry.
-    #
-    # Hand-listed rather than derived from `GATEWAY_AGENTIC_PROVIDER_FIELDS`,
-    # unlike the unit layer: a sandbox scenario drives a deployed container
-    # through a browser and imports no production module, so importing config
-    # here to spare seven lines would trade this layer's whole point — that it
-    # agrees with the running system rather than with the code that built it.
-    for field in (
-        "implementation_provider",
-        "review_provider",
-        "planner_provider",
-        "triage_provider",
-        "ac_provider",
-        "maintenance_provider",
-        "repo_provider",
-    ):
-        options = page.locator(f"[data-testid='input-{field}'] option", has_text="kimi")
-        assert await options.count() > 0, (
-            f"{field} dropdown is missing the 'kimi' option"
-        )
+    # `repo_provider` is the one agentic dial this screen renders — the other
+    # six (implementation/review/planner/triage/ac/maintenance) are not in the
+    # settings schema at all, so asserting on them here checks nothing that
+    # exists. It must offer "kimi": the dial's choices derive from the config
+    # Literal, and it is the only place an operator can point a repo's agentic
+    # work at the Moonshot harness without editing a file.
+    options = page.locator(
+        "[data-testid='input-repo_provider'] option", has_text="kimi"
+    )
+    assert await options.count() > 0, (
+        "repo_provider dropdown is missing the 'kimi' option"
+    )
 
     # The key-status badge renders. No provider key is set in the sandbox, so it
     # must read "not set" (booleans only — the secret value never reaches the UI).

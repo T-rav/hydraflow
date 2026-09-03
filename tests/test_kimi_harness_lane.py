@@ -348,3 +348,72 @@ def test_a_kimi_role_counts_as_a_gateway_bypass(tmp_path: Path) -> None:
     assert any("repo_provider" in row and "kimi" in row for row in reported), (
         f"a kimi-dialled role is missing from {reported}"
     )
+
+
+def test_the_dashboard_and_the_spawn_read_one_map() -> None:
+    """Identity, not equality — two equal copies are still two copies.
+
+    `_effective_repo_provider` exists to answer "what will the spawn actually
+    do", so the moment it consults its own copy of the lane→key-presence map it
+    can answer a question about a different program than the one that runs.
+    Equality would pass on the day someone duplicated the map and both copies
+    still happened to agree, which is exactly the day the divergence starts.
+
+    This is also why the map is public. Reaching it through a `noqa: PLC2701`
+    said the name was private and the rule wrong; the rule was right and the
+    name was in the wrong namespace.
+    """
+    from dashboard_routes import _state_routes
+    from repo_backend import DIRECT_HARNESS_KEY_PRESENT
+
+    assert _state_routes.DIRECT_HARNESS_KEY_PRESENT is DIRECT_HARNESS_KEY_PRESENT
+
+
+def test_a_lane_with_no_failover_model_is_refused_at_load(tmp_path: Path) -> None:
+    """`repo_provider="kimi"` with no `repo_model` must not load.
+
+    z.ai's override inherits `credit_failover_model` when `repo_model` is
+    unset. No other lane has one, and `rewrite_command_model` does not decline
+    an empty model — it writes `--model ""` onto the spawned CLI, which comes
+    back as an opaque upstream error rather than as the half-finished
+    configuration it is. Refused here so it cannot reach a spawn.
+    """
+    with pytest.raises(ValueError, match="repo_model"):
+        HydraFlowConfig(repo_root=tmp_path, repo_provider="kimi")
+
+
+def test_an_unset_zai_repo_model_still_inherits_its_failover(tmp_path: Path) -> None:
+    """The decoy for the refusal above: z.ai has something to inherit, so it
+    must keep loading with `repo_model` unset. A rule stated as "a locked lane
+    needs a model" rather than "a lane with nothing to inherit needs one"
+    would break every existing z.ai repo override."""
+    config = HydraFlowConfig(repo_root=tmp_path, repo_provider="zai")
+
+    assert config.repo_model == ""
+    assert config.credit_failover_model.startswith("glm")
+
+
+def test_a_repo_override_never_asks_a_lane_for_an_empty_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Belt to the validator's braces, asserted at the rewrite itself.
+
+    `_default_model_for` returned `config.repo_model.strip()` for any non-zai
+    lane — the same empty string the caller had just tried — so the `or`
+    fallback was a no-op and the rewrite ran with "". Constructed here by
+    bypassing validation, because the point is that this function is safe even
+    when something upstream was not.
+    """
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test-moonshot")
+    config = HydraFlowConfig(
+        repo_root=tmp_path, repo_provider="kimi", repo_model="kimi-k3"
+    )
+    object.__setattr__(config, "repo_model", "")
+    cmd = ["claude", "--model", "opus", "-p", "hi"]
+
+    provider, rewritten = apply_repo_provider("claude", cmd, config)
+
+    assert (provider, rewritten) == ("claude", cmd), (
+        "an unresolvable model must leave the spawn alone, not reroute it and "
+        f"ask for --model '' (got {provider!r}, {rewritten!r})"
+    )

@@ -6991,6 +6991,33 @@ class HydraFlowConfig(BaseModel):
             raise ValueError(msg)
         return v
 
+    @model_validator(mode="after")
+    def repo_model_is_set_for_a_lane_that_cannot_default(self) -> HydraFlowConfig:
+        """A direct repo lane with no failover model must name its own.
+
+        z.ai inherits `credit_failover_model` when `repo_model` is unset, and
+        has since the override existed. No other lane has an equivalent dial,
+        so for them an unset `repo_model` resolves to nothing — and the spawn
+        path does not decline an empty model, it writes `--model ""` onto the
+        CLI. That fails as an opaque upstream error, which is the least useful
+        possible rendering of "you did not finish configuring this repo".
+        """
+        provider = self.repo_provider
+        if (
+            provider in _PROVIDER_MODEL_PREFIX
+            and provider not in LANE_DEFAULT_MODEL_FIELD
+            and not self.repo_model.strip()
+        ):
+            prefix = _PROVIDER_MODEL_PREFIX[provider]
+            msg = (
+                f"repo_provider={provider!r} requires repo_model to be set to a "
+                f"{prefix}-* model: that lane has no failover model to inherit, "
+                "so leaving it empty would reroute the spawn and ask it for no "
+                "model at all."
+            )
+            raise ValueError(msg)
+        return self
+
     @field_validator("visual_fail_threshold")
     @classmethod
     def visual_fail_above_warn(cls, v: float, info: Any) -> float:
@@ -7594,6 +7621,14 @@ _MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
     ("glm", "zai"),
     ("kimi", "kimi"),
 ]
+
+#: Direct harness lane -> the config field an unset `repo_model` inherits from.
+#: z.ai has `credit_failover_model` (a glm-* id by validator) and has always
+#: fallen back to it. A lane absent here has nothing to inherit, which is why
+#: `repo_model_is_set_for_a_lane_that_cannot_default` refuses that combination
+#: at load rather than letting `apply_repo_provider` reach a spawn with no
+#: model to ask for.
+LANE_DEFAULT_MODEL_FIELD: Mapping[str, str] = {"zai": "credit_failover_model"}
 
 #: Provider -> the model-family prefix its backend serves, inverted from the
 #: table above rather than re-listed. These lanes are locked in BOTH directions:

@@ -35,6 +35,11 @@ from gateway_mint_client import (
     _validate_gateway_credential,
     revoke_gateway_key,
 )
+from hydraflow_gateway.models import (
+    ProviderBinding,
+    binding_for_lane,
+    binding_for_model,
+)
 from model_pricing import USAGE_SHAPE_OPENAI_COMPAT, usage_shape_for_tool
 from models import TranscriptEventData, TranscriptLinePayload
 from process_group import kill_process_group
@@ -968,11 +973,6 @@ def harness_billing_provider(provider: str, model: str) -> str:
     if provider != _GATEWAY:
         return provider
 
-    from hydraflow_gateway.models import (  # noqa: PLC0415
-        ProviderBinding,
-        binding_for_model,
-    )
-
     # Delegated rather than re-tested: a second `startswith("glm")` here is the
     # "two copies of one mapping" ADR-0139 §D8 warns about, and it is what made
     # kimi-* invisible to this function while the gateway happily served it.
@@ -995,8 +995,6 @@ def _mint_binding(
     kimi spawn would have minted an Anthropic key and billed a lane it never
     touched.
     """
-    from hydraflow_gateway.models import binding_for_lane  # noqa: PLC0415
-
     return cast(
         'Literal["anthropic", "zai-harness", "kimi-harness"]',
         binding_for_lane(billing_provider).value,

@@ -81,7 +81,7 @@ describe('humanize', () => {
 })
 
 describe('providerKeyStatus', () => {
-  const keys = { openrouter: true, zai: false }
+  const keys = { openrouter: true, zai: false, kimi: true }
 
   it('maps a <provider>_base_url field to its key presence', () => {
     expect(providerKeyStatus('openrouter_base_url', keys)).toBe(true)
@@ -97,9 +97,20 @@ describe('providerKeyStatus', () => {
     expect(providerKeyStatus('zai_base_url', {})).toBeNull()
   })
 
-  it('badges repo_provider with its zai key presence only when "zai" is selected', () => {
+  it('badges repo_provider for any lane the server reports a key for', () => {
+    // Was written as "only when zai is selected", which is what the
+    // implementation did rather than what it owed. The rule is that a direct
+    // lane's key presence is shown; asserting the literal meant `kimi` — a
+    // lane on the same payload — rendered no badge and nothing reddened.
     expect(providerKeyStatus('repo_provider', keys, 'zai')).toBe(false)
+    expect(providerKeyStatus('repo_provider', keys, 'kimi')).toBe(true)
+  })
+
+  it('leaves repo_provider unbadged for a value that is not a keyed lane', () => {
+    // The decoy: without it, returning the key presence of some arbitrary
+    // provider for every value would satisfy the case above.
     expect(providerKeyStatus('repo_provider', keys, 'claude')).toBeNull()
+    expect(providerKeyStatus('repo_provider', keys, 'gateway')).toBeNull()
   })
 })
 

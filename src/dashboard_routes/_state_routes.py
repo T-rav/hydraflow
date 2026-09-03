@@ -23,7 +23,7 @@ from dashboard_routes._routes import (
 from models import RepoRuntimeInfo
 from operator_start import apply_operator_start
 from prompt_gate import is_valid_data_class
-from repo_backend import _DIRECT_HARNESS_KEY_PRESENT  # noqa: PLC2701
+from repo_backend import DIRECT_HARNESS_KEY_PRESENT
 
 logger = logging.getLogger("hydraflow.dashboard")
 
@@ -43,7 +43,7 @@ def _effective_repo_provider(repo_config: Any) -> str:
     which would put the badge back to showing intent, in the one case where it
     matters.
     """
-    check = _DIRECT_HARNESS_KEY_PRESENT.get(repo_config.repo_provider)
+    check = DIRECT_HARNESS_KEY_PRESENT.get(repo_config.repo_provider)
     if check is not None and not check():
         return "claude"
     return repo_config.repo_provider
