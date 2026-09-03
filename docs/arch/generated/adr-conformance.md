@@ -98,6 +98,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0142 | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 | ADR-0143 | enforced | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status`, `pytest:tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift`, `pytest:tests/scenarios/test_charter_purpose_drift_scenario.py::TestPurposeDrift::test_a_charter_that_lost_its_purpose_files_one_issue` |
 | ADR-0146 | enforced | `pytest:tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op`, `pytest:tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off`, `pytest:tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close` |
+| ADR-0147 | enforced | `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_defaults_to_the_gateway`, `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_capable_set_covers_every_dial`, `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_keeps_a_direct_escape_hatch` |
 
 ## Check → ADRs it protects
 
@@ -120,6 +121,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members` | ADR-0143 |
 | `pytest:tests/architecture/test_director_no_authority.py` | ADR-0137 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
+| `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_capable_set_covers_every_dial` | ADR-0147 |
+| `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_defaults_to_the_gateway` | ADR-0147 |
+| `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_keeps_a_direct_escape_hatch` | ADR-0147 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_gateway_env_key_coverage.py` | ADR-0142 |
 | `pytest:tests/architecture/test_import_boundary_gate.py` | ADR-0118 |

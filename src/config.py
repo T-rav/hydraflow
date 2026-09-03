@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -3433,30 +3434,31 @@ class HydraFlowConfig(BaseModel):
     # a DeepSeek id for openrouter, "glm-5.2" for zai, "kimi-k3" for kimi).
     wiki_compilation_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
-    ] = Field(default="claude", description="Backend for wiki topic compilation.")
+    ] = Field(default="gateway", description="Backend for wiki topic compilation.")
     adr_review_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
-        Field(default="claude", description="Backend for the ADR reviewer.")
+        Field(default="gateway", description="Backend for the ADR reviewer.")
     )
     transcript_summary_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
-    ] = Field(default="claude", description="Backend for transcript summarization.")
+    ] = Field(default="gateway", description="Backend for transcript summarization.")
     retro_finder_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
-        Field(default="claude", description="Backend for the retrospective finder.")
+        Field(default="gateway", description="Backend for the retrospective finder.")
     )
     triage_honeypot_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
     ] = Field(
-        default="claude", description="Backend for the triage injection honeypot."
+        default="gateway", description="Backend for the triage injection honeypot."
     )
     pr_unstick_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
         Field(
-            default="claude", description="Backend for the PR-unsticker cause analysis."
+            default="gateway",
+            description="Backend for the PR-unsticker cause analysis.",
         )
     )
     term_proposer_provider: Literal[
         "claude", "gateway", "openrouter", "zai", "kimi"
     ] = Field(
-        default="claude",
+        default="gateway",
         description="Backend for the term-proposer / entry-evidence drafters.",
     )
     # Per-role backend dials for the AGENTIC (tool-using) roles. Unlike the
@@ -3475,19 +3477,19 @@ class HydraFlowConfig(BaseModel):
     # on review_provider. Adding a dead dial here would validate at config-load
     # yet never route at runtime — a footgun, so we don't.
     implementation_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude", description="Harness backend for implementation agents."
+        default="gateway", description="Harness backend for implementation agents."
     )
     review_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude", description="Harness backend for review agents."
+        default="gateway", description="Harness backend for review agents."
     )
     planner_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude", description="Harness backend for planning agents."
+        default="gateway", description="Harness backend for planning agents."
     )
     triage_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude", description="Harness backend for triage agents."
+        default="gateway", description="Harness backend for triage agents."
     )
     ac_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude", description="Harness backend for acceptance-criteria agents."
+        default="gateway", description="Harness backend for acceptance-criteria agents."
     )
     # One knob to route ALL maintenance loops to a backend, coherently. Unlike
     # the old background_model (which back-filled *_model only and could strand a
@@ -3499,7 +3501,7 @@ class HydraFlowConfig(BaseModel):
     # touches implement/review/plan/triage. Leave at claude/"" to configure
     # dedicated roles individually.
     maintenance_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude",
+        default="gateway",
         description=(
             "Backend applied to every maintenance loop (not the work loops). "
             "Set to 'zai' to run all maintenance on GLM; pair with maintenance_model."
@@ -3522,7 +3524,7 @@ class HydraFlowConfig(BaseModel):
     # further reroutes a spawn still resolving to "claude"). Resolution order:
     # role dial > repo_provider > credit-failover.
     repo_provider: Literal["claude", "gateway", "zai"] = Field(
-        default="claude",
+        default="gateway",
         description=(
             "Repo-wide harness backend override for this repo's work spawns. "
             "Set to 'zai' to run this repo on GLM; pair with repo_model. A "
@@ -7490,9 +7492,18 @@ GATEWAY_AGENTIC_PROVIDER_FIELDS: tuple[str, ...] = (
 GATEWAY_ONE_SHOT_PROVIDER_FIELDS: tuple[str, ...] = tuple(
     f"{role}_provider" for role in _MAINTENANCE_DIALED_ROLES
 )
+#: Roles whose dial is their own but which sit outside the agentic/one-shot
+#: split. ``maintenance_provider`` is the PARENT four caretaker roles inherit
+#: at their lightweight seam, so leaving it direct routes those four around the
+#: gateway no matter what the named dials say — the widest hole in the set.
+GATEWAY_INHERITED_PROVIDER_FIELDS: tuple[str, ...] = (
+    "maintenance_provider",
+    "retro_finder_provider",
+)
 GATEWAY_CAPABLE_PROVIDER_FIELDS: tuple[str, ...] = (
     *GATEWAY_AGENTIC_PROVIDER_FIELDS,
     *GATEWAY_ONE_SHOT_PROVIDER_FIELDS,
+    *GATEWAY_INHERITED_PROVIDER_FIELDS,
 )
 
 # Model prefix → required tool. Any model starting with a listed prefix
@@ -8002,6 +8013,48 @@ def _validate_repo_format(repo: str) -> None:
         raise ValueError(msg)
 
 
+#: The gateway upstream binding each provider dial needs, by the upstream the
+#: dial ultimately reaches. A dial on ``gateway`` mints a per-spawn credential
+#: bound to one of these; the gateway refuses the mint when the binding is
+#: absent (``GatewaySettings.from_env`` only adds an upstream whose env pair is
+#: set), so an unset key is a spawn failure, not a degraded route.
+_GATEWAY_UPSTREAM_ENV: dict[str, tuple[str, str]] = {
+    "anthropic": ("GATEWAY_ANTHROPIC_BASE_URL", "GATEWAY_ANTHROPIC_API_KEY"),
+    "zai-harness": ("GATEWAY_ZAI_HARNESS_BASE_URL", "GATEWAY_ZAI_HARNESS_API_KEY"),
+}
+
+
+def gateway_binding_gaps(
+    config: HydraFlowConfig, *, env: Mapping[str, str] | None = None
+) -> list[str]:
+    """Env pairs a gateway-routed deployment needs but does not have.
+
+    ADR-0147 arms the fleet ratchet by default, so every still-Claude spawn
+    is rewritten to the gateway and the ledger sees all of them. That is fail-CLOSED: with no ``GATEWAY_ANTHROPIC_*`` pair the
+    gateway has no Anthropic upstream, every mint is refused, and the factory
+    stops. Reporting the missing pair by name at boot is the difference between
+    one actionable line and N spawn failures that each look like an outage.
+
+    Returns the missing variable names, empty when the deployment is complete.
+    """
+    environment = os.environ if env is None else env
+    routed = bool(getattr(config, "gateway_fleet_ratchet_enabled", False)) or any(
+        getattr(config, name, None) == "gateway"
+        for name in type(config).model_fields
+        if name.endswith("_provider")
+    )
+    if not routed:
+        return []
+    # Anthropic is the upstream every Claude-model role reaches through the
+    # gateway; the zai pair is only needed once a dial names a glm model, so it
+    # is not demanded here.
+    return [
+        var
+        for var in _GATEWAY_UPSTREAM_ENV["anthropic"]
+        if not environment.get(var, "").strip()
+    ]
+
+
 def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
     """Resolve repo slug and git identity from env vars.
 
@@ -8029,6 +8082,17 @@ def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
 
     if config.repo:
         _validate_repo_format(config.repo)
+
+    gaps = gateway_binding_gaps(config)
+    if gaps:
+        logger.warning(
+            "Gateway-routed roles have no Anthropic upstream: %s unset. Every "
+            "spawn on a `gateway` dial will fail its credential mint until "
+            "these are set in the GATEWAY process environment (ADR-0147). Set "
+            "them and restart the gateway, or point the affected *_provider "
+            "dials back at a direct backend.",
+            " and ".join(gaps),
+        )
 
     # Git identity:
     # explicit value → HYDRAFLOW_GIT_USER_NAME/EMAIL env vars

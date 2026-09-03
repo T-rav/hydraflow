@@ -58,8 +58,12 @@ def test_the_dial_set_is_derived_and_non_empty() -> None:
 
 class TestAGovernedRepoMustRouteEveryFaceThroughTheGateway:
     def test_a_direct_face_is_refused_at_load(self) -> None:
+        # The direct face is set EXPLICITLY. ADR-0147 made `gateway` the dial
+        # default, so `_governed()` alone no longer produces a violation — and
+        # a test that relied on the default would have started asserting
+        # nothing while still passing.
         with pytest.raises(ValueError, match="must resolve through the gateway"):
-            HydraFlowConfig(**_governed())
+            HydraFlowConfig(**_governed(maintenance_provider="claude"))
 
     def test_the_refusal_names_the_offending_face(self) -> None:
         """ "Something is ungoverned" is not something an operator can act on."""
@@ -77,8 +81,19 @@ class TestAGovernedRepoMustRouteEveryFaceThroughTheGateway:
 
 
 class TestTheGateIsScopedToTheGovernedRepo:
+    """Non-conscription, asserted as a property rather than as a default.
+
+    These once read `== "claude"`, which was the DEFAULT standing in for "this
+    repo was not forced". ADR-0147 made `gateway` the default, so that spelling
+    would now pass for the wrong reason on a conscripted config. Each case sets
+    a direct dial explicitly and asserts the gate LEFT IT ALONE — the property
+    the objection was actually about.
+    """
+
     def test_an_unarmed_deployment_is_untouched(self) -> None:
-        assert HydraFlowConfig(repo="acme/other").maintenance_provider == "claude"
+        config = HydraFlowConfig(repo="acme/other", maintenance_provider="claude")
+
+        assert config.maintenance_provider == "claude"
 
     def test_another_repo_is_not_forced_onto_the_gateway(self) -> None:
         """The objection that stalled this criterion, asserted as a property.
@@ -87,14 +102,18 @@ class TestTheGateIsScopedToTheGovernedRepo:
         repository the host serves — they are separate configs.
         """
         config = HydraFlowConfig(
-            repo="acme/other", gateway_enforcement_canary_repo=_GOVERNED
+            repo="acme/other",
+            gateway_enforcement_canary_repo=_GOVERNED,
+            maintenance_provider="claude",
         )
 
         assert config.maintenance_provider == "claude"
 
     def test_a_repo_with_no_identity_is_not_judged(self) -> None:
         """Without a canonical repo there is nothing to compare the lock to."""
-        config = HydraFlowConfig(gateway_enforcement_canary_repo=_GOVERNED)
+        config = HydraFlowConfig(
+            gateway_enforcement_canary_repo=_GOVERNED, maintenance_provider="claude"
+        )
 
         assert config.maintenance_provider == "claude"
 

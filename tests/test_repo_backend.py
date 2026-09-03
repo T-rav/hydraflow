@@ -35,7 +35,11 @@ def test_noop_when_repo_provider_is_claude(
 ) -> None:
     monkeypatch.setenv("ZAI_API_KEY", "k")
     cmd = ["claude", "--model", "claude-opus-4-8"]
-    assert apply_repo_provider("claude", cmd, _cfg(tmp_path)) == ("claude", cmd)
+    # repo_provider set EXPLICITLY: ADR-0147 made `gateway` the dial default, so
+    # relying on it here would test a different branch than the name claims.
+    cfg = _cfg(tmp_path, repo_provider="claude")
+
+    assert apply_repo_provider("claude", cmd, cfg) == ("claude", cmd)
 
 
 def test_reroutes_to_zai_when_repo_provider_is_zai(
@@ -153,7 +157,9 @@ def test_claude_native_repo_still_fails_over(
 
     monkeypatch.setenv("ZAI_API_KEY", "k")
     credit_failover.engage(now=NOW, resume_at=None, cooldown_minutes=15)
-    cfg = _cfg(tmp_path)  # repo_provider left at default "claude"
+    # Explicit, not defaulted: ADR-0147 routes repo_provider to the gateway by
+    # default, and this case is specifically the still-Claude repo.
+    cfg = _cfg(tmp_path, repo_provider="claude")
     cmd = ["claude", "--model", "claude-opus-4-8"]
 
     provider, cmd = apply_repo_provider("claude", cmd, cfg)

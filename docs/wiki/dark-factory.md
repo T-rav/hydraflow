@@ -430,6 +430,62 @@ them (two 2026-07 sessions nearly did):
 
 Still open: subagent-verify wrapper, pre-commit arch-regen.
 
+## Gateway-routed spawns (ADR-0147)
+
+Every `*_provider` dial defaults to `gateway`, so role spawns transit the proxy
+and land in its ledger — the only record carrying per-spawn attribution (role,
+spawn, session, issue, PR) in one provider-agnostic schema. Before this, the
+ledger held 908 rows from a single provider over two days and had been dead for
+a fortnight, while the proxy ran and every dial pointed around it.
+
+**No docker required.** The docker constraint belongs to the fleet ratchet, not
+to the dials.
+
+### The one thing an operator must set
+
+`GatewaySettings.from_env` binds only upstreams whose env pair is present.
+Without the Anthropic pair the gateway has no Anthropic upstream and **every
+mint is refused** — gateway selection is fail-closed, so this is a stopped
+factory, not a slow one.
+
+```bash
+# in the GATEWAY process environment — not the repo .env
+GATEWAY_ANTHROPIC_BASE_URL=https://api.anthropic.com
+GATEWAY_ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Restart the gateway. Boot logs name any missing variable directly
+(`gateway_binding_gaps()`), so a misconfiguration is one line rather than N
+spawn failures that each look like an outage.
+
+**Verify** the ledger fills with the Anthropic lane:
+
+```bash
+tail -50 .hydraflow/gateway/requests.jsonl \
+  | jq -r 'select(.upstream_provider=="anthropic")
+           | [.principal.id, .model_served, .cost_usd] | @tsv'
+```
+
+### What is still direct
+
+`_resolve_provider` returns a hardcoded `"claude"` for every `BaseRunner`
+subclass with no `PROVIDER_FIELD` — bug_reproducer, hitl, research, discover,
+shape, plan_reviewer, diagnostic. No dial reaches them. Only the fleet ratchet
+does, and it requires `execution_mode="docker"` because a host agent CLI reads
+provider OAuth/keychain state **even when its process environment is scrubbed**
+— it would record a gateway spawn that never transited the gateway.
+
+Docker is slow, and these are the low-volume roles. Leaving them direct is a
+deliberate stopping point: the ledger is complete for the roles that spend, and
+honest about the ones it does not cover.
+
+### Rolling back
+
+Set the affected dial(s) back to `claude`. The literal remains on every dial
+precisely so this is one variable, and because `credit_failover` needs it — it
+reroutes a `claude` spawn to GLM when subscription credit is exhausted, and the
+air-gapped sandbox has no gateway to reach.
+
 ## Exception sensor — standing Bugsink up (ADR-0146)
 
 **There is no single `make start`.** The sensor is separate infrastructure on
