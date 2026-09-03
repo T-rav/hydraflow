@@ -63,22 +63,17 @@ class TestCreateApp:
 # ---------------------------------------------------------------------------
 
 
+# Routes whose 5xx in this fixture is the FIXTURE, not the dashboard. Named
+# individually with the reason, so the exemption cannot quietly widen (#11548).
+_SERVER_ERROR_EXEMPT = {
+    # Shells out to `gh api repos//issues` for HITL state. The test config has
+    # no repo, so gh 404s and the handler surfaces it as a 500. With a real
+    # repo configured this route answers normally.
+    "/api/sandbox-hitl",
+}
+
+
 class TestIndexRoute:
-    def test_get_root_returns_200(
-        self, config: HydraFlowConfig, event_bus: EventBus, state
-    ) -> None:
-        from fastapi.testclient import TestClient
-
-        from dashboard import HydraFlowDashboard
-
-        dashboard = HydraFlowDashboard(config, event_bus, state)
-        app = dashboard.create_app()
-
-        client = TestClient(app)
-        response = client.get("/")
-
-        assert response.status_code == 200
-
     def test_get_root_returns_html_content_type(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
@@ -385,21 +380,6 @@ class TestHealthRoute:
 
 
 class TestStateRoute:
-    def test_get_state_returns_200(
-        self, config: HydraFlowConfig, event_bus: EventBus, state
-    ) -> None:
-        from fastapi.testclient import TestClient
-
-        from dashboard import HydraFlowDashboard
-
-        dashboard = HydraFlowDashboard(config, event_bus, state)
-        app = dashboard.create_app()
-
-        client = TestClient(app)
-        response = client.get("/api/state")
-
-        assert response.status_code == 200
-
     def test_get_state_returns_state_dict(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
@@ -509,21 +489,6 @@ class TestStatsRoute:
 
 
 class TestEventsRoute:
-    def test_get_events_returns_200(
-        self, config: HydraFlowConfig, event_bus: EventBus, state
-    ) -> None:
-        from fastapi.testclient import TestClient
-
-        from dashboard import HydraFlowDashboard
-
-        dashboard = HydraFlowDashboard(config, event_bus, state)
-        app = dashboard.create_app()
-
-        client = TestClient(app)
-        response = client.get("/api/events")
-
-        assert response.status_code == 200
-
     def test_get_events_returns_list(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
@@ -827,21 +792,6 @@ class TestPRsRoute:
 
 
 class TestHumanInputGetRoute:
-    def test_get_human_input_returns_200(
-        self, config: HydraFlowConfig, event_bus: EventBus, state
-    ) -> None:
-        from fastapi.testclient import TestClient
-
-        from dashboard import HydraFlowDashboard
-
-        dashboard = HydraFlowDashboard(config, event_bus, state)
-        app = dashboard.create_app()
-
-        client = TestClient(app)
-        response = client.get("/api/human-input")
-
-        assert response.status_code == 200
-
     def test_get_human_input_returns_empty_dict_when_no_orchestrator(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
@@ -1081,3 +1031,77 @@ class TestStartStop:
         assert (
             dashboard._server_task.done()
         )  # already-done task stays done after stop()
+
+
+class TestEveryParameterlessGetRoute:
+    """#11548: the four hand-copied route smoke tests, parametrised by reference.
+
+    They were four identical bodies differing only in a path string — `/`,
+    `/api/state`, `/api/events`, `/api/human-input`. Collapsing them to a
+    hand-written list of those same four would remove the duplication and keep
+    the coverage at four.
+
+    `docs/standards/parametrised_guards/README.md` asks for the set the code
+    actually iterates, by reference. That set is the app's own route table, and
+    it holds **94** parameterless GET routes. Ninety of them had no
+    lifecycle coverage at all, and a route added tomorrow is covered without
+    anyone remembering to add a case.
+
+    The assertion is "no 5xx", not "200": a route that needs query parameters
+    answers 422 by design, and that is FastAPI working, not the dashboard
+    failing. A 5xx is the dashboard failing, which is what a lifecycle test is
+    for.
+    """
+
+    @staticmethod
+    def _parameterless_get_paths(app) -> list[str]:
+        return sorted(
+            route.path
+            for route in app.routes
+            if "GET" in getattr(route, "methods", set()) and "{" not in route.path
+        )
+
+    def test_the_route_set_is_read_from_the_app_not_hardcoded(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        """Anti-vacuity: the parametrisation must come from the live app.
+
+        A hand-copied list would pass every case below while covering whatever
+        someone last remembered to type. This pins that the set is derived, and
+        that it is materially larger than the four tests it replaced.
+        """
+        from dashboard import HydraFlowDashboard
+
+        app = HydraFlowDashboard(config, event_bus, state).create_app()
+        paths = self._parameterless_get_paths(app)
+
+        assert len(paths) > 50, (
+            f"only {len(paths)} parameterless GET routes discovered — the route "
+            "table is no longer being read from the app"
+        )
+        for legacy in ("/", "/api/state", "/api/events", "/api/human-input"):
+            assert legacy in paths, (
+                f"{legacy} was covered by a hand-written test before #11548 and "
+                "is no longer in the derived set — coverage went backwards"
+            )
+
+    def test_no_parameterless_get_route_returns_a_server_error(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        """Every GET route the app registers must come up without a 5xx."""
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        app = HydraFlowDashboard(config, event_bus, state).create_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        failures = []
+        for path in self._parameterless_get_paths(app):
+            if path in _SERVER_ERROR_EXEMPT:
+                continue
+            code = client.get(path).status_code
+            if code >= 500:
+                failures.append(f"{path} -> {code}")
+
+        assert not failures, "routes returned a server error: " + ", ".join(failures)
