@@ -128,10 +128,18 @@ class TraceCollector:
         self._finalized: bool = False
 
     def record(self, raw_line: str) -> None:
-        """Record one parsed JSON line. Never raises."""
+        """Record one parsed JSON line. Tolerates bad DATA, not bad CODE.
+
+        The catch is narrowed to `ValueError` (#6496) — which covers
+        `json.JSONDecodeError` — because that is what malformed trace input
+        legitimately produces. An `AttributeError`, `AssertionError` or
+        `NameError` from the serialisation logic is a programming error, and
+        the old `except Exception` turned every one of them into a warning
+        nobody reads while telemetry silently stopped being collected.
+        """
         try:
             self._record_inner(raw_line)
-        except Exception:
+        except ValueError:
             logger.warning("trace_collector.record failed", exc_info=True)
 
     def _record_inner(self, raw_line: str) -> None:
@@ -445,7 +453,10 @@ class TraceCollector:
         self._finalized = True
         try:
             return self._finalize_inner(success=success)
-        except Exception:
+        except (OSError, ValueError):
+            # Disk and data failures only (#6496). A programming error here
+            # returned `None`, which is indistinguishable from an empty trace —
+            # so `factory_metrics` saw a missing data point and nothing said why.
             logger.warning("trace_collector.finalize failed", exc_info=True)
             return None
 

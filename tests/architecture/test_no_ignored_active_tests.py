@@ -276,12 +276,16 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: regression_issue_6494 took two grandfathered xfails with it. The cap
 #: falls in the same change by design — a cap left above the live count is
 #: slack a later PR can spend without anything reddening.
-#: 107 -> 101 when the health-monitor trio (#6602/#6626/#6630) was fixed:
+#: 107 -> 104 when #6496 was actually fixed: `TraceCollector.record` and
+#: `.finalize` stopped swallowing AttributeError/AssertionError, so all three
+#: of that file's pins pass unmarked. Unlike the 109 -> 107 drop, nothing was
+#: deleted here — the pins are live tests now.
+#: 104 -> 98 when the health-monitor trio (#6602/#6626/#6630) was fixed:
 #: `compute_trend_metrics` now returns None rather than a nominal 0.0 for an
 #: unparseable item_scores.json, counts only the failure lines it parsed, and
 #: warns on an unreadable outcomes trail; `file_util.atomic_write` no longer
 #: lets a cleanup error replace the write error. All six pins are live tests.
-DEFERRED_XFAILS_MAX = 101
+DEFERRED_XFAILS_MAX = 98
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -289,9 +293,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6476.py::TestProcWaitAlwaysCalledInFinally.test_unexpected_error_after_stderr_task_calls_proc_wait",
         "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_drain_failure_calls_proc_wait",
         "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_write_failure_calls_proc_wait",
-        "tests/regressions/regression_issue_6496.py::TestFinalizeDoesNotMaskProgrammingErrors.test_finalize_propagates_attribute_error",
-        "tests/regressions/regression_issue_6496.py::TestRecordDoesNotMaskProgrammingErrors.test_record_propagates_assertion_error",
-        "tests/regressions/regression_issue_6496.py::TestRecordDoesNotMaskProgrammingErrors.test_record_propagates_attribute_error",
         "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientExhaustsThreadPool.test_thread_pool_starved_by_concurrent_retries",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientUsesBlockingSleep.test_retry_loop_calls_blocking_time_sleep",
