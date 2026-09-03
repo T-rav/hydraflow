@@ -20,12 +20,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mockworld.sandbox_main import SANDBOX_SEAMS, SEAM_KINDS
+from mockworld.sandbox_main import (
+    CONFIG_DISABLE_FLAGS,
+    SANDBOX_SEAMS,
+    SEAM_KINDS,
+)
 from tests.architecture.sandbox_seam_scan import (
     ratchet_diff,
     scan_runner_constructions,
     scan_spawn_signatures,
     signature_module,
+    signature_seam_keys,
     undeclared_signatures,
 )
 
@@ -110,7 +115,14 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     # per the shrink-only rule (the module is seam-declared, not grandfathered).
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._find_open_escalation::run_subprocess_result": 1,
     "src/trust_fleet_sanity_loop.py::TrustFleetSanityLoop._reconcile_closed_escalations::run_subprocess_result": 1,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,
+    # #6961 split phase 3's two spawns: the branch listing stays here, and the
+    # delete moved to the module-level ``_delete_landed_branch`` so it can try
+    # the safe flag before the force one. SPLIT, not grown — 2 becomes 1 + 1,
+    # the same tolerated local-git class, and the helper is written with a
+    # single lexical ``run_subprocess`` precisely so trying two flags does not
+    # add a site to a shrink-only ratchet.
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 1,
+    "src/workspace_gc_loop.py::_delete_landed_branch::run_subprocess": 1,
     # _get_issue_state's raw ``gh api`` spawn was routed through
     # PRPort.get_issue_state in #9543 — entry pruned per the shrink-only rule.
     # #10698 all-root enumerate-and-reap phase: LOCAL-git worktree operations
@@ -184,8 +196,10 @@ def test_declared_seams_map_to_scanned_spawn_modules() -> None:
     green-lighting an uncovered path under a near-miss name.
     """
     current = scan_spawn_signatures(REPO_ROOT)
-    scanned_modules = {signature_module(signature) for signature in current}
-    stale = set(SANDBOX_SEAMS) - scanned_modules
+    scanned: set[str] = set()
+    for signature in current:
+        scanned.update(signature_seam_keys(signature))
+    stale = set(SANDBOX_SEAMS) - scanned
     assert not stale, (
         f"SANDBOX_SEAMS declares seams for modules with no scanned spawn "
         f"sites: {sorted(stale)}. Rename or prune the declaration."
@@ -211,15 +225,117 @@ def test_baseline_entries_are_not_seam_declared() -> None:
     """
     conflicted = sorted(
         {
-            signature_module(signature)
+            key
             for signature in GRANDFATHERED_SPAWN_BASELINE
-            if signature_module(signature) in SANDBOX_SEAMS
+            for key in signature_seam_keys(signature)
+            if key in SANDBOX_SEAMS
         }
     )
     assert not conflicted, (
         f"Modules present in both SANDBOX_SEAMS and the grandfathered "
         f"baseline: {conflicted}. Prune their baseline entries."
     )
+
+
+def test_every_config_disable_seam_names_its_flag() -> None:
+    """A ``config_disable`` claim with no flag is unfalsifiable (#12105).
+
+    The registry checks that a spawn site is NAMED; before this it never
+    checked the named mechanism was WIRED. Deleting an override reddened
+    nothing across the whole architecture suite, so an entry could claim
+    ``config_disable`` while its spawn ran for real in the air-gapped
+    sandbox — the s51/s56 wedge the registry exists to prevent.
+    """
+    declared = {key for key, kind in SANDBOX_SEAMS.items() if kind == "config_disable"}
+
+    assert declared == set(CONFIG_DISABLE_FLAGS), (
+        "every config_disable seam must name the flag that disables it in "
+        f"CONFIG_DISABLE_FLAGS. Unmapped: {sorted(declared - set(CONFIG_DISABLE_FLAGS))}; "
+        f"mapped but not declared: {sorted(set(CONFIG_DISABLE_FLAGS) - declared)}."
+    )
+
+
+def test_every_named_flag_exists_on_the_config() -> None:
+    """A typo'd flag name would satisfy the mapping and disable nothing."""
+    from config import HydraFlowConfig
+
+    fields = set(HydraFlowConfig.model_fields)
+    missing = {
+        key: [f for f in flags if f not in fields]
+        for key, flags in CONFIG_DISABLE_FLAGS.items()
+    }
+    missing = {k: v for k, v in missing.items() if v}
+
+    assert not missing, (
+        f"CONFIG_DISABLE_FLAGS names non-existent config fields: {missing}"
+    )
+
+
+def test_every_config_disable_seam_is_really_disabled(tmp_path) -> None:
+    """Force each flag ON, then require the overrides to put it back.
+
+    Asserting the post-state alone would pass for a flag that merely happens
+    to default off — and defaults move: the sandbox already pins
+    ``staging_enabled`` because its production default flipped to True.
+    Forcing True first makes the check independent of the current default, so
+    it proves an EXPLICIT pin exists rather than observing a coincidence.
+    """
+    from config import HydraFlowConfig
+    from mockworld import sandbox_main
+
+    flags = sorted({f for flags in CONFIG_DISABLE_FLAGS.values() for f in flags})
+    config = HydraFlowConfig(repo_root=tmp_path)
+    for flag in flags:
+        object.__setattr__(config, flag, True)
+
+    sandbox_main._apply_sandbox_config_overrides(config)
+
+    still_on = [f for f in flags if getattr(config, f)]
+    assert not still_on, (
+        "_apply_sandbox_config_overrides left these config_disable flags ON, so "
+        f"their declared seam does not exist: {still_on}"
+    )
+
+
+def test_the_flag_check_can_see_an_un_pinned_flag(tmp_path) -> None:
+    """Known positive: the assertion shape above must detect a missing pin.
+
+    Without this the wiring check is itself unfalsifiable — the exact defect
+    it was written to close, one level up. Force a flag ON, do NOT run the
+    overrides, and require the same assertion to report it.
+    """
+    from config import HydraFlowConfig
+    from mockworld import sandbox_main
+
+    config = HydraFlowConfig(repo_root=tmp_path)
+    object.__setattr__(config, "fleet_vitals_enabled", True)
+
+    assert [f for f in ("fleet_vitals_enabled",) if getattr(config, f)] == [
+        "fleet_vitals_enabled"
+    ], "the assertion shape used above cannot see an un-pinned flag"
+
+    sandbox_main._apply_sandbox_config_overrides(config)
+    assert config.fleet_vitals_enabled is False
+
+
+def test_a_phase_seam_covers_only_its_own_phase() -> None:
+    """The phase-scoped key must not blanket the module it names.
+
+    ``workspace_gc_loop`` declares a seam for ONE phase while five of its
+    other spawn sites stay grandfathered; if ``undeclared_signatures`` keyed
+    on the module prefix those five would silently go quiet. This is the
+    known positive for that: a sibling phase in a phase-seamed module is
+    still undeclared.
+    """
+    declared = "workspace_gc_loop::_reap_abandoned_creations"
+    assert declared in SANDBOX_SEAMS, "fixture drifted — repoint this test"
+    covered = "src/workspace_gc_loop.py::_reap_abandoned_creations::run_subprocess"
+    sibling = "src/workspace_gc_loop.py::_reap_worktree::run_subprocess"
+
+    undeclared = undeclared_signatures({covered: 1, sibling: 1}, set(SANDBOX_SEAMS))
+
+    assert covered not in undeclared
+    assert undeclared == {sibling: 1}
 
 
 # ---------------------------------------------------------------------------

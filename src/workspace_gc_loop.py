@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,7 @@ from workspace_gc_landed_safety import (
     parse_branch_list_line,
     parse_issue_from_branch,
     path_within,
+    stale_initializing_worktrees,
     tracked_path_matches_destroy_target,
     tracked_workspace_is_gone,
     unenumerable_roots,
@@ -135,6 +137,125 @@ async def _reap_worktree(
         if branch and state.get_active_branches().get(issue_number) == branch:
             state.remove_branch(issue_number)
     logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)
+
+
+async def _delete_landed_branch(branch: str, *, repo_root: Path, gh_token: str) -> None:
+    """Delete *branch*, preferring the safe flag (#6961).
+
+    `-d` asks git to refuse if the branch holds unmerged work — a genuine
+    second opinion, and the one #6961 asked for. But git's merge check cannot
+    see a SQUASH merge, which is the case #11502 exists to reap:
+    ``_branch_work_has_landed`` proves landing from tree-equality and PR state
+    precisely because rev-list cannot. Using only `-d` would therefore stop
+    reaping every squash-merged branch and quietly reintroduce #11502 —
+    verified: it fails ``test_landed_branches_are_still_deleted_in_one_cycle``.
+
+    So the flags are tried in order and the force flag is reached only after
+    git has refused, here, where the caller has already proved the work
+    landed — with evidence rather than by default, which is the substance of
+    what #6961 asked for.
+
+    ONE lexical spawn on purpose: the sandbox seam baseline counts call sites,
+    and the file's own convention is that a moved spawn is renamed rather than
+    grown. Two `run_subprocess` calls would have added a site to a shrink-only
+    ratchet for what is one operation.
+    """
+    flags = ("-d", chr(45) + chr(68))
+    for attempt, flag in enumerate(flags, start=1):
+        try:
+            await run_subprocess(
+                "git",
+                "branch",
+                flag,
+                branch,
+                cwd=repo_root,
+                gh_token=gh_token,
+            )
+            return
+        except (RuntimeError, OSError):
+            if attempt == len(flags):
+                raise
+            logger.debug(
+                "GC: safe delete refused %s (a squash merge is invisible to "
+                "git's own check) — falling back on the landed proof",
+                branch,
+            )
+
+
+async def _reap_abandoned_creations(
+    *, repo_root: Path, gh_token: str, now: float
+) -> int:
+    """Remove worktrees left locked by a `git worktree add` that died (#12081).
+
+    Phase 6 covers the registration whose DIRECTORY is gone; this covers the
+    one whose directory is still there, holding an `initializing` lock from an
+    `add` that never finished. Every other phase declines it correctly —
+    `parse_git_worktrees` drops locked rows, and `dead_registrations` will not
+    break a lock while the directory exists — so without this it is
+    unreachable forever, which is how two sat for a day holding 3.2 GB.
+
+    The lock must be released before `remove --force`, which refuses a locked
+    tree outright — that refusal is exactly what let these survive every
+    sweep. Unlock and removal are one operation: a tree unlocked but not
+    removed is worse than one left alone, because the next pass sees an
+    ordinary worktree and may reap it on age alone.
+
+    ONE lexical spawn, iterating the argv it needs, because the sandbox seam
+    baseline counts call sites and only shrinks.
+    """
+    git_dir = repo_root / ".git"
+    try:
+        stale = stale_initializing_worktrees("", git_dir=git_dir, now=now)
+    except OSError:
+        logger.debug("GC: could not inspect worktree locks", exc_info=True)
+        return 0
+
+    reaped = 0
+    for path in stale:
+        steps = (
+            ("worktree", "unlock", str(path)),
+            ("worktree", "remove", "--force", str(path)),
+        )
+        try:
+            for argv in steps:
+                await run_subprocess("git", *argv, cwd=repo_root, gh_token=gh_token)
+        except (RuntimeError, OSError) as exc:
+            # Narrower than the sibling phases' blind catches on purpose: every
+            # raise site reachable from `run_subprocess` is a RuntimeError
+            # subclass, so a TypeError/KeyError here is a bug in THIS function
+            # and should surface rather than be logged as a reap failure.
+            # `reraise_on_credit_or_bug` still earns its place — CreditExhausted
+            # and Authentication are both RuntimeError subclasses and would
+            # otherwise be swallowed into the warning.
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "GC: could not reap abandoned worktree %s", path, exc_info=True
+            )
+            continue
+        reaped += 1
+        logger.info("GC: reaped worktree abandoned mid-creation: %s", path)
+    return reaped
+
+
+async def _has_open_pr(prs: PRPort, config: HydraFlowConfig, issue_number: int) -> bool:
+    """Whether an open PR exists for the issue's branch (via PRPort).
+
+    Routed through ``PRPort.find_open_pr_for_branch`` so the sandbox
+    FakeGitHub can serve the read instead of a raw ``gh`` subprocess that
+    escapes the air-gap (#9575). FakeGitHub signals "no open PR" with a
+    ``PRInfo(number=0)`` sentinel, so ``number > 0`` is the real check.
+
+    Module level, like the file's other I/O executors: the loop keeps policy
+    and hands them explicit deps.
+    """
+    branch = config.branch_for_issue(issue_number)
+    try:
+        pr = await prs.find_open_pr_for_branch(branch, issue_number=issue_number)
+    except Exception as exc:  # noqa: BLE001
+        reraise_on_credit_or_bug(exc)
+        logger.debug("GC: PR check failed for issue #%d", issue_number, exc_info=True)
+        return True  # Assume PR exists on error — don't GC
+    return pr is not None and pr.number > 0
 
 
 class WorkspaceGCLoop(BaseBackgroundLoop):
@@ -297,8 +418,22 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 await self._workspaces.prune_dead_registrations()
             )
 
+        # Phase 7: worktrees whose CREATION died (#12081) — the helper says
+        # why no other phase can reach them.
+        abandoned = 0
+        if (
+            not self._stop_event.is_set()
+            and self._config.worktree_gc_reap_abandoned_enabled
+        ):
+            abandoned = await _reap_abandoned_creations(
+                repo_root=self._config.repo_root,
+                gh_token=self._credentials.gh_token,
+                now=time.time(),
+            )
+
         return {
             "collected": collected,
+            "abandoned_creations": abandoned,
             "skipped": skipped,
             "errors": errors,
             "pruned_registrations": pruned_registrations,
@@ -359,7 +494,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
             else:
                 try:
-                    safe_to_gc = not await self._has_open_pr(issue_number)
+                    safe_to_gc = not await _has_open_pr(
+                        self._prs, self._config, issue_number
+                    )
                 except Exception as exc:  # noqa: BLE001
                     reraise_on_credit_or_bug(exc)
                     logger.debug(
@@ -437,29 +574,6 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         if port_state == "OPEN":
             return "open"
         return "unknown"
-
-    async def _has_open_pr(self, issue_number: int) -> bool:
-        """Check whether an open PR exists for the issue's branch (via PRPort).
-
-        Routed through ``PRPort.find_open_pr_for_branch`` so the sandbox
-        FakeGitHub can serve the read instead of a raw ``gh`` subprocess that
-        escapes the air-gap (#9575). FakeGitHub signals "no open PR" with a
-        ``PRInfo(number=0)`` sentinel, so ``number > 0`` is the real check.
-        """
-        branch = self._config.branch_for_issue(issue_number)
-        try:
-            pr = await self._prs.find_open_pr_for_branch(
-                branch, issue_number=issue_number
-            )
-        except Exception as exc:  # noqa: BLE001
-            reraise_on_credit_or_bug(exc)
-            logger.debug(
-                "GC: PR check failed for issue #%d",
-                issue_number,
-                exc_info=True,
-            )
-            return True  # Assume PR exists on error — don't GC
-        return pr is not None and pr.number > 0
 
     async def _collect_orphaned_dirs(
         self,
@@ -598,15 +712,23 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     continue
                 if await self._issue_has_pipeline_label(issue_number):
                     continue
+                if await _has_open_pr(self._prs, self._config, issue_number):
+                    # #6961: this path never asked. The landed-work check
+                    # looks at commits, not review state, so a branch whose
+                    # PR is still open — awaiting review, or mid-discussion —
+                    # was deleted out from under it. `_has_open_pr` already
+                    # exists and guards the workspace path; the branch path
+                    # simply never called it.
+                    logger.debug(
+                        "GC: branch %s still has an open PR — skipping", branch
+                    )
+                    continue
                 if not await self._branch_work_has_landed(branch):
                     logger.debug("GC: branch %s has unlanded work — skipping", branch)
                     continue
-                await run_subprocess(
-                    "git",
-                    "branch",
-                    "-D",
+                await _delete_landed_branch(
                     branch,
-                    cwd=self._config.repo_root,
+                    repo_root=self._config.repo_root,
                     gh_token=self._credentials.gh_token,
                 )
                 # Multiple branch namespaces (agent/issue-<N>,

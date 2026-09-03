@@ -340,6 +340,15 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 if not inside_allowed_child:
                     continue
                 directories.append({"name": child.name, "path": child_real})
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            # A path the caller asked for that is not there is a CLIENT
+            # condition, not a server fault. Returning 500 said "the dashboard
+            # broke" for the ordinary case of browsing to a directory that has
+            # since been removed — and made the endpoint a 5xx on any host
+            # whose HOME does not exist, which is how the route-table lifecycle
+            # test caught it on CI but never locally.
+            logger.info("Directory not found for listing: %s: %s", target_path, exc)
+            return JSONResponse({"error": "directory not found"}, status_code=404)
         except OSError as exc:
             logger.warning("Failed to list directory %s: %s", target_path, exc)
             return JSONResponse({"error": "failed to list directory"}, status_code=500)

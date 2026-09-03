@@ -184,7 +184,6 @@ class TestRunRecorderCorruptManifestLogLevel:
     not DEBUG — operators need visibility into data corruption.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6782 — fix not yet landed", strict=False)
     def test_corrupt_manifest_logged_at_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -199,7 +198,12 @@ class TestRunRecorderCorruptManifestLogLevel:
         recorder = RunRecorder(config)
 
         # Create a run directory with a corrupt manifest.
-        runs_dir = tmp_path / "repo" / ".hydraflow" / "runs" / "42"
+        # Derived from the recorder, not spelled: `repo_data_path` is
+        # repo-SCOPED (ADR-0021 D2), so the real tree is
+        # `.hydraflow/<slug>/runs`. Hardcoding `.hydraflow/runs` seeded a
+        # directory `list_runs` never looks in, so it returned [] for the
+        # right reason by accident and logged nothing at any level.
+        runs_dir = recorder.runs_dir / "42"
         corrupt_dir = runs_dir / "20260101T100000Z"
         corrupt_dir.mkdir(parents=True)
         (corrupt_dir / "manifest.json").write_text("NOT VALID JSON!!!")

@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 
 # Ensure src/ is importable
@@ -51,6 +50,8 @@ class TestProbeReturnsAvailableOnTransientNetworkErrors:
 
         After fix, the probe should return True (assume credits available).
         """
+        import httpx  # noqa: PLC0415
+
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -72,6 +73,8 @@ class TestProbeReturnsAvailableOnTransientNetworkErrors:
 
         After fix, the probe should return True.
         """
+        import httpx  # noqa: PLC0415
+
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -93,6 +96,7 @@ class TestProbeReturnsAvailableOnTransientNetworkErrors:
 
         After fix, the probe should return True.
         """
+
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -122,6 +126,7 @@ class TestProbeDoesNotMaskUnexpectedErrors:
 
         After fix, it should propagate (not be caught and turned into False).
         """
+
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)

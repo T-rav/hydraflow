@@ -44,7 +44,6 @@ class TestTriageSingleTracedPropagatesFatalErrors:
     """AuthenticationError and CreditExhaustedError must propagate, not be caught."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6728 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates(self) -> None:
         """AuthenticationError must NOT be caught by the RuntimeError handler."""
         config = ConfigFactory.create()
@@ -59,7 +58,6 @@ class TestTriageSingleTracedPropagatesFatalErrors:
             await phase._triage_single_traced(_ISSUE)
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6728 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates(self) -> None:
         """CreditExhaustedError must NOT be caught by the RuntimeError handler."""
         config = ConfigFactory.create()

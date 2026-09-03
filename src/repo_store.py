@@ -93,6 +93,17 @@ class RepoRegistryStore:
             raw = json.loads(self._path.read_text())
         except FileNotFoundError:
             return []
+        except OSError:
+            # Widened from FileNotFoundError alone (#6921). A registry that
+            # treats "no file" as an empty list has no reason to treat "cannot
+            # read the file" as fatal: a permission or I/O error took down
+            # every caller, where the absent-file case returns cleanly. Warn
+            # so the difference is visible in logs, then degrade the same way.
+            logger.warning(
+                "repos.json could not be read; starting from empty state",
+                exc_info=True,
+            )
+            return []
         except json.JSONDecodeError:
             logger.warning(
                 "repos.json is corrupt; starting from empty state", exc_info=True
@@ -119,7 +130,18 @@ class RepoRegistryStore:
         payload = {
             "repos": [record.to_dict() for record in records],
         }
-        atomic_write(self._path, json.dumps(payload, indent=2) + "\n")
+        try:
+            atomic_write(self._path, json.dumps(payload, indent=2) + "\n")
+        except OSError:
+            # #6921: a full or read-only disk raised straight through into
+            # whatever was registering a repo. The registry is durable state,
+            # not a transaction — losing this write costs the next `load` its
+            # newest entries, which is recoverable, where an exception here
+            # aborts the caller mid-operation.
+            logger.warning(
+                "repos.json could not be written; registry not persisted",
+                exc_info=True,
+            )
 
     def upsert(self, record: RepoRecord) -> RepoRecord:
         records = {existing.slug: existing for existing in self.load()}

@@ -25,6 +25,11 @@ from run_recorder import RunRecorder
 def _make_recorder(tmp_path: Path) -> RunRecorder:
     """Create a RunRecorder pointing at a temporary runs directory."""
     config = MagicMock()
+    # RunRecorder reads repo_data_path (ADR-0021 D2 repo-scoping), not
+    # data_path. Seeding only the old name left _runs_dir pointing at a
+    # MagicMock, so every walk found nothing and the tests reported an empty
+    # tree rather than the race they were written for.
+    config.repo_data_path.return_value = tmp_path / "runs"
     config.data_path.return_value = tmp_path / "runs"
     return RunRecorder(config)
 
@@ -48,7 +53,6 @@ def _populate_run(
 class TestGetStorageStatsConcurrentDeletion:
     """get_storage_stats must not crash when a file vanishes mid-iteration."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6717 — fix not yet landed", strict=False)
     def test_stat_raises_file_not_found_mid_iteration(self, tmp_path: Path) -> None:
         """Simulate a file being deleted by GC between rglob enumeration and
         the stat() call.  The current code has no OSError guard, so this
@@ -125,7 +129,6 @@ class TestGetStorageStatsConcurrentDeletion:
 class TestGetStorageStatsPermissionError:
     """get_storage_stats must not crash on PermissionError (e.g. NFS)."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6717 — fix not yet landed", strict=False)
     def test_stat_permission_error_is_skipped(self, tmp_path: Path) -> None:
         """If stat() raises PermissionError for a file, get_storage_stats
         should skip that file and continue, not propagate the exception.
@@ -171,7 +174,6 @@ class TestGetStorageStatsPermissionError:
 class TestPurgeExpiredConcurrentDeletion:
     """purge_expired must not crash when a directory vanishes mid-iteration."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6717 — fix not yet landed", strict=False)
     def test_iterdir_raises_when_issue_dir_removed_concurrently(
         self, tmp_path: Path
     ) -> None:

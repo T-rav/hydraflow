@@ -14,7 +14,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from models import IsoTimestamp, PipelineStage
 from text_match import keyword_matches
@@ -219,16 +219,12 @@ class HarnessInsightStore:
         archive and downstream retry-context builders.
         """
         self._enrich_record_hints(record)
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
+        from file_util import append_jsonl  # noqa: PLC0415
 
-            append_jsonl(self._failures_path, record.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append failure to %s",
-                self._failures_path,
-                exc_info=True,
-            )
+        # No local guard: `append_jsonl` is best-effort by contract (#6623) and
+        # logs its own I/O failures. Keeping an `except OSError` here would be
+        # dead code that reads like live protection.
+        append_jsonl(self._failures_path, record.model_dump_json())
 
         if self._obs is not None:
             self._obs.breadcrumb(
@@ -252,8 +248,18 @@ class HarnessInsightStore:
         for line in tail:
             try:
                 records.append(FailureRecord.model_validate_json(line))
-            except Exception:  # noqa: BLE001
-                logger.warning("Skipping malformed harness record: %s", line[:80])
+            except ValidationError:
+                # Narrowed from `except Exception` (#6696): that also caught
+                # OSError and every programming error, reporting each as a
+                # "malformed record" and moving on. Only a parse failure is a
+                # malformed record. exc_info carries WHICH field failed —
+                # without it the log names the line but not the defect, so
+                # schema drift reads as one-off noise.
+                logger.warning(
+                    "Skipping malformed harness record: %s",
+                    line[:80],
+                    exc_info=True,
+                )
         return records
 
     def get_proposed_patterns(self) -> set[str]:

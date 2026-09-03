@@ -11,6 +11,7 @@ rolled-up ``hydraflow-find`` issue it files when no repair applies.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from config import HydraFlowConfig
@@ -33,6 +34,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("hydraflow.health_monitor_loop")
+
+
+def _cause_line(heartbeat: Mapping[str, object]) -> str:
+    """Render the heartbeat's recorded exception, or say it carries none.
+
+    #12067: the actuator used to tell the operator to go read logs that had
+    already rolled over, because the heartbeat genuinely held no cause. It does
+    now (``base_background_loop._report_cycle_failure``), so an issue filed
+    without one means a loop reporting `error` by some other route — worth
+    saying explicitly rather than rendering a blank line.
+    """
+    details = heartbeat.get("details")
+    if not isinstance(details, dict):
+        return "- Last cause: `not recorded`\n"
+    error_type = details.get("error_type")
+    error = details.get("error")
+    if not error_type and not error:
+        return "- Last cause: `not recorded`\n"
+    return f"- Last cause: `{error_type}: {error}`\n"
 
 
 class HealthMonitorPersistentErrorMixin:
@@ -172,10 +192,12 @@ class HealthMonitorPersistentErrorMixin:
                 f"- Last heartbeat: `{last_run}`\n"
                 f"- Known auto-repair pattern: `"
                 f"{'attempted — no matching condition found' if has_pattern else 'none registered for this loop'}"
-                f"`\n\n"
+                f"`\n"
+                f"{_cause_line(hb)}\n"
                 f"### Operator playbook\n"
                 f"1. Check orchestrator logs for `{name}`'s recent cycle "
-                f"exceptions (heartbeat details carry no error message).\n"
+                f"exceptions (the cause above is the last cycle's only; the "
+                f"logs carry the traceback).\n"
                 f"2. If this is a new recurring failure class, consider "
                 f"adding an entry to `HealthMonitorLoop._known_repairs`.\n\n"
                 f"_Auto-filed by HydraFlow `health_monitor` "

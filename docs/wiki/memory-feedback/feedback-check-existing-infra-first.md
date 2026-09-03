@@ -4,9 +4,9 @@ name: Check existing infrastructure before building parallel solutions
 description: Before writing a new test/lint/loop, grep the codebase for existing infrastructure
   that already solves the problem — reinventing wastes ~30-45 min of agent dispatches
   per missed case
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 12056
+promoted_in: '#12056'
 wontfix_reason: null
 created: 2026-05-08
 ---

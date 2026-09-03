@@ -28,7 +28,6 @@ class TestIssue6653FetchAllGraphqlNoSlashGuard:
     slash, instead of a descriptive error."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6653 — fix not yet landed", strict=False)
     async def test_fetch_all_graphql_empty_repo_raises_descriptive_error(
         self, config: HydraFlowConfig
     ) -> None:
@@ -52,7 +51,6 @@ class TestIssue6653FetchAllGraphqlNoSlashGuard:
             await fetcher._fetch_all_graphql(["hydraflow-ready"])
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6653 — fix not yet landed", strict=False)
     async def test_fetch_all_graphql_no_slash_repo_raises_descriptive_error(
         self, config: HydraFlowConfig
     ) -> None:

@@ -3,9 +3,10 @@ source: feedback_xml_tags_in_subagent_prompts.md
 name: XML tags in subagent/Claude prompts
 description: When building prompts for the Claude API or Agent tool dispatches, wrap
   content regions in named XML tags — same rubric I apply in prompt audits
-status: pending
+status: promoted
 issue: null
-promoted_in: null
+promoted_in: scripts/audit_prompts.py::score_xml_tags — criterion 3 of the prompt
+  scorecard, run by make audit-prompts
 wontfix_reason: null
 created: '2026-04-21'
 ---

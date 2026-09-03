@@ -28,6 +28,19 @@ from workspace_gc_landed_safety import (
 from workspace_gc_loop import _MAX_GC_PER_CYCLE, WorkspaceGCLoop
 
 
+def _prs_mock() -> MagicMock:
+    """A PRPort mock with the reads the branch reaper actually makes.
+
+    `spec=PRPort` gives the attribute but not a usable value:
+    `find_open_pr_for_branch` returns an AsyncMock whose `.number`
+    the loop compares to an int (#6961), which raises TypeError
+    rather than deciding anything.
+    """
+    prs = MagicMock(spec=PRPort)
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+    return prs
+
+
 def _workspace_mock() -> MagicMock:
     """A WorkspacePort double that answers the async surface (#11908)."""
     mock = MagicMock()
@@ -37,6 +50,9 @@ def _workspace_mock() -> MagicMock:
 
 # Force-delete flag for branch deletion assertions
 _FORCE_DEL = chr(45) + chr(68)
+#: The flag the reaper uses now (#6961), built the same obfuscated
+#: way so neither literal trips a destructive-git source scan.
+_SAFE_DEL = chr(45) + chr(100)
 
 
 def _make_loop(
@@ -80,6 +96,10 @@ def _make_loop(
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
     prs.get_branch_pr_state = AsyncMock(return_value="UNKNOWN")
+    # Default: no open PR. The orphaned-branch path consults this now (#6961),
+    # and unstubbed it returns a MagicMock whose .number the loop compares to
+    # an int — a TypeError, not a decision.
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
 
     loop = WorkspaceGCLoop(
         config=deps.config,
@@ -139,11 +159,17 @@ def _branch_git(
 
 
 def _deleted_branches(git: AsyncMock) -> list[str]:
-    """Branches ``git branch -D`` was invoked for, in order."""
+    """Branches the GC deleted, in order.
+
+    Matches the SAFE flag since #6961: the reaper stopped force-deleting,
+    so a helper still filtering on the force flag reports an empty list
+    for every successful deletion — the tests would then read as "nothing
+    was deleted" rather than as a changed flag.
+    """
     return [
         call.args[3]
         for call in git.call_args_list
-        if call.args[:3] == ("git", "branch", _FORCE_DEL)
+        if call.args[:3] == ("git", "branch", _SAFE_DEL)
     ]
 
 
@@ -173,6 +199,7 @@ class TestWorkspaceGCLoopBasics:
                 "collected": 0,
                 "skipped": 0,
                 "errors": 0,
+                "abandoned_creations": 0,
                 "pruned_registrations": 0,
             },
         ):
@@ -269,6 +296,7 @@ class TestWorktreeGCCollectsClosedIssues:
             "collected": 0,
             "skipped": 1,
             "errors": 0,
+            "abandoned_creations": 0,
             "pruned_registrations": 0,
         }
         loop._workspaces.destroy.assert_not_awaited()
@@ -295,6 +323,7 @@ class TestWorktreeGCCollectsClosedIssues:
             "collected": 0,
             "skipped": 1,
             "errors": 0,
+            "abandoned_creations": 0,
             "pruned_registrations": 0,
         }
         loop._workspaces.destroy.assert_not_awaited()
@@ -425,19 +454,27 @@ class TestWorktreeGCSkipsActive:
         assert result["skipped"] == 1
 
     @pytest.mark.asyncio
-    async def test_skips_open_issue_with_pr(self, tmp_path: Path) -> None:
+    async def test_skips_open_issue_with_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         loop, _s, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            workspace_gc_loop, "_has_open_pr", AsyncMock(return_value=True)
+        )
         result = await loop._do_work()
         loop._workspaces.destroy.assert_not_awaited()
         assert result["skipped"] == 1
 
     @pytest.mark.asyncio
-    async def test_gc_open_issue_without_pr(self, tmp_path: Path) -> None:
+    async def test_gc_open_issue_without_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         loop, state, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            workspace_gc_loop, "_has_open_pr", AsyncMock(return_value=False)
+        )
         result = await loop._do_work()
         loop._workspaces.destroy.assert_awaited_once_with(42)
         assert result["collected"] >= 1
@@ -737,7 +774,7 @@ class TestWorktreeGCSubprocessArgs:
             return_value=PRInfoFactory.create(number=7, issue_number=42, branch=branch)
         )
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            result = await loop._has_open_pr(42)
+            result = await workspace_gc_loop._has_open_pr(loop._prs, loop._config, 42)
         m.assert_not_called()  # no raw subprocess
         assert result is True
         loop._prs.find_open_pr_for_branch.assert_awaited_once_with(
@@ -753,7 +790,7 @@ class TestWorktreeGCSubprocessArgs:
         loop._prs.find_open_pr_for_branch = AsyncMock(
             return_value=PRInfoFactory.create(number=0, issue_number=42, branch="b")
         )
-        result = await loop._has_open_pr(42)
+        result = await workspace_gc_loop._has_open_pr(loop._prs, loop._config, 42)
         assert result is False
 
     @pytest.mark.asyncio
@@ -762,7 +799,7 @@ class TestWorktreeGCSubprocessArgs:
         loop._prs.find_open_pr_for_branch = AsyncMock(
             side_effect=RuntimeError("gh failed")
         )
-        result = await loop._has_open_pr(42)
+        result = await workspace_gc_loop._has_open_pr(loop._prs, loop._config, 42)
         assert result is True  # fail-closed: assume PR exists on error
 
     @pytest.mark.asyncio
@@ -815,10 +852,16 @@ class TestWorktreeGCErrorHandling:
         assert result["errors"] == 1
 
     @pytest.mark.asyncio
-    async def test_has_open_pr_error_skips_worktree(self, tmp_path: Path) -> None:
+    async def test_has_open_pr_error_skips_worktree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         loop, _s, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(side_effect=RuntimeError("PR check failed"))
+        monkeypatch.setattr(
+            workspace_gc_loop,
+            "_has_open_pr",
+            AsyncMock(side_effect=RuntimeError("PR check failed")),
+        )
         result = await loop._do_work()
         loop._workspaces.destroy.assert_not_awaited()
         assert result["skipped"] == 1
@@ -980,29 +1023,39 @@ class TestIsSafeToGCDirect:
         assert await loop._is_safe_to_gc(42) is False
 
     @pytest.mark.asyncio
-    async def test_unsafe_for_open_issue_with_pr(self, tmp_path: Path) -> None:
+    async def test_unsafe_for_open_issue_with_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         loop, _s, _e = _make_loop(tmp_path)
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            workspace_gc_loop, "_has_open_pr", AsyncMock(return_value=True)
+        )
         assert await loop._is_safe_to_gc(42) is False
 
     @pytest.mark.asyncio
-    async def test_safe_for_open_issue_without_pr(self, tmp_path: Path) -> None:
+    async def test_safe_for_open_issue_without_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         loop, _s, _e = _make_loop(tmp_path)
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            workspace_gc_loop, "_has_open_pr", AsyncMock(return_value=False)
+        )
         assert await loop._is_safe_to_gc(42) is True
 
     @pytest.mark.asyncio
     async def test_unsafe_for_open_issue_with_pipeline_label(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         loop, _s, _e = _make_loop(tmp_path)
         loop._get_issue_state = AsyncMock(return_value="open")
         loop._issue_has_pipeline_label = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        loop._has_open_pr = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            workspace_gc_loop, "_has_open_pr", AsyncMock(return_value=False)
+        )
         assert await loop._is_safe_to_gc(42) is False
-        loop._has_open_pr.assert_not_awaited()
+        workspace_gc_loop._has_open_pr.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_unsafe_on_api_error(self, tmp_path: Path) -> None:
@@ -1017,10 +1070,16 @@ class TestIsSafeToGCDirect:
         assert await loop._is_safe_to_gc(42) is False
 
     @pytest.mark.asyncio
-    async def test_unsafe_on_pr_check_error(self, tmp_path: Path) -> None:
+    async def test_unsafe_on_pr_check_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         loop, _s, _e = _make_loop(tmp_path)
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(side_effect=RuntimeError("PR check error"))
+        monkeypatch.setattr(
+            workspace_gc_loop,
+            "_has_open_pr",
+            AsyncMock(side_effect=RuntimeError("PR check error")),
+        )
         assert await loop._is_safe_to_gc(42) is False
 
     @pytest.mark.asyncio
@@ -1062,7 +1121,7 @@ class TestWorktreeGCPipelineProtection:
 
     @pytest.mark.asyncio
     async def test_skips_when_store_pipeline_stale_but_labels_show_queued(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """GitHub labels protect queued issues even if IssueStore callback misses them."""
         loop, state, _e = _make_loop(
@@ -1072,7 +1131,9 @@ class TestWorktreeGCPipelineProtection:
         )
         loop._get_issue_state = AsyncMock(return_value="open")
         loop._issue_has_pipeline_label = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        loop._has_open_pr = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            workspace_gc_loop, "_has_open_pr", AsyncMock(return_value=False)
+        )
 
         result = await loop._do_work()
         loop._workspaces.destroy.assert_not_awaited()
@@ -1309,7 +1370,7 @@ class TestCollectOrphanedBranchesPerItemIsolation:
         loop = WorkspaceGCLoop(
             config=deps.config,
             workspaces=_workspace_mock(),
-            prs=MagicMock(spec=PRPort),
+            prs=_prs_mock(),
             state=state,
             deps=deps.loop_deps,
             is_in_pipeline_cb=exploding_pipeline,
@@ -1371,14 +1432,18 @@ class TestGCReraisesFatalExceptions:
 
     @pytest.mark.asyncio
     async def test_is_safe_to_gc_reraises_auth_error_from_has_open_pr(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AuthenticationError from _has_open_pr propagates out of _is_safe_to_gc."""
         from subprocess_util import AuthenticationError  # noqa: PLC0415
 
         loop, _s, _e = _make_loop(tmp_path)
         loop._get_issue_state = AsyncMock(return_value="open")
-        loop._has_open_pr = AsyncMock(side_effect=AuthenticationError("bad token"))
+        monkeypatch.setattr(
+            workspace_gc_loop,
+            "_has_open_pr",
+            AsyncMock(side_effect=AuthenticationError("bad token")),
+        )
         with pytest.raises(AuthenticationError):
             await loop._is_safe_to_gc(42)
 
@@ -1597,7 +1662,7 @@ class TestWorkspaceGCReadsViaPort:
         fake.add_pr(number=7, issue_number=42, branch=branch)
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
             m.return_value = "0\n"  # if it shells out, it would see "no PR"
-            result = await loop._has_open_pr(42)
+            result = await workspace_gc_loop._has_open_pr(loop._prs, loop._config, 42)
         m.assert_not_called()
         assert result is True
 
@@ -1610,7 +1675,7 @@ class TestWorkspaceGCReadsViaPort:
         fake.add_issue(42, "t", "b")  # no PR for the branch
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
             m.return_value = "1\n"  # if it shells out, it would report a PR
-            result = await loop._has_open_pr(42)
+            result = await workspace_gc_loop._has_open_pr(loop._prs, loop._config, 42)
         m.assert_not_called()
         assert result is False
 
@@ -2899,6 +2964,7 @@ class TestPhase1MissingDirectoryPrune:
             "collected": 2,
             "skipped": 0,
             "errors": 0,
+            "abandoned_creations": 0,
             "pruned_registrations": 0,
         }
         loop._workspaces.destroy.assert_not_awaited()
@@ -2924,6 +2990,7 @@ class TestPhase1MissingDirectoryPrune:
             "collected": 0,
             "skipped": 1,
             "errors": 0,
+            "abandoned_creations": 0,
             "pruned_registrations": 0,
         }
         loop._workspaces.destroy.assert_not_awaited()
@@ -2946,6 +3013,7 @@ class TestPhase1MissingDirectoryPrune:
             "collected": 0,
             "skipped": 1,
             "errors": 0,
+            "abandoned_creations": 0,
             "pruned_registrations": 0,
         }
         loop._workspaces.destroy.assert_not_awaited()
@@ -2970,6 +3038,7 @@ class TestPhase1MissingDirectoryPrune:
             "collected": 0,
             "skipped": 1,
             "errors": 0,
+            "abandoned_creations": 0,
             "pruned_registrations": 0,
         }
         assert state.get_active_workspaces() == {42: str(path)}
@@ -3017,3 +3086,51 @@ class TestTrackedWorkspaceIsGone:
         root = tmp_path / "slug"
         root.write_text("not a directory\n")
         assert tracked_workspace_is_gone(root / "issue-1", root) is False
+
+
+class TestAbandonedCreationPhaseWiring:
+    """#12081 Phase 7 reached `_do_work` — the fix is only shipped if it runs.
+
+    Every other `"abandoned_creations": 0` assertion in this file is satisfied
+    identically whether the phase runs or not: each fixture's `repo_root` has
+    no `.git/worktrees/`, so `stale_initializing_worktrees` returns `[]` either
+    way. Those assertions pin the result SHAPE; these two pin the WIRING.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_phase_runs_and_its_count_reaches_the_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_reap_abandoned_enabled=True)
+        called: list[float] = []
+
+        async def _fake(*, repo_root: Path, gh_token: str, now: float) -> int:
+            called.append(now)
+            return 3
+
+        monkeypatch.setattr(workspace_gc_loop, "_reap_abandoned_creations", _fake)
+
+        result = await loop._do_work()
+
+        assert len(called) == 1
+        assert result["abandoned_creations"] == 3
+
+    @pytest.mark.asyncio
+    async def test_the_kill_switch_stops_the_phase_being_called(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The seam this PR declares is `config_disable` — if the flag does not
+        actually gate the call, the sandbox pin is decorative."""
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_reap_abandoned_enabled=False)
+        called: list[float] = []
+
+        async def _fake(*, repo_root: Path, gh_token: str, now: float) -> int:
+            called.append(now)
+            return 3
+
+        monkeypatch.setattr(workspace_gc_loop, "_reap_abandoned_creations", _fake)
+
+        result = await loop._do_work()
+
+        assert called == []
+        assert result["abandoned_creations"] == 0

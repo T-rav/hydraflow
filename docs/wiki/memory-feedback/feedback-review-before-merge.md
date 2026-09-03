@@ -3,10 +3,12 @@ source: feedback_review_before_merge.md
 name: Always review PRs for bugs before merging
 description: Run audit agents on PRs to catch bugs, missing tests, and gaps before
   merge — don't just merge blindly
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface for the rule as written. Requiring an approval is
+  a branch-protection setting, but running a fresh-eyes pass and acting on its findings
+  is not observable from the PR — an approval can be granted without one.
 created: '2026-03-28'
 ---
 

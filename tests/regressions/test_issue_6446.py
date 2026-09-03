@@ -56,10 +56,14 @@ class TestIssue6446CorruptLineExcInfo:
         # The corrupt line should be skipped — result is empty
         assert result == [], f"Expected empty list for corrupt input, got {result}"
 
-        # A debug log should have been emitted for the corrupt line
-        debug_records = [r for r in records if r.levelno == logging.DEBUG]
+        # #6690 raised this record from DEBUG to WARNING — DEBUG is off in
+        # production, so a dropped queue item was invisible exactly where
+        # it mattered. This test's subject is that the record carries
+        # exc_info, not which level carries it, so it follows the record
+        # rather than re-pinning the level #6690 deliberately changed.
+        debug_records = [r for r in records if r.levelno >= logging.DEBUG]
         assert len(debug_records) >= 1, (
-            "Expected at least 1 DEBUG log for the corrupt queue line, "
+            "Expected at least 1 log record for the corrupt queue line, "
             f"but got {len(debug_records)}."
         )
 
@@ -106,9 +110,9 @@ class TestIssue6446CorruptLineExcInfo:
 
         assert result == [], f"Expected empty list for invalid QueueItem, got {result}"
 
-        debug_records = [r for r in records if r.levelno == logging.DEBUG]
+        debug_records = [r for r in records if r.levelno >= logging.DEBUG]
         assert len(debug_records) >= 1, (
-            "Expected at least 1 DEBUG log for the invalid queue line."
+            "Expected at least 1 log record for the invalid queue line."
         )
 
         corrupt_record = debug_records[0]

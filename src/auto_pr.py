@@ -169,6 +169,161 @@ def _remove_worktree(
 # ---------------------------------------------------------------------------
 
 
+#: How generated arch artifacts are reconciled with the staged file set before
+#: a bot commit. `make arch-regen-stage` is the exact remedy the worktree
+#: pre-commit hook prints when docs/arch/generated/ is out of sync (#12062):
+#: term files, ports, loops and ADR surfaces are INPUTS to the generated
+#: artifacts, so a bot PR that stages one without regenerating is rejected at
+#: commit time — TermProposerLoop hit this on every cycle. Module-level so
+#: tests can substitute a recording stub.
+_ARCH_REGEN_ARGV: tuple[str, ...] = ("make", "arch-regen-stage")
+_ARCH_REGEN_TIMEOUT_S = 600.0
+
+
+#: The drift-exempt generated artifacts (arch.runner._DRIFT_EXEMPT): derived
+#: from a moving ``git log`` window rather than from source, so two trees with
+#: byte-identical architecture still produce different bytes for them.
+#: ``make arch-regen-stage`` blanket-adds the generated directory; without
+#: the scoped exclusion in the regen helpers, a caller whose files touch no
+#: arch inputs would stage volatile churn — turning a no-diff into a spurious
+#: PR, the exact scenario ``substantive_specs`` exists to prevent. When
+#: substantive content IS staged, these ride along per the documented
+#: contract. Duplicated here rather than
+#: imported (arch.runner is heavyweight and this module must stay light);
+#: bound to the runner's set by
+#: tests/regressions/test_issue_12062_auto_pr_arch_regen.py so it cannot
+#: drift.
+_VOLATILE_ARCH_ARTIFACTS: tuple[str, ...] = ("changelog.md", "traceability_matrix.md")
+
+
+def _volatile_arch_paths() -> list[str]:
+    """The drift-exempt generated artifacts, as repo-relative paths."""
+    return [f"docs/arch/generated/{name}" for name in sorted(_VOLATILE_ARCH_ARTIFACTS)]
+
+
+async def _regen_arch_artifacts_async(
+    worktree_path: Path, gh_token: str, run_subprocess: Callable[..., Awaitable[str]]
+) -> None:
+    """Regenerate + stage arch artifacts in the worktree — FAIL-OPEN (#12062).
+
+    Runs the pre-commit hook's own remedy between the caller's staging and the
+    commit. The volatile drift-exempt artifacts (git-log-window views) honor
+    the substantive_specs contract: they RIDE ALONG when anything substantive
+    is staged, and are unstaged (per path, so a repo lacking one still gets
+    the others handled) only when they would be the commit's sole content —
+    preventing spurious churn PRs without starving the committed views. Deterministic regen
+    (`.meta.json` is a content digest, #11674) stages nothing when inputs are
+    untouched. On any failure the flow proceeds: the commit then either
+    succeeds (inputs untouched) or fails with the hook's clear remedy — never
+    worse than the pre-#12062 behaviour. Toy test repos without a Makefile
+    take the fail-open path by construction. ``run_subprocess`` is passed by
+    the caller (which already holds the deferred import) so this helper adds
+    no import-suppression of its own — the suppressions ratchet only shrinks.
+    """
+    try:
+        await run_subprocess(
+            *_ARCH_REGEN_ARGV,
+            cwd=worktree_path,
+            gh_token=gh_token,
+            timeout=_ARCH_REGEN_TIMEOUT_S,
+        )
+    except (RuntimeError, OSError) as exc:
+        logger.warning(
+            "auto_pr: arch regen failed in %s — proceeding; the pre-commit "
+            "hook rejects the commit if artifacts are stale (%s)",
+            worktree_path,
+            exc,
+        )
+        return
+    volatile = _volatile_arch_paths()
+    try:
+        await run_subprocess(
+            "git",
+            "diff",
+            "--cached",
+            "--quiet",
+            "--",
+            ".",
+            *[f":(exclude){path}" for path in volatile],
+            cwd=worktree_path,
+            gh_token=gh_token,
+        )
+    except (RuntimeError, OSError):
+        # Non-zero: something SUBSTANTIVE is staged — the volatile artifacts
+        # ride along, exactly as the substantive_specs contract documents.
+        return
+    # Exit 0: the only staged content (if any) is volatile churn. Drop it so
+    # the no-diff short-circuit holds and no spurious PR opens (#12062).
+    for path in volatile:
+        try:
+            await run_subprocess(
+                "git",
+                "restore",
+                "--staged",
+                "--worktree",
+                "--",
+                path,
+                cwd=worktree_path,
+                gh_token=gh_token,
+            )
+        except (RuntimeError, OSError):
+            # Path absent in this tree (minimal repos) — nothing staged for it.
+            logger.debug("auto_pr: volatile-artifact exclusion skipped for %s", path)
+
+
+def _regen_arch_artifacts(worktree_path: Path) -> None:
+    """Sync twin of :func:`_regen_arch_artifacts_async` for
+    :func:`open_automated_pr` — same argv, same volatile exclusion, same
+    fail-open contract. Kept in step by the #12062 regression tests, which
+    drive both entry points through the shared module-level seam."""
+    try:
+        result = subprocess.run(
+            list(_ARCH_REGEN_ARGV),
+            cwd=worktree_path,
+            capture_output=True,
+            text=True,
+            timeout=_ARCH_REGEN_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning(
+            "open_automated_pr: arch regen failed in %s (%s) — proceeding; "
+            "the pre-commit hook will reject the commit if artifacts are stale",
+            worktree_path,
+            exc,
+        )
+        return
+    if result.returncode != 0:
+        logger.warning(
+            "open_automated_pr: arch regen exited %d in %s — proceeding; "
+            "the pre-commit hook will reject the commit if artifacts are "
+            "stale. stderr tail: %s",
+            result.returncode,
+            worktree_path,
+            (result.stderr or "")[-300:],
+        )
+        return
+    volatile = _volatile_arch_paths()
+    substantive = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", "."]
+        + [f":(exclude){path}" for path in volatile],
+        cwd=worktree_path,
+        capture_output=True,
+        check=False,
+        timeout=_SUBPROCESS_TIMEOUT_S,
+    )
+    if substantive.returncode != 0:
+        return  # substantive content staged — volatile rides along
+    for path in volatile:
+        subprocess.run(
+            ["git", "restore", "--staged", "--worktree", "--", path],
+            cwd=worktree_path,
+            capture_output=True,
+            check=False,
+            timeout=_SUBPROCESS_TIMEOUT_S,
+        )
+
+
 def _build_commit_args(author_name: str, author_email: str, message: str) -> list[str]:
     """Build the arg list for `git commit`, skipping identity overrides when
     the caller-supplied name or email is empty.
@@ -290,6 +445,12 @@ def open_automated_pr(
             raise AutoPrError(
                 f"failed to stage files for branch {branch!r}: {exc}"
             ) from exc
+
+        # Reconcile generated arch artifacts with the staged inputs (#12062).
+        # Runs BEFORE the empty-diff check so a regen no-op cannot turn a
+        # genuinely empty PR into a non-empty one, and regen-staged artifacts
+        # ride the same commit as the files that changed them.
+        _regen_arch_artifacts(worktree_path)
 
         # Detect empty staged diff — e.g. the file contents matched origin.
         diff_check = _run_git(
@@ -448,6 +609,50 @@ def _status_check_rollup_is_green(rollup: list[dict[str, Any]]) -> bool:
     return True
 
 
+# StatusContext entries carry no ``status`` field, so their un-settled states
+# have to be recognised from ``state`` alone or a queued legacy check reads as
+# a settled failure.
+_PENDING_STATES: frozenset[str] = frozenset({"pending", "expected", ""})
+
+
+def _rollup_has_settled_failure(rollup: list[dict[str, Any]]) -> bool:
+    """True iff some check has FINISHED and finished badly (#12068).
+
+    This is the question the arm decision needs, and it is not the same as
+    "is the PR green". ``_status_check_rollup_is_green`` answers the latter
+    correctly and is still the right predicate for asking whether a PR is
+    mergeable *now*; using it to decide whether to ARM ``--auto`` made the
+    gate self-defeating, because ``--auto`` is armed the instant
+    ``gh pr create`` returns, when no check has settled and many are not yet
+    registered. It could therefore never pass, and no bot PR was ever armed.
+
+    Un-settled is not a failure:
+    - a CheckRun whose ``status`` is not ``completed`` is still running;
+    - a StatusContext whose ``state`` is ``pending``/``expected`` likewise;
+    - an empty rollup means no check has registered yet.
+
+    A settled non-green conclusion IS a failure, and refusing to arm there is
+    the whole of #10672's belt — #10663's harm was arming on a PR already
+    known to be bad, which this still prevents.
+
+    Everything else is held by branch protection, not by this function: the
+    live ``staging protect`` ruleset requires ``CI Gate``, both ``quality``
+    jobs, ``Detect Changes`` and ``discover-projects``, so an armed ``--auto``
+    cannot merge until those pass.
+    """
+    for check in rollup:
+        status = str(check.get("status") or "").strip().lower()
+        if status:
+            if status != "completed":
+                continue  # CheckRun still running
+        elif str(check.get("state") or "").strip().lower() in _PENDING_STATES:
+            continue  # StatusContext not settled
+        raw = check.get("conclusion") or check.get("state") or ""
+        if str(raw).strip().lower() not in _GREEN_CONCLUSIONS:
+            return True
+    return False
+
+
 def _auto_merge_enabled() -> bool:
     """Resolve the ``auto_pr_auto_merge_enabled`` kill-switch from live config.
 
@@ -464,12 +669,14 @@ def _auto_merge_enabled() -> bool:
     return bool(cfg.auto_pr_auto_merge_enabled)
 
 
-def _rollup_payload_is_green(payload: str, pr_url: str) -> bool:
+def _rollup_payload_is_armable(payload: str, pr_url: str) -> bool:
     """Parse a ``gh pr view --json statusCheckRollup`` payload; fail-closed.
 
-    Returns ``True`` only when the payload parses to a rollup list that
-    :func:`_status_check_rollup_is_green` accepts. Any parse problem →
-    ``False`` (never arm auto-merge on an indeterminate PR).
+    ``True`` when the payload parses and no check has SETTLED badly — see
+    :func:`_rollup_has_settled_failure` for why that, and not "fully green",
+    is the arm question (#12068). A parse problem stays fail-closed: an
+    unreadable rollup is indeterminate, and this is the one branch where
+    refusing costs nothing, since the next tick re-reads it.
     """
     try:
         data = json.loads(payload)
@@ -489,9 +696,10 @@ def _rollup_payload_is_green(payload: str, pr_url: str) -> bool:
             pr_url,
         )
         return False
-    if not _status_check_rollup_is_green(rollup):
+    if _rollup_has_settled_failure(rollup):
         logger.info(
-            "auto_pr green-gate: PR %s not fully green; not arming auto-merge",
+            "auto_pr arm-gate: PR %s has a settled failing check; not arming "
+            "auto-merge",
             pr_url,
         )
         return False
@@ -525,7 +733,7 @@ def _auto_merge_allowed(pr_url: str, *, worktree_path: Path) -> bool:
             proc.stderr or proc.stdout,
         )
         return False
-    return _rollup_payload_is_green(proc.stdout, pr_url)
+    return _rollup_payload_is_armable(proc.stdout, pr_url)
 
 
 async def _auto_merge_allowed_async(
@@ -560,7 +768,7 @@ async def _auto_merge_allowed_async(
             exc,
         )
         return False
-    return _rollup_payload_is_green(stdout, pr_url)
+    return _rollup_payload_is_armable(stdout, pr_url)
 
 
 # ---------------------------------------------------------------------------
@@ -810,6 +1018,12 @@ async def _finalize_pr_from_worktree(
     (``None``) preserves the all-staged behavior for every other caller.
     """
     from subprocess_util import run_subprocess  # noqa: PLC0415
+
+    # Reconcile generated arch artifacts with whatever the caller staged
+    # (#12062). Runs BEFORE the substantive-diff check so regen output rides
+    # the same commit, and excludes the drift-exempt volatile artifacts so a
+    # no-input caller cannot be turned into a spurious PR.
+    await _regen_arch_artifacts_async(worktree_path, gh_token, run_subprocess)
 
     # Empty (substantive) staged diff → nothing to PR. This is what stops
     # DiagramLoop opening a churn PR when only volatile artifacts moved.
@@ -1160,6 +1374,9 @@ async def generate_and_open_pr_async(
             ``no-diff`` — no branch, no push, no PR. Those volatile paths are
             still committed when a substantive one changed. ``None`` (default)
             means every staged change counts, preserving prior behavior.
+            (The finalize tail's arch regen honors the same contract: its
+            volatile drift-exempt outputs ride along with substantive changes
+            and are unstaged only when they would be the sole content, #12062.)
 
     All other args mirror :func:`open_automated_pr_async`.
     """

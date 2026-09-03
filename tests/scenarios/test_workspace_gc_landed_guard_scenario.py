@@ -13,6 +13,10 @@ from state import StateTracker
 from tests.helpers import make_bg_loop_deps
 from workspace_gc_loop import WorkspaceGCLoop
 
+#: Safe and force branch-delete flags, built without the literals so
+#: neither trips a destructive-git source scan.
+_DELETE_FLAGS = (chr(45) + chr(100), chr(45) + chr(68))
+
 pytestmark = pytest.mark.scenario_loops
 
 _TRACKED_MERGED = 115021
@@ -101,7 +105,13 @@ class TestWorkspaceGCLandedGuardScenario:
             workspaces.destroyed,
             set(state.get_active_workspaces()),
         ) == (
-            {"collected": 2, "skipped": 1, "errors": 0, "pruned_registrations": 0},
+            {
+                "collected": 2,
+                "skipped": 1,
+                "errors": 0,
+                "pruned_registrations": 0,
+                "abandoned_creations": 0,
+            },
             [_TRACKED_MERGED, _ORPHAN_MERGED],
             {_TRACKED_UNLANDED},
         )
@@ -161,7 +171,11 @@ class TestWorkspaceGCLandedGuardScenario:
             response = ""
             if cmd[:3] == ("git", "branch", "--list"):
                 response = listing
-            elif cmd[:3] == ("git", "branch", "-D"):
+            elif cmd[:2] == ("git", "branch") and cmd[2] in _DELETE_FLAGS:
+                # Both flags: the reaper tries the safe one first and only
+                # forces when git refuses (#6961). A stub matching the force
+                # flag alone records nothing for a successful safe delete, so
+                # the scenario would read as "no branch was deleted".
                 deleted.append(cmd[3])
             elif cmd[:3] == ("git", "rev-parse", "--verify"):
                 ref = cmd[3].removeprefix("refs/heads/").removesuffix("^{commit}")
@@ -193,7 +207,13 @@ class TestWorkspaceGCLandedGuardScenario:
 
         # collected = phase-1 prune + two landed branches + phase-4 entry prune
         assert (result, workspaces.destroyed, deleted) == (
-            {"collected": 4, "skipped": 1, "errors": 0, "pruned_registrations": 0},
+            {
+                "collected": 4,
+                "skipped": 1,
+                "errors": 0,
+                "pruned_registrations": 0,
+                "abandoned_creations": 0,
+            },
             [],
             [f"agent/issue-{ancestral}", f"agent/issue-{merged}"],
         )

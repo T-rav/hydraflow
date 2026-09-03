@@ -12,8 +12,6 @@ the full traceback appears in structured logging output.  They will FAIL
 
 from __future__ import annotations
 
-import pytest
-
 import json
 import logging
 from pathlib import Path
@@ -24,7 +22,6 @@ from review_insights import ReviewInsightStore
 class TestIssue6627ExcInfoOnMalformedRecords:
     """Warning logs for malformed records must include exc_info."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6627 — fix not yet landed", strict=False)
     def test_load_recent_includes_exc_info_on_malformed_line(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:
@@ -65,7 +62,6 @@ class TestIssue6627ExcInfoOnMalformedRecords:
             "expected the Pydantic ValidationError class"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6627 — fix not yet landed", strict=False)
     def test_load_proposal_metadata_includes_exc_info_on_malformed_entry(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:

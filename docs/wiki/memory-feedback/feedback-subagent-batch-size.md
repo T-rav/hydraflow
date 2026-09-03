@@ -3,10 +3,11 @@ source: feedback_subagent_batch_size.md
 name: Cap subagent-driven-development batches at 2–4 coherent tasks
 description: Batches of 10+ mechanical tasks packed into a single subagent dispatch
   time out mid-execution; small batches (2–4 tasks) complete reliably
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface. Batch size is a judgment about a task's shape, and
+  a cap would be wrong as often as it was right.
 created: '2026-04-21'
 ---
 

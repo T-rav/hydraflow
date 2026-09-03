@@ -330,6 +330,43 @@ def _probe_process_tree_teardown() -> ProofResult:
         shutil.rmtree(marker.parent, ignore_errors=True)
 
 
+def _marker_pids(marker: Path) -> list[int]:
+    """Pids the spawned tree has written so far — [] until both are readable.
+
+    Tolerates the partially-written file: a read that lands between the two
+    writes yields one pid, which is not yet the tree the caller is waiting for.
+    """
+    try:
+        raw = marker.read_text()
+    except OSError:
+        return []
+    out: list[int] = []
+    for token in raw.split():
+        try:
+            out.append(int(token))
+        except ValueError:
+            return []  # a torn write — treat as not-yet-ready
+    return out
+
+
+def _await_marker_pids(
+    marker: Path, *, timeout_s: float, expected: int = 2
+) -> list[int]:
+    """Block until *marker* holds *expected* pids, or the deadline passes.
+
+    Extracted so the WAIT itself is testable, not just the read. Reverting
+    this to `while not marker.exists()` stays green on a quiet host — the
+    child usually writes fast enough — so only a test that holds the file
+    open and empty can hold the line here.
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        pids = _marker_pids(marker)
+        if len(pids) >= expected or time.monotonic() >= deadline:
+            return pids
+        time.sleep(0.05)
+
+
 def _teardown_proof(marker: Path) -> ProofResult:
     """Spawn the tree, reap it, and report survivors."""
     from process_group import kill_process_group  # noqa: PLC0415 — script-local import
@@ -350,12 +387,14 @@ def _teardown_proof(marker: Path) -> ProofResult:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline and not marker.exists():
-        time.sleep(0.05)
-    pids: list[int] = []
-    if marker.exists():
-        pids = [int(x) for x in marker.read_text().split() if x.strip()]
+    # Wait for the marker's CONTENT, not its existence. The child creates the
+    # file with `open(marker, "w")` and writes the two pids only after
+    # spawning the grandchild, so `marker.exists()` goes true while the file
+    # is still empty. On a loaded host the probe won this race and read `[]`,
+    # reporting `descendants_spawned: 0` and a FAIL verdict for a teardown
+    # that had worked perfectly — a false negative in the probe itself, not
+    # just its test.
+    pids = _await_marker_pids(marker, timeout_s=15.0)
 
     kill_process_group(proc)
     with contextlib.suppress(subprocess.TimeoutExpired):

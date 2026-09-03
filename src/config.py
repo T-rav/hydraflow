@@ -187,6 +187,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("stale_report_threshold_hours", "HYDRAFLOW_STALE_REPORT_THRESHOLD_HOURS", 6),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
     ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
+    # Canonical name matches the field (#6733). The field was renamed
+    # workspace_gc_interval but its env var kept the old `WORKTREE` spelling,
+    # so the documented convention (HYDRAFLOW_<FIELD_NAME>) silently did not
+    # work for this one setting. The legacy spelling is kept below so an
+    # operator who already exports it is not broken by the rename.
+    ("workspace_gc_interval", "HYDRAFLOW_WORKSPACE_GC_INTERVAL", 1800),
     ("workspace_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
     (
         "worktree_gc_min_age_seconds",
@@ -6792,6 +6798,15 @@ class HydraFlowConfig(BaseModel):
     workspace_gc_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for WorkspaceGCLoop.",
+    )
+    worktree_gc_reap_abandoned_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for the WorkspaceGCLoop phase that reaps "
+            "worktrees abandoned mid-`git worktree add` (#12081). When False "
+            "the loop keeps every other phase but leaves a stale "
+            "`initializing` lock in place."
+        ),
     )
     worktree_gc_all_roots_enabled: bool = Field(
         default=True,

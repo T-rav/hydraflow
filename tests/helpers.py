@@ -433,6 +433,7 @@ class ConfigFactory:
         epic_sweep_interval: int = 3600,
         workspace_gc_interval: int = 1800,
         worktree_gc_all_roots_enabled: bool = True,
+        worktree_gc_reap_abandoned_enabled: bool = True,
         worktree_gc_roots: list[str] | None = None,
         # 0 in tests: worktrees created inside a test are brand-new, so a
         # positive min_age would block every reap. The too-new guard's own
@@ -737,6 +738,7 @@ class ConfigFactory:
                 epic_sweep_interval=epic_sweep_interval,
                 workspace_gc_interval=workspace_gc_interval,
                 worktree_gc_all_roots_enabled=worktree_gc_all_roots_enabled,
+                worktree_gc_reap_abandoned_enabled=worktree_gc_reap_abandoned_enabled,
                 worktree_gc_roots=worktree_gc_roots
                 if worktree_gc_roots is not None
                 else [],

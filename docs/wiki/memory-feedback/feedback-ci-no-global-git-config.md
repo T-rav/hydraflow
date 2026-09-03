@@ -4,9 +4,11 @@ name: CI has no global git config — fixtures must persist identity
 description: GitHub Actions runners have no global git user.email/user.name. Tests
   that run real `git commit` without explicit `-c user.*` overrides must persist identity
   in the repo-local config via `git config`.
-status: pending
+status: promoted
 issue: null
-promoted_in: null
+promoted_in: tests/conftest.py::setup_test_environment (session-scoped autouse fixture;
+  seeds GIT_AUTHOR_*/GIT_COMMITTER_* so no test depends on ambient git identity, and
+  its docstring cites this memory by name)
 wontfix_reason: null
 created: '2026-04-21'
 ---

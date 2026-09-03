@@ -86,7 +86,15 @@ logger = logging.getLogger("hydraflow.sandbox_main")
 #   instance when the scenario seeds them (and the scenario is crafted to
 #   stay within the seam's coverage — see the per-loop comments in main()).
 # - "config_disable": ``_apply_sandbox_config_overrides`` turns the spawning
-#   code path off wholesale.
+#   code path off wholesale. Every such declaration must name its flag in
+#   CONFIG_DISABLE_FLAGS below, and that flag is PROVEN to be pinned off
+#   (#12105) — a registry that only records the claim is worth nothing.
+# - "bounded_offline_failure": the spawn DOES run on the air-gapped network.
+#   It is safe only because it carries an explicit ``timeout=`` and its caller
+#   handles the resulting failure, so it fails fast inside its own tier
+#   instead of wedging the sandbox. This kind exists to stop that argument
+#   being filed under ``config_disable``, where it reads as "cannot run"
+#   (#12105).
 SEAM_KINDS: frozenset[str] = frozenset(
     {
         "fake_llm_runner",
@@ -94,8 +102,39 @@ SEAM_KINDS: frozenset[str] = frozenset(
         "mockworld_sentinel",
         "seed_seam",
         "config_disable",
+        "bounded_offline_failure",
     }
 )
+
+
+# Every ``config_disable`` seam key -> the config flag(s) that actually turn
+# its spawn path off. Hand-written because the flag name is not derivable from
+# the module name, and load-bearing because
+# ``test_every_config_disable_seam_is_really_disabled`` forces each flag ON and
+# requires ``_apply_sandbox_config_overrides`` to put it back — so a dropped
+# override reddens, and a production default flipping to True cannot silently
+# break the seam (#12105).
+CONFIG_DISABLE_FLAGS: dict[str, tuple[str, ...]] = {
+    "contract_refresh_loop": ("contract_refresh_external_enabled",),
+    "flake_tracker_loop": ("flake_tracker_loop_enabled",),
+    "health_monitor_loop::HealthMonitorFleetVitalsMixin._fleet_change_ledger": (
+        "fleet_vitals_enabled",
+    ),
+    "staging_promotion_loop": (
+        "evidence_pack_enabled",
+        "rc_observed_advance_close_enabled",
+        "rc_auto_recut_enabled",
+        "rc_promotion_health_enabled",
+    ),
+    "intervention_tally_loop": ("intervention_tally_classify_enabled",),
+    "sampled_audit_loop": ("sampled_audit_reaudit_enabled",),
+    "plan_worker_runner": ("fable_plan_canary_repo",),
+    "implement_worker_runner": ("fable_implement_canary_repo",),
+    "review_worker_runner": ("fable_review_canary_repo",),
+    "workspace_gc_loop::_reap_abandoned_creations": (
+        "worktree_gc_reap_abandoned_enabled",
+    ),
+}
 
 # Default credit-exhaustion text carried on the scripted signal (#10570) when a
 # scenario's ``credit_exhaustion`` seed omits ``message``. Mirrors the Claude
@@ -155,6 +194,12 @@ SANDBOX_SEAMS: dict[str, str] = {
     # External recorders + replay gate path off via
     # ``contract_refresh_external_enabled=False`` (s30).
     "contract_refresh_loop": "config_disable",
+    # #12081's reap phase, declared PHASE-scoped: ``workspace_gc_loop`` as a
+    # whole cannot take a seam (its state/orphan-dir/branch phases must keep
+    # running under s46/s65), but this one phase is gated by
+    # ``worktree_gc_reap_abandoned_enabled``, which the overrides below pin
+    # off — so the spawn is as unreachable as any module-wide config_disable.
+    "workspace_gc_loop::_reap_abandoned_creations": "config_disable",
     # s56: ``skill_prompt_corpus_cases`` / ``skill_prompt_refine_patch`` seed
     # seams replace ``_run_corpus`` and ``_refine_llm``; the seeded patch trips
     # the tripwire so the loop returns before ``_open_refine_pr``'s raw spawns.
@@ -168,16 +213,25 @@ SANDBOX_SEAMS: dict[str, str] = {
     # loop no sandbox scenario exercises, so the whole loop is config-disabled
     # below rather than seeding those reads.
     "flake_tracker_loop": "config_disable",
-    # health_monitor_loop has two spawn paths (#11392):
+    # health_monitor_loop's two spawn paths (#11392) are air-gapped by
+    # DIFFERENT mechanisms, so they are declared separately (#12105). A single
+    # module-wide ``config_disable`` covered both and was only half true:
+    # ``_check_stale_code`` is not disabled by any flag, and reading the
+    # declaration would tell you it could not run.
     # - ``_fleet_change_ledger`` (raw ``git log``): the whole fleet-vitals
     #   feature is pinned OFF below (``fleet_vitals_enabled=False``) — it is
     #   advisory and carries its own unit/regression coverage.
-    # - ``_check_stale_code`` (bounded ``git fetch``): previously
-    #   grandfathered; on the air-gapped network the fetch fails fast within
-    #   its own timeout tier and the check degrades per its documented
-    #   RuntimeError path — recorded here as the module's seam instead of in
-    #   the baseline (shrink-only rule).
-    "health_monitor_loop": "config_disable",
+    # - ``_check_stale_code`` (bounded ``git fetch``): RUNS on the air-gapped
+    #   network. Safe because the call carries an explicit
+    #   ``timeout=_STALE_CODE_FETCH_TIMEOUT_SECS`` and its ``except
+    #   RuntimeError`` covers SubprocessTimeoutError, so it fails inside its
+    #   own tier and the check degrades rather than alerting on a stale ref.
+    "health_monitor_loop::HealthMonitorFleetVitalsMixin._fleet_change_ledger": (
+        "config_disable"
+    ),
+    "health_monitor_loop::HealthMonitorFreshnessMixin._check_stale_code": (
+        "bounded_offline_failure"
+    ),
     # StagingPromotionLoop's raw-gh reads bypass FakeGitHub and hang the
     # air-gapped network (#10353): ``_list_merged_promotion_prs`` (`gh pr list`,
     # reached by the evidence reconcile AND the G1 observed-main-advance sweep),
@@ -368,6 +422,13 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # state/orphan-dir phases only, and the all-root reaper has its own unit +
     # MockWorld scenario cover.
     object.__setattr__(config, "worktree_gc_all_roots_enabled", False)
+    # Phase 7 (#12081) is the same LOCAL-git class as the phase above — `git
+    # worktree unlock` + `remove` on the live host repo, no network reach — and
+    # is pinned OFF for the same reason: determinism. It only ever acts on a
+    # worktree holding an hour-old `initializing` lock, which the sandbox never
+    # creates, so pinning it costs no coverage and its unit tests carry the
+    # behaviour.
+    object.__setattr__(config, "worktree_gc_reap_abandoned_enabled", False)
     # GoalSupervisorLoop (#11602): its Fable consult is a real
     # ``BaseSubprocessRunner`` spawn, and the runner is built lazily INSIDE
     # ``_get_runner`` — nothing can attach the ``_mockworld_fake_llm`` sentinel
