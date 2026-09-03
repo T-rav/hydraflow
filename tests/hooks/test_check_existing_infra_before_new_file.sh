@@ -145,4 +145,30 @@ if ! grep -q 'ls-files' "$HOOK"; then
   fail=1
 fi
 
-if [ "$fail" = 0 ]; then echo "PASS"; else exit 1; fi
+# The marker key must never come back empty. `md5sum` is Linux-only and macOS
+# keeps `md5` in /sbin, so a trimmed PATH resolves NEITHER — the substitution
+# yields "", every file collapses onto the single marker `infra-`, and the
+# first refusal silently disables this guard for its whole 240-minute window.
+# The guard went inert exactly this way on a shell whose PATH omitted /sbin.
+NO_HASH_MARKERS="$(mktemp -d)"
+run_without_hasher () {
+  echo "{\"tool_input\":{\"file_path\":\"$1\"}}" \
+    | env PATH=/usr/bin:/bin CLAUDE_PROJECT_DIR="$REPO" \
+          HF_HOOK_MARKER_DIR="$NO_HASH_MARKERS" "$HOOK" >/dev/null 2>&1
+  return $?
+}
+run_without_hasher "$REPO/tests/test_event_type_reducer_parity.py"
+if [ "$?" != "2" ]; then
+  echo "FAIL: expected exit 2 with no hasher on PATH — the first refusal"
+  fail=1
+fi
+run_without_hasher "$REPO/src/label_drift_loop.py"
+if [ "$?" != "2" ]; then
+  echo "FAIL: a DIFFERENT path was exempted by the first file's marker — the"
+  echo "      key collapsed to empty, so the guard disabled itself"
+  fail=1
+fi
+rm -rf "$NO_HASH_MARKERS"
+
+if [ "$fail" = 0 ]; then
+echo "PASS"; else exit 1; fi
