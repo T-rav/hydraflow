@@ -280,10 +280,6 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: `.finalize` stopped swallowing AttributeError/AssertionError, so all three
 #: of that file's pins pass unmarked. Unlike the 109 -> 107 drop, nothing was
 #: deleted here — the pins are live tests now.
-#: 92 -> 84 when the docker_runner trio (#6578/#6959/#6971) was fixed:
-#: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
-#: timeout now raises the house `SubprocessTimeoutError`, and container logs
-#: come from one demuxed call instead of two round-trips.
 #: 104 -> 98 when the health-monitor trio (#6602/#6626/#6630) was fixed:
 #: `compute_trend_metrics` now returns None rather than a nominal 0.0 for an
 #: unparseable item_scores.json, counts only the failure lines it parsed, and
@@ -292,6 +288,10 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: 98 -> 92 when runner_utils' zombie-subprocess and assert-as-invariant pins
 #: (#6476/#6703) were fixed: `stream_claude_process` now kills the group and
 #: reaps on EVERY exit path, and the pipe checks survive `python -O`.
+#: 92 -> 84 when the docker_runner trio (#6578/#6959/#6971) was fixed:
+#: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
+#: timeout now raises the house `SubprocessTimeoutError`, and container logs
+#: come from one demuxed call instead of two round-trips.
 DEFERRED_XFAILS_MAX = 84
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
