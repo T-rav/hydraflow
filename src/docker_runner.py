@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from execution import SimpleResult, SubprocessRunner, get_default_runner
-from subprocess_util import scrub_gateway_spawn_env
+from subprocess_util import SubprocessTimeoutError, scrub_gateway_spawn_env
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
@@ -348,17 +348,52 @@ class DockerRunner:
         self._gateway_env_mask_path: Path | None = None
 
     def _ensure_client(self, max_retries: int = 6, delay: float = 5.0) -> None:
+        """Probe Docker once. Fast — never sleeps, never holds a thread.
+
+        This used to own the retry loop, sleeping ``delay`` seconds between
+        attempts. Both callers reach it through ``run_in_executor``, so each
+        retrying call parked a default-executor worker for up to
+        ``max_retries * delay`` seconds. With Docker down and containers
+        spawning concurrently, that exhausted the pool and starved every other
+        ``run_in_executor`` user — git operations, disk I/O, memory sync —
+        none of which had anything to do with Docker (#6578).
+
+        The waiting now lives in :meth:`_ensure_client_reachable`, where
+        ``await asyncio.sleep`` yields instead of occupying a thread. The
+        parameters are kept so the raised message still reports the budget the
+        caller asked for.
+        """
+        try:
+            self._client.ping()
+        except Exception as exc:
+            msg = (
+                f"Docker daemon not available after {max_retries} retries "
+                f"({max_retries * delay:.0f}s). Start Docker Desktop or "
+                "check the Docker socket."
+            )
+            raise RuntimeError(msg) from exc
+
+    async def _ensure_client_reachable(
+        self, max_retries: int = 6, delay: float = 5.0
+    ) -> None:
         """Verify Docker is reachable; wait and retry if the daemon is restarting.
 
         Retries up to *max_retries* times with *delay* seconds between attempts,
         giving Docker Desktop time to restart (e.g. via launchd auto-restart).
+        The wait is ``asyncio.sleep``, so a restarting daemon costs this
+        coroutine time and costs the executor pool nothing (#6578). Each ping
+        still runs in a thread — the docker SDK is synchronous — but only for
+        the length of the ping, never for the length of the wait.
         """
-        import time  # noqa: PLC0415
-
         import docker  # noqa: PLC0415
 
+        loop = asyncio.get_running_loop()
+
+        def _ping(client: Any) -> None:
+            client.ping()
+
         try:
-            self._client.ping()
+            await loop.run_in_executor(None, _ping, self._client)
             return
         except Exception:
             logger.debug("Docker ping failed on attempt, will retry", exc_info=True)
@@ -370,10 +405,10 @@ class DockerRunner:
                 attempt,
                 max_retries,
             )
-            time.sleep(delay)
+            await asyncio.sleep(delay)
             try:
-                self._client = docker.from_env()
-                self._client.ping()
+                self._client = await loop.run_in_executor(None, docker.from_env)
+                await loop.run_in_executor(None, _ping, self._client)
                 logger.info("Docker daemon reconnected after %d attempt(s)", attempt)
                 return
             except Exception:
@@ -385,10 +420,12 @@ class DockerRunner:
                 )
                 continue
 
-        raise RuntimeError(
+        msg = (
             f"Docker daemon not available after {max_retries} retries "
-            f"({max_retries * delay:.0f}s). Start Docker Desktop or check the Docker socket."
+            f"({max_retries * delay:.0f}s). Start Docker Desktop or check the "
+            "Docker socket."
         )
+        raise RuntimeError(msg)
 
     async def __aenter__(self) -> DockerRunner:
         return self
@@ -662,9 +699,11 @@ class DockerRunner:
 
         needs_stdin = stdin is None or stdin == asyncio.subprocess.PIPE
 
-        # Pre-flight: verify Docker is reachable (handles daemon restarts)
+        # Pre-flight: verify Docker is reachable (handles daemon restarts).
+        # Awaited directly — pushing the retry into the executor is what
+        # starved the pool in #6578.
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._ensure_client)
+        await self._ensure_client_reachable()
 
         container_kwargs: dict[str, Any] = {
             "image": self._image,
@@ -713,6 +752,36 @@ class DockerRunner:
             self._containers.discard(container)
             raise
 
+    @staticmethod
+    async def _fetch_container_log(
+        loop: asyncio.AbstractEventLoop,
+        container: Any,
+        *,
+        stdout: bool,
+        stderr: bool,
+    ) -> str:
+        """Fetch one log stream, never raising (#6971).
+
+        A failure here costs one stream's diagnostics; letting it escape used
+        to cost the other stream's as well, plus the exit status, because the
+        container is removed in the caller's ``finally`` immediately after.
+        """
+        which = "stdout" if stdout else "stderr"
+        try:
+            raw = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, lambda: container.logs(stdout=stdout, stderr=stderr)
+                ),
+                timeout=30.0,
+            )
+        except TimeoutError:
+            logger.warning("Timed out fetching container %s logs", which)
+            return ""
+        except Exception:
+            logger.warning("Failed to fetch container %s logs", which, exc_info=True)
+            return ""
+        return raw.decode(errors="replace")
+
     async def run_simple(
         self,
         cmd: Sequence[str],
@@ -743,8 +812,9 @@ class DockerRunner:
 
         loop = asyncio.get_running_loop()
 
-        # Pre-flight: verify Docker is reachable (handles daemon restarts)
-        await loop.run_in_executor(None, self._ensure_client)
+        # Pre-flight: verify Docker is reachable (handles daemon restarts).
+        # Awaited directly (#6578) — see _ensure_client_reachable.
+        await self._ensure_client_reachable()
 
         harness_env = _bounded_harness_env(env)
         gateway_routed = _is_gateway_harness_env(harness_env, self._config)
@@ -821,41 +891,43 @@ class DockerRunner:
                 timeout=timeout,
             )
 
-            try:
-                logs_stdout = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        lambda: container.logs(stdout=True, stderr=False).decode(
-                            errors="replace"
-                        ),
-                    ),
-                    timeout=30.0,
-                )
-                logs_stderr = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        lambda: container.logs(stdout=False, stderr=True).decode(
-                            errors="replace"
-                        ),
-                    ),
-                    timeout=30.0,
-                )
-            except TimeoutError:
-                logger.warning("Timed out fetching container logs")
-                logs_stdout = ""
-                logs_stderr = ""
+            # Each stream gets its OWN guard (#6971). They used to share one
+            # try, so anything raised by the stdout fetch — not only the
+            # timeout — skipped the stderr fetch entirely, and the output that
+            # explains a failure is exactly the output most likely to be lost.
+            #
+            # #6971 proposed collapsing these into a single `demux=True` call
+            # to halve the round-trips. That option does not exist here:
+            # `Container.logs` forwards **kwargs straight to
+            # `APIClient.logs`, whose signature is
+            # (container, stdout, stderr, stream, timestamps, tail, since,
+            # follow, until) — no `demux`, so the call raises TypeError.
+            # `demux` is an `exec_run` parameter. Two calls is the only shape
+            # the API offers; independent guards are the fix that was actually
+            # available.
+            logs_stdout = await self._fetch_container_log(
+                loop, container, stdout=True, stderr=False
+            )
+            logs_stderr = await self._fetch_container_log(
+                loop, container, stdout=False, stderr=True
+            )
 
             return SimpleResult(
                 stdout=logs_stdout.strip(),
                 stderr=logs_stderr.strip(),
                 returncode=result["StatusCode"],
             )
-        except TimeoutError:
+        except TimeoutError as exc:
             try:
                 await loop.run_in_executor(None, container.kill)
             except Exception:
                 logger.warning("Failed to kill container on timeout", exc_info=True)
-            raise
+            # Translate to the house timeout type (#6959). A bare `raise` let
+            # asyncio's TimeoutError escape, so every caller written against
+            # the documented `except SubprocessTimeoutError` contract missed a
+            # Docker timeout and saw it as an unhandled error instead.
+            msg = f"Docker container exceeded its {timeout}s timeout"
+            raise SubprocessTimeoutError(msg) from exc
         except asyncio.CancelledError:
             # A cancelled await (e.g. a loop watchdog) leaves the executor
             # thread parked inside the synchronous ``container.wait()``.  Kill

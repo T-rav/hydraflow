@@ -153,7 +153,7 @@ entries:
   src/disturbance_dampener_loop.py::noqa:S101: 1
   src/docker_runner.py::noqa:A002: 1
   src/docker_runner.py::noqa:ARG002: 5
-  src/docker_runner.py::noqa:PLC0415: 8
+  src/docker_runner.py::noqa:PLC0415: 7
   src/docker_runner.py::noqa:S108: 1
   src/docker_runner.py::type-ignore[arg-type]: 1
   src/edge_proposer_loop.py::noqa:PLC0415: 1

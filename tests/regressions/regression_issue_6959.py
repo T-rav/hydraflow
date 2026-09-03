@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 from docker_runner import DockerRunner
 from subprocess_util import SubprocessTimeoutError
 
@@ -68,7 +67,6 @@ class TestDockerRunSimpleTimeoutContract:
     """Docker-mode timeouts must raise SubprocessTimeoutError, not raw TimeoutError."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6959 — fix not yet landed", strict=False)
     async def test_run_simple_raises_subprocess_timeout_error(
         self, tmp_path: Path
     ) -> None:
@@ -92,7 +90,6 @@ class TestDockerRunSimpleTimeoutContract:
             await runner.run_simple(["sleep", "999"], timeout=0.01)
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6959 — fix not yet landed", strict=False)
     async def test_timeout_exception_is_chained(self, tmp_path: Path) -> None:
         """The ``SubprocessTimeoutError`` must chain the original ``TimeoutError``
         via ``from exc`` so the traceback preserves the root cause.
@@ -134,7 +131,6 @@ class TestCallerSubprocessTimeoutGuard:
     Docker-mode timeouts — currently they silently miss them."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6959 — fix not yet landed", strict=False)
     async def test_except_subprocess_timeout_error_catches_docker_timeout(
         self, tmp_path: Path
     ) -> None:

@@ -73,6 +73,25 @@ class _FakeProc:
         self.killed = True
 
 
+def _await_pid(pidfile: Path, deadline_s: float) -> int:
+    """Wait for *pidfile* to hold a complete pid, then return it.
+
+    Polling `pidfile.exists()` is not enough: `echo $! > file` creates the
+    file when the shell opens the redirection and writes to it a moment
+    later, so a loop that stops at "exists" can read `""` and die on
+    `int("")` — an empty-pidfile flake that has nothing to do with the
+    process-group behaviour under test. Wait for content that parses.
+    """
+    deadline = time.monotonic() + deadline_s
+    while time.monotonic() < deadline:
+        try:
+            return int(pidfile.read_text().strip())
+        except (OSError, ValueError):
+            time.sleep(0.05)
+    msg = f"{pidfile} never received a pid within {deadline_s}s"
+    raise AssertionError(msg)
+
+
 class TestReapAllTrackedProcesses:
     def test_real_process_group_is_torn_down(self, tmp_path: Path) -> None:
         """A tracked child's GRANDCHILD dies too — group kill, not child kill."""
@@ -82,10 +101,7 @@ class TestReapAllTrackedProcesses:
             start_new_session=True,
         )
         try:
-            deadline = time.monotonic() + _POLL_DEADLINE_S
-            while not pidfile.exists() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            grandchild = int(pidfile.read_text().strip())
+            grandchild = _await_pid(pidfile, _POLL_DEADLINE_S)
             assert _pid_alive(grandchild)
 
             fake = _FakeProc(pid=proc.pid, returncode=None)
@@ -186,7 +202,9 @@ class TestOrchestratorHooksInvokeReaper:
         orch = self._orch(config)
         with (
             patch.object(orch, "_build_interrupted_issues", AsyncMock(return_value=[])),
-            patch("orchestrator_lifecycle.reap_all_tracked_processes", return_value=2) as reap,
+            patch(
+                "orchestrator_lifecycle.reap_all_tracked_processes", return_value=2
+            ) as reap,
         ):
             await orch.stop()
 
@@ -228,10 +246,9 @@ class TestRunSimpleChildrenAreStopReapable:
             )
         )
         try:
-            deadline = time.monotonic() + _POLL_DEADLINE_S
-            while not pidfile.exists() and time.monotonic() < deadline:
-                await asyncio.sleep(0.05)
-            grandchild = int(pidfile.read_text().strip())
+            grandchild = await asyncio.get_running_loop().run_in_executor(
+                None, _await_pid, pidfile, _POLL_DEADLINE_S
+            )
             assert _pid_alive(grandchild)
 
             # The grandchild writes the pidfile as soon as the child execs,
