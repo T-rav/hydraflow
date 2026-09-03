@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # noqa: S404 - reads a local credential store by argv, never a shell
+import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -188,14 +188,18 @@ def parse_credential_blob(raw: str) -> OAuthToken:
 
 
 def run_credential_command(command: tuple[str, ...]) -> str:
-    """Run *command* and return its stdout.
+    """Run *command* as an argument vector and return its stdout.
+
+    Never through a shell, and never string-interpolated: the command comes
+    from settings and its OUTPUT is a live credential, so a shell would put
+    that credential one redirection away from a log.
 
     ``check=False``: a missing credential store is a configuration state this
     module reports with a useful message, not a traceback out of subprocess.
     Output is never logged — it is the credential.
     """
     try:
-        completed = subprocess.run(  # noqa: S603 - argv from settings, never a shell
+        completed = subprocess.run(
             list(command),
             capture_output=True,
             text=True,

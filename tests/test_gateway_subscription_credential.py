@@ -1,4 +1,4 @@
-"""The Claude subscription OAuth credential the gateway's Anthropic upstream can use.
+"""The Claude subscription OAuth credential for the gateway (ADR-0148).
 
 ADR-0147 routes every role through the gateway, and the gateway swapped in one
 static `x-api-key` — which meant routing everything through it required a
@@ -143,7 +143,7 @@ class TestFreshness:
 
 
 class TestTheSource:
-    """Read, cache, refresh, fail closed."""
+    """ADR-0148: read, cache, refresh, fail closed."""
 
     def _source(
         self,

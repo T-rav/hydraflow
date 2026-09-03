@@ -181,6 +181,5 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0111 | `pytest:tests/test_flows.py` |
 | ADR-0117 | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0119 | `pytest:tests/test_credit_failover.py` |
-| ADR-0148 | `pytest:tests/test_gateway_oauth_passthrough.py::TestTheOAuthHeadersAreBuilt::test_a_clients_own_betas_survive`, `pytest:tests/test_gateway_oauth_passthrough.py::TestAProxiedRequestOnTheSubscriptionLane::test_the_upstream_gets_the_subscription_token`, `pytest:tests/test_gateway_oauth_passthrough.py::TestAllThreeCredentialsCanShareOnePool::test_the_subscription_account_needs_no_environment_secret`, `pytest:tests/test_gateway_subscription_credential.py::TestTheSource::test_a_stale_token_with_no_refresh_command_fails_closed` |
 
 <!-- arch:generated -->

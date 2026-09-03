@@ -1,4 +1,4 @@
-"""The subscription lane, end to end through the gateway.
+"""The subscription lane, end to end through the gateway (ADR-0148).
 
 ADR-0147 routed every role through the gateway, and the gateway only knew how
 to present a static `x-api-key` — so "everything through one ledger" required
@@ -108,7 +108,7 @@ def _anthropic_upstream(style: UpstreamAuthStyle) -> UpstreamSettings:
 
 
 class TestSettingsRefuseAnAmbiguousCredential:
-    """Two credentials configured and one in use is the worst debugging state."""
+    """ADR-0148: two credentials configured and one in use is the worst state."""
 
     def test_an_oauth_upstream_needs_no_static_key(self) -> None:
         upstream = _anthropic_upstream(UpstreamAuthStyle.OAUTH_BEARER)
@@ -221,7 +221,7 @@ class TestTheCredentialSourceIsBuiltOnlyWhenNeeded:
 
 
 class TestTheOAuthHeadersAreBuilt:
-    """Bearer plus the beta flag, and never at the cost of the client's betas."""
+    """ADR-0148: bearer plus the beta flag, never at the cost of the client's betas."""
 
     def test_the_token_rides_on_authorization(self) -> None:
         headers = replace_request_headers(
@@ -337,7 +337,7 @@ def _client(
 
 
 class TestAProxiedRequestOnTheSubscriptionLane:
-    """What the upstream received — the wiring a unit test cannot see."""
+    """ADR-0148, from the outside: what the upstream actually received."""
 
     async def test_the_upstream_gets_the_subscription_token(
         self, tmp_path: Path
@@ -423,7 +423,7 @@ class TestAProxiedRequestOnTheSubscriptionLane:
 class TestAllThreeCredentialsCanShareOnePool:
     """Sub, metered key and z.ai as accounts, so fallback can hop between them.
 
-    The env-level `GATEWAY_ANTHROPIC_AUTH_MODE` picks ONE Anthropic credential,
+    ADR-0148. The env-level `GATEWAY_ANTHROPIC_AUTH_MODE` picks ONE credential,
     because both would occupy the same `ProviderBinding.ANTHROPIC` slot. Bounded
     fallback (ADR-0142) needs them present at once, which means declaring them
     as accounts — and `load_account_pool` built every account with a static
