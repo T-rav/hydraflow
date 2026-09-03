@@ -20,6 +20,60 @@ Required runtime configuration:
 - one complete provider pair:
   `GATEWAY_ANTHROPIC_BASE_URL` + `GATEWAY_ANTHROPIC_API_KEY`, or
   `GATEWAY_ZAI_HARNESS_BASE_URL` + `GATEWAY_ZAI_HARNESS_API_KEY`
+
+### Anthropic on a subscription instead of a key (ADR-0148)
+
+`GATEWAY_ANTHROPIC_AUTH_MODE=subscription` presents a Claude subscription's
+OAuth bearer token instead of an API key. The token is read from the store and
+cached until 120s before its recorded expiry — not re-read per request — so
+after re-authenticating in Claude Code, restart the gateway. `GATEWAY_ANTHROPIC_BASE_URL` is still
+required — the lane changes the credential, not the destination — and
+`GATEWAY_ANTHROPIC_API_KEY` must be **unset**, so it is unambiguous which
+credential this gateway presents.
+
+| Variable | Meaning |
+|---|---|
+| `GATEWAY_ANTHROPIC_AUTH_MODE` | `api_key` (default) or `subscription` |
+| `GATEWAY_ANTHROPIC_OAUTH_READ_COMMAND` | prints the credential; defaults to the macOS keychain item Claude Code writes |
+| `GATEWAY_ANTHROPIC_OAUTH_REFRESH_COMMAND` | run once when the token is stale, then the store is re-read |
+
+Both commands are split with `shlex` and run as an argument vector, never
+through a shell: their output is a live credential.
+
+**The refresh command is yours to supply.** The gateway detects staleness
+(against a 120s skew), runs the command once, re-reads, and fails closed with a
+message naming the remedy if the token is still stale. It never serves an
+expired token and never retries the refresh in a loop. Anthropic's OAuth token
+endpoint is not hardcoded here because this repo has not verified it.
+
+Two constraints worth knowing before you choose this lane:
+
+- **Host only.** The credential store is the operator's login keychain, which a
+  container cannot reach.
+- **Not what a personal subscription is provisioned for.** Anthropic may refuse
+  it at any time. ADR-0148 records this as an accepted risk; the rollback is
+  `GATEWAY_ANTHROPIC_AUTH_MODE=api_key`.
+
+To run subscription **and** a metered key together — so bounded fallback can hop
+from one to the other — declare them as accounts in `GATEWAY_ACCOUNTS_FILE`
+rather than through the mode switch, which selects only one. Both hops stay on
+the Anthropic lane: fallback never crosses to z.ai, because candidates are
+filtered by the model's provider binding.
+
+```yaml
+schema_version: 1
+accounts:
+  - id: claude-subscription
+    provider_binding: anthropic
+    base_url: https://api.anthropic.com
+    auth_style: oauth-bearer      # no credential_env: resolved per request
+    billing_kind: flat_rate
+  - id: claude-metered
+    provider_binding: anthropic
+    base_url: https://api.anthropic.com
+    auth_style: x-api-key
+    credential_env: GATEWAY_ACCOUNT_CLAUDE_METERED_KEY
+```
 - `GATEWAY_LEDGER_PATH` and `GATEWAY_BODY_DIR` for durable mounted storage
 
 The long-running gateway must remain non-root. Pre-create mounted metadata and

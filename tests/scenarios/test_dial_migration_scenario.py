@@ -64,7 +64,13 @@ def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Repo:
     monkeypatch.setenv("ZAI_API_KEY", "dial-migration-scenario-zai-key")
     monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", _CONTROL_TOKEN)
 
-    config = ConfigFactory.create(repo_root=tmp_path / "repo", repo=_REPO)
+    # No dial pin: this scenario is ABOUT which dials sit off their default, so
+    # it needs the real ones. The factory otherwise pins every `*_provider` to
+    # "claude", which against ADR-0147's `gateway` default reads as twelve
+    # moved dials rather than the one this fixture sets.
+    config = ConfigFactory.create(
+        repo_root=tmp_path / "repo", repo=_REPO, pin_role_dials=False
+    )
     config.planner_provider = "zai"
     config.planner_model = _GLM
     config.gateway_route_shadow_enabled = True

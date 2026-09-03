@@ -278,12 +278,19 @@ def test_a_zai_pinned_one_shot_loop_is_recorded_as_an_ungoverned_bypass(
 def test_a_loop_with_no_dial_is_recorded_as_the_maintenance_default(
     config: Any,
 ) -> None:
-    """An omitted provider inherits ``maintenance_provider``, and that is named."""
+    """An omitted provider inherits ``maintenance_provider``, and that is named.
+
+    The transport is spelled as the value actually inherited. It read "claude"
+    until ADR-0147 moved `maintenance_provider` to `gateway`; leaving it would
+    describe a spawn that inherited one provider and transported on another,
+    which is a different mechanism and would have this test asserting the wrong
+    one while still looking like it checked inheritance.
+    """
     record = record_dialled_route_shadow(
         config=config,
         principal_id="sampled_audit",
         requested_provider=None,
-        transport_provider="claude",
+        transport_provider=config.maintenance_provider,
         model="sonnet",
         request_face=RequestFace.ONE_SHOT,
     )

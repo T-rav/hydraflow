@@ -385,7 +385,13 @@ def _aggregate_gateway_rows(
         # Gateway streams are Anthropic-shaped for every upstream: their
         # ``input_tokens`` EXCLUDES cache whatever the model's one-shot flag.
         cost, unknown = _row_cost(row, pricing, input_includes_cache=False)
-        spend_usd += cost
+        # A flat-rate row is priced the same way — tokens times the model's
+        # rate — but that figure was never billed per call: the plan already
+        # paid for it. Summing it as spend overstates the bill by exactly the
+        # subscription's traffic, which is the guessing one ledger was meant to
+        # end (ADR-0148).
+        if str(row.get("billing_kind", "metered")) != "flat_rate":
+            spend_usd += cost
         requests += 1
         unpriced_requests += int(unknown)
     return _SpendAggregate(

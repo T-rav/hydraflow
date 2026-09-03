@@ -136,18 +136,33 @@ def zai_key_present() -> bool:
     return any(os.environ.get(k, "").strip() for k in _ZAI_API_KEY_ENVS)
 
 
+#: Provider values whose spend lands on the Anthropic lane, and which a Claude
+#: credit cap therefore takes out. `claude` is the direct CLI; `gateway` is the
+#: same upstream reached through the proxy (ADR-0147 made it the dial default).
+#: Exported so the failover guards sweep the lane this function actually acts
+#: on, instead of a copy that can drift out from under them.
+ANTHROPIC_LANE_PROVIDERS: frozenset[str] = frozenset({"claude", "gateway"})
+
+
 def apply_credit_failover(
     provider: str, cmd: list[str], config: HydraFlowConfig
 ) -> tuple[str, list[str]]:
     """Reroute a Claude work spawn to zai/GLM while failover is active.
 
-    Returns ``(provider, cmd)`` unchanged unless ALL hold: the spawn is on
-    ``claude``, ``credit_failover_enabled``, failover is currently active, and a
-    ``ZAI_API_KEY`` is present. When rerouting, the ``--model`` in *cmd* is
-    rewritten to ``config.credit_failover_model`` (the zai backend requires a
-    glm-* model). The input *cmd* is never mutated.
+    Returns ``(provider, cmd)`` unchanged unless ALL hold: the spawn is on the
+    Anthropic lane (``ANTHROPIC_LANE_PROVIDERS`` — ``claude`` or, since
+    ADR-0147, ``gateway``), ``credit_failover_enabled``, and failover is
+    currently active. A direct ``claude`` spawn additionally requires a local
+    ``ZAI_API_KEY``, because it must address z.ai itself; a ``gateway`` spawn
+    does NOT, because the proxy mints a z.ai-bound virtual key from the
+    rewritten model and the worker never holds a real credential.
+
+    The two lanes resolve differently: ``claude`` becomes ``zai``, while
+    ``gateway`` keeps its transport and moves only its model. Either way the
+    ``--model`` in *cmd* is rewritten to ``config.credit_failover_model`` (the
+    zai backend requires a glm-* model). The input *cmd* is never mutated.
     """
-    if provider not in {"claude", "gateway"}:
+    if provider not in ANTHROPIC_LANE_PROVIDERS:
         return provider, cmd
     if not config.credit_failover_enabled:
         return provider, cmd

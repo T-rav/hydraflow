@@ -17,7 +17,7 @@ Two halves, and only the first is code in this repo:
 
 | Half | Where it lives | What it does |
 |---|---|---|
-| Outbound | `src/observability/sentry_adapter.py` | Ships exceptions to an ingest endpoint |
+| Outbound | `src/observability/sentry_adapter.py` | Ships exceptions to an ingest endpoint. Installed per process at each entrypoint (`server.main`, `hydraflow_gateway.__main__.main`), and injected as an `ObservabilityPort` where a caller takes one. |
 | Inbound | `src/dashboard_routes/_issue_intake_routes.py` | One authenticated boundary that files the issue |
 
 The inbound half is deliberately *not* a HydraFlow loop — but it is code, which
@@ -76,8 +76,30 @@ issues". This file states the rules; the runbook states how to satisfy them.
     regression and unmute; the receiver deduplicates on the group id rather than
     the rendered message, which varies within a group.
 
+13. **Every unattended process installs the sensor at its entrypoint.** Not at
+    the composition root. A process that dies during config load or factory
+    boot never reaches its composition root, and "the factory will not start"
+    is the failure an operator most needs on the board. `install_process_sensor`
+    is the entrypoint half; `build_observability_adapter` remains the injected
+    port for code that takes one.
+14. **The SDK is initialised once per process.** `sentry_sdk.init` replaces the
+    global client wholesale, so a second call silently discards the first —
+    including its component tag. `init_sentry_sdk` is the only caller.
+15. **Every event names the process it came from.** One backend project
+    receives from the server and the gateway, which are separate deployables
+    with separate failure modes. The `hydraflow.component` tag is set on the
+    *global* scope, because the loops and the ASGI middleware both push scopes.
+16. **Incidental log promotion is not a bug report.** Sentry's logging
+    integration turns every `logger.error` into an event, and most of this
+    repo's error-level call sites attach no exception. Those arrive with no
+    stack trace, group on message text, and reach triage as a sentence with
+    nothing to act on. An event with no exception is dropped unless a call
+    site asked for it explicitly.
+
 Rules 8-12 are why the label matters more than it looks: the label is what
-makes an error a routable piece of work rather than a notification.
+makes an error a routable piece of work rather than a notification. Rules
+13-16 are why it is *reported at all*: before them the sensor covered one
+process, from partway through its boot.
 
 <!-- standard:enforced-by -->
 - `tests/test_sentry_observability_adapter.py`
@@ -85,6 +107,7 @@ makes an error a routable piece of work rather than a notification.
 - `tests/test_issue_intake_boundary.py`
 - `tests/architecture/test_intake_proxy_config.py`
 - `tests/scenarios/test_exception_sensor_triage_scenario.py`
+- `tests/test_process_sentry_sensor.py`
 <!-- /standard:enforced-by -->
 
 ## Why a standard and not just an ADR

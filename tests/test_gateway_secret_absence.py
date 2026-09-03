@@ -34,6 +34,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import get_args
 
 import httpx
 import pytest
@@ -848,10 +849,24 @@ def _credential_bearing_field_names() -> frozenset[str]:
         name
         for model in (UpstreamSettings, GatewaySettings)
         for name, field in model.model_fields.items()
-        if field.annotation is SecretStr
+        if _carries_a_secret(field.annotation)
     }
     names.add("token")
     return frozenset(names)
+
+
+def _carries_a_secret(annotation: object) -> bool:
+    """Whether *annotation* is a SecretStr, including inside a union.
+
+    `UpstreamSettings.api_key` became `SecretStr | None` when the subscription
+    lane arrived (it holds no static key), and an identity check against
+    `SecretStr` stopped matching it — dropping the field from this corpus and
+    silently narrowing every sweep built on it. Caught by the anti-vacuity test
+    below, which is the reason that test exists.
+    """
+    if annotation is SecretStr:
+        return True
+    return any(arg is SecretStr for arg in get_args(annotation))
 
 
 def test_the_names_that_carry_credentials_were_actually_found() -> None:

@@ -52,14 +52,18 @@ def _governed(**overrides: object) -> dict[str, object]:
 
 def test_the_dial_set_is_derived_and_non_empty() -> None:
     """Anti-vacuity: an empty set would make every assertion below pass."""
-    assert len(_PROVIDER_DIALS) >= 13
+    assert len(_PROVIDER_DIALS) >= 14
     assert "maintenance_provider" in _PROVIDER_DIALS
 
 
 class TestAGovernedRepoMustRouteEveryFaceThroughTheGateway:
     def test_a_direct_face_is_refused_at_load(self) -> None:
+        # The direct face is set EXPLICITLY. ADR-0147 made `gateway` the dial
+        # default, so `_governed()` alone no longer produces a violation — and
+        # a test that relied on the default would have started asserting
+        # nothing while still passing.
         with pytest.raises(ValueError, match="must resolve through the gateway"):
-            HydraFlowConfig(**_governed())
+            HydraFlowConfig(**_governed(maintenance_provider="claude"))
 
     def test_the_refusal_names_the_offending_face(self) -> None:
         """ "Something is ungoverned" is not something an operator can act on."""
@@ -77,8 +81,19 @@ class TestAGovernedRepoMustRouteEveryFaceThroughTheGateway:
 
 
 class TestTheGateIsScopedToTheGovernedRepo:
+    """Non-conscription, asserted as a property rather than as a default.
+
+    These once read `== "claude"`, which was the DEFAULT standing in for "this
+    repo was not forced". ADR-0147 made `gateway` the default, so that spelling
+    would now pass for the wrong reason on a conscripted config. Each case sets
+    a direct dial explicitly and asserts the gate LEFT IT ALONE — the property
+    the objection was actually about.
+    """
+
     def test_an_unarmed_deployment_is_untouched(self) -> None:
-        assert HydraFlowConfig(repo="acme/other").maintenance_provider == "claude"
+        config = HydraFlowConfig(repo="acme/other", maintenance_provider="claude")
+
+        assert config.maintenance_provider == "claude"
 
     def test_another_repo_is_not_forced_onto_the_gateway(self) -> None:
         """The objection that stalled this criterion, asserted as a property.
@@ -87,14 +102,18 @@ class TestTheGateIsScopedToTheGovernedRepo:
         repository the host serves — they are separate configs.
         """
         config = HydraFlowConfig(
-            repo="acme/other", gateway_enforcement_canary_repo=_GOVERNED
+            repo="acme/other",
+            gateway_enforcement_canary_repo=_GOVERNED,
+            maintenance_provider="claude",
         )
 
         assert config.maintenance_provider == "claude"
 
     def test_a_repo_with_no_identity_is_not_judged(self) -> None:
         """Without a canonical repo there is nothing to compare the lock to."""
-        config = HydraFlowConfig(gateway_enforcement_canary_repo=_GOVERNED)
+        config = HydraFlowConfig(
+            gateway_enforcement_canary_repo=_GOVERNED, maintenance_provider="claude"
+        )
 
         assert config.maintenance_provider == "claude"
 
@@ -102,16 +121,20 @@ class TestTheGateIsScopedToTheGovernedRepo:
 class TestAGovernedRepoNeedsTheFleetRatchet:
     """Dials are only half the faces (#11992).
 
-    Twenty of twenty-four `BaseRunner` subclasses declare no `PROVIDER_FIELD`,
-    so `_resolve_provider` returns a hardcoded "claude" — bug_reproducer, hitl,
-    research, discover, shape, plan_reviewer, diagnostic. No `*_provider`
-    setting can move them. The fleet ratchet is the only thing that rewrites a
-    still-claude spawn to "gateway".
+    Seven runners declare no `PROVIDER_FIELD`, so `_resolve_provider` returns a
+        hardcoded "claude" — bug_reproducer, hitl, research, discover, shape,
+        plan_reviewer, diagnostic. (20 of the 24 direct `BaseRunner` subclasses
+        declare none, but 13 of those are mixins composed into runners that do
+        carry a dial.) No `*_provider` setting can move them.
 
-    The first version of this gate checked the dials alone, so a canary with
-    every dial on "gateway" and the ratchet off passed while seven runners went
-    straight to Anthropic — an ungoverned face no configuration named, which is
-    what the gate exists to refuse.
+        ADR-0147's `repo_provider` default rewrites them to "gateway" too, so the
+        ratchet is no longer the only route — but it is the only one that requires
+        docker, which is what makes the attribution provable.
+
+        The first version of this gate checked the dials alone, so a canary with
+        every dial on "gateway" and the ratchet off passed while seven runners went
+        straight to Anthropic — an ungoverned face no configuration named, which is
+        what the gate exists to refuse.
     """
 
     def test_every_dial_on_the_gateway_is_not_enough(self) -> None:

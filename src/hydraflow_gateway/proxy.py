@@ -31,14 +31,22 @@ from hydraflow_gateway.ledger import (
     GatewayLedger,
     GatewayLedgerRow,
 )
-from hydraflow_gateway.models import GatewayIdentity, GatewayRequestStatus
+from hydraflow_gateway.models import (
+    AccountBillingKind,
+    GatewayIdentity,
+    GatewayRequestStatus,
+)
 from hydraflow_gateway.observer import (
     RequestMetadataObserver,
     SseUsageObserver,
     UsageSnapshot,
 )
 from hydraflow_gateway.routing_account_state import AccountRuntimeState
-from hydraflow_gateway.routing_accounts import RESERVED_ACCOUNT_IDS, AccountPool
+from hydraflow_gateway.routing_accounts import (
+    RESERVED_ACCOUNT_IDS,
+    AccountPool,
+    GatewayAccount,
+)
 from hydraflow_gateway.routing_fallback import (
     TerminalDecisionIndex,
     condition_for_terminal,
@@ -47,6 +55,11 @@ from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
     UpstreamSettings,
+)
+from hydraflow_gateway.subscription_credential import (
+    OAUTH_BETA_FLAG,
+    SubscriptionCredentialError,
+    SubscriptionCredentialSource,
 )
 from model_pricing import ModelPricingTable
 
@@ -66,6 +79,8 @@ _REQUEST_CAPACITY_REFUSAL = "request-capacity-exhausted"
 """Why a request was turned away at an account's concurrent ceiling."""
 _OBSERVATION_REFUSAL = "gateway-observation-unavailable"
 """This gateway could not persist an observation, so it served nothing."""
+_CREDENTIAL_REFUSAL = "gateway-upstream-credential-unavailable"
+"""The upstream credential could not be resolved, so nothing was sent."""
 _POOL_EXHAUSTED_REFUSAL = "gateway-connection-pool-exhausted"
 """This gateway ran out of its OWN connection slots before any upstream."""
 
@@ -179,7 +194,9 @@ class GatewayProxy:
         wall_clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         request_id_factory: Callable[[], str] | None = None,
+        subscription_credential: SubscriptionCredentialSource | None = None,
     ) -> None:
+        self._subscription_credential = subscription_credential
         self._settings = settings
         self._client = client
         self._ledger = ledger
@@ -193,6 +210,59 @@ class GatewayProxy:
         self._monotonic = monotonic
         self._request_id_factory = request_id_factory or (lambda: str(ULID()))
         self._telemetry_healthy = True
+
+    def _billing_kind(self, identity: GatewayIdentity) -> AccountBillingKind:
+        """How the account that served this request is billed.
+
+        Derived rather than passed down: the row is written on every terminal
+        path, several of which never reached the code that resolved a token,
+        and a value threaded through all of them would default to wrong.
+
+        An account's own declaration wins, because a metered key and a
+        flat-rate plan can sit on the same provider binding — which is the
+        whole point of declaring them as separate accounts. Only when nothing
+        declared it is the auth style used as the tell.
+        """
+        account = self._account_for(identity)
+        if account is not None:
+            return account.billing_kind
+        upstream = self._upstream_for(identity)
+        if upstream is None:
+            return AccountBillingKind.METERED
+        return (
+            AccountBillingKind.FLAT_RATE
+            if upstream.auth_style is UpstreamAuthStyle.OAUTH_BEARER
+            else AccountBillingKind.METERED
+        )
+
+    def _account_for(self, identity: GatewayIdentity) -> GatewayAccount | None:
+        """The pooled account behind *identity*, when this request has one.
+
+        Direct attribute access, matching ``_upstream_for``: a ``getattr``
+        default here would turn a renamed field into a permanent ``None``, and
+        the caller would silently report every request as ``metered``.
+        """
+        if self._pool is None or identity.route_binding is None:
+            return None
+        return self._pool.account(identity.route_binding.account_id)
+
+    async def _resolve_subscription_token(
+        self, upstream: UpstreamSettings
+    ) -> str | None:
+        """The current subscription token, or ``None`` for a static-key lane.
+
+        Off the event loop: reading the credential store forks a process, and
+        a blocking fork on the proxy hot path would stall every other in-flight
+        spawn for its duration.
+        """
+        if upstream.auth_style is not UpstreamAuthStyle.OAUTH_BEARER:
+            return None
+        if self._subscription_credential is None:
+            raise GatewayCredentialError(
+                "this upstream is on the subscription lane but the gateway was "
+                "started without a credential source"
+            )
+        return await asyncio.to_thread(self._subscription_credential.access_token)
 
     @property
     def telemetry_healthy(self) -> bool:
@@ -372,10 +442,49 @@ class GatewayProxy:
             write=self._settings.write_timeout_seconds,
             pool=self._settings.pool_timeout_seconds,
         )
+        try:
+            access_token = await self._resolve_subscription_token(upstream)
+        except asyncio.CancelledError:
+            # The widest await in this handler: a read plus a refresh plus a
+            # re-read can block for a minute and a half, so a client giving up
+            # here is ordinary. Every other await in `forward` finalizes on
+            # cancel; without this one the attempt leaks its request slot and
+            # leaves a phantom "streaming" route for the process lifetime.
+            attempt.finalize(
+                self, status_code=499, completed=False, client_aborted=True
+            )
+            raise
+        except Exception as exc:
+            # Broad on purpose. `SubscriptionCredentialError` is the expected
+            # shape, but the credential path forks a process and parses a
+            # third-party document, so it can also surface a decode error or a
+            # malformed expiry. Letting one of those escape returns a 500 with
+            # a traceback, writes no ledger row, and leaks the request slot —
+            # strictly worse than the 503 this contract promises.
+            #
+            # No upstream was ever asked, so this is a gateway-side refusal and
+            # must not become evidence against the account — same reasoning as
+            # the pool-timeout arm below. The message names the remedy; it is
+            # written to be safe to log, and carries no credential material.
+            attempt.refusal_reason = _CREDENTIAL_REFUSAL
+            attempt.finalize(
+                self,
+                status_code=503,
+                completed=False,
+                client_aborted=False,
+            )
+            detail = (
+                str(exc)
+                if isinstance(exc, SubscriptionCredentialError | GatewayCredentialError)
+                else "the upstream credential could not be resolved"
+            )
+            raise HTTPException(status_code=503, detail=detail) from exc
         upstream_request = httpx.Request(
             request.method,
             upstream_url,
-            headers=replace_request_headers(request.headers.raw, upstream),
+            headers=replace_request_headers(
+                request.headers.raw, upstream, access_token=access_token
+            ),
             content=content,
             extensions={"timeout": timeout.as_dict()},
         )
@@ -685,6 +794,7 @@ class GatewayProxy:
             status_code=status_code,
             status=request_status,
             upstream_provider=identity.provider_binding,
+            billing_kind=self._billing_kind(identity),
             path=path,
             model_requested=request_observer.model_requested(),
             model_served=usage.model_served,
@@ -854,14 +964,60 @@ def _reject_dot_segments(raw_path: bytes) -> None:
     raise HTTPException(status_code=400, detail="upstream path is too deeply encoded")
 
 
-def replace_request_headers(
-    raw_headers: Sequence[tuple[bytes, bytes]], upstream: UpstreamSettings
+def _merge_anthropic_beta(
+    forwarded: list[tuple[bytes, bytes]], flag: bytes
 ) -> list[tuple[bytes, bytes]]:
-    """Remove transport/client auth headers and inject server-owned auth."""
+    """Add *flag* to ``anthropic-beta`` without dropping what the client sent.
+
+    The Claude CLI sends its own betas on this header. Appending a second
+    ``anthropic-beta`` — or replacing the client's — would silently disable
+    whichever features the caller had asked for, so the values are merged into
+    one comma-joined header and de-duplicated in order.
+    """
+    existing: list[bytes] = []
+    rest: list[tuple[bytes, bytes]] = []
+    for name, value in forwarded:
+        if name.lower() == b"anthropic-beta":
+            existing.extend(part.strip() for part in value.split(b",") if part.strip())
+        else:
+            rest.append((name, value))
+    merged: list[bytes] = []
+    for candidate in [*existing, flag]:
+        if candidate not in merged:
+            merged.append(candidate)
+    rest.append((b"anthropic-beta", b", ".join(merged)))
+    return rest
+
+
+def replace_request_headers(
+    raw_headers: Sequence[tuple[bytes, bytes]],
+    upstream: UpstreamSettings,
+    *,
+    access_token: str | None = None,
+) -> list[tuple[bytes, bytes]]:
+    """Remove transport/client auth headers and inject server-owned auth.
+
+    *access_token* supplies the credential for an ``OAUTH_BEARER`` upstream,
+    which holds no static key. Passed in rather than stamped onto a copied
+    ``UpstreamSettings`` because ``model_copy`` skips field validators — the
+    same trap :meth:`GatewaySettings.governs` documents — and a credential is
+    the last value that should reach a header unvalidated.
+    """
     blocked = _connection_scoped_names(raw_headers) | _CLIENT_AUTH_HEADERS | {b"host"}
     forwarded = [
         (name, value) for name, value in raw_headers if name.lower() not in blocked
     ]
+    if upstream.auth_style is UpstreamAuthStyle.OAUTH_BEARER:
+        if not access_token:
+            raise GatewayCredentialError(
+                "the oauth-bearer upstream was reached with no resolved "
+                "subscription token"
+            )
+        forwarded.append((b"authorization", b"Bearer " + access_token.encode("ascii")))
+        return _merge_anthropic_beta(forwarded, OAUTH_BETA_FLAG.encode("ascii"))
+
+    if upstream.api_key is None:  # pragma: no cover - settings validation forbids it
+        raise GatewayCredentialError("upstream has no credential configured")
     provider_key = upstream.api_key.get_secret_value().encode("ascii")
     if upstream.auth_style == UpstreamAuthStyle.X_API_KEY:
         forwarded.append((b"x-api-key", provider_key))

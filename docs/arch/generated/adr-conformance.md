@@ -98,6 +98,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0142 | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 | ADR-0143 | enforced | `pytest:tests/test_charter.py::test_from_dict_loads_all_four_layers_plus_rails`, `pytest:tests/architecture/test_policy_adr_enforcement_parity.py::test_engine_reproduces_the_ratchet_verdict_for_every_accepted_adr`, `pytest:tests/architecture/test_standards_registry.py::TestReadmeAndYamlAreOneSet`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members`, `pytest:tests/architecture/test_adr0143_decision_shape.py::test_blocking_is_an_orthogonal_field_not_a_status`, `pytest:tests/test_charter_purpose_presence.py::TestAnUnstatedPurposeIsDrift::test_a_charter_stating_no_product_is_drift`, `pytest:tests/scenarios/test_charter_purpose_drift_scenario.py::TestPurposeDrift::test_a_charter_that_lost_its_purpose_files_one_issue` |
 | ADR-0146 | enforced | `pytest:tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op`, `pytest:tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off`, `pytest:tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close` |
+| ADR-0147 | enforced | `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_defaults_to_the_gateway`, `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_capable_set_covers_every_dial`, `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_keeps_a_direct_escape_hatch` |
+| ADR-0148 | enforced | `pytest:tests/test_gateway_oauth_passthrough.py::TestTheOAuthHeadersAreBuilt::test_a_clients_own_betas_survive`, `pytest:tests/test_gateway_oauth_passthrough.py::TestAProxiedRequestOnTheSubscriptionLane::test_the_upstream_gets_the_subscription_token`, `pytest:tests/test_gateway_oauth_passthrough.py::TestAllThreeCredentialsCanShareOnePool::test_the_subscription_account_needs_no_environment_secret`, `pytest:tests/test_gateway_subscription_credential.py::TestTheSource::test_a_stale_token_with_no_refresh_command_fails_closed` |
 
 ## Check → ADRs it protects
 
@@ -120,6 +122,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_adr0143_decision_shape.py::test_decision_status_is_exactly_the_four_ruled_members` | ADR-0143 |
 | `pytest:tests/architecture/test_director_no_authority.py` | ADR-0137 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
+| `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_capable_set_covers_every_dial` | ADR-0147 |
+| `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_defaults_to_the_gateway` | ADR-0147 |
+| `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_keeps_a_direct_escape_hatch` | ADR-0147 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_gateway_env_key_coverage.py` | ADR-0142 |
 | `pytest:tests/architecture/test_import_boundary_gate.py` | ADR-0118 |
@@ -224,7 +229,11 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_flows.py` | ADR-0111 |
 | `pytest:tests/test_gateway_control_reader.py` | ADR-0138 |
 | `pytest:tests/test_gateway_control_v2_read_api.py` | ADR-0138 |
+| `pytest:tests/test_gateway_oauth_passthrough.py::TestAProxiedRequestOnTheSubscriptionLane::test_the_upstream_gets_the_subscription_token` | ADR-0148 |
+| `pytest:tests/test_gateway_oauth_passthrough.py::TestAllThreeCredentialsCanShareOnePool::test_the_subscription_account_needs_no_environment_secret` | ADR-0148 |
+| `pytest:tests/test_gateway_oauth_passthrough.py::TestTheOAuthHeadersAreBuilt::test_a_clients_own_betas_survive` | ADR-0148 |
 | `pytest:tests/test_gateway_secret_absence.py` | ADR-0138, ADR-0139, ADR-0140, ADR-0141, ADR-0142 |
+| `pytest:tests/test_gateway_subscription_credential.py::TestTheSource::test_a_stale_token_with_no_refresh_command_fails_closed` | ADR-0148 |
 | `pytest:tests/test_governed_preflight.py` | ADR-0141 |
 | `pytest:tests/test_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_actuator.py` | ADR-0103 |

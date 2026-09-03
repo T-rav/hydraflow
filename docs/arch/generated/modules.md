@@ -59,7 +59,7 @@ graph LR
     src -- "31" --> src_hydraflow_gateway
     src -- "1" --> src_implement_phase
     src -- "6" --> src_intervention
-    src -- "1" --> src_observability
+    src -- "2" --> src_observability
     src -- "5" --> src_policy
     src -- "2" --> src_pr_unsticker
     src -- "18" --> src_preflight
@@ -90,6 +90,7 @@ graph LR
     src_epic -- "9" --> src_state
     src_erosion -- "4" --> src_arch
     src_health_monitor_loop -- "3" --> src_state
+    src_hydraflow_gateway -- "1" --> src_observability
     src_implement_phase -- "6" --> src_agent
     src_implement_phase -- "5" --> src_flows
     src_implement_phase -- "8" --> src_state

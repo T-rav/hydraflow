@@ -43,14 +43,35 @@ sample rate re-instruments the app by the back door.
 Python:
 
 ```python
+import os
 import sentry_sdk
 
-sentry_sdk.init(
-    dsn=os.environ["SENTRY_DSN"],
-    traces_sample_rate=0.0,  # spans are OTel's, not this
-    send_default_pii=False,  # no local variables, no request bodies
-)
+
+def _bugs_only(event, hint):
+    """Rule 16: an error-level log line with no exception is not a bug."""
+    if "exc_info" in hint or event.get("exception"):
+        return event
+    return None if "log_record" in hint else event
+
+
+def install_sensor(component: str) -> bool:
+    """Call this at the process ENTRYPOINT (rule 13), once (rule 14)."""
+    dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if not dsn:
+        return False
+    sentry_sdk.init(
+        dsn=dsn,
+        traces_sample_rate=0.0,  # spans are OTel's, not this
+        send_default_pii=False,  # no local variables, no request bodies
+        before_send=_bugs_only,
+    )
+    # Rule 15: GLOBAL scope, so the tag survives every scope push.
+    sentry_sdk.get_global_scope().set_tag("hydraflow.component", component)
+    return True
 ```
+
+Each process calls it with its own name — HydraFlow uses `server` and
+`gateway` — so one backend project can tell separate deployables apart.
 
 Node:
 
@@ -169,6 +190,15 @@ not a code change.
     intake at all.
 11. The caller does not choose its own provenance.
 12. One issue per error group.
+13. Every unattended process installs the sensor at its own entrypoint, not at
+    a composition root it may die before reaching.
+14. The SDK is initialised once per process. A second `init` replaces the
+    global client and silently discards the first one's tags.
+15. Every event names the process it came from, tagged on the *global* scope so
+    it survives the scope pushes middleware and worker loops make.
+16. An error-level log line carrying no exception is not a bug report. The
+    logging integration promotes every `logger.error`; most carry no stack
+    trace and reach triage as a sentence with nothing to act on.
 
 ## What you never do
 

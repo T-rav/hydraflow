@@ -14,8 +14,10 @@ Measured 2026-08-31, over ~7.5h after the cap engaged at 06:15:
       5  Wiki compilation model failed (rc=-1: timed out after 300s)
 
 The wiki breaker opening twice (#11819) was a symptom of this, not a wiki bug:
-`wiki_compilation_provider` defaults to `claude`, so every compile call went to
-the capped provider and burned its full 300s.
+`wiki_compilation_provider` defaulted to `claude`, so every compile call went to
+the capped provider and burned its full 300s. ADR-0147 moved that default to
+`gateway`, which reaches the same upstream -- the exposure moved transport, it
+did not go away.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import pytest
 
 import credit_failover
+from credit_failover import ANTHROPIC_LANE_PROVIDERS
 import runner_utils
 from prompt_telemetry import parse_command_tool_model
 
@@ -56,11 +59,23 @@ def test_the_provider_sweep_is_not_empty() -> None:
     assert len(_provider_defaults()) >= 10
 
 
-def test_claude_pinned_dials_exist_and_are_the_population_at_risk() -> None:
-    """Documents WHY this matters: most role dials default to the capped one."""
-    claude_pinned = [n for n, d in _provider_defaults().items() if d == "claude"]
-    assert "wiki_compilation_provider" in claude_pinned
-    assert len(claude_pinned) >= 10
+def test_anthropic_lane_dials_exist_and_are_the_population_at_risk() -> None:
+    """Documents WHY this matters: most role dials default to the capped lane."""
+    at_risk = [
+        n for n, d in _provider_defaults().items() if d in ANTHROPIC_LANE_PROVIDERS
+    ]
+    assert "wiki_compilation_provider" in at_risk
+    assert len(at_risk) >= 10
+
+
+def test_a_dial_off_the_anthropic_lane_is_not_counted_as_at_risk() -> None:
+    """Decoy: keeps the population above from degenerating into 'every dial'.
+
+    Without this, widening ANTHROPIC_LANE_PROVIDERS to cover everything would
+    still satisfy the count assertion and the guard would stop discriminating.
+    """
+    assert "zai" not in ANTHROPIC_LANE_PROVIDERS
+    assert "openrouter" not in ANTHROPIC_LANE_PROVIDERS
 
 
 @pytest.fixture
@@ -68,9 +83,7 @@ def _capped(monkeypatch: pytest.MonkeyPatch):
     """Failover engaged with a z.ai credential present."""
     monkeypatch.setenv("ZAI_API_KEY", "test-key-not-a-real-credential")
     credit_failover.reset_for_tests()
-    credit_failover.engage(
-        now=datetime.now(UTC), resume_at=None, cooldown_minutes=60
-    )
+    credit_failover.engage(now=datetime.now(UTC), resume_at=None, cooldown_minutes=60)
     yield
     credit_failover.reset_for_tests()
 

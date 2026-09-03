@@ -191,7 +191,10 @@ class TestRepoBackendOverride:
         assert row["type"] == "enum"
         assert set(row["choices"]) == {"claude", "gateway", "zai"}
         assert row["live"] is True
-        assert row["default"] == "claude"
+        # Read from the model: this asserted the literal "claude" until
+        # ADR-0147 moved the default to "gateway", which is a schema fact the
+        # dashboard renders rather than a choice this test gets to make.
+        assert row["default"] == HydraFlowConfig.model_fields["repo_provider"].default
         assert row["description"]
 
     def test_repo_model_is_mutable_and_schema_visible(self) -> None:

@@ -19,8 +19,9 @@ def _cfg(tmp_path: Path, **over: object) -> HydraFlowConfig:
     )
 
 
-def test_repo_provider_defaults_claude(tmp_path: Path) -> None:
-    assert _cfg(tmp_path).repo_provider == "claude"
+def test_repo_provider_defaults_to_the_gateway(tmp_path: Path) -> None:
+    """ADR-0147: the repo override ships routed, so repo-wide spend is ledgered."""
+    assert _cfg(tmp_path).repo_provider == "gateway"
 
 
 def test_repo_model_defaults_empty(tmp_path: Path) -> None:

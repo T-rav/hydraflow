@@ -37,6 +37,7 @@ import pytest
 
 import credit_failover
 import runner_utils
+from credit_failover import ANTHROPIC_LANE_PROVIDERS
 from prompt_telemetry import parse_command_tool_model
 from tests.helpers import ConfigFactory
 
@@ -148,13 +149,24 @@ def test_nothing_reroutes_when_no_cap_is_engaged(monkeypatch) -> None:
     assert parse_command_tool_model(cmd)[1] == "haiku"
 
 
-def test_every_claude_pinned_role_dial_is_covered_by_the_failover(capped) -> None:
+def test_every_anthropic_lane_role_dial_is_covered_by_the_failover(capped) -> None:
     """The blast radius, by reference rather than by a copied list.
 
-    13 `*_provider` settings default to `claude` and ~12 modules use the
-    lightweight path. Each one was dead for the duration of a cap. Derived from
-    config.py so a NEW role dial added with a `claude` default is caught here —
-    a hand-written list could never notice one.
+    Role dials default onto the Anthropic lane -- `claude` before ADR-0147,
+    `gateway` after -- and each one was dead for the duration of a cap. Derived
+    from config.py so a NEW role dial landing on that lane is caught here; a
+    hand-written list could never notice one.
+
+    Each dial is exercised with ITS OWN default as the provider. Feeding a
+    hardcoded "claude" for every name, as this did before ADR-0147, makes the
+    loop body independent of the dial and re-asserts a single case N times --
+    it would keep passing with every dial moved off the lane.
+
+    The two lanes fail over differently: a direct `claude` spawn changes
+    provider to `zai`, while a `gateway` spawn keeps its transport (the proxy
+    mints a z.ai-bound virtual key) and moves only its model. The property that
+    holds for both, and the one credit waste actually turns on, is that the
+    spawn stops addressing an Anthropic model.
     """
     import re
 
@@ -165,12 +177,37 @@ def test_every_claude_pinned_role_dial_is_covered_by_the_failover(capped) -> Non
             src,
         )
     )
-    claude_pinned = [name for name, default in dials.items() if default == "claude"]
-    assert len(claude_pinned) >= 10, "extraction found too few dials to be meaningful"
+    at_risk = {
+        name: default
+        for name, default in dials.items()
+        if default in ANTHROPIC_LANE_PROVIDERS
+    }
+    assert len(at_risk) >= 10, "extraction found too few dials to be meaningful"
 
     config = ConfigFactory.create()
-    for _name in claude_pinned:
-        provider, _ = credit_failover.apply_credit_failover(
-            "claude", runner_utils._telemetry_cmd("claude", "claude", "haiku"), config
+    for name, default in at_risk.items():
+        provider, cmd = credit_failover.apply_credit_failover(
+            default,
+            runner_utils._telemetry_cmd(default, "claude", "haiku"),
+            config,
         )
-        assert provider == "zai"
+        assert provider != "claude", f"{name} still addresses the capped CLI"
+        assert parse_command_tool_model(cmd)[1] == config.credit_failover_model, (
+            f"{name} moved provider without its model"
+        )
+
+
+def test_a_dial_off_the_anthropic_lane_is_left_alone(capped) -> None:
+    """Decoy: the failover must not conscript a dial already off the lane.
+
+    Pins that the sweep above discriminates. A failover that rewrote every
+    provider unconditionally would satisfy it while breaking z.ai-pinned dials.
+    """
+    provider, cmd = credit_failover.apply_credit_failover(
+        "zai",
+        runner_utils._telemetry_cmd("zai", "zai", "glm-4.6"),
+        config=ConfigFactory.create(),
+    )
+
+    assert provider == "zai"
+    assert parse_command_tool_model(cmd)[1] == "glm-4.6"

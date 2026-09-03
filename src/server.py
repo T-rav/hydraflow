@@ -18,6 +18,7 @@ from config import HydraFlowConfig, build_credentials
 from events import EventType, HydraFlowEvent
 from factory_autostart import maybe_autostart_host
 from log import setup_logging
+from observability import sentry_adapter
 from package_resources import ResourceNotFoundError, checkout_path, checkout_root
 from prompt_gate import most_restrictive_data_class
 from runtime_config import (
@@ -477,6 +478,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     log_path = os.environ.get("HYDRAFLOW_LOG_FILE", str(DEFAULT_LOG_FILE))
     level = logging.DEBUG if verbose else logging.INFO
     setup_logging(level=level, json_output=not verbose, log_file=log_path)
+
+    # Before the config load, deliberately. The composition root builds the
+    # injected ObservabilityPort much later, so a process that died during
+    # config load or factory boot reported nothing at all -- and "the factory
+    # will not start" is the failure an operator most needs on the board.
+    # `load_dotenv` above has already put SENTRY_DSN in the environment.
+    sentry_adapter.install_process_sensor("server")
 
     config = load_runtime_config()
 

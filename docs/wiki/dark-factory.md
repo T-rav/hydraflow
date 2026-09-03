@@ -430,6 +430,99 @@ them (two 2026-07 sessions nearly did):
 
 Still open: subagent-verify wrapper, pre-commit arch-regen.
 
+## Gateway-routed spawns (ADR-0147)
+
+Every `*_provider` dial defaults to `gateway`, so role spawns transit the proxy
+and land in its ledger — the only record carrying per-spawn attribution (role,
+spawn, session, issue, PR) in one provider-agnostic schema. Before this, the
+ledger held 908 rows from a single provider over two days and had been dead for
+a fortnight, while the proxy ran and every dial pointed around it.
+
+**No docker required.** The docker constraint belongs to the fleet ratchet, not
+to the dials.
+
+### The one thing an operator must set
+
+`GatewaySettings.from_env` binds only upstreams whose env pair is present.
+Without the Anthropic pair the gateway has no Anthropic upstream and **every
+mint is refused** — gateway selection is fail-closed, so this is a stopped
+factory, not a slow one.
+
+```bash
+# in the GATEWAY process environment — not the repo .env
+GATEWAY_ANTHROPIC_BASE_URL=https://api.anthropic.com
+GATEWAY_ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Or on your existing Claude subscription, with no API key at all** (ADR-0148):
+
+```bash
+GATEWAY_ANTHROPIC_BASE_URL=https://api.anthropic.com
+GATEWAY_ANTHROPIC_AUTH_MODE=subscription
+# GATEWAY_ANTHROPIC_API_KEY must be unset in this mode
+```
+
+The gateway then presents the subscription's OAuth bearer token, read from the
+credential store and cached until 120s before its expiry, then refreshed via
+`GATEWAY_ANTHROPIC_OAUTH_REFRESH_COMMAND`. Re-authenticating in Claude Code
+needs a gateway restart to take effect. Host only (the store is the login
+keychain), and the ledger marks those rows `billing_kind: flat_rate` so they are
+not summed as dollars owed. `gateway/README.md` has the full contract, the
+caveats, and the accounts-file form that runs subscription and key together for
+fallback.
+
+Restart the gateway. Note the factory cannot verify this pair for you — it
+lives in the gateway's environment, and `GATEWAY_CONTROL_PLANE_ENV_KEYS` keeps
+it out of the factory process. The gateway reports it: the accounts view shows
+the Anthropic account `configured` rather than `UNVERIFIED / CREDENTIAL_MISSING`.
+
+What the factory *does* check at boot is its own prerequisite —
+`HYDRAFLOW_GATEWAY_CONTROL_TOKEN`, without which no mint is attempted at all.
+`gateway_binding_gaps()` names it once, rather than leaving N spawn failures
+that each look like an outage.
+
+**Verify** the ledger fills with the Anthropic lane:
+
+```bash
+tail -50 .hydraflow/gateway/requests.jsonl \
+  | jq -r 'select(.upstream_provider=="anthropic")
+           | [.principal.id, .model_served, .cost_usd] | @tsv'
+```
+
+### What the dials miss — and what sweeps it up
+
+`_resolve_provider` returns a hardcoded `"claude"` for every `BaseRunner`
+subclass with no `PROVIDER_FIELD` — bug_reproducer, hitl, research, discover,
+shape, plan_reviewer, diagnostic — seven runners. (20 of the 24 direct
+subclasses declare none, but 13 of those are mixins composed into runners that
+do carry a dial.) No `*_provider` dial reaches them.
+
+They route anyway, via `repo_provider`. `base_runner` applies
+`apply_repo_provider` to every spawn, and it rewrites a spawn that is *still*
+`claude` — precisely what a dial-less runner resolves to. `repo_provider`
+defaults to `gateway`, so those roles transit the proxy in **host mode with no
+ratchet armed**. Precedence is `role dial > repo_provider > credit-failover`:
+the dials win where they exist, `repo_provider` sweeps up the rest.
+
+The exception is a `codex` command — `apply_repo_provider` leaves it untouched,
+because the gateway serves the Claude harness only.
+
+**What host mode does not buy you.** `gateway_fleet_ratchet_enabled` requires
+`execution_mode="docker"` because a host agent CLI reads provider
+OAuth/keychain state **even when its process environment is scrubbed**. That
+hazard is not specific to the ratchet: a `repo_provider` rewrite on the host
+gets you gateway *attribution* without the isolation that would make it proof
+of transit. Accepted deliberately — host is the shape the factory runs in, and
+a row that is right in the ordinary case beats no row — but do not read a
+ledger row as evidence the CLI could not have gone around it.
+
+### Rolling back
+
+Set the affected dial(s) back to `claude`. The literal remains on every dial
+precisely so this is one variable, and because `credit_failover` needs it — it
+reroutes a `claude` spawn to GLM when subscription credit is exhausted, and the
+air-gapped sandbox has no gateway to reach.
+
 ## Exception sensor — standing Bugsink up (ADR-0146)
 
 **There is no single `make start`.** The sensor is separate infrastructure on

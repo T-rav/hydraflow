@@ -13,15 +13,17 @@ import config as config_module
 from config import HydraFlowConfig, _parse_combo
 
 
-def test_wired_agentic_roles_have_provider_dial_defaulting_claude() -> None:
-    """Every role with a provider-honoring spawn carries a dial defaulting claude.
+def test_wired_agentic_roles_have_a_provider_dial() -> None:
+    """Every role with a provider-honoring spawn carries a dial (ADR-0147: gateway).
 
     Only roles with a dedicated spawn get a dial — sub-spawns inherit their
     outer runner's provider, so a dial for them would validate yet never route.
+    The subject is that the dial EXISTS and ships routed; the literal moved from
+    `claude` to `gateway` when ADR-0147 put every role's spend on the ledger.
     """
     cfg = HydraFlowConfig()
     for role in ("implementation", "review", "planner", "triage", "ac"):
-        assert getattr(cfg, f"{role}_provider") == "claude", role
+        assert getattr(cfg, f"{role}_provider") == "gateway", role
 
 
 def test_sub_spawn_roles_have_no_dead_provider_dial() -> None:
@@ -96,12 +98,22 @@ def test_allow_gateway_pr_unstick_with_claude_background_tool(
     assert cfg.background_tool == tool
 
 
-def test_adr_reviewer_is_explicit_gateway_canary_not_global_default() -> None:
-    direct = HydraFlowConfig()
-    canary = HydraFlowConfig(adr_review_provider="gateway")
-    assert direct.adr_review_provider == "claude"
-    assert canary.adr_review_provider == "gateway"
-    assert canary.implementation_provider == "claude"
+def test_the_adr_reviewer_canary_has_graduated_to_the_global_default() -> None:
+    """ADR-0147 graduated ADR-0141's bounded canary.
+
+    This asserted the opposite — that `gateway` on the ADR reviewer was an
+    explicit opt-in while everything else stayed direct. That WAS the canary's
+    whole point, and the canary succeeded: the default is now gateway
+    everywhere, so the distinction it recorded no longer exists. What still
+    holds, and is asserted here, is that a dial can be pointed back at the
+    direct harness explicitly.
+    """
+    default = HydraFlowConfig()
+    opted_out = HydraFlowConfig(adr_review_provider="claude")
+
+    assert default.adr_review_provider == "gateway"
+    assert default.implementation_provider == "gateway"
+    assert opted_out.adr_review_provider == "claude"
 
 
 def test_adr_reviewer_gateway_canary_env_is_not_ignored() -> None:
@@ -110,7 +122,12 @@ def test_adr_reviewer_gateway_canary_env_is_not_ignored() -> None:
     ):
         cfg = HydraFlowConfig()
     assert cfg.adr_review_provider == "gateway"
-    assert cfg.implementation_provider == "claude"
+    # Scoped, not global: a dial explicitly pointed elsewhere is unaffected by
+    # this role's env override. (Both default to gateway since ADR-0147, so the
+    # scoping is asserted against an explicit value rather than a default.)
+    assert HydraFlowConfig(
+        implementation_provider="claude"
+    ).implementation_provider == ("claude")
 
 
 def test_gateway_fleet_ratchet_promotes_untouched_roles_to_terminal_profile() -> None:
@@ -290,10 +307,13 @@ def test_maintenance_knob_routes_only_maintenance_roles() -> None:
     assert cfg.wiki_compilation_model == "glm-5.2"
     assert cfg.adr_review_provider == "zai"
     assert cfg.pr_unstick_provider == "zai"  # provider even though it has no model
-    # …work loops untouched (still Claude).
-    assert cfg.implementation_provider == "claude"
+    # …work loops untouched by the maintenance knob. Asserted as "not zai"
+    # rather than "== claude": ADR-0147 made the work-loop default `gateway`,
+    # and the property this test is named for is that the knob did not reach
+    # them, not what they happen to default to.
+    assert cfg.implementation_provider != "zai"
     assert cfg.model != "glm-5.2"
-    assert cfg.review_provider == "claude"
+    assert cfg.review_provider != "zai"
 
 
 def test_shared_maintenance_roles_resolve_maintenance_model() -> None:
@@ -333,8 +353,11 @@ def test_shared_maintenance_roles_reject_glm_on_direct_claude(
     field: str,
     stage: str,
 ) -> None:
+    # `maintenance_provider` is set EXPLICITLY: ADR-0147 defaults it to
+    # `gateway`, which legitimately serves glm, so the default no longer builds
+    # the direct-claude case this test is named for.
     with pytest.raises((ValueError, ValidationError), match=stage):
-        HydraFlowConfig(**{field: "glm-5.2"})
+        HydraFlowConfig(**{field: "glm-5.2", "maintenance_provider": "claude"})
 
 
 def test_terminal_fleet_rejects_host_codex_caretaker_spawns() -> None:

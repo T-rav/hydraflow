@@ -906,6 +906,25 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
 
         return member in HydraFlowConfig.model_fields
 
+    def _hydraflow_config() -> type:
+        from config import HydraFlowConfig  # noqa: PLC0415
+
+        return HydraFlowConfig
+
+    def _gateway_dial_drop_is_caught(member: str) -> bool:
+        """A dial dropped from the routing guard reddens its capable-set case.
+
+        `_DIALS` derives from `HydraFlowConfig`'s own `*_provider` fields, and
+        `test_the_capable_set_covers_every_dial` asserts that set equals
+        `GATEWAY_CAPABLE_PROVIDER_FIELDS`. A dial that stopped being a field
+        would drop out of both sides at once, so the equality is not what
+        catches it — `test_there_are_dials_to_guard`'s floor is, which is why
+        that floor tracks the real count rather than carrying slack.
+        """
+        from config import HydraFlowConfig  # noqa: PLC0415
+
+        return member in HydraFlowConfig.model_fields
+
     def _policy_purity_drop_is_caught(member: str) -> bool:
         classified = (
             set(policy_purity._PURE_SOURCES) | set(policy_purity._IO_SOURCES)  # noqa: SLF001
@@ -943,6 +962,26 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "that looks reasonable (#11853's shape). The drop is caught by "
                 "test_every_dial_is_either_generated_or_registered_as_a_gap, "
                 "which compares the maps against HydraFlowConfig's own fields."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_every_dial_routes_through_the_gateway._DIALS",
+            members=tuple(
+                sorted(
+                    n
+                    for n in _hydraflow_config().model_fields
+                    if n.endswith("_provider")
+                )
+            ),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_gateway_dial_drop_is_caught,
+            why=(
+                "ADR-0147's routing guard. Every case is parametrised over the "
+                "dials themselves, so a dial dropped from the sweep stops "
+                "having its gateway default asserted — and an unrouted dial "
+                "does not raise, it spends on a lane the ledger never sees, "
+                "which is the exact blindness ADR-0147 exists to end. The "
+                "floor in test_there_are_dials_to_guard catches the drop."
             ),
         ),
         GuardedEnumeration(

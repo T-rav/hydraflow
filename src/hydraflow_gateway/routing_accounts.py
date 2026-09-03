@@ -33,16 +33,23 @@ from __future__ import annotations
 
 import os
 import re
-from enum import StrEnum
 from fnmatch import fnmatchcase
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from hydraflow_gateway.models import (
     LEGACY_ACCOUNT_IDS,
+    AccountBillingKind,
     ProviderBinding,
     binding_for_model,
     legacy_account_id,
@@ -92,13 +99,6 @@ class AccountRegistryError(ValueError):
     """A server-owned account document could not be loaded. Never quotes a value."""
 
 
-class AccountBillingKind(StrEnum):
-    """Whether spend on this account is metered actual or a flat-rate notional."""
-
-    METERED = "metered"
-    FLAT_RATE = "flat_rate"
-
-
 class GatewayAccount(BaseModel):
     """One account's non-secret definition. Never carries credential material."""
 
@@ -109,7 +109,14 @@ class GatewayAccount(BaseModel):
     provider_binding: ProviderBinding
     base_url: str
     auth_style: UpstreamAuthStyle
-    credential_env: str = Field(min_length=1, max_length=128)
+    credential_env: str = Field(default="", max_length=128)
+    """The env var NAME holding this account's secret, or ``""`` for oauth.
+
+    Empty only under ``OAUTH_BEARER``, where the credential expires and is
+    resolved per request rather than read from the environment. Demanding a
+    variable name there would send an operator looking for a variable to set
+    that nothing reads — see :meth:`require_a_credential_source`.
+    """
     credential_kind: str = Field(default="api-key", max_length=64)
     billing_kind: AccountBillingKind = AccountBillingKind.METERED
     # ``None`` is "no declared ceiling", which is what every legacy account has
@@ -120,6 +127,30 @@ class GatewayAccount(BaseModel):
     allowed_models: tuple[str, ...] = ()
     """fnmatch patterns. Empty means this account serves its whole lane."""
     capabilities: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def require_a_credential_source(self) -> GatewayAccount:
+        """Every account names exactly one place its credential comes from.
+
+        A static-key account without ``credential_env`` would silently drop out
+        of the pool at load (``load_account_pool`` skips an account whose secret
+        is absent), so an operator's typo becomes a missing candidate rather
+        than an error. An oauth-bearer account WITH one is the same ambiguity
+        the upstream settings refuse: two sources declared, one used.
+        """
+        if self.auth_style is UpstreamAuthStyle.OAUTH_BEARER:
+            if self.credential_env:
+                raise ValueError(
+                    "an oauth-bearer account resolves its token per request, "
+                    "so it must not declare a credential_env"
+                )
+            return self
+        if not self.credential_env:
+            raise ValueError(
+                f"account {self.account_id!r} uses {self.auth_style.value!r} "
+                "and must declare a credential_env"
+            )
+        return self
 
     @field_validator("account_id")
     @classmethod
@@ -147,6 +178,11 @@ class GatewayAccount(BaseModel):
         exposure is not a pool anyone should be able to declare in a file.
         """
         candidate = value.strip()
+        if not candidate:
+            # An oauth-bearer account legitimately has none; the model
+            # validator below is what proves it is that case and not an
+            # omission on a static-key account.
+            return candidate
         if _CREDENTIAL_ENV_RE.fullmatch(candidate) is None:
             raise ValueError(
                 "credential_env must be an upper-case GATEWAY_ environment "
@@ -237,7 +273,21 @@ def compile_legacy_accounts(
                 if binding in upstreams
                 else _LEGACY_AUTH_STYLE[binding]
             ),
-            credential_env=LEGACY_CREDENTIAL_ENV[binding],
+            # Omitted when the compiled upstream is on the subscription lane:
+            # that credential is not in the environment, so naming a variable
+            # would point an operator at one nothing reads.
+            credential_env=(
+                ""
+                if binding in upstreams
+                and upstreams[binding].auth_style is UpstreamAuthStyle.OAUTH_BEARER
+                else LEGACY_CREDENTIAL_ENV[binding]
+            ),
+            billing_kind=(
+                AccountBillingKind.FLAT_RATE
+                if binding in upstreams
+                and upstreams[binding].auth_style is UpstreamAuthStyle.OAUTH_BEARER
+                else AccountBillingKind.METERED
+            ),
         )
         for binding in ProviderBinding
     ]
@@ -384,6 +434,17 @@ class AccountPool:
         """Whether this process resolved a credential for *account_id*."""
         return account_id.strip().lower() in self._upstreams
 
+    @property
+    def upstreams(self) -> tuple[UpstreamSettings, ...]:
+        """Every configured account's upstream.
+
+        Exposed so the composition root can ask "does any account need a
+        subscription credential?" — a question it previously asked of the
+        env-level settings alone, which meant an oauth account declared in the
+        accounts file got no credential source and failed every request.
+        """
+        return tuple(self._upstreams.values())
+
     def upstream(self, account_id: str) -> UpstreamSettings | None:
         """Return the origin and credential one account is reached with."""
         return self._upstreams.get(account_id.strip().lower())
@@ -422,6 +483,18 @@ def load_account_pool(
         for binding, upstream in settings.upstreams.items()
     }
     for account in declared:
+        if account.auth_style is UpstreamAuthStyle.OAUTH_BEARER:
+            # A subscription account's token expires, so there is no secret to
+            # read from the environment: the proxy resolves one per request.
+            # Declaring it as an account rather than as the single env-level
+            # upstream is what lets bounded fallback hop OFF it — sub first,
+            # then a metered key, then z.ai.
+            upstreams[account.account_id] = UpstreamSettings(
+                base_url=account.base_url,
+                api_key=None,
+                auth_style=account.auth_style,
+            )
+            continue
         secret = env.get(account.credential_env, "").strip()
         if not secret:
             continue
