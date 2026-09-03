@@ -158,7 +158,12 @@ def atomic_write(path: Path, data: str) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
-        with contextlib.suppress(OSError):
+        # Best-effort cleanup must never REPLACE the exception that brought us
+        # here (#6630). `suppress(OSError)` let a non-OSError from unlink
+        # propagate out of this handler, so the caller saw the cleanup failure
+        # and the real write error was lost. `Exception` covers that while
+        # still letting KeyboardInterrupt/SystemExit through.
+        with contextlib.suppress(Exception):
             os.unlink(tmp)
         raise
 

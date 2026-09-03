@@ -51,7 +51,6 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 class TestIssue6602SilentExceptPass:
     """Corrupt input must not produce metrics indistinguishable from healthy."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6602 — fix not yet landed", strict=False)
     def test_corrupt_scores_json_not_silently_zero(self, tmp_path: Path) -> None:
         """Corrupt item_scores.json should NOT produce avg_memory_score == 0.0.
 
@@ -82,7 +81,6 @@ class TestIssue6602SilentExceptPass:
             "expected None to signal computation failure, got silent 0.0 instead"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6602 — fix not yet landed", strict=False)
     def test_corrupt_scores_json_stale_count_not_silently_zero(
         self, tmp_path: Path
     ) -> None:
@@ -107,7 +105,6 @@ class TestIssue6602SilentExceptPass:
             "callers cannot distinguish this from 'healthy zero'"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6602 — fix not yet landed", strict=False)
     def test_corrupt_failure_lines_mask_hitl_escalation(self, tmp_path: Path) -> None:
         """Corrupt lines in harness_failures.jsonl silently zero out HITL counts.
 

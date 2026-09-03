@@ -6,6 +6,7 @@
 graph LR
   subgraph builder
     agentrunner["AgentRunner<br/><i>runner</i>"]
+    agentskill["AgentSkill<br/><i>policy</i>"]
     reportissueloop["ReportIssueLoop<br/><i>loop</i>"]
     reviewverdict["ReviewVerdict<br/><i>value_object</i>"]
     task["Task<br/><i>entity</i>"]
@@ -137,6 +138,8 @@ graph LR
   agentrunner -->|depends_on| subprocessrunner
   agentrunner -->|depends_on| eventtype
   agentrunner -->|depends_on| hydraflowevent
+  agentskill -->|depends_on| agentrunner
+  agentskill -->|depends_on| corpuslearningloop
   basebackgroundloop -->|depends_on| eventbus
   basebackgroundloop -->|depends_on| hydraflowconfig
   basebackgroundloop -->|depends_on| fitnesscontext

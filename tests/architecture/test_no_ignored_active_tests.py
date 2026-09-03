@@ -284,7 +284,12 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
 #: isolation, and both loader warnings carry exc_info. All 8 pins are live.
-DEFERRED_XFAILS_MAX = 96
+#: 104 -> 98 when the health-monitor trio (#6602/#6626/#6630) was fixed:
+#: `compute_trend_metrics` now returns None rather than a nominal 0.0 for an
+#: unparseable item_scores.json, counts only the failure lines it parsed, and
+#: warns on an unreadable outcomes trail; `file_util.atomic_write` no longer
+#: lets a cleanup error replace the write error. All six pins are live tests.
+DEFERRED_XFAILS_MAX = 90
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -302,16 +307,10 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_index_json_write_failure_does_not_crash_ingest",
         "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_index_md_write_failure_does_not_crash_ingest",
         "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_topic_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6602.py::TestIssue6602SilentExceptPass.test_corrupt_failure_lines_mask_hitl_escalation",
-        "tests/regressions/regression_issue_6602.py::TestIssue6602SilentExceptPass.test_corrupt_scores_json_not_silently_zero",
-        "tests/regressions/regression_issue_6602.py::TestIssue6602SilentExceptPass.test_corrupt_scores_json_stale_count_not_silently_zero",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_data_written_before_fsync_failure_is_preserved",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_caught_not_propagated",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_logged",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_write_oserror_is_caught_not_propagated",
-        "tests/regressions/regression_issue_6626.py::TestIssue6626SilentPassOnErrors.test_outcomes_oserror_logs_warning",
-        "tests/regressions/regression_issue_6630.py::TestIssue6630AuthenticationErrorNotSuppressed.test_authentication_error_not_logged_as_transient",
-        "tests/regressions/regression_issue_6630.py::TestIssue6630DecisionFileCleanup.test_cleanup_suppresses_all_exceptions_on_unlink",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
