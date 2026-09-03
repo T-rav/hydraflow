@@ -25,10 +25,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from subprocess_util import AuthenticationError, CreditExhaustedError
+from exception_classify import INFRA_FATAL_EXCEPTIONS
 
-_FATALS = [CreditExhaustedError("budget exhausted"), AuthenticationError("bad creds")]
-_IDS = [type(e).__name__ for e in _FATALS]
+# Parametrised over the real set BY REFERENCE, not a hand-copied list
+# (docs/standards/parametrised_guards). A new member of
+# INFRA_FATAL_EXCEPTIONS extends these tests automatically; a copy would have
+# left the new one unexercised while still looking covered.
+_IDS = [t.__name__ for t in INFRA_FATAL_EXCEPTIONS]
 
 
 def _health_loop(tmp_path: Path):
@@ -43,8 +46,11 @@ def _health_loop(tmp_path: Path):
     return loop
 
 
-@pytest.mark.parametrize("exc", _FATALS, ids=_IDS)
-def test_health_monitor_lets_the_fatal_out(tmp_path: Path, exc: Exception) -> None:
+@pytest.mark.parametrize("exc_type", INFRA_FATAL_EXCEPTIONS, ids=_IDS)
+def test_health_monitor_lets_the_fatal_out(
+    tmp_path: Path, exc_type: type[BaseException]
+) -> None:
+    exc = exc_type("simulated infra failure")
     loop = _health_loop(tmp_path)
     with (
         patch("review_insights.verify_proposals", side_effect=exc),
@@ -91,13 +97,17 @@ def _review_result():
     )
 
 
-@pytest.mark.parametrize("exc", _FATALS, ids=_IDS)
-async def test_review_phase_lets_the_fatal_out(tmp_path: Path, exc: Exception) -> None:
-    """`except (RuntimeError, OSError)` must not absorb a fatal subclass."""
-    assert isinstance(exc, RuntimeError), (
-        "this test only means something while the fatal types are "
-        "RuntimeError subclasses — that is why the clause caught them"
-    )
+@pytest.mark.parametrize("exc_type", INFRA_FATAL_EXCEPTIONS, ids=_IDS)
+async def test_review_phase_lets_the_fatal_out(
+    tmp_path: Path, exc_type: type[BaseException]
+) -> None:
+    """`except (RuntimeError, OSError)` must not absorb a fatal type.
+
+    MemoryError is not a RuntimeError and was never caught by that clause, so
+    it passes trivially here — kept in the sweep anyway so the test tracks the
+    constant rather than the subset that happens to be affected today.
+    """
+    exc = exc_type("simulated infra failure")
     phase = _review_phase(tmp_path)
     phase._insights.append_review.side_effect = exc
 
