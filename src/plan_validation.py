@@ -21,6 +21,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.plan_validation")
 
 # Pattern for detecting deferred testing strategy.
+#: Cap on a derived rejection-class key, so a malformed error cannot write an
+#: unbounded ledger stage name.
+_REJECTION_CLASS_MAX = 60
+
+
+def rejection_class(error: str) -> str:
+    """The gate an error came from, for per-class counting (#11822).
+
+    Every gate in this module emits ``"<Name> gate: <detail>"``, so the text
+    before the first colon is the class. Derived rather than matched against a
+    hardcoded list of the five current gates: a sixth gate added tomorrow gets
+    counted without anyone remembering to register it, which is the failure
+    mode a literal list would have.
+
+    An error with no colon is its own class, truncated — unclassifiable is a
+    distinct bucket, not a shared one, so unrelated malformed errors cannot
+    accumulate into a false threshold breach.
+    """
+    head = error.split(":", 1)[0].strip()
+    return (head or error.strip())[:_REJECTION_CLASS_MAX]
+
+
 _TEST_LATER_RE = re.compile(
     r"\b(later|tbd|todo|to\s+be\s+determined|will\s+be\s+added\s+later)\b",
     re.IGNORECASE,

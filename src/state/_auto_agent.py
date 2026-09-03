@@ -30,27 +30,48 @@ class AutoAgentStateMixin:
     #: wipes can never see the second one.
     PLAN_VALIDATION_STAGE = "plan_validation"
 
-    def get_plan_validation_rejections(self, issue: int) -> int:
-        """How many planning attempts this issue has lost to validation."""
-        cl = self._data.convergence_ledgers.get(str(issue))
-        return cl.get_attempts(self.PLAN_VALIDATION_STAGE) if cl else 0
+    @staticmethod
+    def plan_validation_stage_for(rejection_class: str) -> str:
+        """Ledger stage key for one rejection class (#11822).
 
-    def bump_plan_validation_rejections(self, issue: int) -> int:
-        """Record one plan-validation rejection; returns the new total."""
+        Counting per class, not in total, is the operator ruling: three
+        refusals of the SAME gate is an issue the planner cannot shrink, while
+        three different gates once each is an issue with three fixable faults.
+        Routing the second to decomposition would split work that only needed
+        correcting.
+        """
+        return f"{AutoAgentStateMixin.PLAN_VALIDATION_STAGE}:{rejection_class}"
+
+    def get_plan_validation_rejections(self, issue: int, rejection_class: str) -> int:
+        """How many times this issue has lost to *rejection_class*."""
+        cl = self._data.convergence_ledgers.get(str(issue))
+        if cl is None:
+            return 0
+        return cl.get_attempts(self.plan_validation_stage_for(rejection_class))
+
+    def bump_plan_validation_rejection(self, issue: int, rejection_class: str) -> int:
+        """Record one rejection of *rejection_class*; returns that class's total."""
         key = str(issue)
         cl = self._data.convergence_ledgers.get(key)
         if cl is None:
             cl = ConvergenceLedger(issue_number=issue)
             self._data.convergence_ledgers[key] = cl
-        n = cl.increment_attempts(self.PLAN_VALIDATION_STAGE)
+        n = cl.increment_attempts(self.plan_validation_stage_for(rejection_class))
         self.save()
         return n
 
     def clear_plan_validation_rejections(self, issue: int) -> None:
-        """Reset after a decomposition or a successful plan."""
+        """Reset every class after a decomposition or a plan that lands."""
         cl = self._data.convergence_ledgers.get(str(issue))
-        if cl is not None and self.PLAN_VALIDATION_STAGE in cl.stage_state:
-            cl.stage_state[self.PLAN_VALIDATION_STAGE].attempts = 0
+        if cl is None:
+            return
+        prefix = f"{self.PLAN_VALIDATION_STAGE}:"
+        touched = False
+        for stage in list(cl.stage_state):
+            if stage.startswith(prefix):
+                cl.stage_state[stage].attempts = 0
+                touched = True
+        if touched:
             self.save()
 
     def get_auto_agent_attempts(self, issue: int) -> int:
