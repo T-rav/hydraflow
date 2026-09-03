@@ -219,16 +219,12 @@ class HarnessInsightStore:
         archive and downstream retry-context builders.
         """
         self._enrich_record_hints(record)
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
+        from file_util import append_jsonl  # noqa: PLC0415
 
-            append_jsonl(self._failures_path, record.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append failure to %s",
-                self._failures_path,
-                exc_info=True,
-            )
+        # No local guard: `append_jsonl` is best-effort by contract (#6623) and
+        # logs its own I/O failures. Keeping an `except OSError` here would be
+        # dead code that reads like live protection.
+        append_jsonl(self._failures_path, record.model_dump_json())
 
         if self._obs is not None:
             self._obs.breadcrumb(

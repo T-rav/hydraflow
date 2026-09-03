@@ -222,9 +222,12 @@ def append_jsonl(path: Path, data: str) -> None:
     detaches the suppression from the thing it justifies. An earlier version
     of the #6623 fix did that, and #9143 caught it.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _drop_torn_tail(path)
     try:
+        # The mkdir is inside the guard too: a read-only parent is the same
+        # class of failure as a full disk, and a helper that swallows one
+        # while raising the other gives callers no usable contract.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _drop_torn_tail(path)
         with open(path, "a", encoding="utf-8") as f:
             # scrub_secrets() is the ADR-0085 redaction sanitizer for this
             # durable write path: it regex-redacts every credential-shaped
