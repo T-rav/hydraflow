@@ -11,8 +11,6 @@ canonical test in test_state_persistence.py is updated to include the field.
 
 from __future__ import annotations
 
-import pytest
-
 import ast
 from pathlib import Path
 
@@ -44,7 +42,6 @@ class TestRouteBackCountsDefault:
 class TestDefaultsTestCompleteness:
     """The canonical defaults test must assert every dict/list field on StateData."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6975 — fix not yet landed", strict=False)
     def test_route_back_counts_asserted_in_canonical_defaults_test(self) -> None:
         """Fail until test_state_persistence.py checks route_back_counts."""
         test_file = Path(__file__).resolve().parent.parent / "test_state_persistence.py"

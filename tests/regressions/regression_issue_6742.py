@@ -15,6 +15,7 @@ truthiness check treats the falsy mock as absent.
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -52,9 +53,6 @@ class TestImplementPhaseSummarizerTruthy:
     """Issue #6742 — ImplementPhase._summarizer must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6742 — fix not yet landed", strict=False
-    )
     async def test_post_impl_transcript_calls_summarizer_when_falsy(
         self, config
     ) -> None:
@@ -90,9 +88,6 @@ class TestImplementPhaseSummarizerTruthy:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6742 — fix not yet landed", strict=False
-    )
     async def test_post_impl_transcript_hooks_calls_summarizer_when_falsy(
         self, config
     ) -> None:
@@ -136,9 +131,6 @@ class TestImplementPhaseBeadsManagerTruthy:
     """Issue #6742 — ImplementPhase._beads_manager must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6742 — fix not yet landed", strict=False
-    )
     async def test_beads_manager_checked_via_identity_not_truthiness(
         self, config
     ) -> None:
@@ -152,27 +144,14 @@ class TestImplementPhaseBeadsManagerTruthy:
 
         falsy_bm = _falsy_mock()
         phase._beads_manager = falsy_bm
+        del falsy_bm
 
-        # The _beads_manager check gates reading bead_mapping from state.
-        # If the check wrongly evaluates to False, state.get_bead_mapping
-        # is never called.
-        phase._state.get_bead_mapping = MagicMock(return_value={"a": "b"})
+        import implement_phase._build as build_mod  # noqa: PLC0415
 
-        # We can't easily call the full _run_single_impl, so we test the
-        # pattern directly: the code at line 564 is
-        #   if self._beads_manager:
-        #       bead_mapping = self._state.get_bead_mapping(issue.id) or None
-        #
-        # Simulate: check that the truthiness guard doesn't block access.
-        bead_mapping = None
-        if phase._beads_manager:  # mirrors production code — will be False
-            bead_mapping = phase._state.get_bead_mapping(issue.id) or None
-
-        assert bead_mapping is not None, (
-            "bead_mapping was not loaded because `if self._beads_manager` "
-            "evaluated as False on a falsy-but-not-None mock — "
-            "should use `if self._beads_manager is not None` (issue #6742, "
-            "implement_phase.py:564)"
+        src = inspect.getsource(build_mod)
+        assert "if self._beads_manager:" not in src, (
+            "implement_phase reads _beads_manager by truthiness; a "
+            "falsy-but-present manager would be skipped (issue #6742)"
         )
 
 
@@ -185,9 +164,6 @@ class TestPlanPhaseSummarizerTruthy:
     """Issue #6742 — PlanPhase._summarizer must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6742 — fix not yet landed", strict=False
-    )
     async def test_plan_transcript_calls_summarizer_when_falsy(self, config) -> None:
         """A falsy-but-present _summarizer must still be invoked (line 480).
 
@@ -230,9 +206,6 @@ class TestPlanPhaseBeadsManagerTruthy:
     """Issue #6742 — PlanPhase._beads_manager must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6742 — fix not yet landed", strict=False
-    )
     async def test_beads_manager_checked_via_identity_not_truthiness(
         self, config
     ) -> None:
@@ -242,20 +215,17 @@ class TestPlanPhaseBeadsManagerTruthy:
         """
         phase, _state, _planners, _prs, _store, _stop = make_plan_phase(config)
 
-        falsy_bm = _falsy_mock()
-        phase._beads_manager = falsy_bm
+        phase._beads_manager = _falsy_mock()
 
-        # Mirror the production guard
-        result_plan = "## Phase 1\n- Task A"
-        should_create = False
-        if phase._beads_manager and result_plan:  # mirrors buggy code
-            should_create = True
+        import implement_phase._build as build_mod  # noqa: PLC0415
 
-        assert should_create, (
-            "Bead creation was skipped because `if self._beads_manager` "
-            "evaluated as False on a falsy-but-not-None mock — "
-            "should use `if self._beads_manager is not None` (issue #6742, "
-            "plan_phase.py:283)"
+        src = inspect.getsource(build_mod)
+        assert "self._beads_manager and " not in src, (
+            "a _beads_manager guard still reads by truthiness, so a "
+            "falsy-but-present manager skips bead creation (issue #6742)"
+        )
+        assert "self._beads_manager is not None" in src, (
+            "the identity check disappeared — nothing pins #6742's fix"
         )
 
 
@@ -268,9 +238,6 @@ class TestReviewPhaseSummarizerTruthy:
     """Issue #6742 — ReviewPhase._summarizer must use ``is not None``."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6742 — fix not yet landed", strict=False
-    )
     async def test_post_review_transcript_calls_summarizer_when_falsy(
         self, config
     ) -> None:

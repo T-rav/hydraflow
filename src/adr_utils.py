@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from pathlib import Path
 
 __all__ = [
@@ -34,6 +35,14 @@ _ADR_REQUIRED_HEADINGS = ("## Context", "## Decision", "## Consequences")
 # Module-level set tracking ADR numbers already handed out in this process,
 # so concurrent workers each get a unique number even before their files land.
 _assigned_adr_numbers: set[int] = set()
+
+#: Serialises the read-compute-write in :func:`next_adr_number` (#6694). The
+#: docstring there already promised callers "will never return the same
+#: value", but the scan, the max and the insert were three separate steps —
+#: two threads could both read the same highest number and both return it,
+#: which is how two ADRs ended up claiming one number. The promise was in the
+#: prose before it was in the code.
+_adr_number_lock = threading.Lock()
 
 ADR_FILE_RE = re.compile(r"^(\d{4})-.*\.md$")
 
@@ -156,6 +165,12 @@ def next_adr_number(
     persistent dotfile so subsequent calls — even after restart — will
     never return the same value.
     """
+    with _adr_number_lock:
+        return _next_adr_number_locked(adr_dir, primary_adr_dir)
+
+
+def _next_adr_number_locked(adr_dir: Path, primary_adr_dir: Path | None) -> int:
+    """Body of :func:`next_adr_number`; callers must hold the lock."""
     # Merge persisted numbers from both directories into the in-memory set
     for d in (adr_dir, primary_adr_dir):
         if d is not None and d.is_dir():

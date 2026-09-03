@@ -1,5 +1,12 @@
 """Regression test for issue #6694.
 
+Why this has no MockWorld scenario: the race needs a barrier placed between
+computing the number and recording it. Eight threads racing freely returned
+eight DISTINCT numbers on every run with the lock removed — the critical
+section is short and the GIL serialises most of it — so a scenario, which
+arranges loops rather than instructions, cannot reach the window at all.
+
+
 ``adr_utils._assigned_adr_numbers`` is a module-level ``set[int]`` with no
 lock.  Two concurrent callers of ``next_adr_number`` can both read ``highest``
 before either writes to the set, causing both to return the **same** ADR
@@ -21,8 +28,7 @@ Expected: FAIL (both threads return the same number) until a lock is added.
 
 from __future__ import annotations
 
-import pytest
-
+import contextlib
 import sys
 import threading
 from pathlib import Path
@@ -45,40 +51,43 @@ class BarrierSet(set):
         self._barrier = barrier
 
     def add(self, value: object) -> None:
-        # Block until both threads reach this point.
-        self._barrier.wait()
+        # Block until both threads reach this point — between computing
+        # ``number`` and recording it, which is the only window where both
+        # can still hold the same value.
+        #
+        # A timeout is EXPECTED once the fix lands: serialising the
+        # read-compute-write means the second thread cannot reach this call
+        # while the first is waiting, so the first times out and proceeds
+        # alone. Raising there killed the test with BrokenBarrierError
+        # instead of letting it report on the ADR numbers, which is what it
+        # is actually about.
+        with contextlib.suppress(threading.BrokenBarrierError):
+            self._barrier.wait()
         super().add(value)
 
 
 class TestIssue6694ConcurrentAdrNumberRace:
     """next_adr_number must hand out unique numbers under concurrency."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6694 — fix not yet landed", strict=False)
     def test_two_concurrent_callers_get_different_numbers(self, tmp_path: Path) -> None:
-        """Simulate two coroutines calling next_adr_number at the same time.
+        """Concurrent callers must never receive the same ADR number.
 
-        BUG: Without a lock, both threads read the same ``highest`` value
-        from ``_assigned_adr_numbers`` and both compute ``highest + 1``,
-        returning the same ADR number.
-
-        Strategy: replace ``_assigned_adr_numbers`` with a ``BarrierSet``
-        whose ``add()`` blocks at a 2-party barrier.  This guarantees
-        Thread A's ``add`` hasn't executed when Thread B reads ``highest``,
-        so both threads see the same max and produce a duplicate.
+        The interleaving is FORCED. Two threads racing freely do not hit this
+        window — measured: eight threads with the lock removed still produced
+        eight distinct numbers on every run, because the critical section is
+        short and the GIL serialises most of it. Moving the barrier to the
+        directory scan did not help either; by then the threads had already
+        re-serialised. Only a barrier BETWEEN computing the number and
+        recording it holds both threads on the same value, which is what
+        ``BarrierSet.add`` does.
         """
         adr_dir = tmp_path / "docs" / "adr"
         adr_dir.mkdir(parents=True)
-        # Seed with one existing ADR so highest starts at 1.
         (adr_dir / "0001-initial-decision.md").write_text("# Initial\n")
 
-        # Snapshot and clear module-level state so the test is hermetic.
         saved_numbers = adr_utils._assigned_adr_numbers.copy()
-
-        barrier = threading.Barrier(2, timeout=10)
-        racy_set: set[int] = BarrierSet(barrier=barrier)
-
-        # Swap in the barrier-instrumented set.
-        adr_utils._assigned_adr_numbers = racy_set
+        barrier = threading.Barrier(2, timeout=2)
+        adr_utils._assigned_adr_numbers = BarrierSet(barrier=barrier)
 
         results: list[int | None] = [None, None]
         errors: list[BaseException | None] = [None, None]
@@ -86,32 +95,28 @@ class TestIssue6694ConcurrentAdrNumberRace:
         def worker(index: int) -> None:
             try:
                 results[index] = adr_utils.next_adr_number(adr_dir)
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001
                 errors[index] = exc
 
         try:
-            t1 = threading.Thread(target=worker, args=(0,))
-            t2 = threading.Thread(target=worker, args=(1,))
-            t1.start()
-            t2.start()
-            t1.join(timeout=15)
-            t2.join(timeout=15)
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=15)
         finally:
-            # Restore original module state.
             adr_utils._assigned_adr_numbers = set(saved_numbers)
 
-        # Propagate thread errors.
         for i, err in enumerate(errors):
             if err is not None:
                 raise AssertionError(f"Worker {i} raised {err!r}") from err
-
-        assert results[0] is not None and results[1] is not None, (
-            f"Workers did not complete: results={results}"
+        assert all(r is not None for r in results), (
+            f"workers did not complete: {results}"
         )
         assert results[0] != results[1], (
-            f"DATA RACE: both concurrent callers got ADR number {results[0]}.  "
-            f"_assigned_adr_numbers has no lock, so two readers both saw the "
-            f"same highest value and returned identical numbers (issue #6694)."
+            f"DATA RACE: both concurrent callers got ADR number {results[0]}. "
+            "The read-compute-write in next_adr_number must be serialised "
+            "(issue #6694)."
         )
 
     def test_sequential_callers_get_different_numbers(self, tmp_path: Path) -> None:

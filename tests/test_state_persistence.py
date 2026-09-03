@@ -227,6 +227,19 @@ class TestStateDataModel:
     ) -> None:
         """StateData() should have correct zero/empty defaults."""
         data = StateData()
+        # Derived from the model, not listed (#6975). This asserted a
+        # hand-maintained subset — 13 of 131 fields — so every new collection
+        # field arrived unchecked and the list drifted by construction;
+        # `route_back_counts` is simply the one that got noticed. All 96
+        # collection-typed fields default empty, so the rule can be stated
+        # once over the set the model actually has, by reference.
+        for _name in StateData.model_fields:
+            _value = getattr(data, _name)
+            if isinstance(_value, dict | list | set):
+                assert not _value, (
+                    f"StateData.{_name} does not default empty: {_value!r}"
+                )
+
         assert data.processed_issues == {}
         assert data.active_workspaces == {}
         assert data.active_branches == {}

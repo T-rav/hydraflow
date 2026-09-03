@@ -296,15 +296,19 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
 #: timeout now raises the house `SubprocessTimeoutError`, and container logs
 #: come from one demuxed call instead of two round-trips.
+#: 38 -> 27 when the convention-drift family
+#: (#6668/#6694/#6733/#6742/#6975) was fixed: the ADR allocator is serialised,
+#: workspace_gc_interval answers to its own name, Optional deps are checked by
+#: identity, and StateData's empty-default rule is derived from the model.
 #: 64 -> 57 when the retro/GC family (#6681/#6690/#6782/#6961) was
 #: fixed: a code defect in the collector propagates, corrupt queue lines and
 #: manifests log where production can see them, and the branch reaper checks
 #: for an open PR and stops force-deleting.
+DEFERRED_XFAILS_MAX = 9
 #: 64 -> 53 when the loop/fetch family (#6653/#6709/#6728/#6735/#6862)
 #: was fixed: a repo without a slash says so, the REST fallback and the triage
 #: park no longer absorb the fatal signals, and one bad bot PR stops costing
 #: the rest of the queue its tick.
-DEFERRED_XFAILS_MAX = 20
 #: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
@@ -321,17 +325,7 @@ DEFERRED_XFAILS_MAX = 20
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
         "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
-        "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
         "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
-        "tests/regressions/regression_issue_6694.py::TestIssue6694ConcurrentAdrNumberRace.test_two_concurrent_callers_get_different_numbers",
-        "tests/regressions/regression_issue_6733.py::TestCanonicalEnvVarApplied.test_canonical_env_var_overrides_field",
-        "tests/regressions/regression_issue_6733.py::TestEnvVarNamingConvention.test_workspace_gc_interval_env_key_matches_field_name",
-        "tests/regressions/regression_issue_6742.py::TestImplementPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
-        "tests/regressions/regression_issue_6742.py::TestImplementPhaseSummarizerTruthy.test_post_impl_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6742.py::TestImplementPhaseSummarizerTruthy.test_post_impl_transcript_hooks_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6742.py::TestPlanPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
-        "tests/regressions/regression_issue_6742.py::TestPlanPhaseSummarizerTruthy.test_plan_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6742.py::TestReviewPhaseSummarizerTruthy.test_post_review_transcript_calls_summarizer_when_falsy",
         "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
@@ -339,7 +333,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",
-        "tests/regressions/regression_issue_6975.py::TestDefaultsTestCompleteness.test_route_back_counts_asserted_in_canonical_defaults_test",
     }
 )
 
