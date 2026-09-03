@@ -150,6 +150,20 @@ class TestOnlyBugsBecomeIssues:
 
         assert sentry_adapter._bugs_only(event, {}) is not None
 
+    def test_the_filter_is_actually_installed_on_the_client(
+        self, _sdk: MagicMock
+    ) -> None:
+        """The wiring, not just the function.
+
+        Every other test in this class calls `_bugs_only` directly, so
+        deleting the `before_send=` kwarg leaves them all green while
+        production resumes promoting every exception-less `logger.error` into
+        an issue -- the flood rules 9 and 16 exist to prevent.
+        """
+        init_sentry_sdk("https://k@example.invalid/1", component="server")
+
+        assert _sdk.init.call_args.kwargs["before_send"] is sentry_adapter._bugs_only
+
     def test_an_explicit_capture_message_is_kept(self) -> None:
         """Decoy: the filter targets INCIDENTAL promotion, not every message.
 
@@ -187,11 +201,18 @@ class TestTheEntrypointsInstallIt:
             installed.append(component)
 
         monkeypatch.setattr(sentry_adapter, "install_process_sensor", _record)
-        monkeypatch.setattr(gateway_main.uvicorn, "run", lambda *a, **k: None)
+
+        def _serve(*_a: object, **_k: object) -> None:
+            installed.append("serve")
+
+        monkeypatch.setattr(gateway_main.uvicorn, "run", _serve)
 
         gateway_main.main()
 
-        assert installed == ["gateway"]
+        # Ordering, not just membership: `uvicorn.run` blocks until shutdown,
+        # so an install placed after it never runs in production while a test
+        # that only checked membership stayed green.
+        assert installed == ["gateway", "serve"]
 
     def test_the_server_installs_the_sensor_before_loading_config(
         self, monkeypatch: pytest.MonkeyPatch

@@ -8,7 +8,7 @@ reach, because the backend is configuration.
 
 This is the outbound half of the exception sensor
 (``docs/standards/exception_sensor/``). The inbound half — errors becoming
-GitHub issues the pipeline can triage — is ``dashboard_routes/_bugsink_routes``,
+GitHub issues the pipeline can triage — is ``dashboard_routes/_issue_intake_routes``,
 which receives Bugsink's custom webhook. Bugsink has no tracker integration of
 its own; an earlier draft of ADR-0146 said it did, and was wrong.
 

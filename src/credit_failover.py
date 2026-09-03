@@ -149,11 +149,18 @@ def apply_credit_failover(
 ) -> tuple[str, list[str]]:
     """Reroute a Claude work spawn to zai/GLM while failover is active.
 
-    Returns ``(provider, cmd)`` unchanged unless ALL hold: the spawn is on
-    ``claude``, ``credit_failover_enabled``, failover is currently active, and a
-    ``ZAI_API_KEY`` is present. When rerouting, the ``--model`` in *cmd* is
-    rewritten to ``config.credit_failover_model`` (the zai backend requires a
-    glm-* model). The input *cmd* is never mutated.
+    Returns ``(provider, cmd)`` unchanged unless ALL hold: the spawn is on the
+    Anthropic lane (``ANTHROPIC_LANE_PROVIDERS`` — ``claude`` or, since
+    ADR-0147, ``gateway``), ``credit_failover_enabled``, and failover is
+    currently active. A direct ``claude`` spawn additionally requires a local
+    ``ZAI_API_KEY``, because it must address z.ai itself; a ``gateway`` spawn
+    does NOT, because the proxy mints a z.ai-bound virtual key from the
+    rewritten model and the worker never holds a real credential.
+
+    The two lanes resolve differently: ``claude`` becomes ``zai``, while
+    ``gateway`` keeps its transport and moves only its model. Either way the
+    ``--model`` in *cmd* is rewritten to ``config.credit_failover_model`` (the
+    zai backend requires a glm-* model). The input *cmd* is never mutated.
     """
     if provider not in ANTHROPIC_LANE_PROVIDERS:
         return provider, cmd

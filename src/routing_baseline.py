@@ -25,10 +25,11 @@ change the decision's *source* without changing its route, which is a behaviour
 change dressed as a no-op. The default is read from the dial itself, so this
 holds across ADR-0147's move from `claude` to `gateway` and any move after it.
 
-**The dials this cannot express are a list, not a silence.** Six of the fourteen
-have no expressible join today, for three different reasons, and each is
-recorded in `UNGENERATED_DIALS` with which one. A generator that quietly skipped
-them would look complete and migrate two thirds of the fleet.
+**The dials this cannot express are a list, not a silence.** Two of the fourteen
+have no expressible join today — `maintenance_provider` and `repo_provider`,
+both because they are not role rules — and each is recorded in
+`UNGENERATED_DIALS` with its reason. A generator that quietly skipped them
+would look complete while leaving the two dials with the widest reach unmoved.
 """
 
 from __future__ import annotations

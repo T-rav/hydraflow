@@ -7651,14 +7651,17 @@ def _validate_governed_repo_has_no_ungoverned_face(config: HydraFlowConfig) -> N
     # hardcoded "claude" for them — BugReproducer, DiagnosticRunner,
     # DiscoverRunner, HITLRunner, PlanReviewer, ResearchRunner, ShapeRunner.
     # Only AgentRunner, PlannerRunner, ReviewRunner and TriageRunner carry one.
-    # No `*_provider` setting can move the other seven;
-    # the only thing that routes them to the gateway is the fleet ratchet,
-    # which rewrites a still-claude spawn to "gateway" in `base_runner`.
+    # No ROLE dial can move the other seven. `repo_provider` can, and since
+    # ADR-0147 defaults it to "gateway" it does — `apply_repo_provider`
+    # rewrites a still-claude spawn, which is exactly what those seven
+    # resolve to. So they are routed even with the ratchet off.
     #
-    # So a canary repo with every dial on "gateway" and the ratchet off still
-    # sends seven runners straight to Anthropic, and this gate passed it. That
-    # is the exact shape the gate exists to refuse — an ungoverned face that no
-    # configuration names.
+    # What the ratchet still buys is the only thing that makes the routing
+    # PROVABLE: it requires `execution_mode="docker"`, and on the host an
+    # agent CLI reads provider OAuth/keychain state even with a scrubbed
+    # environment. A canary without it records gateway spawns that could have
+    # gone around the gateway — an ungoverned face wearing a governed label,
+    # which is the shape this gate exists to refuse.
     if not getattr(config, "gateway_fleet_ratchet_enabled", False):
         msg = (
             f"{repo} is the gateway enforcement canary, so it needs "

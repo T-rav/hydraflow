@@ -63,4 +63,4 @@ rules:
     enforced_by: tests/test_process_sentry_sensor.py::TestEventsCarryTheirOrigin::test_the_component_is_tagged_on_the_global_scope
   - id: incidental-log-promotion-is-not-a-bug-report
     claim: An error-level log line carrying no exception is dropped rather than filed, while an explicit capture is kept
-    enforced_by: tests/test_process_sentry_sensor.py::TestOnlyBugsBecomeIssues::test_a_logged_line_with_no_exception_is_dropped
+    enforced_by: tests/test_process_sentry_sensor.py::TestOnlyBugsBecomeIssues::test_the_filter_is_actually_installed_on_the_client
