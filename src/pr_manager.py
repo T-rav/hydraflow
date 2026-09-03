@@ -405,7 +405,17 @@ class PRManager(
                 )
 
             # Get PR number from URL (e.g., https://github.com/org/repo/pull/123)
-            pr_number = int(pr_url.rstrip("/").split("/")[-1])
+            tail = pr_url.rstrip("/").rsplit("/", 1)[-1]
+            if not tail.isdigit():
+                # #6923: a bare `int(...)` here raised
+                # "invalid literal for int() with base 10: 'foo'" — naming the
+                # offending segment but not the URL it came from, nor that a
+                # PR had in fact been created. `gh` returning something other
+                # than a PR URL (a warning line, a redirect, a trailing slash)
+                # is the realistic cause, and the message needs to carry it.
+                msg = f"Could not parse PR number from URL: {pr_url!r}"
+                raise RuntimeError(msg)
+            pr_number = int(tail)
 
             pr_info = PRInfo(
                 number=pr_number,

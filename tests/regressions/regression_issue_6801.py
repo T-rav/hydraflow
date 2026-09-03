@@ -11,8 +11,6 @@ return structure and are therefore RED against the current stale docstring.
 
 from __future__ import annotations
 
-import pytest
-
 import inspect
 
 from issue_store import IssueStore
@@ -21,7 +19,6 @@ from issue_store import IssueStore
 class TestGetPipelineSnapshotDocstring:
     """Docstring for get_pipeline_snapshot must reference PipelineSnapshotEntry."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6801 — fix not yet landed", strict=False)
     def test_docstring_mentions_pipeline_snapshot_entry(self) -> None:
         """The docstring must reference PipelineSnapshotEntry, not 'list of dicts'."""
         docstring = inspect.getdoc(IssueStore.get_pipeline_snapshot)
@@ -30,7 +27,6 @@ class TestGetPipelineSnapshotDocstring:
             f"Docstring should reference PipelineSnapshotEntry but says:\n{docstring}"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6801 — fix not yet landed", strict=False)
     def test_docstring_does_not_say_plain_dicts(self) -> None:
         """The docstring must not misleadingly say 'list of dicts'."""
         docstring = inspect.getdoc(IssueStore.get_pipeline_snapshot)
@@ -39,7 +35,6 @@ class TestGetPipelineSnapshotDocstring:
             f"Docstring still uses the stale 'list of dicts' phrasing:\n{docstring}"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6801 — fix not yet landed", strict=False)
     def test_docstring_mentions_epic_metadata(self) -> None:
         """The docstring must mention the optional epic metadata fields."""
         docstring = inspect.getdoc(IssueStore.get_pipeline_snapshot)
