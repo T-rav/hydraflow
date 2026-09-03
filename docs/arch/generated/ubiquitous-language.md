@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_88 terms across 3 bounded contexts._
+_89 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -95,6 +95,18 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 - Phase name is fixed: _phase_name == 'implement'.
 - The runner commits inside the worktree but never pushes or opens a PR — that work belongs to downstream phases.
 - Self-check checklist is dynamically extended with checklist items from recurring review escalations.
+
+## AgentSkill
+
+**Kind:** `policy` · **Context:** `builder` · **Anchor:** `src/skill_registry.py:AgentSkill` · **Confidence:** `accepted`
+**Aliases:** `skill`, `post-implementation check`, `quality gate skill`
+
+A declarative post-implementation check that runs against the branch diff after the implementation agent finishes (e.g. diff-sanity, scope-check, plan-compliance, test-adequacy). Each AgentSkill names a workflow checkpoint with a purpose string surfaced to the agent's prompt, a config_key controlling max retry attempts, a blocking flag that determines whether a failed check stops the pipeline or only warns, prompt/result-parser callables, and optional VerifierSpec (independent second-opinion pass) and repair (in-run fix-forward) hooks. BUILTIN_SKILLS is the registry of these checks, orchestrated by AgentRunner._run_skill() in execution order.
+
+**Invariants:**
+- blocking=True skills stop the pipeline on failure; blocking=False skills log a warning and continue
+- config_key can be set to 0 to disable the skill entirely
+- the optional verifier (VerifierSpec) is an independent second-opinion pass that only runs when trigger(finder_transcript) is true, and its model must stay independent of the finder's review_model
 
 ## Articles
 
