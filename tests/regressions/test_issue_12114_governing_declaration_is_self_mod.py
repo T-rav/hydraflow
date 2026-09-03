@@ -9,12 +9,16 @@ Measured before fixing, rather than assumed:
     docs/standards/factory_autonomy/policy.yaml -> ['self_modification']
     charter.yaml                                -> UNCLASSED
 
-So the risk was already half-closed and half-open. `policy.yaml` sits inside
+So the risk was already half-closed and half-open. `policy.yaml` sat inside
 the #10371 fail-closed class; `charter.yaml` — which declares a repo's loops
 and, under H2, the change classes requiring an operator — did not.
 
-Both are pinned here together, because the pair is the surface. Protecting one
-and not the other leaves the same hole with a smaller entrance.
+**Direction of travel (operator ruling, 2026-09-03): `charter.yaml` is the
+single governing declaration and the autonomy policy's roles move under it.**
+So `charter.yaml` is the one that has to be protected for the long run, and
+the `policy.yaml` assertion below is transitional — it holds until the
+consolidation lands, and should be deleted with the file rather than kept as
+evidence that two governing declarations is the intended shape. It is not.
 """
 
 from __future__ import annotations
@@ -30,7 +34,11 @@ def test_the_charter_is_self_modification() -> None:
 
 def test_the_autonomy_policy_is_self_modification() -> None:
     """`policy.yaml` carries the act/ask classes and their approval
-    requirements. Already covered; asserted here so the pair is one subject.
+    requirements. Already covered; asserted here TRANSITIONALLY.
+
+    Per the operator ruling, these roles fold under `charter.yaml` and this
+    file goes away. Delete this test with it — keeping it would preserve the
+    two-declaration shape the ruling removes.
 
     Written as its own test rather than a parametrised pair on purpose. The
     two are a set of exactly two known files, and a module-level sequence fed
