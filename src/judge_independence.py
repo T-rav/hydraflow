@@ -110,6 +110,14 @@ _SELF_MOD_SUBSTRINGS: tuple[str, ...] = (
     "src/second_order_vitals_loop.py",
     "src/vitals/",
     "src/state/_second_order_vitals.py",
+    # The governing declaration itself (#12114 C1). `policy.yaml` was already
+    # here; `charter.yaml` was not, and it is the other half of the same
+    # surface — it declares which loops a repo runs and (under #12114 H2)
+    # which change classes require a human. A factory able to edit the rule
+    # about what needs a human, and self-approve that edit, makes the rule
+    # decoration. Measured before adding: `policy.yaml` classified
+    # self_modification, `charter.yaml` classified UNCLASSED.
+    "charter.yaml",
     "src/convergence_gate.py",
     "src/escalation_gate.py",
     "src/precondition_gate.py",
