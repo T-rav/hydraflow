@@ -109,7 +109,7 @@ class PlanDispositionMixin:
         )
         self._state.increment_session_counter("planned")
         logger.info("Issue #%d closed as already satisfied", issue.id)
-        if self._summarizer and result.transcript:
+        if self._summarizer is not None and result.transcript:
             try:
                 await self._summarizer.summarize_and_comment(
                     transcript=result.transcript,
@@ -269,7 +269,7 @@ class PlanDispositionMixin:
             await self._suggest_memory(
                 result.transcript, "planner", f"issue #{issue.id}"
             )
-        if self._summarizer and result.transcript:
+        if self._summarizer is not None and result.transcript:
             try:
                 await self._summarizer.summarize_and_comment(
                     transcript=result.transcript,

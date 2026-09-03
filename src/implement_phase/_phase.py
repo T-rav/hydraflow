@@ -384,7 +384,11 @@ class ImplementPhase(
             await self._suggest_memory(
                 result.transcript, "implementer", f"issue #{result.issue_number}"
             )
-        if self._summarizer and result.transcript and result.issue_number > 0:
+        if (
+            self._summarizer is not None
+            and result.transcript
+            and result.issue_number > 0
+        ):
             try:
                 await self._summarizer.summarize_and_comment(
                     transcript=result.transcript,
@@ -418,7 +422,11 @@ class ImplementPhase(
             if already_filed:
                 # Zero-diff handler filed memory with a specific source; skip
                 # memory filing here but still post the transcript summary.
-                if self._summarizer and result.transcript and result.issue_number > 0:
+                if (
+                    self._summarizer is not None
+                    and result.transcript
+                    and result.issue_number > 0
+                ):
                     try:
                         await self._summarizer.summarize_and_comment(
                             transcript=result.transcript,

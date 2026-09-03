@@ -261,7 +261,11 @@ class ReviewPhase(
             await self._suggest_memory(
                 result.transcript, "reviewer", f"PR #{result.pr_number}"
             )
-        if self._summarizer and result.transcript and result.issue_number > 0:
+        if (
+            self._summarizer is not None
+            and result.transcript
+            and result.issue_number > 0
+        ):
             try:
                 await self._summarizer.summarize_and_comment(
                     transcript=result.transcript,

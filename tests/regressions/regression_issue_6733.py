@@ -26,7 +26,6 @@ class TestEnvVarNamingConvention:
     field_name -> HYDRAFLOW_<FIELD_NAME_UPPER>.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6733 — fix not yet landed", strict=False)
     def test_workspace_gc_interval_env_key_matches_field_name(self) -> None:
         """The canonical env var for workspace_gc_interval should be
         HYDRAFLOW_WORKSPACE_GC_INTERVAL, not HYDRAFLOW_WORKTREE_GC_INTERVAL.
@@ -55,7 +54,6 @@ class TestEnvVarNamingConvention:
 class TestCanonicalEnvVarApplied:
     """HYDRAFLOW_WORKSPACE_GC_INTERVAL should control workspace_gc_interval."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6733 — fix not yet landed", strict=False)
     def test_canonical_env_var_overrides_field(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
