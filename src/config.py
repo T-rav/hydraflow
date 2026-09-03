@@ -7662,11 +7662,13 @@ def _validate_governed_repo_has_no_ungoverned_face(config: HydraFlowConfig) -> N
     if not getattr(config, "gateway_fleet_ratchet_enabled", False):
         msg = (
             f"{repo} is the gateway enforcement canary, so it needs "
-            f"gateway_fleet_ratchet_enabled=True. Twenty of twenty-four "
-            f"runners declare no provider dial and resolve to 'claude' by "
-            f"default; the fleet ratchet is the only thing that routes them "
-            f"through the gateway, so without it they reach Anthropic "
-            f"directly however the dials are set."
+            f"gateway_fleet_ratchet_enabled=True. Seven runners declare no "
+            f"provider dial and resolve to 'claude' however the dials are "
+            f"set. ADR-0147's repo_provider default does route them, but only "
+            f"the ratchet requires docker — and on the host an agent CLI "
+            f"reads provider OAuth state even with a scrubbed environment, so "
+            f"a canary without it records gateway spawns it cannot prove "
+            f"transited the gateway."
         )
         raise ValueError(msg)
 

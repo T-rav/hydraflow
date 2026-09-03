@@ -18,6 +18,7 @@ from config import HydraFlowConfig, build_credentials
 from events import EventType, HydraFlowEvent
 from factory_autostart import maybe_autostart_host
 from log import setup_logging
+from observability import sentry_adapter
 from package_resources import ResourceNotFoundError, checkout_path, checkout_root
 from prompt_gate import most_restrictive_data_class
 from runtime_config import (
@@ -483,9 +484,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     # config load or factory boot reported nothing at all -- and "the factory
     # will not start" is the failure an operator most needs on the board.
     # `load_dotenv` above has already put SENTRY_DSN in the environment.
-    from observability.sentry_adapter import install_process_sensor  # noqa: PLC0415
-
-    install_process_sensor("server")
+    sentry_adapter.install_process_sensor("server")
 
     config = load_runtime_config()
 

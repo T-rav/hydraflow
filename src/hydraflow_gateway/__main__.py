@@ -6,6 +6,8 @@ import os
 
 import uvicorn
 
+from observability import sentry_adapter
+
 
 def main() -> None:
     """Start one in-memory-key worker using the deployable env contract."""
@@ -13,9 +15,7 @@ def main() -> None:
     # it -- and ADR-0147 made it the path every LLM spawn takes, which makes
     # gateway availability factory availability. An unreported crash here
     # stops the factory while the factory's own logs stay clean.
-    from observability.sentry_adapter import install_process_sensor
-
-    install_process_sensor("gateway")
+    sentry_adapter.install_process_sensor("gateway")
 
     host = os.environ.get("GATEWAY_HOST", "127.0.0.1")
     port = int(os.environ.get("GATEWAY_PORT", "8080"))

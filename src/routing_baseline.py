@@ -33,8 +33,7 @@ them would look complete and migrate two thirds of the fleet.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from config import HydraFlowConfig
 from hydraflow_gateway.routing_policy import (
     ProviderBinding,
     RoutingAction,
@@ -42,9 +41,6 @@ from hydraflow_gateway.routing_policy import (
     RoutingPolicy,
     WorkerRole,
 )
-
-if TYPE_CHECKING:
-    from config import HydraFlowConfig
 
 
 #: The provider value a dial carries when nobody has moved it.
@@ -57,8 +53,6 @@ if TYPE_CHECKING:
 #: dial it describes (docs/standards/parametrised_guards/).
 def _dial_default(dial: str) -> str:
     """The declared default of *dial*, or `"claude"` if it declares none."""
-    from config import HydraFlowConfig  # noqa: PLC0415 - avoids a config cycle
-
     field = HydraFlowConfig.model_fields.get(dial)
     default = getattr(field, "default", None) if field is not None else None
     return str(default) if isinstance(default, str) and default else "claude"

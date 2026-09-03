@@ -1,8 +1,9 @@
 # ADR-0147: The gateway is the only path for LLM spawns
 
-**Status:** Accepted
-**Date:** 2026-09-03
-**Enforcement:** enforced
+- **Status:** Accepted
+- **Date:** 2026-09-02
+- **Enforcement:** enforced
+- **Binds:** factory
 **Enforced by:**
 - pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_defaults_to_the_gateway
 - pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_capable_set_covers_every_dial
@@ -62,14 +63,16 @@ buys the last mile, not the first.
 
 `_resolve_provider` returns a hardcoded `"claude"` for every `BaseRunner`
 subclass that declares no `PROVIDER_FIELD` — bug_reproducer, hitl, research,
-discover, shape, plan_reviewer, diagnostic. **20 of 24 subclasses declare
-none**, so no `*_provider` dial can move them.
+discover, shape, plan_reviewer, diagnostic — **seven runners**. (20 of the 24
+direct `BaseRunner` subclasses declare no `PROVIDER_FIELD`, but 13 of those are
+mixins composed into runners that do carry one, so the count of *spawning*
+roles the dials cannot reach is seven, not twenty.)
 
 They are still routed, by a third lever this ADR did not originally credit.
 `base_runner` applies `apply_repo_provider` to every spawn, and its contract is
 "reroute a spawn that is *still* `claude`" — which is exactly what a dial-less
 runner resolves to. With `repo_provider` now defaulting to `gateway`, those
-twenty are rewritten to `gateway` as well, in host mode, with no ratchet armed.
+seven are rewritten to `gateway` as well, in host mode, with no ratchet armed.
 The precedence chain (`role dial > repo_provider > credit-failover`) means the
 dials win where they exist and `repo_provider` sweeps up the rest.
 

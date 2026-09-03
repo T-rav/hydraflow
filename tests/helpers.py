@@ -255,6 +255,34 @@ def make_bg_loop_deps(
     )
 
 
+def _direct_role_dials(already_named: frozenset[str]) -> dict[str, str]:
+    """Every `*_provider` dial not already named, pinned to the direct harness.
+
+    ADR-0147 moved the production default to `gateway`, which makes a spawn
+    mint a virtual key against a running proxy before it runs. A unit test
+    exercising the reviewer's transcript parsing has no proxy, no control
+    token and no fake mint client, so the flip turned every such test into
+    `GatewayMintError: gateway selected but HYDRAFLOW_GATEWAY_CONTROL_TOKEN
+    is unset` — a failure about the harness, not about the thing under test.
+
+    This mirrors the `repo_provider="claude"` pin that already sat in this
+    factory for the same reason (#11211): the factory keeps callers on the
+    direct harness, and a test exercising gateway routing opts in explicitly.
+    Those tests also inject a fake mint client, which is the part a blanket
+    default could not supply — see `tests/test_gateway_harness.py`.
+
+    Derived from the model, so a dial added tomorrow is pinned without anyone
+    remembering this helper (docs/standards/parametrised_guards/).
+    """
+    from config import HydraFlowConfig
+
+    return {
+        name: "claude"
+        for name in HydraFlowConfig.model_fields
+        if name.endswith("_provider") and name not in already_named
+    }
+
+
 class ConfigFactory:
     """Factory for HydraFlowConfig instances."""
 
@@ -529,6 +557,8 @@ class ConfigFactory:
                     patch("shutil.which", return_value="/usr/bin/docker")
                 )
             return HydraFlowConfig(
+                # Pinned first so an explicit kwarg below still wins.
+                **_direct_role_dials(frozenset({"repo_provider"})),
                 config_file=config_file,
                 # No test should pay real auth-retry backoff. Production keeps
                 # 5s (doubling to 10s), which cost `test_A23_auth_retry_...`

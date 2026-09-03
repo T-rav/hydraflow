@@ -121,16 +121,20 @@ class TestTheGateIsScopedToTheGovernedRepo:
 class TestAGovernedRepoNeedsTheFleetRatchet:
     """Dials are only half the faces (#11992).
 
-    Twenty of twenty-four `BaseRunner` subclasses declare no `PROVIDER_FIELD`,
-    so `_resolve_provider` returns a hardcoded "claude" — bug_reproducer, hitl,
-    research, discover, shape, plan_reviewer, diagnostic. No `*_provider`
-    setting can move them. The fleet ratchet is the only thing that rewrites a
-    still-claude spawn to "gateway".
+    Seven runners declare no `PROVIDER_FIELD`, so `_resolve_provider` returns a
+        hardcoded "claude" — bug_reproducer, hitl, research, discover, shape,
+        plan_reviewer, diagnostic. (20 of the 24 direct `BaseRunner` subclasses
+        declare none, but 13 of those are mixins composed into runners that do
+        carry a dial.) No `*_provider` setting can move them.
 
-    The first version of this gate checked the dials alone, so a canary with
-    every dial on "gateway" and the ratchet off passed while seven runners went
-    straight to Anthropic — an ungoverned face no configuration named, which is
-    what the gate exists to refuse.
+        ADR-0147's `repo_provider` default rewrites them to "gateway" too, so the
+        ratchet is no longer the only route — but it is the only one that requires
+        docker, which is what makes the attribution provable.
+
+        The first version of this gate checked the dials alone, so a canary with
+        every dial on "gateway" and the ratchet off passed while seven runners went
+        straight to Anthropic — an ungoverned face no configuration named, which is
+        what the gate exists to refuse.
     """
 
     def test_every_dial_on_the_gateway_is_not_enough(self) -> None:

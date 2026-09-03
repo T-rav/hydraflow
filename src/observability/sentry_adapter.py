@@ -136,6 +136,19 @@ def init_sentry_sdk(dsn: str, *, component: str) -> bool:
     """
     if _SDK_STATE.get("component"):
         return False
+    try:
+        _configure(dsn, component)
+    except Exception:  # noqa: BLE001 - a broken reporter must not stop boot
+        logger.warning(
+            "sentry init failed — falling back to the no-op adapter", exc_info=True
+        )
+        return False
+    _SDK_STATE["component"] = component
+    return True
+
+
+def _configure(dsn: str, component: str) -> None:
+    """The raw SDK call, split out so the swallow above has one subject."""
     sentry_sdk.init(
         dsn=dsn,
         # Tracing OFF: spans are not Sentry's job here (ADR-0146). A
@@ -151,8 +164,6 @@ def init_sentry_sdk(dsn: str, *, component: str) -> bool:
     # Global scope, not the current one: the tag must survive every scope push
     # the loops and the ASGI middleware make, or events lose their origin.
     sentry_sdk.get_global_scope().set_tag("hydraflow.component", component)
-    _SDK_STATE["component"] = component
-    return True
 
 
 def install_process_sensor(
@@ -181,15 +192,7 @@ def install_process_sensor(
     dsn = (environment.get("SENTRY_DSN") or "").strip()
     if not dsn:
         return False
-    try:
-        started = init_sentry_sdk(dsn, component=component)
-    except Exception:  # noqa: BLE001 - a broken reporter must not stop boot
-        logger.warning(
-            "sentry init failed — %s continues without the sensor",
-            component,
-            exc_info=True,
-        )
-        return False
+    started = init_sentry_sdk(dsn, component=component)
     if started:
         logger.info("observability: exception sensor active for %s", component)
     return started
@@ -283,12 +286,12 @@ def build_observability_adapter(credentials: Credentials) -> ObservabilityPort:
     dsn = (credentials.sentry_dsn or "").strip()
     if not dsn:
         return NoOpObservabilityAdapter()
-    try:
-        adapter = SentryObservabilityAdapter(dsn)
-    except Exception:  # noqa: BLE001 - a broken reporter must not stop boot
-        logger.warning(
-            "sentry init failed — falling back to the no-op adapter", exc_info=True
-        )
+    if (
+        not init_sentry_sdk(dsn, component=_DEFAULT_COMPONENT)
+        and sdk_component() is None
+    ):
+        # init_sentry_sdk swallowed a broken reporter and said so; a False with
+        # a component already recorded just means this process is bound.
         return NoOpObservabilityAdapter()
     logger.info("observability: exception sensor active (errors only)")
-    return adapter
+    return SentryObservabilityAdapter(dsn)

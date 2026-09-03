@@ -476,8 +476,9 @@ tail -50 .hydraflow/gateway/requests.jsonl \
 
 `_resolve_provider` returns a hardcoded `"claude"` for every `BaseRunner`
 subclass with no `PROVIDER_FIELD` — bug_reproducer, hitl, research, discover,
-shape, plan_reviewer, diagnostic (20 of 24 subclasses). No `*_provider` dial
-reaches them.
+shape, plan_reviewer, diagnostic — seven runners. (20 of the 24 direct
+subclasses declare none, but 13 of those are mixins composed into runners that
+do carry a dial.) No `*_provider` dial reaches them.
 
 They route anyway, via `repo_provider`. `base_runner` applies
 `apply_repo_provider` to every spawn, and it rewrites a spawn that is *still*
