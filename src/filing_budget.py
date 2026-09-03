@@ -103,21 +103,30 @@ async def file_overflow_summary(
     labels: Sequence[str],
     title: str,
     intro: str,
+    subject_keys: Sequence[str] = (),
 ) -> int:
     """File ONE summary issue for findings that overflowed the per-tick cap.
 
     When more than ``budget.cap`` findings surface in a single tick, the caller
-    records each over-cap subject in *dedup* (so it is not re-filed
-    individually) and collects a bullet line via :meth:`FilingBudget.note_overflow`;
-    this then folds the whole batch into a single ``create_issue`` call instead
-    of one issue per finding (#10767). The summary is deduped by a digest of its
-    own contents (``{key_prefix}:summary:{digest}``) so an unchanged overflow set
-    is not re-filed on later ticks. Returns ``1`` if a summary was filed, else
-    ``0``.
+    collects a bullet line via :meth:`FilingBudget.note_overflow` and passes the
+    over-cap subjects' dedup keys as *subject_keys*; this folds the whole batch
+    into a single ``create_issue`` call instead of one issue per finding
+    (#10767). The summary is deduped by a digest of its own contents
+    (``{key_prefix}:summary:{digest}``) so an unchanged overflow set is not
+    re-filed on later ticks. Returns ``1`` if a summary was filed, else ``0``.
 
-    Honors ``create_issue``'s documented 0-sentinel (``ports.py``): when the gh
-    call fails without raising, the dedup key is left unrecorded so the summary
-    is retried next tick rather than silently swallowed.
+    **This function owns the subject keys (#12070).** They are recorded ONLY
+    after a confirmed filing, together with the summary's own key, in one write.
+
+    That ownership is the fix for a defect the previous contract could not
+    prevent: callers recorded each subject in the ``not budget.allow()`` branch,
+    *before* the summary was attempted. Honoring ``create_issue``'s 0-sentinel
+    (``ports.py`` — the gh call failed without raising) by withholding only the
+    summary's own key then bought nothing: the retry tick found every subject
+    already recorded, skipped them all, collected no overflow, and returned
+    early. The batch was lost entirely, with no issue anywhere. All three
+    callers had the ordering wrong in the same way, which is what makes it a
+    contract problem rather than three bugs.
     """
     if not budget.overflow:
         return 0
@@ -153,6 +162,10 @@ async def file_overflow_summary(
         # the summary is retried next tick rather than lost.
         return 0
 
+    # One write, after the filing is confirmed: the summary's own key AND every
+    # subject it covers. Recording the subjects earlier is what defeated the
+    # 0-sentinel retry (#12070).
     seen.add(dedup_key)
+    seen.update(subject_keys)
     dedup.set_all(seen)
     return 1
