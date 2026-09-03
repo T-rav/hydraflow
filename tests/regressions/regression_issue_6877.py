@@ -100,7 +100,6 @@ def _make_trace() -> SubprocessTrace:
 class TestFactoryMetricJSONLCorruption:
     """Issue #6877 — partial write corruption cascades in factory_metrics.jsonl."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6877 — fix not yet landed", strict=False)
     def test_partial_write_cascades_to_corrupt_subsequent_event(self, config) -> None:
         """A partial write (from a prior disk-full failure) without a trailing
         newline causes the NEXT successful ``_append_factory_metric`` call to
@@ -146,7 +145,6 @@ class TestFactoryMetricJSONLCorruption:
             f"loses data."
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6877 — fix not yet landed", strict=False)
     def test_all_lines_valid_json_after_partial_write(self, config) -> None:
         """After a write failure, every line in the JSONL file must be
         parseable JSON.  No corrupted partial lines should remain.

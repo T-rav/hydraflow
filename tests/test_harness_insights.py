@@ -637,13 +637,19 @@ class TestAppendFailureOSError:
         store = HarnessInsightStore(tmp_path / "memory")
         record = _make_record()
 
+        # The warning now comes from `append_jsonl`, which is best-effort by
+        # contract (#6623) and logs its own I/O failures — so
+        # `append_failure`'s local `except OSError` was dead code reading like
+        # live protection, and was removed. The property under test is
+        # unchanged: recording a failure must not raise, and the I/O error
+        # must be visible.
         with (
             patch("file_util.open", side_effect=OSError("disk full")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.harness_insights"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.file_util"),
         ):
             store.append_failure(record)  # should not raise
 
-        assert "Could not append failure" in caplog.text
+        assert "I/O error appending to" in caplog.text
 
     def test_append_failure_handles_mkdir_failure(self, tmp_path, caplog) -> None:
         """When mkdir fails with PermissionError, log warning and don't raise."""
@@ -656,11 +662,11 @@ class TestAppendFailureOSError:
 
         with (
             patch.object(Path, "mkdir", side_effect=PermissionError("not allowed")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.harness_insights"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.file_util"),
         ):
             store.append_failure(record)  # should not raise
 
-        assert "Could not append failure" in caplog.text
+        assert "I/O error appending to" in caplog.text
 
 
 # ---------------------------------------------------------------------------

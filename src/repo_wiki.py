@@ -100,6 +100,26 @@ _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
 _ENTRY_ID_RE = re.compile(r"^(\d+)-")
 
 
+def _safe_write(path: Path, content: str, *, encoding: str | None = None) -> bool:
+    """Write *content* to *path*; return whether it landed.
+
+    The wiki is a derived artifact: every one of these writes is regenerated
+    on the next pass, so an unwritable disk should cost the wiki its refresh,
+    not cost the ingest or lint run that was producing it (#6599). Seven call
+    sites shared that exposure, so the guard lives in one place rather than
+    being repeated — and repeated slightly differently — at each.
+    """
+    try:
+        if encoding is None:
+            path.write_text(content)
+        else:
+            path.write_text(content, encoding=encoding)
+    except OSError:
+        logger.warning("repo_wiki: could not write %s", path, exc_info=True)
+        return False
+    return True
+
+
 def _slugify(title: str, *, max_len: int = 50) -> str:
     """Filesystem-safe slug for an entry title."""
     slug = _SLUG_STRIP_RE.sub("-", title.lower()).strip("-")
@@ -409,7 +429,7 @@ def _write_tracked_synthesis_entry(
     lines.append("")
     lines.append(safe_content)
     lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    _safe_write(path, "\n".join(lines), encoding="utf-8")
     return path
 
 
@@ -1372,7 +1392,7 @@ class RepoWikiStore:
         if index is not None:
             index.last_lint = now.isoformat()
             index_path = repo_dir / "index.json"
-            index_path.write_text(index.model_dump_json(indent=2))
+            _safe_write(index_path, index.model_dump_json(indent=2))
 
         self._append_log(repo_slug, "active_lint", result.model_dump())
         return result
@@ -1699,15 +1719,16 @@ class RepoWikiStore:
         for topic in DEFAULT_TOPICS:
             topic_path = repo_dir / f"{topic}.md"
             if not topic_path.exists():
-                topic_path.write_text(
-                    f"# {topic.replace('_', ' ').title()}\n\n_No entries yet._\n"
+                _safe_write(
+                    topic_path,
+                    f"# {topic.replace('_', ' ').title()}\n\n_No entries yet._\n",
                 )
 
         # Seed index if missing
         index_path = repo_dir / "index.json"
         if not index_path.exists():
             index = WikiIndex(repo_slug=repo_slug)
-            index_path.write_text(index.model_dump_json(indent=2))
+            _safe_write(index_path, index.model_dump_json(indent=2))
 
         return repo_dir
 
@@ -1870,7 +1891,7 @@ class RepoWikiStore:
                 )
                 lines.append(f"\n```json:entry\n{slim}\n```\n")
 
-        topic_path.write_text("\n".join(lines))
+        _safe_write(topic_path, "\n".join(lines))
 
     def _load_index(self, repo_slug: str) -> WikiIndex | None:
         index_path = self._repo_dir(repo_slug) / "index.json"
@@ -1916,7 +1937,7 @@ class RepoWikiStore:
 
         # Write JSON index
         index_path = repo_dir / "index.json"
-        index_path.write_text(index.model_dump_json(indent=2))
+        _safe_write(index_path, index.model_dump_json(indent=2))
 
         # Write human-readable index.md
         md_path = repo_dir / "index.md"
@@ -1928,7 +1949,7 @@ class RepoWikiStore:
             lines.append(f"\n## {topic.replace('_', ' ').title()} ({len(titles)})\n")
             for title in titles:
                 lines.append(f"- {title}")
-        md_path.write_text("\n".join(lines) + "\n")
+        _safe_write(md_path, "\n".join(lines) + "\n")
 
     def _append_log(
         self,

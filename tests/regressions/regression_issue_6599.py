@@ -64,7 +64,6 @@ def _write_text_raiser(*, fail_on: set[str]):
 class TestIngestWriteFailure:
     """Issue #6599: ingest() should not propagate OSError from write_text."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_topic_write_failure_does_not_crash_ingest(self, tmp_path: Path) -> None:
         """_write_topic_page (line 560) raises OSError during ingest.
 
@@ -88,7 +87,6 @@ class TestIngestWriteFailure:
                 f"ingest() propagated OSError instead of handling it: {exc} (line 560)"
             )
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_index_json_write_failure_does_not_crash_ingest(
         self, tmp_path: Path
     ) -> None:
@@ -112,7 +110,6 @@ class TestIngestWriteFailure:
                 f"ingest() propagated OSError from _rebuild_index: {exc} (line 604)"
             )
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_index_md_write_failure_does_not_crash_ingest(self, tmp_path: Path) -> None:
         """_rebuild_index (line 616) raises OSError writing index.md.
 
@@ -144,7 +141,6 @@ class TestIngestWriteFailure:
 class TestActiveLintWriteFailure:
     """Issue #6599: active_lint() should not propagate OSError."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_last_lint_index_write_failure_does_not_crash(self, tmp_path: Path) -> None:
         """index_path.write_text at line 373 raises OSError.
 
@@ -165,7 +161,6 @@ class TestActiveLintWriteFailure:
                 f"{exc} (line 373)"
             )
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_topic_write_failure_during_stale_marking_does_not_crash(
         self, tmp_path: Path
     ) -> None:
@@ -209,7 +204,6 @@ class TestActiveLintWriteFailure:
 class TestEnsureRepoDirWriteFailure:
     """Issue #6599: _ensure_repo_dir should not propagate OSError."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_topic_file_seeding_failure_does_not_crash(self, tmp_path: Path) -> None:
         """write_text at line 431 raises OSError during topic file seeding.
 
@@ -230,7 +224,6 @@ class TestEnsureRepoDirWriteFailure:
                 f"seeding: {exc} (line 431)"
             )
 
-    @pytest.mark.xfail(reason="Regression for issue #6599 — fix not yet landed", strict=False)
     def test_index_seeding_failure_does_not_crash(self, tmp_path: Path) -> None:
         """write_text at line 439 raises OSError during index.json seeding.
 
