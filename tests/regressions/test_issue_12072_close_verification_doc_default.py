@@ -19,8 +19,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from config import HydraFlowConfig  # noqa: E402
@@ -28,11 +26,16 @@ from config import HydraFlowConfig  # noqa: E402
 _FIELD = "close_verification_enabled"
 _SRC = Path(__file__).parents[2] / "src"
 
-#: Phrases that assert the actuator is off unless someone turns it on.
+#: PROSE phrases asserting the actuator is off unless someone turns it on.
+#:
+#: `default=false` is deliberately NOT here. It matches the field's own source
+#: line (`default=False,`), so including it made the "docs say off" branch
+#: below satisfiable by the code rather than by any documentation — a branch
+#: that could never fail. Caught by flipping the default and watching nothing
+#: redden.
 _CLAIMS_OFF = (
     "default-off",
     "default false",
-    "default=false",
     "fully inert until",
 )
 
@@ -56,17 +59,27 @@ def test_the_field_still_exists_to_be_documented() -> None:
     )
 
 
-@pytest.mark.parametrize("claim", _CLAIMS_OFF)
-def test_no_default_off_claim_survives_a_default_on_flag(claim: str) -> None:
-    """The docs must not say OFF while the shipped default is ON."""
-    if HydraFlowConfig.model_fields[_FIELD].default is not True:
-        pytest.skip("default is not True; this direction is not the risk")
+def test_the_documentation_matches_the_shipped_default() -> None:
+    """The docs must describe whichever default the field actually ships.
 
-    assert claim not in _documenting_text(), (
-        f"`{_FIELD}` ships default=True but its documentation still claims "
-        f"{claim!r}. This actuator reopens and re-triages issues, so the "
-        f"wrong answer here is the unsafe one."
-    )
+    Asserted in BOTH directions with no skip: an earlier version skipped when
+    the default was False, which the no-ignored-active-tests ratchet correctly
+    refuses — a guard that opts out of asserting is not a guard.
+    """
+    text = _documenting_text()
+    claims_off = [claim for claim in _CLAIMS_OFF if claim in text]
+
+    if HydraFlowConfig.model_fields[_FIELD].default is True:
+        assert not claims_off, (
+            f"`{_FIELD}` ships default=True but its documentation still claims "
+            f"{claims_off}. This actuator reopens and re-triages issues, so "
+            f"the wrong answer here is the unsafe one."
+        )
+    else:
+        assert claims_off, (
+            f"`{_FIELD}` ships default=False but nothing in its documentation "
+            f"says so; a reader would assume the actuator is live."
+        )
 
 
 def test_the_documentation_names_the_disable_path() -> None:
