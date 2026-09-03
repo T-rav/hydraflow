@@ -310,6 +310,7 @@ def _regen_arch_artifacts(worktree_path: Path) -> None:
         cwd=worktree_path,
         capture_output=True,
         check=False,
+        timeout=_SUBPROCESS_TIMEOUT_S,
     )
     if substantive.returncode != 0:
         return  # substantive content staged — volatile rides along
@@ -319,6 +320,7 @@ def _regen_arch_artifacts(worktree_path: Path) -> None:
             cwd=worktree_path,
             capture_output=True,
             check=False,
+            timeout=_SUBPROCESS_TIMEOUT_S,
         )
 
 

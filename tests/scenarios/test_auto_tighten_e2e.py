@@ -111,13 +111,18 @@ def _init_repo_with_staging_base(tmp_path: Path) -> tuple[Path, Path]:
     return local, bare_remote
 
 
-def _build_stub_run_subprocess(gh_calls: list[tuple[str, ...]]):
+def _build_stub_run_subprocess(
+    gh_calls: list[tuple[str, ...]],
+    make_calls: list[tuple[str, ...]] | None = None,
+):
     """Fake ``subprocess_util.run_subprocess`` matching the real signature.
 
     ``git`` commands are delegated to the ORIGINAL (pre-monkeypatch)
     ``run_subprocess`` so real git executes end to end (worktree add, file
     staging, commit, push). ``gh`` commands are captured into ``gh_calls``
-    and answered with a canned success WITHOUT shelling out.
+    and answered with a canned success WITHOUT shelling out. ``make``
+    commands are captured into ``make_calls`` and RAISE, modelling this
+    Makefile-less toy repo faithfully — see the branch below.
     """
     original_run_subprocess = subprocess_util.run_subprocess
 
@@ -145,6 +150,18 @@ def _build_stub_run_subprocess(gh_calls: list[tuple[str, ...]]):
                     '[{"status": "COMPLETED", "conclusion": "SUCCESS"}]}'
                 )
             return ""
+        if cmd and cmd[0] == "make":
+            # #12062 wired `make arch-regen-stage` into the finalize tail. The
+            # scenario repo built above has no Makefile, so the real command
+            # exits non-zero and `run_subprocess` raises — which is precisely
+            # the fail-open path `_regen_arch_artifacts_async` documents
+            # ("toy test repos without a Makefile take the fail-open path by
+            # construction"). Model that, rather than a canned success: a stub
+            # that succeeds here would assert the opposite of what production
+            # does in this tree.
+            if make_calls is not None:
+                make_calls.append(cmd)
+            raise RuntimeError(f"make: no rule to make target: {cmd!r}")
         raise AssertionError(f"unexpected non-git/gh command in stub: {cmd!r}")
 
     return fake_run_subprocess, original_run_subprocess
@@ -232,7 +249,10 @@ async def test_auto_tighten_e2e_pr_actuation(tmp_path, monkeypatch) -> None:
     )
 
     gh_calls: list[tuple[str, ...]] = []
-    fake_run_subprocess, original_run_subprocess = _build_stub_run_subprocess(gh_calls)
+    make_calls: list[tuple[str, ...]] = []
+    fake_run_subprocess, original_run_subprocess = _build_stub_run_subprocess(
+        gh_calls, make_calls
+    )
     monkeypatch.setattr(subprocess_util, "run_subprocess", fake_run_subprocess)
 
     result = await loop._do_work()
@@ -272,6 +292,17 @@ async def test_auto_tighten_e2e_pr_actuation(tmp_path, monkeypatch) -> None:
         f"expected exactly one gh pr merge --auto, got {gh_calls}"
     )
     assert "--auto" in merge_calls[0]
+
+    # ── 3b. #12062: the finalize tail regenerates arch artifacts BEFORE the
+    # bot commit, so a caller touching arch inputs is no longer rejected by
+    # the worktree pre-commit hook. This repo has no Makefile, so the attempt
+    # raises and the documented fail-open path carries the flow — which the
+    # PR/branch/commit assertions above and below independently prove still
+    # completed. Without the wiring this list is empty.
+    assert make_calls == [("make", "arch-regen-stage")], (
+        f"expected exactly one arch-regen attempt in the finalize tail, "
+        f"got {make_calls}"
+    )
 
     # ── 2. THE CRITICAL ONE: the branch's committed tree actually contains
     # the bumped fail_under — proves file edits written to repo_root reached
