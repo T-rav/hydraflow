@@ -3086,3 +3086,51 @@ class TestTrackedWorkspaceIsGone:
         root = tmp_path / "slug"
         root.write_text("not a directory\n")
         assert tracked_workspace_is_gone(root / "issue-1", root) is False
+
+
+class TestAbandonedCreationPhaseWiring:
+    """#12081 Phase 7 reached `_do_work` — the fix is only shipped if it runs.
+
+    Every other `"abandoned_creations": 0` assertion in this file is satisfied
+    identically whether the phase runs or not: each fixture's `repo_root` has
+    no `.git/worktrees/`, so `stale_initializing_worktrees` returns `[]` either
+    way. Those assertions pin the result SHAPE; these two pin the WIRING.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_phase_runs_and_its_count_reaches_the_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_reap_abandoned_enabled=True)
+        called: list[float] = []
+
+        async def _fake(*, repo_root: Path, gh_token: str, now: float) -> int:
+            called.append(now)
+            return 3
+
+        monkeypatch.setattr(workspace_gc_loop, "_reap_abandoned_creations", _fake)
+
+        result = await loop._do_work()
+
+        assert len(called) == 1
+        assert result["abandoned_creations"] == 3
+
+    @pytest.mark.asyncio
+    async def test_the_kill_switch_stops_the_phase_being_called(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The seam this PR declares is `config_disable` — if the flag does not
+        actually gate the call, the sandbox pin is decorative."""
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_reap_abandoned_enabled=False)
+        called: list[float] = []
+
+        async def _fake(*, repo_root: Path, gh_token: str, now: float) -> int:
+            called.append(now)
+            return 3
+
+        monkeypatch.setattr(workspace_gc_loop, "_reap_abandoned_creations", _fake)
+
+        result = await loop._do_work()
+
+        assert called == []
+        assert result["abandoned_creations"] == 0
