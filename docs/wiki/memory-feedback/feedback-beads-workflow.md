@@ -3,9 +3,9 @@ source: feedback_beads_workflow.md
 name: Keep factory task state in worktree JSONL
 description: HydraFlow owns phase-task lifecycle in each implementation worktree;
   agents never invoke a database-backed task CLI
-status: pending
+status: promoted
 issue: null
-promoted_in: null
+promoted_in: tests/architecture/test_beads_store_write_ownership.py
 wontfix_reason: null
 created: '2026-03-28'
 ---
