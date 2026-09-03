@@ -41,19 +41,22 @@ from config import (
     HydraFlowConfig,
 )
 
-_INHERITING_STAGES = tuple(
-    sorted(
-        stage
-        for stage, sources in _STAGE_PROVIDER_SOURCE.items()
-        if "maintenance_provider" in sources
-    )
-)
+# Derived inline at each use rather than aliased to a module-level name, which
+# is how the two `_MAINTENANCE_DIALED_ROLES` parametrisations below already
+# read. A module-level sequence fed to `parametrize` is a guard enumeration and
+# owes `tests/architecture/guard_enumeration_registry.py` a drop-detector; this
+# set has none to give, because a stage dropped from `_STAGE_PROVIDER_SOURCE`
+# falls back to `getattr(config, ..., "claude")` and so leaves production and
+# this file at the same instant, with nothing left to notice the departure.
 
 
 def test_the_sets_this_file_reasons_about_are_not_empty() -> None:
     """Fail closed: an empty set makes every case below vacuously true."""
     assert _MAINTENANCE_DIALED_ROLES, "no maintenance-dialled roles to check"
-    assert _INHERITING_STAGES, "no stage inherits maintenance_provider"
+    assert any(
+        "maintenance_provider" in sources
+        for sources in _STAGE_PROVIDER_SOURCE.values()
+    ), "no stage inherits maintenance_provider"
 
 
 @pytest.mark.parametrize("role", sorted(_MAINTENANCE_DIALED_ROLES))
@@ -94,18 +97,26 @@ def test_an_explicit_role_dial_still_wins(role: str, tmp_path) -> None:
     assert getattr(config, f"{role}_provider") == "gateway"
 
 
-@pytest.mark.parametrize("stage", _INHERITING_STAGES)
+@pytest.mark.parametrize(
+    "stage",
+    sorted(
+        stage
+        for stage, sources in _STAGE_PROVIDER_SOURCE.items()
+        if "maintenance_provider" in sources
+    ),
+)
 def test_an_inheriting_stage_resolves_through_the_maintenance_dial(
     stage: str, tmp_path
 ) -> None:
-    """These stages own no dial; their source map must still point at it.
+    """A stage that owns no dial still resolves to the maintenance provider.
 
-    They omit the provider on their `run_lightweight_agent` calls deliberately
-    so the central seam performs the inheritance. If the mapping is dropped
-    during P6b's migration the stage silently falls back rather than raising.
+    The parametrisation selects these stages by their mapping, so membership
+    is not re-asserted here — what is asserted is the consequence: the dial's
+    value actually reaches them. They omit the provider on their
+    `run_lightweight_agent` calls deliberately so the central seam performs
+    the inheritance, and if P6b drops the mapping the stage falls back to
+    "claude" silently rather than raising.
     """
-    assert "maintenance_provider" in _STAGE_PROVIDER_SOURCE[stage]
-
     config = HydraFlowConfig(
         repo_root=tmp_path, maintenance_provider="zai", maintenance_model="glm-4.6"
     )
