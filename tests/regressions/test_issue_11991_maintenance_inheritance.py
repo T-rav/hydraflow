@@ -22,6 +22,13 @@ Both parametrisations iterate the PRODUCTION sets by reference, per
 `docs/standards/parametrised_guards/README.md`. A seventh maintenance-dialled
 role or a fifth inheriting stage is covered the day it is added, which a
 hand-copied list would not be.
+
+There is deliberately no MockWorld scenario beside this file, and the PR
+carries a `Skip-Scenario:` trailer saying so. The defect lives entirely in
+`HydraFlowConfig` field resolution: the observable IS the config object, and a
+scenario could only boot a loop to read back the same attribute this file
+reads directly. That is the shape P10.8's escape hatch was built for (#11921) —
+demanding a scenario here buys a ceremonial test nobody believes.
 """
 
 from __future__ import annotations
