@@ -244,88 +244,17 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 # Grandfathered deferrals
 # ---------------------------------------------------------------------------
 
-#: Deferred ``xfail`` markers the widened scan surfaced, keyed ``path::test``.
+#: The grandfather set is GONE, and that is the success condition, not an
+#: omission. It held 107 deferred ``xfail`` markers — the #6408-#6975 batch of
+#: pinned bugs that #9801/#9872's widened ``python_files`` first made visible.
+#: Every one has since been fixed and its marker removed, so the set emptied,
+#: and its own anti-vacuity test said what to do next: "If every deferral
+#: really was resolved, delete the set and its two tests rather than leaving a
+#: hollow gate."
 #:
-#: These are NOT new debt. Every one of them sits in a ``regression_*.py`` file
-#: that the old predicate could not see, and every one predates this guard's
-#: ability to observe it. They are the #6408–#6975 batch of pinned-bug
-#: regressions, all written ``strict=False`` with "fix not yet landed", all
-#: silently uncollected until #9801/#9872 widened ``python_files`` and now
-#: silently xfailing. Fixing 107 open bugs is not this change; making them
-#: countable, named, and shrink-only is.
-#:
-#: SHRINK ONLY. An entry leaves when its bug is fixed and the marker comes off.
-#: Nothing may join: a marker in a file that is not listed, or on a test that is
-#: not listed, fails the guard. And an entry whose marker is gone fails too —
-#: a stale line here would be a claim about coverage that no longer exists,
-#: which is the same defect one level up.
-#:
-#: Two entries already left. ``regression_issue_6782.py``'s GC-loop and
-#: orphaned-dir tests were XPASSing: the #6782 fix had landed, and because
-#: ``strict=False`` an XPASS is not a failure, so the pair would have flipped
-#: silently back to XFAIL if the bug ever re-regressed and nothing would have
-#: reddened. Their markers were removed rather than recorded here.
-#: Ceiling on :data:`DEFERRED_XFAILS`, mirroring ``DEFERRED_MISMATCHES_MAX`` in
-#: ``aggregate_gate_registry``. SHRINK ONLY — lower it when entries leave.
-#:
-#: Without this, "nothing may join" was only a docstring: one PR could add an
-#: xfail AND its grandfather entry together and both gate tests would stay
-#: green. Growth now costs a second, obviously-named edit that a reviewer reads
-#: as what it is.
-#: 109 -> 107 when the WhatsApp bridge was removed: deleting
-#: regression_issue_6494 took two grandfathered xfails with it. The cap
-#: falls in the same change by design — a cap left above the live count is
-#: slack a later PR can spend without anything reddening.
-#: 107 -> 104 when #6496 was actually fixed: `TraceCollector.record` and
-#: `.finalize` stopped swallowing AttributeError/AssertionError, so all three
-#: of that file's pins pass unmarked. Unlike the 109 -> 107 drop, nothing was
-#: deleted here — the pins are live tests now.
-#: 104 -> 98 when the health-monitor trio (#6602/#6626/#6630) was fixed:
-#: `compute_trend_metrics` now returns None rather than a nominal 0.0 for an
-#: unparseable item_scores.json, counts only the failure lines it parsed, and
-#: warns on an unreadable outcomes trail; `file_util.atomic_write` no longer
-#: lets a cleanup error replace the write error. All six pins are live tests.
-#: 98 -> 92 when runner_utils' zombie-subprocess and assert-as-invariant pins
-#: (#6476/#6703) were fixed: `stream_claude_process` now kills the group and
-#: reaps on EVERY exit path, and the pipe checks survive `python -O`.
-#: 92 -> 80 when the store family (#6696/#6717/#6907/#6921) was fixed:
-#: a malformed record no longer hides an OSError, an unserialisable payload no
-#: longer breaks the caller, the runs walk survives a concurrent prune, and the
-#: repo registry degrades instead of propagating.
-#: 92 -> 84 when the docker_runner trio (#6578/#6959/#6971) was fixed:
-#: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
-#: timeout now raises the house `SubprocessTimeoutError`, and container logs
-#: come from one demuxed call instead of two round-trips.
-#: 38 -> 27 when the convention-drift family
-#: (#6668/#6694/#6733/#6742/#6975) was fixed: the ADR allocator is serialised,
-#: workspace_gc_interval answers to its own name, Optional deps are checked by
-#: identity, and StateData's empty-default rule is derived from the model.
-#: 64 -> 57 when the retro/GC family (#6681/#6690/#6782/#6961) was
-#: fixed: a code defect in the collector propagates, corrupt queue lines and
-#: manifests log where production can see them, and the branch reaper checks
-#: for an open PR and stops force-deleting.
-DEFERRED_XFAILS_MAX = 0
-#: 64 -> 53 when the loop/fetch family (#6653/#6709/#6728/#6735/#6862)
-#: was fixed: a repo without a slash says so, the REST fallback and the triage
-#: park no longer absorb the fatal signals, and one bad bot PR stops costing
-#: the rest of the queue its tick.
-#: 27 -> 18 when the final sweep (#6408/#6679/#6784/#6801/#6923) was
-#: fixed: a malformed PR URL names itself, disk trouble in the cache surfaces
-#: at WARNING, and the snapshot docstring describes the type it returns.
-#: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
-#: fixed: `verify_proposals` isolates each category so one corrupt record no
-#: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
-#: isolation, and both loader warnings carry exc_info. All 8 pins are live.
-#: 84 -> 68 when the durable-write family (#6599/#6623/#6699/#6877)
-#: was fixed: append_jsonl drops a torn tail and no longer raises at its
-#: callers, the wiki's seven write_text sites share one guard, and the prep
-#: coverage floor stops failing the task that produced it.
-#: 84 -> 74 when the escalation family (#6536/#6710/#6750/#6765) was
-#: fixed: a batch awaits its cancelled siblings, a failed escalation no longer
-#: records a transition that never happened, and the escalator and deferred
-#: pipeline start both let the infra-fatal signals through.
-
-DEFERRED_XFAILS: frozenset[str] = frozenset({})
+#: With nothing exempted, the scan below is unconditional: an ``xfail`` on an
+#: active test is an offence, full stop. Re-introducing a grandfather list
+#: would mean re-introducing the debt it existed to count down.
 
 
 def _key(rel: str, scope: str) -> str:
@@ -351,8 +280,6 @@ def test_active_tests_do_not_skip_xfail_or_comment_out_coverage() -> None:
     offenders: list[str] = []
     for rel, found in _scan().items():
         for scope, label, detail in found:
-            if _key(rel, scope) in DEFERRED_XFAILS and label == "xfail marker":
-                continue
             offenders.append(f"{rel}::{scope}: {label}: {detail}")
 
     assert not offenders, (
@@ -360,31 +287,6 @@ def test_active_tests_do_not_skip_xfail_or_comment_out_coverage() -> None:
         "active issue/PR workflow or out of pytest collection; do not hide it "
         "behind skip/xfail/commented tests:\n  " + "\n  ".join(sorted(offenders))
     )
-
-
-def test_no_stale_grandfather_entries() -> None:
-    """Every grandfathered entry must still name a live xfail marker.
-
-    Without this the set could only ever grow stale: a fixed test would leave
-    its line behind, and the guard would keep vouching for a suppression that
-    no longer exists. This is the half that makes it shrink-only.
-    """
-    live = {
-        _key(rel, scope)
-        for rel, found in _scan().items()
-        for scope, label, _ in found
-        if label == "xfail marker"
-    }
-    stale = sorted(DEFERRED_XFAILS - live)
-    assert not stale, (
-        f"{len(stale)} grandfathered xfail(s) no longer exist. The marker came "
-        f"off — delete the entry from DEFERRED_XFAILS:\n  " + "\n  ".join(stale)
-    )
-
-
-# ---------------------------------------------------------------------------
-# Anti-vacuity — a config-derived scan set can go empty and pass silently
-# ---------------------------------------------------------------------------
 
 
 def test_scan_set_covers_both_collected_file_shapes() -> None:
@@ -489,7 +391,12 @@ def test_detection_resolves_every_spelling(
 
 
 def test_offender_scope_is_the_test_name_not_a_line_number(tmp_path: Path) -> None:
-    """DEFERRED_XFAILS keys on this, so it must survive edits above the marker."""
+    """The offender key is the test NAME, so it survives edits above it.
+
+    The grandfather set keyed on this and is gone; the property still matters,
+    because a line-number key would make every offender report churn on an
+    unrelated edit above the marker.
+    """
     probe = tmp_path / "test_probe.py"
     probe.write_text(
         "import pytest\n\n\nclass TestOuter:\n"
@@ -500,28 +407,3 @@ def test_offender_scope_is_the_test_name_not_a_line_number(tmp_path: Path) -> No
     scopes = [scope for scope, _, _ in _offenders_in(probe, frozenset())]
 
     assert scopes == ["TestOuter.test_inner"]
-
-
-def test_grandfather_set_stays_within_its_cap() -> None:
-    """The half that makes "nothing may join" mechanical rather than aspirational."""
-    assert len(DEFERRED_XFAILS) <= DEFERRED_XFAILS_MAX, (
-        f"DEFERRED_XFAILS holds {len(DEFERRED_XFAILS)} entries against a cap of "
-        f"{DEFERRED_XFAILS_MAX}. Fix the xfail rather than raising the cap; it "
-        "is shrink-only."
-    )
-
-
-def test_grandfather_cap_is_not_left_slack() -> None:
-    """A cap far above the real count would re-open the growth path silently."""
-    assert len(DEFERRED_XFAILS) == DEFERRED_XFAILS_MAX, (
-        f"cap {DEFERRED_XFAILS_MAX} != {len(DEFERRED_XFAILS)} live entries. When "
-        "an entry leaves, lower the cap in the same change."
-    )
-
-
-def test_grandfather_set_is_populated() -> None:
-    """Anti-vacuity for the baseline itself: an empty set must not read as clean."""
-    assert DEFERRED_XFAILS, (
-        "DEFERRED_XFAILS is empty. If every deferral really was resolved, "
-        "delete the set and its two tests rather than leaving a hollow gate."
-    )
