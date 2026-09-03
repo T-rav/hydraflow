@@ -175,7 +175,7 @@ entries:
   src/goal_supervisor_loop.py::noqa:BLE001: 5
   src/goal_supervisor_loop.py::noqa:PLC0415: 5
   src/goal_supervisor_runner.py::noqa:BLE001: 1
-  src/harness_insights.py::noqa:BLE001: 4
+  src/harness_insights.py::noqa:BLE001: 3
   src/harness_insights.py::noqa:PLC0415: 5
   src/health_monitor_loop/_adjust.py::noqa:BLE001: 4
   src/health_monitor_loop/_freshness.py::noqa:BLE001: 1

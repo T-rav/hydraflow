@@ -122,6 +122,32 @@ class RunContext:
         return manifest
 
 
+def _safe_size(path: Path) -> int:
+    """Total the files under *path*, skipping whatever vanished (#6717).
+
+    Every byte-total in this module walks a tree the GC is free to prune, and
+    an unguarded ``stat()`` on a file removed since ``rglob`` listed it takes
+    down the whole caller. Missing a file's bytes is the correct degradation:
+    the file is gone, so its bytes are gone too.
+    """
+    total = 0
+    for f in path.rglob("*"):
+        try:
+            if f.is_file():
+                total += f.stat().st_size
+        except OSError:
+            logger.debug("run_recorder: %s vanished during size walk", f)
+    return total
+
+
+def _is_empty(path: Path) -> bool:
+    """Whether *path* has no entries; a vanished directory counts as empty."""
+    try:
+        return not any(path.iterdir())
+    except OSError:
+        return False
+
+
 def _safe_iterdir(path: Path) -> list[Path]:
     """List *path*, or nothing if it vanished underneath us (#6717).
 
@@ -241,14 +267,7 @@ class RunRecorder:
                     if not run_dir.is_dir():
                         continue
                     total_runs += 1
-                    for f in run_dir.rglob("*"):
-                        try:
-                            if f.is_file():
-                                total_bytes += f.stat().st_size
-                        except OSError:
-                            logger.debug(
-                                "run_recorder: %s vanished during stats walk", f
-                            )
+                    total_bytes += _safe_size(run_dir)
         return {
             "total_bytes": total_bytes,
             "total_mb": round(total_bytes / (1024 * 1024), 2),
@@ -282,7 +301,7 @@ class RunRecorder:
                     removed += 1
                     logger.info("Purged expired run %s", run_dir)
             # Remove empty issue dirs
-            if issue_dir.is_dir() and not any(issue_dir.iterdir()):
+            if issue_dir.is_dir() and _is_empty(issue_dir):
                 with contextlib.suppress(OSError):
                     issue_dir.rmdir()
         return removed
@@ -297,10 +316,10 @@ class RunRecorder:
 
         # Collect all runs with their timestamps and paths
         runs: list[tuple[str, Path]] = []
-        for issue_dir in self._runs_dir.iterdir():
+        for issue_dir in _safe_iterdir(self._runs_dir):
             if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                 continue
-            for run_dir in issue_dir.iterdir():
+            for run_dir in _safe_iterdir(issue_dir):
                 if not run_dir.is_dir():
                     continue
                 try:
@@ -318,9 +337,7 @@ class RunRecorder:
         while runs and current_bytes > max_bytes:
             _, oldest_run = runs.pop()
             parent = oldest_run.parent
-            run_bytes = sum(
-                f.stat().st_size for f in oldest_run.rglob("*") if f.is_file()
-            )
+            run_bytes = _safe_size(oldest_run)
             shutil.rmtree(oldest_run, ignore_errors=True)
             if oldest_run.exists():
                 logger.warning(
@@ -331,7 +348,7 @@ class RunRecorder:
             removed += 1
             logger.info("Purged oversized run %s", oldest_run)
             # Remove empty issue dirs
-            if parent.is_dir() and not any(parent.iterdir()):
+            if parent.is_dir() and _is_empty(parent):
                 with contextlib.suppress(OSError):
                     parent.rmdir()
 
@@ -339,12 +356,9 @@ class RunRecorder:
 
     def _compute_total_bytes(self) -> int:
         """Return total bytes across all run artifacts."""
-        total = 0
-        if self._runs_dir.is_dir():
-            for f in self._runs_dir.rglob("*"):
-                if f.is_file():
-                    total += f.stat().st_size
-        return total
+        if not self._runs_dir.is_dir():
+            return 0
+        return _safe_size(self._runs_dir)
 
     def purge_all(self) -> int:
         """Delete all recorded runs. Returns the number removed."""
@@ -358,6 +372,6 @@ class RunRecorder:
                 if run_dir.is_dir():
                     shutil.rmtree(run_dir, ignore_errors=True)
                     removed += 1
-            if issue_dir.is_dir() and not any(issue_dir.iterdir()):
+            if issue_dir.is_dir() and _is_empty(issue_dir):
                 issue_dir.rmdir()
         return removed
