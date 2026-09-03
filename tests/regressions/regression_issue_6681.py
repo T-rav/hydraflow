@@ -102,7 +102,6 @@ class TestRetrospectiveRecordTypeError:
     swallows it."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6681 — fix not yet landed", strict=False)
     async def test_type_error_in_collect_propagates(self, tmp_path: Path) -> None:
         collector, _state = _make_collector(tmp_path)
         review = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)

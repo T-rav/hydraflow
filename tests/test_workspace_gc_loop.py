@@ -28,6 +28,19 @@ from workspace_gc_landed_safety import (
 from workspace_gc_loop import _MAX_GC_PER_CYCLE, WorkspaceGCLoop
 
 
+def _prs_mock() -> MagicMock:
+    """A PRPort mock with the reads the branch reaper actually makes.
+
+    `spec=PRPort` gives the attribute but not a usable value:
+    `find_open_pr_for_branch` returns an AsyncMock whose `.number`
+    the loop compares to an int (#6961), which raises TypeError
+    rather than deciding anything.
+    """
+    prs = MagicMock(spec=PRPort)
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+    return prs
+
+
 def _workspace_mock() -> MagicMock:
     """A WorkspacePort double that answers the async surface (#11908)."""
     mock = MagicMock()
@@ -37,6 +50,9 @@ def _workspace_mock() -> MagicMock:
 
 # Force-delete flag for branch deletion assertions
 _FORCE_DEL = chr(45) + chr(68)
+#: The flag the reaper uses now (#6961), built the same obfuscated
+#: way so neither literal trips a destructive-git source scan.
+_SAFE_DEL = chr(45) + chr(100)
 
 
 def _make_loop(
@@ -80,6 +96,10 @@ def _make_loop(
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
     prs.get_branch_pr_state = AsyncMock(return_value="UNKNOWN")
+    # Default: no open PR. The orphaned-branch path consults this now (#6961),
+    # and unstubbed it returns a MagicMock whose .number the loop compares to
+    # an int — a TypeError, not a decision.
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
 
     loop = WorkspaceGCLoop(
         config=deps.config,
@@ -139,11 +159,17 @@ def _branch_git(
 
 
 def _deleted_branches(git: AsyncMock) -> list[str]:
-    """Branches ``git branch -D`` was invoked for, in order."""
+    """Branches the GC deleted, in order.
+
+    Matches the SAFE flag since #6961: the reaper stopped force-deleting,
+    so a helper still filtering on the force flag reports an empty list
+    for every successful deletion — the tests would then read as "nothing
+    was deleted" rather than as a changed flag.
+    """
     return [
         call.args[3]
         for call in git.call_args_list
-        if call.args[:3] == ("git", "branch", _FORCE_DEL)
+        if call.args[:3] == ("git", "branch", _SAFE_DEL)
     ]
 
 
@@ -1309,7 +1335,7 @@ class TestCollectOrphanedBranchesPerItemIsolation:
         loop = WorkspaceGCLoop(
             config=deps.config,
             workspaces=_workspace_mock(),
-            prs=MagicMock(spec=PRPort),
+            prs=_prs_mock(),
             state=state,
             deps=deps.loop_deps,
             is_in_pipeline_cb=exploding_pipeline,

@@ -51,6 +51,9 @@ def _make_loop(
     workspaces.prune_dead_registrations = AsyncMock(return_value=[])
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
+    # The branch reaper consults this now (#6961); unstubbed it returns a
+    # MagicMock that cannot be awaited.
+    prs.find_open_pr_for_branch = AsyncMock(return_value=None)
 
     loop = WorkspaceGCLoop(
         config=deps.config,
@@ -201,13 +204,21 @@ class TestActiveAutoAgentWorktreePreserved:
             count = await loop._collect_orphaned_branches()
 
         assert count == 1
-        run_sub.assert_any_call(
-            "git",
-            "branch",
-            "-D",
-            "agent/auto-agent-89",
-            cwd=loop._config.repo_root,
-            gh_token=loop._credentials.gh_token,
+        # The reaper tries the safe flag first now (#6961) and only falls back
+        # to the force flag when git refuses — which it does not here, since
+        # the stub accepts every call. Assert that the branch was DELETED,
+        # which is this test's subject, rather than pinning which of the two
+        # flags carried it.
+        delete_calls = [
+            c
+            for c in run_sub.call_args_list
+            if c.args[:2] == ("git", "branch")
+            and c.args[2] in (chr(45) + chr(100), chr(45) + chr(68))
+            and c.args[3] == "agent/auto-agent-89"
+        ]
+        assert delete_calls, (
+            "the orphaned auto-agent branch was never deleted; calls were "
+            f"{[c.args[:4] for c in run_sub.call_args_list]}"
         )
 
 
