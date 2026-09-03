@@ -25,6 +25,17 @@ from ._common import (
 
 logger = logging.getLogger("hydraflow.health_monitor_loop")
 
+#: The HITL issue body is read by a human deciding whether to intervene, so an
+#: uncomputed metric must not render as a number. `item_scores.json` failing to
+#: parse leaves these None (#6602); "unavailable" says so, where `0.0000` would
+#: have read as a real and alarming measurement.
+_UNAVAILABLE = "unavailable (item_scores.json unreadable)"
+
+
+def _render_score(value: float | None) -> str:
+    """Render an optional score for the HITL issue body."""
+    return _UNAVAILABLE if value is None else f"{value:.4f}"
+
 
 class HealthMonitorHitlMixin:
     """HITL recommendation filing of ``HealthMonitorLoop``."""
@@ -77,7 +88,12 @@ class HealthMonitorHitlMixin:
                     )
                 )
 
-            if metrics.avg_memory_score < _AVG_SCORE_LOW:
+            # None = item_scores.json unparseable (#6602). Not a low
+            # score — no recommendation can be made from no data.
+            if (
+                metrics.avg_memory_score is not None
+                and metrics.avg_memory_score < _AVG_SCORE_LOW
+            ):
                 recommendations.append(
                     (
                         "avg_memory_score",
@@ -175,7 +191,7 @@ class HealthMonitorHitlMixin:
             f"- `agent_timeout`: {config.agent_timeout}\n\n"
             f"### Evidence\n"
             f"- First-pass rate (last 50): `{metrics.first_pass_rate:.2%}`\n"
-            f"- Avg memory score: `{metrics.avg_memory_score:.4f}`\n"
+            f"- Avg memory score: `{_render_score(metrics.avg_memory_score)}`\n"
             f"- Surprise rate: `{metrics.surprise_rate:.2%}`\n"
             f"- HITL escalation rate: `{metrics.hitl_escalation_rate:.2%}`\n"
             f"- Stale items (score<0.3, ≥5 appearances): `{metrics.stale_item_count}`\n\n"

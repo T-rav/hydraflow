@@ -204,7 +204,12 @@ class HealthMonitorFleetVitalsMixin:
     ) -> None:
         if self._obs is None:
             return
-        self._obs.set_measurement("memory.avg_score", metrics.avg_memory_score)
+        # None when item_scores.json is unparseable (#6602). Emit no
+        # measurement rather than a zero: a gap in the series is honest about
+        # the missing cycle, where a 0.0 point charts as a real collapse in
+        # memory quality. stale_items carries -1 and needs no guard.
+        if metrics.avg_memory_score is not None:
+            self._obs.set_measurement("memory.avg_score", metrics.avg_memory_score)
         self._obs.set_measurement("memory.first_pass_rate", metrics.first_pass_rate)
         self._obs.set_measurement("memory.surprise_rate", metrics.surprise_rate)
         self._obs.set_measurement("memory.stale_items", float(metrics.stale_item_count))
