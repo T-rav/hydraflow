@@ -598,13 +598,29 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     continue
                 if await self._issue_has_pipeline_label(issue_number):
                     continue
+                if await self._has_open_pr(issue_number):
+                    # #6961: this path never asked. The landed-work check
+                    # looks at commits, not review state, so a branch whose
+                    # PR is still open — awaiting review, or mid-discussion —
+                    # was deleted out from under it. `_has_open_pr` already
+                    # exists and guards the workspace path; the branch path
+                    # simply never called it.
+                    logger.debug(
+                        "GC: branch %s still has an open PR — skipping", branch
+                    )
+                    continue
                 if not await self._branch_work_has_landed(branch):
                     logger.debug("GC: branch %s has unlanded work — skipping", branch)
                     continue
                 await run_subprocess(
                     "git",
                     "branch",
-                    "-D",
+                    # -d, not -D (#6961): force-delete discards unmerged
+                    # commits silently. Safe delete makes git refuse when the
+                    # branch holds work that is not merged — a second opinion
+                    # on `_branch_work_has_landed`, from the tool that
+                    # actually knows the commit graph.
+                    "-d",
                     branch,
                     cwd=self._config.repo_root,
                     gh_token=self._credentials.gh_token,

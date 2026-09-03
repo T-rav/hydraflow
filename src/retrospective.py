@@ -104,7 +104,12 @@ class RetrospectiveCollector:
                 await self.analyze_evidence(
                     self._load_recent(self._config.retrospective_window)
                 )
-        except Exception:
+        except Exception as exc:
+            # #6681: "continuing" is right for a data hiccup and wrong for a
+            # code defect. A TypeError here means the collector cannot build
+            # a retrospective for ANY issue, and swallowing it turned a
+            # permanently broken feature into a warning per issue that nobody reads.
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "Retrospective failed for issue #%d — continuing",
                 issue_number,

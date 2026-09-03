@@ -69,7 +69,11 @@ class RetrospectiveQueue:
             try:
                 items.append(QueueItem.model_validate_json(stripped))
             except Exception:
-                logger.debug(
+                # WARNING, not DEBUG (#6690): a corrupt line means a queued
+                # retrospective is being dropped, and DEBUG is off in
+                # production — so the loss was invisible exactly where it
+                # mattered.
+                logger.warning(
                     "Skipping corrupt queue line: %s",
                     stripped[:80],
                     exc_info=True,

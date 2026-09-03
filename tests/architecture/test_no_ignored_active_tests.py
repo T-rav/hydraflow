@@ -296,7 +296,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
 #: timeout now raises the house `SubprocessTimeoutError`, and container logs
 #: come from one demuxed call instead of two round-trips.
-DEFERRED_XFAILS_MAX = 64
+#: 64 -> 57 when the retro/GC family (#6681/#6690/#6782/#6961) was
+#: fixed: a code defect in the collector propagates, corrupt queue lines and
+#: manifests log where production can see them, and the branch reaper checks
+#: for an open PR and stops force-deleting.
+DEFERRED_XFAILS_MAX = 57
 #: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
@@ -321,10 +325,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
         "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
-        "tests/regressions/regression_issue_6681.py::TestRetrospectiveRecordTypeError.test_type_error_in_collect_propagates",
-        "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_invalid_json_logs_at_warning",
-        "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_pydantic_validation_failure_logs_at_warning",
-        "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_warning_includes_exc_info",
         "tests/regressions/regression_issue_6694.py::TestIssue6694ConcurrentAdrNumberRace.test_two_concurrent_callers_get_different_numbers",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_mkdir_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_write_does_not_propagate",
@@ -352,7 +352,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_primary",
         "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_authentication_error_propagates",
         "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_credit_exhausted_error_propagates",
-        "tests/regressions/regression_issue_6782.py::TestRunRecorderCorruptManifestLogLevel.test_corrupt_manifest_logged_at_warning",
         "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
@@ -365,8 +364,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",
-        "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_branch_gc_uses_safe_delete_not_force",
-        "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_skips_branch_when_open_pr_exists",
         "tests/regressions/regression_issue_6975.py::TestDefaultsTestCompleteness.test_route_back_counts_asserted_in_canonical_defaults_test",
     }
 )

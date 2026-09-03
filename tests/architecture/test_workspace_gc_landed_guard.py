@@ -9,7 +9,14 @@ _SOURCE = Path(__file__).resolve().parents[2] / "src" / "workspace_gc_loop.py"
 _PREDICATE = "_worktree_work_has_landed"
 _BRANCH_PREDICATE = "_branch_work_has_landed"
 _DRIVER = "_drive_landed_proof"
-_FORCE_DELETE = ("git", "branch", "-D")
+#: Both branch-delete flags. #11571's invariant is "delete only after proof",
+#: and it applies to the safe flag exactly as much as the force one — #6961
+#: moved `_collect_orphaned_branches` to `-d`, which dropped it out of a
+#: force-only tuple and made this guard stop watching the site it was written
+#: for. Widened rather than narrowed: a safer delete must not buy an exemption
+#: from the ordering rule.
+_DELETE_FLAGS = (chr(45) + chr(68), chr(45) + chr(100))
+_DELETE_PREFIXES = tuple(("git", "branch", flag) for flag in _DELETE_FLAGS)
 
 
 def _functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -110,7 +117,7 @@ def _force_delete_linenos(node: ast.AST) -> list[int]:
         and isinstance(child.func, ast.Name)
         and child.func.id == "run_subprocess"
         and tuple(arg.value for arg in child.args[:3] if isinstance(arg, ast.Constant))
-        == _FORCE_DELETE
+        in _DELETE_PREFIXES
     ]
 
 

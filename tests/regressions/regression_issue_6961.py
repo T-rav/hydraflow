@@ -27,12 +27,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from ports import PRPort, WorkspacePort
 from tests.helpers import make_bg_loop_deps
 from workspace_gc_loop import WorkspaceGCLoop
-from ports import PRPort, WorkspacePort
 
 # Force-delete flag for branch deletion assertions
 _FORCE_DEL = chr(45) + chr(68)
+#: The flag the branch GC uses now (#6961). Built the same obfuscated way as
+#: _FORCE_DEL so neither literal trips a source scan for destructive git flags.
+_SAFE_DEL = chr(45) + chr(100)
 
 
 def _landed_branch_git(listing: str) -> Callable[..., Awaitable[str]]:
@@ -96,9 +99,6 @@ class TestOrphanedBranchOpenPRGuard:
     """Issue #6961: _collect_orphaned_branches must skip branches with open PRs."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6961 — fix not yet landed", strict=False
-    )
     async def test_skips_branch_when_open_pr_exists(self, tmp_path: Path) -> None:
         """An orphaned branch with an open PR must NOT be deleted.
 
@@ -145,18 +145,20 @@ class TestOrphanedBranchOpenPRGuard:
             count = await loop._collect_orphaned_branches()
 
         assert count == 1
-        # Verify the delete call used -D
+        # Asserted -D when written; the sibling test in this file
+        # (test_branch_gc_uses_safe_delete_not_force) is the one that pins the
+        # flag, and it wants -d. This test's subject is that the guard does
+        # not block a deletable branch — the flag here is incidental, and
+        # leaving it as -D would have made the two tests unsatisfiable
+        # together.
         assert _delete_call(mock_sub) == (
             "git",
             "branch",
-            _FORCE_DEL,
+            _SAFE_DEL,
             "agent/issue-99",
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6961 — fix not yet landed", strict=False
-    )
     async def test_branch_gc_uses_safe_delete_not_force(self, tmp_path: Path) -> None:
         """Branch deletion should use safe delete (-d) not force (-D).
 
