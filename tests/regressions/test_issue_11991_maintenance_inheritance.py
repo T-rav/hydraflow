@@ -113,27 +113,39 @@ def test_an_inheriting_stage_resolves_through_the_maintenance_dial(
 
 
 @pytest.mark.parametrize("role", sorted(_MAINTENANCE_DIALED_ROLES))
-def test_the_maintenance_dial_cannot_currently_select_claude(
-    role: str, tmp_path
-) -> None:
-    """A KNOWN GAP, pinned so P6b's migration cannot quietly change it.
+def test_the_maintenance_dial_can_select_claude(role: str, tmp_path) -> None:
+    """An operator pulling the role-set back OFF the gateway is honoured.
 
-    `_apply_if_default` is guarded by `config.maintenance_provider != "claude"`,
-    which treated `claude` as "unset". That was right when `claude` was the
-    default. #12083 made `gateway` the default and the sentinel did not move,
-    so an operator setting `maintenance_provider: claude` — to pull the
-    maintenance role-set back off the gateway — gets no effect at all.
+    `_apply_if_default` was guarded by `maintenance_provider != "claude"`,
+    using claude as a stand-in for "unset". True while claude was the default;
+    #12083 (ADR-0147) made `gateway` the default and the sentinel did not move,
+    so setting `maintenance_provider: claude` silently did nothing to any of
+    these six roles. The gate now asks whether the operator SET the field.
 
-    This asserts the CURRENT behaviour rather than the desired one, on purpose.
-    Changing which provider serves six roles is a spend decision, not a
-    refactor, and it is reported on #11991 rather than made here. When it is
-    fixed this test flips, and the flip should be deliberate and visible.
-
-    The per-role dial remains a working escape hatch — pinned below.
+    This is the direction that matters for spend: the dial exists to move the
+    maintenance role-set off an expensive backend, and it could not.
     """
     config = HydraFlowConfig(repo_root=tmp_path, maintenance_provider="claude")
 
-    assert getattr(config, f"{role}_provider") == "gateway"
+    assert getattr(config, f"{role}_provider") == "claude", (
+        f"{role} ignored an explicit maintenance_provider=claude — the dial "
+        "cannot express the one direction it most needs to (#11991 AC3)"
+    )
+
+
+@pytest.mark.parametrize("role", sorted(_MAINTENANCE_DIALED_ROLES))
+def test_an_unset_dial_leaves_the_role_on_its_own_default(role: str, tmp_path) -> None:
+    """The regression guard for that change.
+
+    The old code applied `gateway` over `gateway` when the dial was unset — a
+    no-op only because every default matches. Gating on explicit-set makes it
+    genuinely inert, and this pins that the observable outcome did not move.
+    """
+    config = HydraFlowConfig(repo_root=tmp_path)
+
+    assert getattr(config, f"{role}_provider") == (
+        HydraFlowConfig.model_fields[f"{role}_provider"].default
+    )
 
 
 def test_the_per_role_dial_is_still_an_escape_hatch(tmp_path) -> None:

@@ -7475,9 +7475,20 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
     # Maintenance knob: route the maintenance role-set to one backend coherently
     # (provider AND model together), never the work loops. A model is only
     # applied where the role actually has a *_model field (pr_unstick has none).
-    if config.maintenance_provider != "claude" or config.maintenance_model.strip():
+    # Gate on "did the operator set it", not "is it non-claude". The old
+    # `!= "claude"` test used claude as a stand-in for unset, which was true
+    # while claude was the default. #12083 (ADR-0147) made `gateway` the
+    # default and the sentinel did not move, so `maintenance_provider: claude`
+    # — an operator pulling the maintenance role-set back OFF the gateway —
+    # silently did nothing to any of the six roles (#11991 AC3).
+    #
+    # The unset path is unchanged in effect: `maintenance_provider` and every
+    # role dial default to `gateway`, so the old code applied gateway over
+    # gateway and `_apply_if_default` is a no-op either way.
+    maintenance_dialled = "maintenance_provider" in explicit_fields
+    if maintenance_dialled or config.maintenance_model.strip():
         for role in _MAINTENANCE_DIALED_ROLES:
-            if config.maintenance_provider != "claude":
+            if maintenance_dialled:
                 _apply_if_default(f"{role}_provider", config.maintenance_provider)
             model_field = f"{role}_model"
             if (
