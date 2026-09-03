@@ -43,12 +43,16 @@ def compute_trend_metrics(
                 except Exception:  # noqa: BLE001
                     logger.debug("Skipping malformed outcomes line", exc_info=True)
         except OSError:
-            pass
+            # #6626: this was a bare `pass`. An unreadable outcomes trail left
+            # first_pass_rate at 0.0 with no operator-visible signal, which is
+            # indistinguishable from "every run failed". Warn like the
+            # harness_failures read below already does.
+            logger.warning("Failed to read outcomes.jsonl", exc_info=True)
 
     first_pass_rate = (successes / total_outcomes) if total_outcomes > 0 else 0.0
 
     # --- item_scores.json ---
-    avg_memory_score = 0.0
+    avg_memory_score: float | None = 0.0
     stale_item_count = 0
     if scores_path.exists():
         try:
@@ -64,13 +68,16 @@ def compute_trend_metrics(
                     and int(s.get("appearances", 0)) >= 5
                 )
         except Exception:  # noqa: BLE001
-            # Signal parse failure via a sentinel negative count (#6470) so
-            # callers can distinguish "no data" from "corrupt file".
+            # #6470 signalled parse failure with a -1 count, which works:
+            # -1 is outside the count's domain. But it left avg_memory_score
+            # at 0.0, and 0.0 IS in that field's domain — so `_hitl` read a
+            # corrupt file as "memory scores critically low" and escalated a
+            # compaction recommendation. #6602: only the score goes to None.
             logger.warning(
                 "Failed to parse item_scores.json — score metrics unavailable",
                 exc_info=True,
             )
-            avg_memory_score = 0.0
+            avg_memory_score = None
             stale_item_count = -1
 
     # --- harness_failures.jsonl — surprise & hitl rates ---
@@ -81,10 +88,15 @@ def compute_trend_metrics(
         try:
             lines = failures_path.read_text(encoding="utf-8").strip().splitlines()
             tail = lines[-window:] if len(lines) > window else lines
-            total_failures = len(tail)
             for line in tail:
                 try:
                     rec = json.loads(line)
+                    # #6602: the denominator was `len(tail)`, so malformed
+                    # lines inflated it while contributing to no category.
+                    # An all-corrupt tail read as "0% HITL escalation" —
+                    # the calmest possible signal from unusable data. Only
+                    # lines that actually parsed count.
+                    total_failures += 1
                     if rec.get("category") == "hitl_escalation":
                         hitl_count += 1
                     # Surprise is detected in the memory trail, not here;
