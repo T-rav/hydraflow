@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11889
 source_phase: plan
 created_at: 2026-09-01T10:19:26.410503+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Record fixture provenance in tests/fixtures/stream_json/README.md

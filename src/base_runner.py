@@ -733,6 +733,12 @@ class BaseRunner:
             "HYDRAFLOW_QUALITY_LOCK_TIMEOUT": str(
                 int(self._config.quality_timeout * self._LOCK_WAIT_SHARE)
             ),
+            # The verification budget (#12036). The agent budget and the
+            # verification budget are now two numbers an operator sets
+            # separately, instead of one implying the other.
+            "HYDRAFLOW_QUALITY_SLOTS": str(
+                getattr(self._config, "max_concurrent_verifications", 1)
+            ),
         }
 
     async def _verify_quality(self, worktree_path: Path) -> LoopResult:

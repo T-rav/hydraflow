@@ -334,13 +334,15 @@ def test_acquire_abandons_when_ppid_diverges_to_a_non_one_value(
     Under a subreaper an orphan is reparented onto the subreaper's pid, not
     onto PID 1 — a `os.getppid() == 1` check would silently never fire.
     """
-    from scripts.quality_host_lock import _acquire
+    from scripts.quality_host_lock import _acquire_any_slot
 
     handle = (tmp_path / "lock").open("w")
     recorded_parent_pid = os.getppid()
     monkeypatch.setattr(os, "getppid", lambda: recorded_parent_pid + 1)
     try:
-        state = _acquire(handle, timeout_s=30, parent_pid=recorded_parent_pid)
+        _held, state = _acquire_any_slot(
+            [handle], timeout_s=30, parent_pid=recorded_parent_pid
+        )
         assert state == "abandoned"
     finally:
         handle.close()
@@ -356,12 +358,12 @@ def test_acquire_does_not_abandon_when_recorded_parent_pid_is_one(
     unchanged ppid of 1 (wrapper's real parent legitimately is init) still
     proceeds to acquire the free lock normally.
     """
-    from scripts.quality_host_lock import _acquire
+    from scripts.quality_host_lock import _acquire_any_slot
 
     handle = (tmp_path / "lock").open("w")
     monkeypatch.setattr(os, "getppid", lambda: 1)
     try:
-        state = _acquire(handle, timeout_s=30, parent_pid=1)
+        _held, state = _acquire_any_slot([handle], timeout_s=30, parent_pid=1)
         assert state == "acquired"
     finally:
         handle.close()

@@ -22,10 +22,13 @@ identical ``Skip-Regression:`` opt-out. The classifier lives in ``src`` — neve
 ``scripts`` — because the container runs ``PYTHONPATH=src`` and ``src`` must not
 import from ``scripts`` (see #10365).
 
-Default-OFF behind ``config.close_verification_enabled``
-(``HYDRAFLOW_CLOSE_VERIFICATION_ENABLED``, default false): fully inert — makes
-no port calls and changes no behaviour — until enabled, exactly like the G1
-auto-recut actuator.
+Ships **ENABLED** behind ``config.close_verification_enabled``
+(``HYDRAFLOW_CLOSE_VERIFICATION_ENABLED``, default true). It began disabled
+under the G1 auto-recut actuator's rollout discipline and the default has since
+flipped (#12072), so on an untouched deployment this actuator DOES reopen and
+re-triage a delta-less close. Turn it off from the System tab, or by setting the
+environment variable to ``false``, which restores the inert behaviour — no port
+calls, no change in behaviour.
 """
 
 from __future__ import annotations

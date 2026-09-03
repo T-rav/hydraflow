@@ -4,9 +4,21 @@
 Runs the full regression suite, collects currently-failing nodeids, and writes
 an @pytest.mark.xfail decorator directly above each failing test function.
 
-The xfail reason embeds the issue number parsed from the filename, so a future
-fix that flips the test green will surface as an unexpected pass (XPASS) and
-we can drop the marker explicitly rather than silently.
+The xfail reason embeds the issue number parsed from the filename, and the
+marker is written ``strict=True`` so a future fix that flips the test green
+FAILS the run until someone drops the marker explicitly (#12071).
+
+``strict=False`` was the original spelling and could not deliver that: pytest
+reports an unexpected pass as ``x`` and exits 0, so a pin whose bug had been
+fixed sat RED-labelled forever with nothing pointing at it.
+``src/regression_rot_scan.py`` exists partly to work around that masking, and
+infers RED-ness statically because "xfail(strict=False) masks the exit code
+anyway".
+
+The ~109 pins already in the tree keep their ``strict=False`` markers: flipping
+them wholesale would fail the run for every pin whose bug has since been fixed,
+which is #12059's per-pin triage rather than a mechanical rewrite. New pins are
+strict from here.
 
 Rerunnable: if a test is already marked xfail, it is left alone.
 """
@@ -106,7 +118,7 @@ def add_xfail_markers(failing: set[str]) -> int:
                         out.append(
                             f"{indent}@pytest.mark.xfail("
                             f'reason="Regression for issue #{issue} — fix not yet landed", '
-                            f"strict=False)\n"
+                            f"strict=True)\n"
                         )
                         file_added += 1
                     break

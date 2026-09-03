@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11948
 source_phase: plan
 created_at: 2026-09-01T10:57:18.007865+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Absence of convergence report is common — deny only for substantial class

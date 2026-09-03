@@ -263,6 +263,9 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         # cap, findings are recorded (so they are not re-filed individually)
         # and folded into ONE summary issue.
         budget = FilingBudget(cap=self._config.detector_calibration_max_issues_per_tick)
+        #: Over-cap subjects, recorded by `file_overflow_summary` only after
+        #: its filing is confirmed (#12070).
+        overflow_keys: list[str] = []
         keys = self._dedup.get()
 
         # Spray files first (#11427): a template spraying many distinct
@@ -274,8 +277,10 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
             if dedup_key in keys:
                 continue
             if not budget.allow():
-                keys = keys | {dedup_key}
-                self._dedup.set_all(keys)
+                # Collected, not recorded (#12070): `file_overflow_summary` records
+                # these only after its filing is confirmed, so a 0-sentinel retry
+                # still finds the batch.
+                overflow_keys.append(dedup_key)
                 budget.note_overflow(
                     overflow_line(
                         tkey[:100], f"{len(entities)} entities/{_WINDOW_DAYS}d"
@@ -319,8 +324,10 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
             if dedup_key in keys:
                 continue
             if not budget.allow():
-                keys = keys | {dedup_key}
-                self._dedup.set_all(keys)
+                # Collected, not recorded (#12070): `file_overflow_summary` records
+                # these only after its filing is confirmed, so a 0-sentinel retry
+                # still finds the batch.
+                overflow_keys.append(dedup_key)
                 budget.note_overflow(
                     overflow_line(norm[:100], f"{len(numbers)}x/{_WINDOW_DAYS}d")
                 )
@@ -354,6 +361,7 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         summary_filed = await file_overflow_summary(
             create_issue=self._pr.create_issue,
             dedup=self._dedup,
+            subject_keys=overflow_keys,
             budget=budget,
             key_prefix="detector_calibration",
             labels=_ISSUE_LABELS,

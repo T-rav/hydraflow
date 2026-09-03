@@ -4,7 +4,7 @@ name: feedback-check-existing-before-building
 description: '2026-08-18: I rebuilt an already-shipped feature (rung-0 ledger #11055)
   and overwrote it with a thinner version. Grep for the module/script BEFORE writing,
   especially when a roadmap says ''NOW''.'
-status: issue-open
+status: promoted
 issue: 11947
 promoted_in: 12016
 wontfix_reason: null

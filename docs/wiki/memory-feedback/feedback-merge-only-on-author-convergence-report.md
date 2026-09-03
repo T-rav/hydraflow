@@ -5,7 +5,7 @@ description: A substantial PR merges ONLY on an explicit convergence report from
   author. Green CI, a stable head, a clean worktree, and an idle process count are
   all indistinguishable from a builder pausing between review passes. Cost three corrective
   PRs in one night (2026-08-22/23).
-status: issue-open
+status: promoted
 issue: 11948
 promoted_in: 12017
 wontfix_reason: null
