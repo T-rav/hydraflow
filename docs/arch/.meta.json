@@ -1,25 +1,25 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "2d720641597a56e26ecd109dfca2d9d8c61c14464a97e093f831ae4f9a3173d5"
+      "content_sha": "93e0e7f74b9a96043bf15d73d2a459bbc767785583825032b81f250b489a5e0f"
     },
     "adr-conformance.md": {
-      "content_sha": "84aac6b0833818589d309286ae83e3a18991deb580ee98950c7dce48f8918cc2"
+      "content_sha": "41d064f169153009bbc7a39be89b685757fd56f3de3413baacc18370f725788a"
     },
     "adr-enforcement.md": {
-      "content_sha": "62f4e7c9da5c5f37046084bd91e4bfd0ff35fb4e70a17f76aa2adc0af7a73d0d"
+      "content_sha": "cccfded9c26e93a37231371783e85bc42675db082002464f75bac0d29c8282d0"
     },
     "adr-falsifiability.md": {
-      "content_sha": "4108542db4ae952ad30ed992968edf251612b51b7eadec36ec0e0cd557470b5e"
+      "content_sha": "6dcb9aaa72cec7690a1b860cf071a9a403265d81f69d78bffab6854b638ca332"
     },
     "adr_xref.md": {
-      "content_sha": "a221185d9f4fa90c358582efc9e692aacbb4b26ada6c06b270272c0fa20b1203"
+      "content_sha": "1a8095e00b5ed276510672f7aaa91dc985d14427a22cf9501dad6d1409683c59"
     },
     "ai_system_inventory.md": {
       "content_sha": "efb63a6496e5efdd333a1edcfda964bfbbe8e06dcc58818782b1b10fb44f0391"
     },
     "coverage_matrix.md": {
-      "content_sha": "ccfef1b6299bd316bbc698eb896b534c630e2ae87f1e104629b1ce2b37984ce1"
+      "content_sha": "37030d9ca6ffcdb979764e32b05aea3e499920be0e4830b08b44ee7403ee32ae"
     },
     "events.md": {
       "content_sha": "b7fff31d940305ba7ae0b4da94f077dc63cce097efec10707b97936df10b69a2"
@@ -40,13 +40,13 @@
       "content_sha": "0f12d1a86a10707f6f6af01906e4ce6f6d0470fc0cbcb6a0e54961c62cca288a"
     },
     "modules.md": {
-      "content_sha": "3b89a19a79750cd9341132e984834592b1474b4a446d3273f0e5b658cf251be7"
+      "content_sha": "86c4ccbb0e78a2a7011e29ef058c9d3aca9f9434557c79ec639978997f8ba4eb"
     },
     "ports.md": {
       "content_sha": "f735d206f8cf8b086aa962df93953ce9a41bd8be59d2ec8893c2677e74eb4f28"
     },
     "standards-decisions.md": {
-      "content_sha": "bfad5bb28e3ac2727cc27fd4f47edbac19d8f5218067d64e92ae1c0a1a1a6abf"
+      "content_sha": "456b9438d7bf81cd459c0a20e7c630d9597620fd9a5a882d3d43ef57012479d8"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "d2991f2750e535b3d02fdf6c0b311dd5f4d62d418c21d702a1013023e806f74d"
@@ -58,5 +58,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "f5e676b6500d33b8c32f31f03f3c2dc7ece286f147597f579bf282561616d2ee"
+  "content_sha": "a16ab0cda52871e21dd6291ce294f388399563a5104a45daacea76e4d2fb93ab"
 }
