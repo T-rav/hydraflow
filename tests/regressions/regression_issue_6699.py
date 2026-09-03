@@ -24,7 +24,6 @@ from admin_tasks import _save_prep_coverage_floor
 class TestIssue6699SavePrepCoverageFloorErrorHandling:
     """_save_prep_coverage_floor must not propagate OSError to callers."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6699 — fix not yet landed", strict=False)
     def test_oserror_on_write_does_not_propagate(self, tmp_path: Path) -> None:
         """OSError during write_text should be caught, not propagated.
 
@@ -50,7 +49,6 @@ class TestIssue6699SavePrepCoverageFloorErrorHandling:
                     "expected it to be caught and logged (issue #6699)"
                 )
 
-    @pytest.mark.xfail(reason="Regression for issue #6699 — fix not yet landed", strict=False)
     def test_permission_error_on_write_does_not_propagate(self, tmp_path: Path) -> None:
         """PermissionError (subclass of OSError) should also be caught.
 
@@ -72,7 +70,6 @@ class TestIssue6699SavePrepCoverageFloorErrorHandling:
                     "expected it to be caught and logged (issue #6699)"
                 )
 
-    @pytest.mark.xfail(reason="Regression for issue #6699 — fix not yet landed", strict=False)
     def test_oserror_on_mkdir_does_not_propagate(self, tmp_path: Path) -> None:
         """OSError during parent mkdir should also be caught.
 

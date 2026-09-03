@@ -292,7 +292,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
 #: isolation, and both loader warnings carry exc_info. All 8 pins are live.
-DEFERRED_XFAILS_MAX = 84
+#: 84 -> 68 when the durable-write family (#6599/#6623/#6699/#6877)
+#: was fixed: append_jsonl drops a torn tail and no longer raises at its
+#: callers, the wiki's seven write_text sites share one guard, and the prep
+#: coverage floor stops failing the task that produced it.
+DEFERRED_XFAILS_MAX = 68
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -300,17 +304,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientExhaustsThreadPool.test_thread_pool_starved_by_concurrent_retries",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientUsesBlockingSleep.test_retry_loop_calls_blocking_time_sleep",
-        "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_last_lint_index_write_failure_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_topic_write_failure_during_stale_marking_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestEnsureRepoDirWriteFailure.test_index_seeding_failure_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestEnsureRepoDirWriteFailure.test_topic_file_seeding_failure_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_index_json_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_index_md_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_topic_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_data_written_before_fsync_failure_is_preserved",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_caught_not_propagated",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_logged",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_write_oserror_is_caught_not_propagated",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
@@ -322,9 +315,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6694.py::TestIssue6694ConcurrentAdrNumberRace.test_two_concurrent_callers_get_different_numbers",
         "tests/regressions/regression_issue_6696.py::TestIssue6696ExcInfoOnMalformedHarnessRecords.test_load_recent_includes_exc_info_on_malformed_line",
         "tests/regressions/regression_issue_6696.py::TestIssue6696ExcInfoOnMalformedHarnessRecords.test_unexpected_exception_type_is_not_swallowed",
-        "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_mkdir_does_not_propagate",
-        "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_write_does_not_propagate",
-        "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_permission_error_on_write_does_not_propagate",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
         "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
@@ -359,8 +349,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_first_pr_still_processes_remaining",
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_hitl_escalation_still_processes_remaining",
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_merge_still_processes_remaining",
-        "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_all_lines_valid_json_after_partial_write",
-        "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_partial_write_cascades_to_corrupt_subsequent_event",
         "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_does_not_raise_on_serialization_error",
         "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_fetch_does_not_raise_on_serialization_error",
         "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_plan_stored_does_not_raise_on_serialization_error",
