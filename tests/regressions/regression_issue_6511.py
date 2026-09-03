@@ -96,8 +96,12 @@ class TestCorruptItemScoresLogging:
         with caplog.at_level(logging.DEBUG, logger=HEALTH_LOGGER):
             result = compute_trend_metrics(outcomes, scores, failures)
 
-        # Assert — metrics fall back to defaults
-        assert result.avg_memory_score == 0.0
+        # Assert — the metric signals "not computed", not a measured zero.
+        # This line read `== 0.0` while this class's subject (and the log
+        # assertion below) is that the parse failure is REPORTED. #6602
+        # settled the value: 0.0 is in the field's domain and was being read
+        # as a real, alarming score.
+        assert result.avg_memory_score is None
 
         # Assert — a log record must be emitted
         health_records = [r for r in caplog.records if r.name == HEALTH_LOGGER]
