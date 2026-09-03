@@ -122,6 +122,22 @@ class RunContext:
         return manifest
 
 
+def _safe_iterdir(path: Path) -> list[Path]:
+    """List *path*, or nothing if it vanished underneath us (#6717).
+
+    Every caller walks the runs tree while the GC is free to prune it. An
+    ``iterdir`` on a directory removed since the parent listing raises, and
+    that error used to end the entire stats or purge pass — one missing
+    directory costing every remaining one. Returns a materialised list, so the
+    caller iterates a snapshot rather than a live handle.
+    """
+    try:
+        return list(path.iterdir())
+    except OSError:
+        logger.debug("run_recorder: %s vanished during walk", path)
+        return []
+
+
 class RunRecorder:
     """Records per-issue run artifacts under ``.hydraflow/<repo_slug>/runs/``."""
 
@@ -211,17 +227,28 @@ class RunRecorder:
         total_runs = 0
         issue_count = 0
         if self._runs_dir.is_dir():
-            for issue_dir in self._runs_dir.iterdir():
+            # Every step here races the GC that prunes the same tree (#6717).
+            # A directory removed between the listing and the walk, or a file
+            # removed between `is_file()` and `stat()`, used to raise out of
+            # the whole computation — so a routine purge could make the
+            # storage panel report nothing at all. Skip what vanished and keep
+            # counting what is still there; a stale total beats no total.
+            for issue_dir in _safe_iterdir(self._runs_dir):
                 if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                     continue
                 issue_count += 1
-                for run_dir in issue_dir.iterdir():
+                for run_dir in _safe_iterdir(issue_dir):
                     if not run_dir.is_dir():
                         continue
                     total_runs += 1
                     for f in run_dir.rglob("*"):
-                        if f.is_file():
-                            total_bytes += f.stat().st_size
+                        try:
+                            if f.is_file():
+                                total_bytes += f.stat().st_size
+                        except OSError:
+                            logger.debug(
+                                "run_recorder: %s vanished during stats walk", f
+                            )
         return {
             "total_bytes": total_bytes,
             "total_mb": round(total_bytes / (1024 * 1024), 2),
@@ -238,10 +265,10 @@ class RunRecorder:
             return 0
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         removed = 0
-        for issue_dir in list(self._runs_dir.iterdir()):
+        for issue_dir in _safe_iterdir(self._runs_dir):
             if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                 continue
-            for run_dir in list(issue_dir.iterdir()):
+            for run_dir in _safe_iterdir(issue_dir):
                 if not run_dir.is_dir():
                     continue
                 try:
@@ -324,10 +351,10 @@ class RunRecorder:
         if not self._runs_dir.is_dir():
             return 0
         removed = 0
-        for issue_dir in list(self._runs_dir.iterdir()):
+        for issue_dir in _safe_iterdir(self._runs_dir):
             if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                 continue
-            for run_dir in list(issue_dir.iterdir()):
+            for run_dir in _safe_iterdir(issue_dir):
                 if run_dir.is_dir():
                     shutil.rmtree(run_dir, ignore_errors=True)
                     removed += 1

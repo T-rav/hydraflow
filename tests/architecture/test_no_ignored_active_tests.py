@@ -288,7 +288,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: 98 -> 92 when runner_utils' zombie-subprocess and assert-as-invariant pins
 #: (#6476/#6703) were fixed: `stream_claude_process` now kills the group and
 #: reaps on EVERY exit path, and the pipe checks survive `python -O`.
-DEFERRED_XFAILS_MAX = 92
+#: 92 -> 80 when the store family (#6696/#6717/#6907/#6921) was fixed:
+#: a malformed record no longer hides an OSError, an unserialisable payload no
+#: longer breaks the caller, the runs walk survives a concurrent prune, and the
+#: repo registry degrades instead of propagating.
+DEFERRED_XFAILS_MAX = 80
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -321,8 +325,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_pydantic_validation_failure_logs_at_warning",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_warning_includes_exc_info",
         "tests/regressions/regression_issue_6694.py::TestIssue6694ConcurrentAdrNumberRace.test_two_concurrent_callers_get_different_numbers",
-        "tests/regressions/regression_issue_6696.py::TestIssue6696ExcInfoOnMalformedHarnessRecords.test_load_recent_includes_exc_info_on_malformed_line",
-        "tests/regressions/regression_issue_6696.py::TestIssue6696ExcInfoOnMalformedHarnessRecords.test_unexpected_exception_type_is_not_swallowed",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_mkdir_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_write_does_not_propagate",
         "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_permission_error_on_write_does_not_propagate",
@@ -331,9 +333,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
         "tests/regressions/regression_issue_6710.py::test_auth_error_awaits_cancelled_siblings",
         "tests/regressions/regression_issue_6710.py::test_credit_exhausted_awaits_cancelled_siblings",
-        "tests/regressions/regression_issue_6717.py::TestGetStorageStatsConcurrentDeletion.test_stat_raises_file_not_found_mid_iteration",
-        "tests/regressions/regression_issue_6717.py::TestGetStorageStatsPermissionError.test_stat_permission_error_is_skipped",
-        "tests/regressions/regression_issue_6717.py::TestPurgeExpiredConcurrentDeletion.test_iterdir_raises_when_issue_dir_removed_concurrently",
         "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_authentication_error_propagates",
         "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6733.py::TestCanonicalEnvVarApplied.test_canonical_env_var_overrides_field",
@@ -365,13 +364,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_merge_still_processes_remaining",
         "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_all_lines_valid_json_after_partial_write",
         "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_partial_write_cascades_to_corrupt_subsequent_event",
-        "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_does_not_raise_on_serialization_error",
-        "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_fetch_does_not_raise_on_serialization_error",
-        "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_plan_stored_does_not_raise_on_serialization_error",
-        "tests/regressions/regression_issue_6921.py::TestLoadOSError.test_io_error_returns_empty_list",
-        "tests/regressions/regression_issue_6921.py::TestLoadOSError.test_permission_error_returns_empty_list",
-        "tests/regressions/regression_issue_6921.py::TestSaveOSError.test_disk_full_on_save_does_not_propagate",
-        "tests/regressions/regression_issue_6921.py::TestSaveOSError.test_permission_error_on_save_does_not_propagate",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",
