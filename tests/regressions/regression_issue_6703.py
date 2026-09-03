@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from runner_utils import stream_claude_process
+from runner_utils import StreamConfig, stream_claude_process
 
 # ---------------------------------------------------------------------------
 # Helpers — fake process with None streams
@@ -54,7 +54,15 @@ def _make_runner(proc: asyncio.subprocess.Process) -> MagicMock:
 
 
 def _common_kwargs(runner: MagicMock) -> dict:
-    """Keyword arguments shared across all test calls."""
+    """Keyword arguments shared across all test calls.
+
+    ``runner`` travels inside ``StreamConfig`` and ``gh_token`` is gone; this
+    harness still passed both as top-level kwargs, so every test here died
+    with ``TypeError: unexpected keyword argument 'runner'`` before reaching
+    the code under test — reporting a stale signature, not the defect. The
+    property being pinned (a None pipe raises RuntimeError, not
+    AssertionError) is unchanged.
+    """
     return {
         "cmd": ["claude", "-p", "--output-format", "stream-json"],
         "prompt": "hello",
@@ -63,8 +71,7 @@ def _common_kwargs(runner: MagicMock) -> dict:
         "event_bus": MagicMock(),
         "event_data": {},
         "logger": logging.getLogger("test"),
-        "runner": runner,
-        "gh_token": "fake-token",
+        "config": StreamConfig(runner=runner),
     }
 
 
@@ -74,7 +81,6 @@ def _common_kwargs(runner: MagicMock) -> dict:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Regression for issue #6703 — fix not yet landed", strict=False)
 async def test_stdout_none_raises_runtime_error() -> None:
     """proc.stdout is None → should raise RuntimeError, not AssertionError."""
     proc = _make_fake_process(stdout=None, stderr=MagicMock())
@@ -85,7 +91,6 @@ async def test_stdout_none_raises_runtime_error() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Regression for issue #6703 — fix not yet landed", strict=False)
 async def test_stderr_none_raises_runtime_error() -> None:
     """proc.stderr is None → should raise RuntimeError, not AssertionError."""
     # stdout must be non-None so the first assert passes and we reach the stderr assert
@@ -97,7 +102,6 @@ async def test_stderr_none_raises_runtime_error() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Regression for issue #6703 — fix not yet landed", strict=False)
 async def test_stdin_none_raises_runtime_error_when_not_prompt_arg() -> None:
     """proc.stdin is None (non-prompt-arg mode) → should raise RuntimeError."""
     # cmd without -p: stdin is used to send the prompt, so stdin=None is the failure
