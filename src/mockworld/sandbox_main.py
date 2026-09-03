@@ -155,6 +155,12 @@ SANDBOX_SEAMS: dict[str, str] = {
     # External recorders + replay gate path off via
     # ``contract_refresh_external_enabled=False`` (s30).
     "contract_refresh_loop": "config_disable",
+    # #12081's reap phase, declared PHASE-scoped: ``workspace_gc_loop`` as a
+    # whole cannot take a seam (its state/orphan-dir/branch phases must keep
+    # running under s46/s65), but this one phase is gated by
+    # ``worktree_gc_reap_abandoned_enabled``, which the overrides below pin
+    # off — so the spawn is as unreachable as any module-wide config_disable.
+    "workspace_gc_loop::_reap_abandoned_creations": "config_disable",
     # s56: ``skill_prompt_corpus_cases`` / ``skill_prompt_refine_patch`` seed
     # seams replace ``_run_corpus`` and ``_refine_llm``; the seeded patch trips
     # the tripwire so the loop returns before ``_open_refine_pr``'s raw spawns.
@@ -368,6 +374,13 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # state/orphan-dir phases only, and the all-root reaper has its own unit +
     # MockWorld scenario cover.
     object.__setattr__(config, "worktree_gc_all_roots_enabled", False)
+    # Phase 7 (#12081) is the same LOCAL-git class as the phase above — `git
+    # worktree unlock` + `remove` on the live host repo, no network reach — and
+    # is pinned OFF for the same reason: determinism. It only ever acts on a
+    # worktree holding an hour-old `initializing` lock, which the sandbox never
+    # creates, so pinning it costs no coverage and its unit tests carry the
+    # behaviour.
+    object.__setattr__(config, "worktree_gc_reap_abandoned_enabled", False)
     # GoalSupervisorLoop (#11602): its Fable consult is a real
     # ``BaseSubprocessRunner`` spawn, and the runner is built lazily INSIDE
     # ``_get_runner`` — nothing can attach the ``_mockworld_fake_llm`` sentinel

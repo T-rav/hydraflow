@@ -173,7 +173,13 @@ class TestPhaseThreeRequiresLandedTip:
         with caplog.at_level(logging.DEBUG, logger=_GIT_LOGGER):
             result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 0,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert (
             _branch_exists(repo, branch),
             _git(repo, "rev-parse", branch),
@@ -231,7 +237,13 @@ class TestPhaseThreeRequiresLandedTip:
         assert _git(repo, "diff", "--name-only", "origin/staging", squash_branch) == ""
         result = await loop._do_work()
 
-        assert result == {"collected": 3, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 3,
+            "skipped": 0,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert [
             _branch_exists(repo, branch)
             for branch in (exact_branch, squash_branch, ancestral_branch)
@@ -260,7 +272,13 @@ class TestPhaseThreeRequiresLandedTip:
         with caplog.at_level(logging.DEBUG, logger=_GIT_LOGGER):
             result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 0,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert _branch_exists(repo, branch)
         assert (worktree.exists(), _gc_warnings(caplog)) == (
             registration == "registered",
@@ -289,7 +307,13 @@ class TestPhaseThreeRequiresLandedTip:
         with caplog.at_level(logging.DEBUG, logger=_GIT_LOGGER):
             result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 0,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert _branch_exists(repo, branch)
         assert _gc_warnings(caplog) == []
 

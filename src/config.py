@@ -6797,6 +6797,15 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for WorkspaceGCLoop.",
     )
+    worktree_gc_reap_abandoned_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for the WorkspaceGCLoop phase that reaps "
+            "worktrees abandoned mid-`git worktree add` (#12081). When False "
+            "the loop keeps every other phase but leaves a stale "
+            "`initializing` lock in place."
+        ),
+    )
     worktree_gc_all_roots_enabled: bool = Field(
         default=True,
         description=(
