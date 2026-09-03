@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from file_util import append_jsonl, file_lock
 from hydraflow_gateway.models import (
+    AccountBillingKind,
     BodyCapturePolicy,
     GatewayIdentity,
     GatewayRequestStatus,
@@ -66,6 +67,17 @@ class GatewayLedgerRow(BaseModel):
     usage_complete: bool
     cost_usd: float | None = Field(default=None, ge=0)
     cost_unknown: bool
+    billing_kind: AccountBillingKind = AccountBillingKind.METERED
+    """Whether ``cost_usd`` is money owed for this request, or already paid.
+
+    A subscription-lane row is priced the same way — token counts times the
+    model's rate — but that figure was never billed per call: the plan is flat
+    rate. Summing both lanes as dollars overstates spend, and the whole point
+    of routing everything through one ledger was to stop guessing at cost, so
+    the lane is recorded rather than inferred. ``metered`` is the default so
+    every row written before this field existed still parses, and reads as
+    what it was.
+    """
     # ADR-0141 route lineage. Null on every v1 row, which is exactly how a
     # governed request is told apart from an ungoverned one after the fact.
     mint_decision_id: str | None = None

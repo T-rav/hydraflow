@@ -207,6 +207,7 @@ cadence and files remediation issues on drift.
 | [0145](0145-charter-declared-loops.md) | Charter-declared loops — the repo owns the workflow, the factory owns governance | Proposed |
 | [0146](0146-sre-v1-the-exception-sensor.md) | SRE v1 — the exception sensor | Accepted |
 | [0147](0147-the-gateway-is-the-only-path-for-llm-spawns.md) | The gateway is the only path for LLM spawns | Accepted |
+| [0148](0148-the-gateway-is-credential-agnostic.md) | The gateway is credential-agnostic | Accepted |
 
 ## Adding a new ADR
 

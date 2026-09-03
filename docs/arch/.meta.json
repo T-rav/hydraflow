@@ -1,19 +1,19 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "a3e30e803ed76dac777f8babbb565e9dd6383daf92dbae18a52f24f6c8bdd634"
+      "content_sha": "93e0e7f74b9a96043bf15d73d2a459bbc767785583825032b81f250b489a5e0f"
     },
     "adr-conformance.md": {
-      "content_sha": "5fe9bb7a39dad72dd26d8150b084b5acae8bd7818be402e0ea8392eefffad279"
+      "content_sha": "41d064f169153009bbc7a39be89b685757fd56f3de3413baacc18370f725788a"
     },
     "adr-enforcement.md": {
-      "content_sha": "5177c3f4e7d500590f946e304449c221a49626b6cb2bf77a43a6607c40f1da2c"
+      "content_sha": "8e46523f273862aa96bcd26fff3cc7f3437e21b4ec9f1550170cdf3c35348f61"
     },
     "adr-falsifiability.md": {
-      "content_sha": "9dd02b012501d990d5f0adbf880ded3f3ae3df2990b214e742ada004b6009e47"
+      "content_sha": "648eadaae0f3675bc4a75cfe431bae6bd16c9d7a15f1b877bf7d352f531eb304"
     },
     "adr_xref.md": {
-      "content_sha": "8801e9d3e835dece44226ee83469697a42eea8670284b86b23650f3c3188f085"
+      "content_sha": "1a8095e00b5ed276510672f7aaa91dc985d14427a22cf9501dad6d1409683c59"
     },
     "ai_system_inventory.md": {
       "content_sha": "efb63a6496e5efdd333a1edcfda964bfbbe8e06dcc58818782b1b10fb44f0391"
@@ -46,7 +46,7 @@
       "content_sha": "f735d206f8cf8b086aa962df93953ce9a41bd8be59d2ec8893c2677e74eb4f28"
     },
     "standards-decisions.md": {
-      "content_sha": "256d3c134c6448796579b500cadafaa52a6a2ae60fbd74186739bc426ea2361f"
+      "content_sha": "456b9438d7bf81cd459c0a20e7c630d9597620fd9a5a882d3d43ef57012479d8"
     },
     "ubiquitous-language-context-map.md": {
       "content_sha": "62e3a2e8c54c8641e5527040a4f5fefd06a7596060aa7bb02950aa1f73324c09"
@@ -58,5 +58,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "989f08190a795b164cb6401f9478e630b25318615ff3a1c198ffcc280db5dd01"
+  "content_sha": "8e756afa22e98fd772a5e5cd35a8006b4af1a39756651b5206042221d79b7311"
 }

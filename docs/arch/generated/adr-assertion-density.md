@@ -4,11 +4,11 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (91 ADRs)
+- **Population:** Accepted (92 ADRs)
 - **Mean density** (per-ADR, unweighted): 97%
-- **Executable fraction** (check-weighted): 99% (237 of 240 cited checks)
-- **Check kinds:** pytest 236, make 1, script 0, prose 3
-- **Prose-count control limit** (Shewhart c-chart UCL): 0.58
+- **Executable fraction** (check-weighted): 99% (241 of 244 cited checks)
+- **Check kinds:** pytest 240, make 1, script 0, prose 3
+- **Prose-count control limit** (Shewhart c-chart UCL): 0.57
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
 > The monthly time-series and the shared Shewhart baseline framework are deferred to the epic's framework child (#10915). This surface is the per-PR snapshot; the longitudinal trend is a later phase.
@@ -108,6 +108,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0143 | PAAA — Purpose, Articles, Actors, Artifacts — and the declare / decide / act seam | 100% | 7 | 0 |
 | ADR-0146 | SRE v1 — the exception sensor | 100% | 3 | 0 |
 | ADR-0147 | The gateway is the only path for LLM spawns | 100% | 3 | 0 |
+| ADR-0148 | The gateway is credential-agnostic | 100% | 4 | 0 |
 
 
 <!-- arch:generated -->

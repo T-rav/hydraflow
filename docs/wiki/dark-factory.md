@@ -454,6 +454,22 @@ GATEWAY_ANTHROPIC_BASE_URL=https://api.anthropic.com
 GATEWAY_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+**Or on your existing Claude subscription, with no API key at all** (ADR-0148):
+
+```bash
+GATEWAY_ANTHROPIC_BASE_URL=https://api.anthropic.com
+GATEWAY_ANTHROPIC_AUTH_MODE=subscription
+# GATEWAY_ANTHROPIC_API_KEY must be unset in this mode
+```
+
+The gateway then presents the subscription's OAuth bearer token, read from the
+credential store per request and refreshed via
+`GATEWAY_ANTHROPIC_OAUTH_REFRESH_COMMAND`. Host only (the store is the login
+keychain), and the ledger marks those rows `billing_kind: flat_rate` so they are
+not summed as dollars owed. `gateway/README.md` has the full contract, the
+caveats, and the accounts-file form that runs subscription and key together for
+fallback.
+
 Restart the gateway. Note the factory cannot verify this pair for you — it
 lives in the gateway's environment, and `GATEWAY_CONTROL_PLANE_ENV_KEYS` keeps
 it out of the factory process. The gateway reports it: the accounts view shows

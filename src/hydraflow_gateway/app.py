@@ -77,6 +77,10 @@ from hydraflow_gateway.routing_account_state import AccountRuntimeState, live_fa
 from hydraflow_gateway.routing_accounts import AccountPool, load_account_pool
 from hydraflow_gateway.routing_fallback import TerminalDecisionIndex
 from hydraflow_gateway.settings import GatewaySettings
+from hydraflow_gateway.subscription_credential import (
+    SubscriptionCredentialSource,
+    build_subscription_credential,
+)
 from model_pricing import ModelPricingTable, load_pricing
 
 _DATA_PLANE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
@@ -221,6 +225,7 @@ def create_app(
     ledger: GatewayLedger | None = None,
     body_store: GatewayBodyStore | None = None,
     pricing: ModelPricingTable | None = None,
+    subscription_credential: SubscriptionCredentialSource | None = None,
     active_routes: ActiveRouteRegistry | None = None,
     account_pool: AccountPool | None = None,
     account_state: AccountRuntimeState | None = None,
@@ -266,6 +271,11 @@ def create_app(
     # lease slot on revoke, expiry, reap and shutdown, and the reservation is
     # keyed on the key id so none of those paths can release it twice.
     resolved_store.on_release(resolved_account_state.release_lease)
+    # Built only when an upstream actually asks for it, so an api_key
+    # deployment never touches a credential store it does not use.
+    resolved_credential = subscription_credential or build_subscription_credential(
+        resolved_settings
+    )
     owns_client = client is None
     resolved_client = client or _build_http_client(resolved_settings)
     proxy = GatewayProxy(
@@ -278,6 +288,7 @@ def create_app(
         account_pool=resolved_pool,
         account_state=resolved_account_state,
         terminals=resolved_terminals,
+        subscription_credential=resolved_credential,
         # One clock behind the whole observation path: a read model that
         # compared a fake `as_of` against real row timestamps would silently
         # drop evidence out of its own window.

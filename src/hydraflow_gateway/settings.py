@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import os
+import shlex
 from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from hydraflow_gateway.models import ProviderBinding
 
@@ -18,6 +26,15 @@ class UpstreamAuthStyle(StrEnum):
 
     X_API_KEY = "x-api-key"
     BEARER = "bearer"
+    OAUTH_BEARER = "oauth-bearer"
+    """A Claude subscription token: bearer PLUS the OAuth beta header.
+
+    Separate from ``BEARER`` (z.ai's) for two reasons that both bite if they
+    share a branch: an OAuth token to Anthropic is rejected without
+    ``anthropic-beta: oauth-2025-04-20``, and it expires — so the credential
+    is resolved per request from ``SubscriptionCredentialSource`` rather than
+    read once from ``api_key``.
+    """
 
 
 class UpstreamSettings(BaseModel):
@@ -26,15 +43,47 @@ class UpstreamSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     base_url: str
-    api_key: SecretStr
+    api_key: SecretStr | None = None
+    """The static provider credential, or ``None`` under ``OAUTH_BEARER``.
+
+    Optional only for the subscription lane, where there is no static key to
+    hold: the token expires, so it is resolved per request instead. Every other
+    auth style still requires one — see :meth:`require_a_credential_or_a_lane`.
+    """
     auth_style: UpstreamAuthStyle
 
     @field_validator("api_key")
     @classmethod
-    def validate_api_key(cls, value: SecretStr) -> SecretStr:
+    def validate_api_key(cls, value: SecretStr | None) -> SecretStr | None:
         """Provider credentials must be non-empty ASCII header values."""
+        if value is None:
+            return None
         _validate_header_secret(value.get_secret_value(), "provider API key")
         return value
+
+    @model_validator(mode="after")
+    def require_a_credential_or_a_lane(self) -> UpstreamSettings:
+        """Exactly one of "static key" or "subscription lane", never neither.
+
+        Making ``api_key`` optional opens a false-ready tap: an upstream with
+        no key and no subscription lane would load fine and fail at the first
+        spawn with an unauthenticated upstream request. And a static key
+        sitting next to ``OAUTH_BEARER`` is a config mistake worth naming
+        rather than silently ignoring — the operator believes one credential
+        is in use while the request carries another.
+        """
+        if self.auth_style is UpstreamAuthStyle.OAUTH_BEARER:
+            if self.api_key is not None:
+                raise ValueError(
+                    "an oauth-bearer upstream resolves its token per request, "
+                    "so it must not also carry a static api_key"
+                )
+            return self
+        if self.api_key is None:
+            raise ValueError(
+                f"an upstream using {self.auth_style.value!r} requires an api_key"
+            )
+        return self
 
     @field_validator("base_url")
     @classmethod
@@ -138,14 +187,17 @@ class GatewaySettings(BaseModel):
         env = os.environ if environ is None else environ
         control_token = _required(env, "GATEWAY_CONTROL_TOKEN")
         upstreams: dict[ProviderBinding, UpstreamSettings] = {}
-        _add_upstream(
-            upstreams,
-            env,
-            provider=ProviderBinding.ANTHROPIC,
-            base_url_name="GATEWAY_ANTHROPIC_BASE_URL",
-            api_key_name="GATEWAY_ANTHROPIC_API_KEY",
-            auth_style=UpstreamAuthStyle.X_API_KEY,
-        )
+        if _anthropic_auth_mode(env) == "subscription":
+            _add_subscription_upstream(upstreams, env)
+        else:
+            _add_upstream(
+                upstreams,
+                env,
+                provider=ProviderBinding.ANTHROPIC,
+                base_url_name="GATEWAY_ANTHROPIC_BASE_URL",
+                api_key_name="GATEWAY_ANTHROPIC_API_KEY",
+                auth_style=UpstreamAuthStyle.X_API_KEY,
+            )
         _add_upstream(
             upstreams,
             env,
@@ -281,6 +333,68 @@ def normalise_repo_slug(value: str) -> str:
     candidate = value.strip().lower()
     canonical = canonicalize_repo(candidate)
     return runtime_slug_for(canonical) if canonical is not None else candidate
+
+
+#: The credential the Anthropic upstream authenticates with. ``api_key`` is the
+#: default so an existing deployment is untouched by this option's existence.
+_ANTHROPIC_AUTH_MODES: frozenset[str] = frozenset({"api_key", "subscription"})
+
+
+def _anthropic_auth_mode(environ: Mapping[str, str]) -> str:
+    """Which credential the Anthropic upstream uses, validated at boot."""
+    mode = environ.get("GATEWAY_ANTHROPIC_AUTH_MODE", "api_key").strip() or "api_key"
+    if mode not in _ANTHROPIC_AUTH_MODES:
+        raise ValueError(
+            "GATEWAY_ANTHROPIC_AUTH_MODE must be one of "
+            f"{', '.join(sorted(_ANTHROPIC_AUTH_MODES))} (got {mode!r})"
+        )
+    return mode
+
+
+def oauth_command(environ: Mapping[str, str], name: str) -> tuple[str, ...] | None:
+    """A configured credential command as an argv tuple, or ``None``.
+
+    Split with ``shlex`` and executed as an argument vector, never through a
+    shell: the command's OUTPUT is a live credential, and a shell would put it
+    one redirection away from a log.
+    """
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return None
+    parts = tuple(shlex.split(raw))
+    if not parts:
+        raise ValueError(f"{name} is set but parsed to an empty command")
+    return parts
+
+
+def _add_subscription_upstream(
+    upstreams: dict[ProviderBinding, UpstreamSettings],
+    environ: Mapping[str, str],
+) -> None:
+    """Register the Anthropic upstream on the subscription (OAuth) lane.
+
+    ``GATEWAY_ANTHROPIC_API_KEY`` must be absent here. Accepting both would
+    leave two credentials configured and only one in use, which is the state an
+    operator is least able to debug from the outside.
+    """
+    base_url = environ.get("GATEWAY_ANTHROPIC_BASE_URL", "").strip()
+    if not base_url:
+        raise ValueError(
+            "GATEWAY_ANTHROPIC_AUTH_MODE=subscription still needs "
+            "GATEWAY_ANTHROPIC_BASE_URL — the lane changes the credential, "
+            "not the destination"
+        )
+    if environ.get("GATEWAY_ANTHROPIC_API_KEY", "").strip():
+        raise ValueError(
+            "GATEWAY_ANTHROPIC_API_KEY is set while "
+            "GATEWAY_ANTHROPIC_AUTH_MODE=subscription; unset one so it is "
+            "unambiguous which credential this gateway presents"
+        )
+    upstreams[ProviderBinding.ANTHROPIC] = UpstreamSettings(
+        base_url=base_url,
+        api_key=None,
+        auth_style=UpstreamAuthStyle.OAUTH_BEARER,
+    )
 
 
 def _add_upstream(

@@ -28,6 +28,13 @@ class RepoClass(StrEnum):
     PERSONAL = "personal"
 
 
+class AccountBillingKind(StrEnum):
+    """Whether spend on this account is metered actual or a flat-rate notional."""
+
+    METERED = "metered"
+    FLAT_RATE = "flat_rate"
+
+
 class ProviderBinding(StrEnum):
     """Upstream provider a virtual key is allowed to reach."""
 

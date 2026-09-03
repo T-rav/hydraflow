@@ -16,6 +16,7 @@ mock's call list.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,9 @@ from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
     UpstreamSettings,
+)
+from hydraflow_gateway.subscription_credential import (
+    SubscriptionCredentialSource,
 )
 from prompt_telemetry import parse_command_tool_model
 from runner_utils import run_lightweight_agent
@@ -65,10 +69,14 @@ class FakeAnthropicOrigin:
     """Deterministic external HTTP boundary that records what it was sent."""
 
     exchanges: list[tuple[str, bytes]] = field(default_factory=list)
+    headers: list[dict[str, str]] = field(default_factory=list)
+    """What each request carried. Separate from ``exchanges`` so existing
+    scenarios keep their url/body pairs unchanged."""
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
         body = await request.aread()
         self.exchanges.append((str(request.url), body))
+        self.headers.append(dict(request.headers))
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
@@ -179,6 +187,12 @@ class GatewayTurn:
 
     returncode: int
     exchanges: list[tuple[str, bytes]]
+    headers: list[dict[str, str]]
+    """What the origin was actually sent, per request.
+
+    The credential swap is only observable here: the worker presents a virtual
+    key and the origin must see a different credential entirely.
+    """
     decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -191,6 +205,7 @@ async def run_gateway_turn(
     key_id: str = "gateway-scenario-key",
     source: str = "implementer",
     zai_upstream: bool = False,
+    subscription_upstream: bool = False,
     governed_repo_slugs: frozenset[str] = frozenset(),
 ) -> GatewayTurn:
     """Drive one real lightweight gateway spawn for *config* and report the wire."""
@@ -198,8 +213,10 @@ async def run_gateway_turn(
     upstreams = {
         ProviderBinding.ANTHROPIC: UpstreamSettings(
             base_url="https://anthropic.test",
-            api_key=SecretStr(provider_key),
-            auth_style=UpstreamAuthStyle.X_API_KEY,
+            api_key=None if subscription_upstream else SecretStr(provider_key),
+            auth_style=UpstreamAuthStyle.OAUTH_BEARER
+            if subscription_upstream
+            else UpstreamAuthStyle.X_API_KEY,
         )
     }
     if zai_upstream:
@@ -228,6 +245,17 @@ async def run_gateway_turn(
         client=upstream_client,
         ledger=ledger,
         body_store=GatewayBodyStore(settings.body_dir),
+        subscription_credential=SubscriptionCredentialSource(
+            read_command=("read-subscription-credential",),
+            run=lambda _command: json.dumps(
+                {
+                    "accessToken": f"{provider_key}-oauth",
+                    "expiresAt": "2099-01-01T00:00:00+00:00",
+                }
+            ),
+        )
+        if subscription_upstream
+        else None,
     )
     gateway_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url=config.gateway_base_url
@@ -251,5 +279,6 @@ async def run_gateway_turn(
     return GatewayTurn(
         returncode=result.returncode,
         exchanges=origin.exchanges,
+        headers=origin.headers,
         decisions=control.decisions,
     )
