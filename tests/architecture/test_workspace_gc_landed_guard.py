@@ -138,7 +138,19 @@ def test_every_branch_force_delete_is_post_proof() -> None:
     proof_linenos = _attribute_call_linenos(phase3, _BRANCH_PREDICATE)
     delete_linenos = _force_delete_linenos(phase3)
 
-    assert force_delete_sites == {"_collect_orphaned_branches", "_reap_worktree"}
+    # `_delete_landed_branch` is phase 3's delete, extracted (#6961) so the
+    # safe flag can be tried before the force flag. The extraction moved the
+    # `run_subprocess` call out of `_collect_orphaned_branches`, which took it
+    # out of this guard's view — the site set changed and the ordering check
+    # had nothing left to order. Both are followed here rather than relaxed:
+    # the helper is a delete site, and it may only be reached from phase 3,
+    # after the proof.
+    assert force_delete_sites == {"_delete_landed_branch", "_reap_worktree"}
+    delete_callers = {
+        method for method, names in calls.items() if "_delete_landed_branch" in names
+    }
+    assert delete_callers == {"_collect_orphaned_branches"}
+    delete_linenos = _attribute_call_linenos(phase3, "_delete_landed_branch")
     assert (len(proof_linenos), len(delete_linenos)) == (1, 1)
     assert proof_linenos[0] < delete_linenos[0]
     assert reap_callers == {"_reap_worktree_if_safe"}
