@@ -106,6 +106,19 @@ def load_mirror_entry(path: Path) -> MirrorEntry:
     if status not in _VALID_STATUS:
         msg = f"invalid status {status!r} in {path}"
         raise ValueError(msg)
+    # `promoted_in` is the terminal transition's evidence, so carrying one while
+    # still claiming an earlier status is a contradiction, not a variant
+    # (#12069). Only `pending -> issue-open` is automated; the move to
+    # `promoted` is manual and drifted on three rows whose PRs had merged and
+    # whose issues were closed. Refusing the pair keeps the drift loud instead
+    # of leaving the board to disagree with the state machine silently.
+    if front.get("promoted_in") is not None and status != "promoted":
+        msg = (
+            f"{path} carries promoted_in={front['promoted_in']!r} with "
+            f"status={status!r}; a row with promoted_in set is `promoted` "
+            f"(docs/wiki/memory-feedback/README.md)"
+        )
+        raise ValueError(msg)
     return MirrorEntry(
         slug=path.stem,
         path=path,

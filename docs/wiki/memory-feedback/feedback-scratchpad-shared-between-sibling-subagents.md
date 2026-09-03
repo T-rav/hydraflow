@@ -4,7 +4,7 @@ name: Scratchpad dir is shared between sibling subagents — prefix filenames
 description: Parallel implementer subagents spawned by one orchestrator all get the
   ORCHESTRATOR's scratchpad path; generic filenames (pr_body.md, quality.log) get
   silently overwritten by siblings — one PR shipped with another task's body
-status: issue-open
+status: promoted
 issue: 11949
 promoted_in: 12015
 wontfix_reason: null
