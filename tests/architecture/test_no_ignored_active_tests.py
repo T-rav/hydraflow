@@ -300,7 +300,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: (#6668/#6694/#6733/#6742/#6975) was fixed: the ADR allocator is serialised,
 #: workspace_gc_interval answers to its own name, Optional deps are checked by
 #: identity, and StateData's empty-default rule is derived from the model.
-DEFERRED_XFAILS_MAX = 27
+#: 64 -> 53 when the loop/fetch family (#6653/#6709/#6728/#6735/#6862)
+#: was fixed: a repo without a slash says so, the REST fallback and the triage
+#: park no longer absorb the fatal signals, and one bad bot PR stops costing
+#: the rest of the queue its tick.
+DEFERRED_XFAILS_MAX = 16
 #: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
@@ -317,27 +321,16 @@ DEFERRED_XFAILS_MAX = 27
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
         "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
-        "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
-        "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
         "tests/regressions/regression_issue_6681.py::TestRetrospectiveRecordTypeError.test_type_error_in_collect_propagates",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_invalid_json_logs_at_warning",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_pydantic_validation_failure_logs_at_warning",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_warning_includes_exc_info",
-        "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
-        "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
-        "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_credit_exhausted_error_propagates",
-        "tests/regressions/regression_issue_6735.py::TestEpicSweeperPropagatesFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6735.py::TestEpicSweeperPropagatesFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6782.py::TestRunRecorderCorruptManifestLogLevel.test_corrupt_manifest_logged_at_warning",
         "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_pipeline_snapshot_entry",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_first_pr_still_processes_remaining",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_hitl_escalation_still_processes_remaining",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_merge_still_processes_remaining",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",

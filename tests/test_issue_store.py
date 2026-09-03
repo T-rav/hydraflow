@@ -1148,12 +1148,27 @@ class TestFetchAllHydraFlowIssues:
         config = ConfigFactory.create()
         fetcher = IssueFetcher(config)
 
-        with patch.object(
-            fetcher,
-            "fetch_issues_by_labels",
-            new_callable=AsyncMock,
-            return_value=[],
-        ) as mock_fetch:
+        # Force the REST fallback EXPLICITLY. These tests mocked only
+        # `fetch_issues_by_labels` and let the GraphQL attempt run for real —
+        # reaching the fallback because an unauthenticated `gh` in CI returns
+        # 401. That made the tests depend on a live subprocess and on the
+        # exact failure it happened to produce; #6709 stopped swallowing
+        # AuthenticationError, and they went red. A deterministic non-fatal
+        # failure keeps them offline and pins the fallback on purpose.
+        with (
+            patch.object(
+                fetcher,
+                "_fetch_all_graphql",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("graphql unavailable"),
+            ),
+            patch.object(
+                fetcher,
+                "fetch_issues_by_labels",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_fetch,
+        ):
             result = await fetcher.fetch_all_hydraflow_issues()
 
             mock_fetch.assert_called_once()
@@ -1178,11 +1193,21 @@ class TestFetchAllHydraFlowIssues:
 
         issue = IssueFactory.create(number=42, labels=["hydraflow-find"])
 
-        with patch.object(
-            fetcher,
-            "fetch_issues_by_labels",
-            new_callable=AsyncMock,
-            return_value=[issue],
+        # Same as above: force the fallback deterministically instead of
+        # relying on a live `gh` call failing (#6709).
+        with (
+            patch.object(
+                fetcher,
+                "_fetch_all_graphql",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("graphql unavailable"),
+            ),
+            patch.object(
+                fetcher,
+                "fetch_issues_by_labels",
+                new_callable=AsyncMock,
+                return_value=[issue],
+            ),
         ):
             result = await fetcher.fetch_all_hydraflow_issues()
             assert len(result) == 1

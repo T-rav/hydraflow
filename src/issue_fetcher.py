@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
+from exception_classify import INFRA_FATAL_EXCEPTIONS
 from models import GitHubIssue, PRInfo, Task
 from subprocess_util import run_subprocess
 
@@ -373,6 +374,18 @@ class IssueFetcher:
             return []
         try:
             return await self._fetch_all_graphql(all_labels)
+        except INFRA_FATAL_EXCEPTIONS:
+            # #6709: falling back to REST cannot help when the credential is
+            # dead or the budget is gone — the fallback spends another call
+            # against the same signal and reports the second failure as the
+            # first one's cause.
+            #
+            # Deliberately INFRA_FATAL_EXCEPTIONS and not
+            # `reraise_on_credit_or_bug`: that also re-raises the likely-bug
+            # class, and a TypeError/AttributeError from an unexpected GraphQL
+            # response shape is precisely what this fallback exists to absorb.
+            # Widening it to bugs turns the graceful REST retry into a crash.
+            raise
         except Exception as exc:
             logger.warning(
                 "GraphQL batch issue fetch failed, falling back to REST: %s", exc
@@ -383,7 +396,18 @@ class IssueFetcher:
 
     async def _fetch_all_graphql(self, all_labels: list[str]) -> list[GitHubIssue]:
         """Single GraphQL request with one alias per label."""
-        owner, name = self._config.repo.split("/", 1)
+        parts = self._config.repo.split("/", 1)
+        if len(parts) != 2 or not all(parts):
+            # #6653: the bare unpack raised "not enough values to unpack
+            # (expected 2, got 1)", which names Python's tuple machinery and
+            # not the setting the operator has to fix. GraphQL needs both
+            # halves; say which one is missing and where it comes from.
+            msg = (
+                f"repo must be 'owner/name', got {self._config.repo!r} — "
+                "set HYDRAFLOW_GITHUB_REPO to the full slug"
+            )
+            raise ValueError(msg)
+        owner, name = parts
 
         fragments = []
         for i, label in enumerate(all_labels):
