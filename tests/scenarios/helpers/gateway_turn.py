@@ -64,6 +64,15 @@ class FixedSseStream(httpx.AsyncByteStream):
         yield SSE_BODY
 
 
+class GzippedSseStream(httpx.AsyncByteStream):
+    """The same SSE body, gzipped — what a real origin sends for `accept-encoding: gzip`."""
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        import gzip
+
+        yield gzip.compress(SSE_BODY)
+
+
 @dataclass(slots=True)
 class FakeAnthropicOrigin:
     """Deterministic external HTTP boundary that records what it was sent."""
@@ -77,6 +86,20 @@ class FakeAnthropicOrigin:
         body = await request.aread()
         self.exchanges.append((str(request.url), body))
         self.headers.append(dict(request.headers))
+        # Honour `accept-encoding`, as a real origin does. api.anthropic.com
+        # gzips its SSE whenever the request allows it, and the usage observer
+        # is fed raw bytes — so a fake that always answers in plaintext cannot
+        # see the class of defect where the gateway lets compression through
+        # and the ledger goes cost-blind.
+        if "gzip" in request.headers.get("accept-encoding", "").lower():
+            return httpx.Response(
+                200,
+                headers={
+                    "content-type": "text/event-stream",
+                    "content-encoding": "gzip",
+                },
+                stream=GzippedSseStream(),
+            )
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
