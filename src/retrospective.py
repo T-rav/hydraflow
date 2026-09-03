@@ -237,16 +237,15 @@ class RetrospectiveCollector:
 
     def _append_entry(self, entry: RetrospectiveEntry) -> None:
         """Append a JSON line to the retrospective log."""
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
+        from file_util import append_jsonl  # noqa: PLC0415
 
-            append_jsonl(self._retro_path, entry.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append to retrospective log %s",
-                self._retro_path,
-                exc_info=True,
-            )
+        # No local OSError guard: `append_jsonl` is best-effort by contract
+        # (#6623) and logs its own I/O failures, and nothing else in this
+        # block can raise one. Keeping it would be dead code that reads like
+        # live protection. Four other callers DO keep theirs, because their
+        # try blocks also cover a `mkdir` or a `file_lock` that can still
+        # raise.
+        append_jsonl(self._retro_path, entry.model_dump_json())
 
     def _load_recent(self, n: int) -> list[RetrospectiveEntry]:
         """Load the last *n* entries from the retrospective log."""

@@ -30,7 +30,6 @@ class TestDeferredPipelineStartSwallowsFatalErrors:
     """Issue #6765: AuthenticationError and CreditExhaustedError must not be swallowed."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6765 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates(
         self, config: HydraFlowConfig
     ) -> None:
@@ -52,7 +51,6 @@ class TestDeferredPipelineStartSwallowsFatalErrors:
             await orch._deferred_pipeline_start()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6765 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates(
         self, config: HydraFlowConfig
     ) -> None:

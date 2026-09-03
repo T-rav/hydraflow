@@ -33,7 +33,6 @@ from file_util import append_jsonl  # noqa: E402
 class TestAppendJsonlOSErrorHandling:
     """append_jsonl must catch OSError from fsync and log it, not propagate."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6623 — fix not yet landed", strict=False)
     def test_fsync_oserror_is_caught_not_propagated(self, tmp_path: Path) -> None:
         """When os.fsync raises OSError (e.g. disk full), append_jsonl should
         catch it and log rather than letting the exception propagate.
@@ -49,7 +48,6 @@ class TestAppendJsonlOSErrorHandling:
             # The bug is that it DOES raise, so this test is RED.
             append_jsonl(target, '{"event":"test"}')
 
-    @pytest.mark.xfail(reason="Regression for issue #6623 — fix not yet landed", strict=False)
     def test_fsync_oserror_is_logged(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -66,7 +64,6 @@ class TestAppendJsonlOSErrorHandling:
             "Expected a log record mentioning the OSError, but none found"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6623 — fix not yet landed", strict=False)
     def test_write_oserror_is_caught_not_propagated(self, tmp_path: Path) -> None:
         """When the write() call itself raises OSError, append_jsonl should
         catch it rather than propagating."""
@@ -87,7 +84,6 @@ class TestAppendJsonlOSErrorHandling:
             # After fix, should not raise. Currently raises.
             append_jsonl(target, '{"event":"boom"}')
 
-    @pytest.mark.xfail(reason="Regression for issue #6623 — fix not yet landed", strict=False)
     def test_data_written_before_fsync_failure_is_preserved(
         self, tmp_path: Path
     ) -> None:

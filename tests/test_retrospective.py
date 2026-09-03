@@ -482,11 +482,15 @@ class TestAppendEntryOSError:
 
         with (
             patch("file_util.open", side_effect=OSError("disk full")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.retrospective"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.file_util"),
         ):
             collector._append_entry(entry)  # should not raise
 
-        assert "Could not append to retrospective log" in caplog.text
+        # The warning comes from `append_jsonl` now, which handles and
+        # logs its own I/O failures (#6623) — the local guard here was
+        # dead code and was removed. The property is unchanged: the
+        # write must not raise, and the failure must be visible.
+        assert "I/O error appending to" in caplog.text
 
     def test_append_entry_handles_mkdir_failure(
         self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
@@ -503,11 +507,15 @@ class TestAppendEntryOSError:
 
         with (
             patch.object(Path, "mkdir", side_effect=PermissionError("not allowed")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.retrospective"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.file_util"),
         ):
             collector._append_entry(entry)  # should not raise
 
-        assert "Could not append to retrospective log" in caplog.text
+        # The warning comes from `append_jsonl` now, which handles and
+        # logs its own I/O failures (#6623) — the local guard here was
+        # dead code and was removed. The property is unchanged: the
+        # write must not raise, and the failure must be visible.
+        assert "I/O error appending to" in caplog.text
 
 
 # ---------------------------------------------------------------------------
