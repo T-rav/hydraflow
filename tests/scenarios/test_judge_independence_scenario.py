@@ -25,6 +25,15 @@ from tests.scenarios.fakes.mock_world import MockWorld
 
 pytestmark = pytest.mark.scenario_loops
 
+_CHARTER_DIFF = (
+    "diff --git a/charter.yaml b/charter.yaml\n"
+    "--- a/charter.yaml\n"
+    "+++ b/charter.yaml\n"
+    "@@ -1,2 +1,2 @@\n"
+    "-  autonomy: ask\n"
+    "+  autonomy: act\n"
+)
+
 _STRUCTURAL_DIFF = (
     "diff --git a/docs/adr/0099-x.md b/docs/adr/0099-x.md\n"
     "--- a/docs/adr/0099-x.md\n"
@@ -126,6 +135,67 @@ class TestJudgeIndependenceScenario:
         ]
         assert len(alarms) == 1
         assert alarms[0].data["pr"] == 4242
+
+    async def test_a_charter_edit_cannot_fail_open_when_the_judge_is_down(
+        self, tmp_path: Path
+    ) -> None:
+        """#12114 C1: editing the governing declaration must fail CLOSED.
+
+        The test above shows a *structural* change failing OPEN when the judge
+        is unavailable — verdict APPROVE, ledgered, alarmed. That is the
+        correct behaviour for an ordinary classed change.
+
+        `charter.yaml` declares a repo's loops and, under #12114 H2, the change
+        classes requiring an operator. It was UNCLASSED, so an edit to it took
+        the structural path and would have failed open: the judge goes down,
+        the change that loosens the rules about what needs a human sails
+        through on an APPROVE nobody produced.
+
+        This drives the real advisor over a charter diff with the judge
+        raising, and asserts the verdict is not an approval. The unit pins
+        assert `classify_paths` returns SELF_MODIFICATION; this asserts the
+        consequence that classification is FOR.
+        """
+        from review_advisor import (
+            SURFACE_ADVISOR_CONFIGS,
+            PostVerifyAdvisor,
+            PostVerifyInput,
+        )
+
+        world = MockWorld(tmp_path)
+        config = _config(world, tmp_path)
+        ledger = ji.ledger_path_for(config)
+
+        boom_runner = _ScriptedRunner(RuntimeError("judge unavailable"))
+        advisor = PostVerifyAdvisor(
+            runner=boom_runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+            ledger_path=ledger,
+            event_bus=world.harness.bus,
+            pr_number=4243,
+            judge_independence_enabled=True,
+            # Passed explicitly because the CONSTRUCTOR defaults it False while
+            # HydraFlowConfig.judge_self_mod_fail_closed_enabled defaults True.
+            # Production wires the config value through; a fixture that omits
+            # it silently tests the fail-OPEN path and would pass against a
+            # build with no fail-closed behaviour at all.
+            self_mod_fail_closed_enabled=True,
+            independent_model="gpt-4o",
+        )
+
+        result = await advisor.run(
+            PostVerifyInput(
+                surface="pr_review",
+                diff=_CHARTER_DIFF,
+                executor_verdict_summary="approved",
+            )
+        )
+
+        assert result.verdict != "APPROVE", (
+            "a charter.yaml edit failed OPEN with the judge down — the change "
+            "that governs what needs a human approved itself on a verdict "
+            "nobody produced (#12114 C1)"
+        )
 
     async def test_fail_open_rate_breach_files_hydraflow_find(
         self, tmp_path: Path
