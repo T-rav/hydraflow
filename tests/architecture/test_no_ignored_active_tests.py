@@ -296,7 +296,7 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
 #: timeout now raises the house `SubprocessTimeoutError`, and container logs
 #: come from one demuxed call instead of two round-trips.
-DEFERRED_XFAILS_MAX = 48
+DEFERRED_XFAILS_MAX = 38
 #: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
@@ -305,11 +305,14 @@ DEFERRED_XFAILS_MAX = 48
 #: was fixed: append_jsonl drops a torn tail and no longer raises at its
 #: callers, the wiki's seven write_text sites share one guard, and the prep
 #: coverage floor stops failing the task that produced it.
+#: 84 -> 74 when the escalation family (#6536/#6710/#6750/#6765) was
+#: fixed: a batch awaits its cancelled siblings, a failed escalation no longer
+#: records a transition that never happened, and the escalator and deferred
+#: pipeline start both let the infra-fatal signals through.
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
         "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
-        "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
@@ -321,9 +324,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6694.py::TestIssue6694ConcurrentAdrNumberRace.test_two_concurrent_callers_get_different_numbers",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
         "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
-        "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
-        "tests/regressions/regression_issue_6710.py::test_auth_error_awaits_cancelled_siblings",
-        "tests/regressions/regression_issue_6710.py::test_credit_exhausted_awaits_cancelled_siblings",
         "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_authentication_error_propagates",
         "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6733.py::TestCanonicalEnvVarApplied.test_canonical_env_var_overrides_field",
@@ -336,12 +336,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6742.py::TestPlanPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
         "tests/regressions/regression_issue_6742.py::TestPlanPhaseSummarizerTruthy.test_plan_transcript_calls_summarizer_when_falsy",
         "tests/regressions/regression_issue_6742.py::TestReviewPhaseSummarizerTruthy.test_post_review_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorFallbackPathPropagatesFatalErrors.test_authentication_error_propagates_from_fallback",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorFallbackPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_fallback",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_authentication_error_propagates_from_primary",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_primary",
-        "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_credit_exhausted_error_propagates",
         "tests/regressions/regression_issue_6782.py::TestRunRecorderCorruptManifestLogLevel.test_corrupt_manifest_logged_at_warning",
         "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
