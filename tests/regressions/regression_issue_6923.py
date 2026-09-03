@@ -1,5 +1,12 @@
 """Regression test for issue #6923.
 
+Why this has no MockWorld scenario: the defect is the CONTENT of an error
+message on a path FakeGitHub never produces. The fake returns well-formed PR
+URLs, so a scenario would have to patch the fake to emit a malformed one —
+which exercises the patch, not the loop. Its sibling #6784 is a log LEVEL,
+which a scenario could assert at no better fidelity than the unit test here.
+
+
 Bug: PRManager.create_pr parses the PR number from the gh CLI output URL via
 ``int(pr_url.rstrip("/").split("/")[-1])``.  The ``/pull/`` presence check
 guards against completely unexpected formats, but URLs like:
