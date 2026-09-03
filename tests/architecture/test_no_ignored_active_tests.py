@@ -280,7 +280,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: `.finalize` stopped swallowing AttributeError/AssertionError, so all three
 #: of that file's pins pass unmarked. Unlike the 109 -> 107 drop, nothing was
 #: deleted here — the pins are live tests now.
-DEFERRED_XFAILS_MAX = 104
+#: 104 -> 96 when the docker_runner trio (#6578/#6959/#6971) was fixed:
+#: the reconnect retry moved off the executor onto `asyncio.sleep`, a Docker
+#: timeout now raises the house `SubprocessTimeoutError`, and container logs
+#: come from one demuxed call instead of two round-trips.
+DEFERRED_XFAILS_MAX = 96
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -289,8 +293,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_drain_failure_calls_proc_wait",
         "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_write_failure_calls_proc_wait",
         "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
-        "tests/regressions/regression_issue_6578.py::TestEnsureClientExhaustsThreadPool.test_thread_pool_starved_by_concurrent_retries",
-        "tests/regressions/regression_issue_6578.py::TestEnsureClientUsesBlockingSleep.test_retry_loop_calls_blocking_time_sleep",
         "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_in_update_proposal_verified_does_not_skip_remaining",
         "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_midway_still_processes_earlier_and_later_proposals",
         "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_last_lint_index_write_failure_does_not_crash",
@@ -379,14 +381,8 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
         "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",
-        "tests/regressions/regression_issue_6959.py::TestCallerSubprocessTimeoutGuard.test_except_subprocess_timeout_error_catches_docker_timeout",
-        "tests/regressions/regression_issue_6959.py::TestDockerRunSimpleTimeoutContract.test_run_simple_raises_subprocess_timeout_error",
-        "tests/regressions/regression_issue_6959.py::TestDockerRunSimpleTimeoutContract.test_timeout_exception_is_chained",
         "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_branch_gc_uses_safe_delete_not_force",
         "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_skips_branch_when_open_pr_exists",
-        "tests/regressions/regression_issue_6971.py::TestLogsCollectedOnTryBlockException.test_logs_attempted_before_container_removal_on_error",
-        "tests/regressions/regression_issue_6971.py::TestLogsLostOnExceptionBetweenWaitAndLogs.test_stderr_logs_still_fetched_when_stdout_logs_raise",
-        "tests/regressions/regression_issue_6971.py::TestTwoSequentialLogCalls.test_logs_fetched_in_single_api_call",
         "tests/regressions/regression_issue_6975.py::TestDefaultsTestCompleteness.test_route_back_counts_asserted_in_canonical_defaults_test",
     }
 )
