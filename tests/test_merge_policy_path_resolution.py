@@ -133,3 +133,28 @@ def test_an_unparseable_charter_does_not_swallow_the_legacy_file(repo: Path) -> 
     legacy = _legacy(repo)
 
     assert HydraFlowConfig(repo_root=repo).merge_policy_path == legacy
+
+
+def test_a_charter_declaring_an_empty_policy_is_not_silently_bypassed(
+    repo: Path,
+) -> None:
+    """`policy:` present but empty must reach the loader, which refuses it.
+
+    The resolver and the loader have to agree on what "declares a policy"
+    means. The loader keys on the key being PRESENT; if the resolver keyed on
+    the value being truthy, a charter with an empty `policy:` would be handed
+    over to the legacy file instead — the operator's declaration silently
+    overridden by the file they were migrating away from, with nothing said.
+
+    Refusing is the safer half of the disagreement: an empty policy is not a
+    permissive one here, it is a deny, and a deny an operator can see and fix.
+    """
+    _charter_with_empty_policy = repo / "charter.yaml"
+    _charter_with_empty_policy.write_text(
+        yaml.safe_dump({"schema_version": 2, "policy": {}}), encoding="utf-8"
+    )
+    _legacy(repo)
+
+    assert (
+        HydraFlowConfig(repo_root=repo).merge_policy_path == _charter_with_empty_policy
+    )

@@ -1316,7 +1316,13 @@ def _declares_a_policy(charter: Path) -> bool:
         raw = yaml.safe_load(charter.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return False
-    return isinstance(raw, dict) and bool(raw.get("policy"))
+    # PRESENCE, matching `load_merge_policy`'s own `"policy" in raw` test. The
+    # two must agree or they disagree in the worst possible place: on a
+    # truthiness test, a charter with an empty `policy:` would be handed to the
+    # legacy file instead, so an operator's declaration would be silently
+    # overridden by the file they were migrating away from. Present-and-empty
+    # reaches the loader and is refused there, which is a deny they can see.
+    return isinstance(raw, dict) and "policy" in raw
 
 
 class HydraFlowConfig(BaseModel):
