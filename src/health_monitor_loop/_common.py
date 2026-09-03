@@ -105,10 +105,22 @@ _PERSISTENT_ERROR_NAMESPACE = "health_monitor_persistent_error"
 class TrendMetrics:
     """Computed health trend metrics for one monitor cycle."""
 
+    #: ``avg_memory_score`` is ``None`` when ``item_scores.json`` could not be
+    #: parsed (#6602). It is NOT 0.0 in that case: 0.0 is a meaningful value on
+    #: this scale, so it read as "every memory item scores zero" and tripped
+    #: `_AVG_SCORE_LOW` in `_hitl`, escalating a spurious "run a full memory
+    #: compaction pass" off nothing but an unparseable file. ``None`` means
+    #: "not computed" and every consumer branches on it.
+    #:
+    #: ``stale_item_count`` keeps #6470's ``-1`` sentinel rather than joining
+    #: it. -1 is already outside the value's domain, so it cannot be read as
+    #: data the way 0.0 could, and it compares false against
+    #: ``_STALE_COUNT_HIGH`` without a guard. It is pinned as the subject of
+    #: `test_corrupt_scores_file_sets_sentinel`.
     def __init__(
         self,
         first_pass_rate: float,
-        avg_memory_score: float,
+        avg_memory_score: float | None,
         surprise_rate: float,
         hitl_escalation_rate: float,
         stale_item_count: int,
