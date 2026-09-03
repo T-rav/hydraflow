@@ -1,5 +1,12 @@
 """Regression test for issue #6694.
 
+Why this has no MockWorld scenario: the race needs a barrier placed between
+computing the number and recording it. Eight threads racing freely returned
+eight DISTINCT numbers on every run with the lock removed — the critical
+section is short and the GIL serialises most of it — so a scenario, which
+arranges loops rather than instructions, cannot reach the window at all.
+
+
 ``adr_utils._assigned_adr_numbers`` is a module-level ``set[int]`` with no
 lock.  Two concurrent callers of ``next_adr_number`` can both read ``highest``
 before either writes to the set, causing both to return the **same** ADR
