@@ -4,9 +4,9 @@ name: Ratchet pattern with grandfather YAML for retroactive convention enforceme
 description: When you want to enforce a new convention but bulk-cleanup is too risky,
   ship a CI-failing detector + grandfather YAML allowlist that locks current state
   and fails on growth
-status: pending
+status: promoted
 issue: null
-promoted_in: null
+promoted_in: docs/adr/0104-auto-tightening-ratchet.md (Accepted; enforced by pytest:tests/test_auto_tighten_invariant.py)
 wontfix_reason: null
 created: 2026-05-08
 ---
