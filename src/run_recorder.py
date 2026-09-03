@@ -206,7 +206,10 @@ class RunRecorder:
                         RunManifest.model_validate_json(manifest_path.read_text())
                     )
                 except Exception:
-                    logger.debug(
+                    # WARNING, not DEBUG (#6782): a corrupt manifest means a
+                    # recorded run is invisible to every reader, and DEBUG is
+                    # off in production.
+                    logger.warning(
                         "Skipping corrupt manifest in %s", run_dir, exc_info=True
                     )
         return manifests

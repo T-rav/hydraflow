@@ -9,7 +9,14 @@ _SOURCE = Path(__file__).resolve().parents[2] / "src" / "workspace_gc_loop.py"
 _PREDICATE = "_worktree_work_has_landed"
 _BRANCH_PREDICATE = "_branch_work_has_landed"
 _DRIVER = "_drive_landed_proof"
-_FORCE_DELETE = ("git", "branch", "-D")
+#: Both branch-delete flags. #11571's invariant is "delete only after proof",
+#: and it applies to the safe flag exactly as much as the force one — #6961
+#: moved `_collect_orphaned_branches` to `-d`, which dropped it out of a
+#: force-only tuple and made this guard stop watching the site it was written
+#: for. Widened rather than narrowed: a safer delete must not buy an exemption
+#: from the ordering rule.
+_DELETE_FLAGS = (chr(45) + chr(68), chr(45) + chr(100))
+_DELETE_PREFIXES = tuple(("git", "branch", flag) for flag in _DELETE_FLAGS)
 
 
 def _functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -103,15 +110,31 @@ def _attribute_call_linenos(node: ast.AST, attr: str) -> list[int]:
 
 
 def _force_delete_linenos(node: ast.AST) -> list[int]:
-    return [
-        child.lineno
-        for child in ast.walk(node)
-        if isinstance(child, ast.Call)
-        and isinstance(child.func, ast.Name)
-        and child.func.id == "run_subprocess"
-        and tuple(arg.value for arg in child.args[:3] if isinstance(arg, ast.Constant))
-        == _FORCE_DELETE
-    ]
+    """Line numbers of every branch-DELETE spawn under *node*.
+
+    Matches on ``("git", "branch", <anything but --list>)`` rather than on a
+    literal flag. #6961 made the flag a variable so the safe one can be tried
+    before the force one, and a predicate keyed on constant argv stopped
+    seeing the call at all — the delete site simply vanished from this guard
+    while the delete itself was still there. A flag held in a variable must
+    not buy an exemption from the proof-before-delete rule.
+    """
+    out = []
+    for child in ast.walk(node):
+        if not (
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "run_subprocess"
+        ):
+            continue
+        head = [a.value for a in child.args[:2] if isinstance(a, ast.Constant)]
+        if head != ["git", "branch"]:
+            continue
+        third = child.args[2] if len(child.args) > 2 else None
+        if isinstance(third, ast.Constant) and third.value == "--list":
+            continue
+        out.append(child.lineno)
+    return out
 
 
 def test_every_branch_force_delete_is_post_proof() -> None:
@@ -131,7 +154,34 @@ def test_every_branch_force_delete_is_post_proof() -> None:
     proof_linenos = _attribute_call_linenos(phase3, _BRANCH_PREDICATE)
     delete_linenos = _force_delete_linenos(phase3)
 
-    assert force_delete_sites == {"_collect_orphaned_branches", "_reap_worktree"}
+    # `_delete_landed_branch` is phase 3's delete, extracted (#6961) so the
+    # safe flag can be tried before the force flag. The extraction moved the
+    # `run_subprocess` call out of `_collect_orphaned_branches`, which took it
+    # out of this guard's view — the site set changed and the ordering check
+    # had nothing left to order. Both are followed here rather than relaxed:
+    # the helper is a delete site, and it may only be reached from phase 3,
+    # after the proof.
+    assert force_delete_sites == {"_delete_landed_branch", "_reap_worktree"}
+
+    # `_delete_landed_branch` is a module-level function (hoisted with the
+    # other I/O executors), so it is called by NAME — `_attribute_call_linenos`
+    # only sees `self.`-qualified calls and reported none.
+    def _name_call_linenos(node: ast.AST, name: str) -> list[int]:
+        return [
+            c.lineno
+            for c in ast.walk(node)
+            if isinstance(c, ast.Call)
+            and isinstance(c.func, ast.Name)
+            and c.func.id == name
+        ]
+
+    delete_callers = {
+        name
+        for name, node in functions.items()
+        if _name_call_linenos(node, "_delete_landed_branch")
+    }
+    assert delete_callers == {"_collect_orphaned_branches"}
+    delete_linenos = _name_call_linenos(phase3, "_delete_landed_branch")
     assert (len(proof_linenos), len(delete_linenos)) == (1, 1)
     assert proof_linenos[0] < delete_linenos[0]
     assert reap_callers == {"_reap_worktree_if_safe"}
