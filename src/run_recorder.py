@@ -122,6 +122,48 @@ class RunContext:
         return manifest
 
 
+def _safe_size(path: Path) -> int:
+    """Total the files under *path*, skipping whatever vanished (#6717).
+
+    Every byte-total in this module walks a tree the GC is free to prune, and
+    an unguarded ``stat()`` on a file removed since ``rglob`` listed it takes
+    down the whole caller. Missing a file's bytes is the correct degradation:
+    the file is gone, so its bytes are gone too.
+    """
+    total = 0
+    for f in path.rglob("*"):
+        try:
+            if f.is_file():
+                total += f.stat().st_size
+        except OSError:
+            logger.debug("run_recorder: %s vanished during size walk", f)
+    return total
+
+
+def _is_empty(path: Path) -> bool:
+    """Whether *path* has no entries; a vanished directory counts as empty."""
+    try:
+        return not any(path.iterdir())
+    except OSError:
+        return False
+
+
+def _safe_iterdir(path: Path) -> list[Path]:
+    """List *path*, or nothing if it vanished underneath us (#6717).
+
+    Every caller walks the runs tree while the GC is free to prune it. An
+    ``iterdir`` on a directory removed since the parent listing raises, and
+    that error used to end the entire stats or purge pass — one missing
+    directory costing every remaining one. Returns a materialised list, so the
+    caller iterates a snapshot rather than a live handle.
+    """
+    try:
+        return list(path.iterdir())
+    except OSError:
+        logger.debug("run_recorder: %s vanished during walk", path)
+        return []
+
+
 class RunRecorder:
     """Records per-issue run artifacts under ``.hydraflow/<repo_slug>/runs/``."""
 
@@ -164,7 +206,10 @@ class RunRecorder:
                         RunManifest.model_validate_json(manifest_path.read_text())
                     )
                 except Exception:
-                    logger.debug(
+                    # WARNING, not DEBUG (#6782): a corrupt manifest means a
+                    # recorded run is invisible to every reader, and DEBUG is
+                    # off in production.
+                    logger.warning(
                         "Skipping corrupt manifest in %s", run_dir, exc_info=True
                     )
         return manifests
@@ -211,17 +256,21 @@ class RunRecorder:
         total_runs = 0
         issue_count = 0
         if self._runs_dir.is_dir():
-            for issue_dir in self._runs_dir.iterdir():
+            # Every step here races the GC that prunes the same tree (#6717).
+            # A directory removed between the listing and the walk, or a file
+            # removed between `is_file()` and `stat()`, used to raise out of
+            # the whole computation — so a routine purge could make the
+            # storage panel report nothing at all. Skip what vanished and keep
+            # counting what is still there; a stale total beats no total.
+            for issue_dir in _safe_iterdir(self._runs_dir):
                 if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                     continue
                 issue_count += 1
-                for run_dir in issue_dir.iterdir():
+                for run_dir in _safe_iterdir(issue_dir):
                     if not run_dir.is_dir():
                         continue
                     total_runs += 1
-                    for f in run_dir.rglob("*"):
-                        if f.is_file():
-                            total_bytes += f.stat().st_size
+                    total_bytes += _safe_size(run_dir)
         return {
             "total_bytes": total_bytes,
             "total_mb": round(total_bytes / (1024 * 1024), 2),
@@ -238,10 +287,10 @@ class RunRecorder:
             return 0
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         removed = 0
-        for issue_dir in list(self._runs_dir.iterdir()):
+        for issue_dir in _safe_iterdir(self._runs_dir):
             if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                 continue
-            for run_dir in list(issue_dir.iterdir()):
+            for run_dir in _safe_iterdir(issue_dir):
                 if not run_dir.is_dir():
                     continue
                 try:
@@ -255,7 +304,7 @@ class RunRecorder:
                     removed += 1
                     logger.info("Purged expired run %s", run_dir)
             # Remove empty issue dirs
-            if issue_dir.is_dir() and not any(issue_dir.iterdir()):
+            if issue_dir.is_dir() and _is_empty(issue_dir):
                 with contextlib.suppress(OSError):
                     issue_dir.rmdir()
         return removed
@@ -270,10 +319,10 @@ class RunRecorder:
 
         # Collect all runs with their timestamps and paths
         runs: list[tuple[str, Path]] = []
-        for issue_dir in self._runs_dir.iterdir():
+        for issue_dir in _safe_iterdir(self._runs_dir):
             if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                 continue
-            for run_dir in issue_dir.iterdir():
+            for run_dir in _safe_iterdir(issue_dir):
                 if not run_dir.is_dir():
                     continue
                 try:
@@ -291,9 +340,7 @@ class RunRecorder:
         while runs and current_bytes > max_bytes:
             _, oldest_run = runs.pop()
             parent = oldest_run.parent
-            run_bytes = sum(
-                f.stat().st_size for f in oldest_run.rglob("*") if f.is_file()
-            )
+            run_bytes = _safe_size(oldest_run)
             shutil.rmtree(oldest_run, ignore_errors=True)
             if oldest_run.exists():
                 logger.warning(
@@ -304,7 +351,7 @@ class RunRecorder:
             removed += 1
             logger.info("Purged oversized run %s", oldest_run)
             # Remove empty issue dirs
-            if parent.is_dir() and not any(parent.iterdir()):
+            if parent.is_dir() and _is_empty(parent):
                 with contextlib.suppress(OSError):
                     parent.rmdir()
 
@@ -312,25 +359,22 @@ class RunRecorder:
 
     def _compute_total_bytes(self) -> int:
         """Return total bytes across all run artifacts."""
-        total = 0
-        if self._runs_dir.is_dir():
-            for f in self._runs_dir.rglob("*"):
-                if f.is_file():
-                    total += f.stat().st_size
-        return total
+        if not self._runs_dir.is_dir():
+            return 0
+        return _safe_size(self._runs_dir)
 
     def purge_all(self) -> int:
         """Delete all recorded runs. Returns the number removed."""
         if not self._runs_dir.is_dir():
             return 0
         removed = 0
-        for issue_dir in list(self._runs_dir.iterdir()):
+        for issue_dir in _safe_iterdir(self._runs_dir):
             if not issue_dir.is_dir() or not issue_dir.name.isdigit():
                 continue
-            for run_dir in list(issue_dir.iterdir()):
+            for run_dir in _safe_iterdir(issue_dir):
                 if run_dir.is_dir():
                     shutil.rmtree(run_dir, ignore_errors=True)
                     removed += 1
-            if issue_dir.is_dir() and not any(issue_dir.iterdir()):
+            if issue_dir.is_dir() and _is_empty(issue_dir):
                 issue_dir.rmdir()
         return removed

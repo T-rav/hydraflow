@@ -244,151 +244,17 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 # Grandfathered deferrals
 # ---------------------------------------------------------------------------
 
-#: Deferred ``xfail`` markers the widened scan surfaced, keyed ``path::test``.
+#: The grandfather set is GONE, and that is the success condition, not an
+#: omission. It held 107 deferred ``xfail`` markers — the #6408-#6975 batch of
+#: pinned bugs that #9801/#9872's widened ``python_files`` first made visible.
+#: Every one has since been fixed and its marker removed, so the set emptied,
+#: and its own anti-vacuity test said what to do next: "If every deferral
+#: really was resolved, delete the set and its two tests rather than leaving a
+#: hollow gate."
 #:
-#: These are NOT new debt. Every one of them sits in a ``regression_*.py`` file
-#: that the old predicate could not see, and every one predates this guard's
-#: ability to observe it. They are the #6408–#6975 batch of pinned-bug
-#: regressions, all written ``strict=False`` with "fix not yet landed", all
-#: silently uncollected until #9801/#9872 widened ``python_files`` and now
-#: silently xfailing. Fixing 107 open bugs is not this change; making them
-#: countable, named, and shrink-only is.
-#:
-#: SHRINK ONLY. An entry leaves when its bug is fixed and the marker comes off.
-#: Nothing may join: a marker in a file that is not listed, or on a test that is
-#: not listed, fails the guard. And an entry whose marker is gone fails too —
-#: a stale line here would be a claim about coverage that no longer exists,
-#: which is the same defect one level up.
-#:
-#: Two entries already left. ``regression_issue_6782.py``'s GC-loop and
-#: orphaned-dir tests were XPASSing: the #6782 fix had landed, and because
-#: ``strict=False`` an XPASS is not a failure, so the pair would have flipped
-#: silently back to XFAIL if the bug ever re-regressed and nothing would have
-#: reddened. Their markers were removed rather than recorded here.
-#: Ceiling on :data:`DEFERRED_XFAILS`, mirroring ``DEFERRED_MISMATCHES_MAX`` in
-#: ``aggregate_gate_registry``. SHRINK ONLY — lower it when entries leave.
-#:
-#: Without this, "nothing may join" was only a docstring: one PR could add an
-#: xfail AND its grandfather entry together and both gate tests would stay
-#: green. Growth now costs a second, obviously-named edit that a reviewer reads
-#: as what it is.
-#: 109 -> 107 when the WhatsApp bridge was removed: deleting
-#: regression_issue_6494 took two grandfathered xfails with it. The cap
-#: falls in the same change by design — a cap left above the live count is
-#: slack a later PR can spend without anything reddening.
-DEFERRED_XFAILS_MAX = 107
-
-DEFERRED_XFAILS: frozenset[str] = frozenset(
-    {
-        "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
-        "tests/regressions/regression_issue_6476.py::TestProcWaitAlwaysCalledInFinally.test_unexpected_error_after_stderr_task_calls_proc_wait",
-        "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_drain_failure_calls_proc_wait",
-        "tests/regressions/regression_issue_6476.py::TestStdinWriteFailureZombieSubprocess.test_stdin_write_failure_calls_proc_wait",
-        "tests/regressions/regression_issue_6496.py::TestFinalizeDoesNotMaskProgrammingErrors.test_finalize_propagates_attribute_error",
-        "tests/regressions/regression_issue_6496.py::TestRecordDoesNotMaskProgrammingErrors.test_record_propagates_assertion_error",
-        "tests/regressions/regression_issue_6496.py::TestRecordDoesNotMaskProgrammingErrors.test_record_propagates_attribute_error",
-        "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
-        "tests/regressions/regression_issue_6578.py::TestEnsureClientExhaustsThreadPool.test_thread_pool_starved_by_concurrent_retries",
-        "tests/regressions/regression_issue_6578.py::TestEnsureClientUsesBlockingSleep.test_retry_loop_calls_blocking_time_sleep",
-        "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_in_update_proposal_verified_does_not_skip_remaining",
-        "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_midway_still_processes_earlier_and_later_proposals",
-        "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_last_lint_index_write_failure_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_topic_write_failure_during_stale_marking_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestEnsureRepoDirWriteFailure.test_index_seeding_failure_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestEnsureRepoDirWriteFailure.test_topic_file_seeding_failure_does_not_crash",
-        "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_index_json_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_index_md_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6599.py::TestIngestWriteFailure.test_topic_write_failure_does_not_crash_ingest",
-        "tests/regressions/regression_issue_6602.py::TestIssue6602SilentExceptPass.test_corrupt_failure_lines_mask_hitl_escalation",
-        "tests/regressions/regression_issue_6602.py::TestIssue6602SilentExceptPass.test_corrupt_scores_json_not_silently_zero",
-        "tests/regressions/regression_issue_6602.py::TestIssue6602SilentExceptPass.test_corrupt_scores_json_stale_count_not_silently_zero",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_data_written_before_fsync_failure_is_preserved",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_caught_not_propagated",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_logged",
-        "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_write_oserror_is_caught_not_propagated",
-        "tests/regressions/regression_issue_6626.py::TestIssue6626SilentPassOnErrors.test_outcomes_oserror_logs_warning",
-        "tests/regressions/regression_issue_6627.py::TestIssue6627ExcInfoOnMalformedRecords.test_load_proposal_metadata_includes_exc_info_on_malformed_entry",
-        "tests/regressions/regression_issue_6627.py::TestIssue6627ExcInfoOnMalformedRecords.test_load_recent_includes_exc_info_on_malformed_line",
-        "tests/regressions/regression_issue_6630.py::TestIssue6630AuthenticationErrorNotSuppressed.test_authentication_error_not_logged_as_transient",
-        "tests/regressions/regression_issue_6630.py::TestIssue6630DecisionFileCleanup.test_cleanup_suppresses_all_exceptions_on_unlink",
-        "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
-        "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
-        "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
-        "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
-        "tests/regressions/regression_issue_6680.py::TestVerifyProposalsAttributeError.test_attribute_error_propagates",
-        "tests/regressions/regression_issue_6681.py::TestRetrospectiveRecordTypeError.test_type_error_in_collect_propagates",
-        "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_invalid_json_logs_at_warning",
-        "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_pydantic_validation_failure_logs_at_warning",
-        "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_warning_includes_exc_info",
-        "tests/regressions/regression_issue_6694.py::TestIssue6694ConcurrentAdrNumberRace.test_two_concurrent_callers_get_different_numbers",
-        "tests/regressions/regression_issue_6696.py::TestIssue6696ExcInfoOnMalformedHarnessRecords.test_load_recent_includes_exc_info_on_malformed_line",
-        "tests/regressions/regression_issue_6696.py::TestIssue6696ExcInfoOnMalformedHarnessRecords.test_unexpected_exception_type_is_not_swallowed",
-        "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_mkdir_does_not_propagate",
-        "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_oserror_on_write_does_not_propagate",
-        "tests/regressions/regression_issue_6699.py::TestIssue6699SavePrepCoverageFloorErrorHandling.test_permission_error_on_write_does_not_propagate",
-        "tests/regressions/regression_issue_6703.py::test_stderr_none_raises_runtime_error",
-        "tests/regressions/regression_issue_6703.py::test_stdin_none_raises_runtime_error_when_not_prompt_arg",
-        "tests/regressions/regression_issue_6703.py::test_stdout_none_raises_runtime_error",
-        "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_authentication_error_propagates_immediately",
-        "tests/regressions/regression_issue_6709.py::TestIssue6709AuthErrorNotSwallowed.test_credit_exhausted_error_propagates_immediately",
-        "tests/regressions/regression_issue_6710.py::test_auth_error_all_siblings_fully_done",
-        "tests/regressions/regression_issue_6710.py::test_auth_error_awaits_cancelled_siblings",
-        "tests/regressions/regression_issue_6710.py::test_credit_exhausted_awaits_cancelled_siblings",
-        "tests/regressions/regression_issue_6717.py::TestGetStorageStatsConcurrentDeletion.test_stat_raises_file_not_found_mid_iteration",
-        "tests/regressions/regression_issue_6717.py::TestGetStorageStatsPermissionError.test_stat_permission_error_is_skipped",
-        "tests/regressions/regression_issue_6717.py::TestPurgeExpiredConcurrentDeletion.test_iterdir_raises_when_issue_dir_removed_concurrently",
-        "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6728.py::TestTriageSingleTracedPropagatesFatalErrors.test_credit_exhausted_error_propagates",
-        "tests/regressions/regression_issue_6733.py::TestCanonicalEnvVarApplied.test_canonical_env_var_overrides_field",
-        "tests/regressions/regression_issue_6733.py::TestEnvVarNamingConvention.test_workspace_gc_interval_env_key_matches_field_name",
-        "tests/regressions/regression_issue_6735.py::TestEpicSweeperPropagatesFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6735.py::TestEpicSweeperPropagatesFatalErrors.test_credit_exhausted_error_propagates",
-        "tests/regressions/regression_issue_6742.py::TestImplementPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
-        "tests/regressions/regression_issue_6742.py::TestImplementPhaseSummarizerTruthy.test_post_impl_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6742.py::TestImplementPhaseSummarizerTruthy.test_post_impl_transcript_hooks_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6742.py::TestPlanPhaseBeadsManagerTruthy.test_beads_manager_checked_via_identity_not_truthiness",
-        "tests/regressions/regression_issue_6742.py::TestPlanPhaseSummarizerTruthy.test_plan_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6742.py::TestReviewPhaseSummarizerTruthy.test_post_review_transcript_calls_summarizer_when_falsy",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorFallbackPathPropagatesFatalErrors.test_authentication_error_propagates_from_fallback",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorFallbackPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_fallback",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_authentication_error_propagates_from_primary",
-        "tests/regressions/regression_issue_6750.py::TestPipelineEscalatorPrimaryPathPropagatesFatalErrors.test_credit_exhausted_error_propagates_from_primary",
-        "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_authentication_error_propagates",
-        "tests/regressions/regression_issue_6765.py::TestDeferredPipelineStartSwallowsFatalErrors.test_credit_exhausted_error_propagates",
-        "tests/regressions/regression_issue_6782.py::TestRunRecorderCorruptManifestLogLevel.test_corrupt_manifest_logged_at_warning",
-        "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
-        "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
-        "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
-        "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_pipeline_snapshot_entry",
-        "tests/regressions/regression_issue_6811.py::TestCorruptProposalDataAbortsEntireSweep.test_attribute_error_on_proposal_does_not_abort",
-        "tests/regressions/regression_issue_6811.py::TestCorruptProposalDataAbortsEntireSweep.test_non_string_proposed_at_type_error_does_not_abort",
-        "tests/regressions/regression_issue_6811.py::TestCorruptProposalDataAbortsEntireSweep.test_none_pre_count_does_not_abort_remaining_proposals",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_first_pr_still_processes_remaining",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_hitl_escalation_still_processes_remaining",
-        "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_merge_still_processes_remaining",
-        "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_all_lines_valid_json_after_partial_write",
-        "tests/regressions/regression_issue_6877.py::TestFactoryMetricJSONLCorruption.test_partial_write_cascades_to_corrupt_subsequent_event",
-        "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_does_not_raise_on_serialization_error",
-        "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_fetch_does_not_raise_on_serialization_error",
-        "tests/regressions/regression_issue_6907.py::TestRecordBestEffortContract.test_record_plan_stored_does_not_raise_on_serialization_error",
-        "tests/regressions/regression_issue_6921.py::TestLoadOSError.test_io_error_returns_empty_list",
-        "tests/regressions/regression_issue_6921.py::TestLoadOSError.test_permission_error_returns_empty_list",
-        "tests/regressions/regression_issue_6921.py::TestSaveOSError.test_disk_full_on_save_does_not_propagate",
-        "tests/regressions/regression_issue_6921.py::TestSaveOSError.test_permission_error_on_save_does_not_propagate",
-        "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
-        "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
-        "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",
-        "tests/regressions/regression_issue_6959.py::TestCallerSubprocessTimeoutGuard.test_except_subprocess_timeout_error_catches_docker_timeout",
-        "tests/regressions/regression_issue_6959.py::TestDockerRunSimpleTimeoutContract.test_run_simple_raises_subprocess_timeout_error",
-        "tests/regressions/regression_issue_6959.py::TestDockerRunSimpleTimeoutContract.test_timeout_exception_is_chained",
-        "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_branch_gc_uses_safe_delete_not_force",
-        "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_skips_branch_when_open_pr_exists",
-        "tests/regressions/regression_issue_6971.py::TestLogsCollectedOnTryBlockException.test_logs_attempted_before_container_removal_on_error",
-        "tests/regressions/regression_issue_6971.py::TestLogsLostOnExceptionBetweenWaitAndLogs.test_stderr_logs_still_fetched_when_stdout_logs_raise",
-        "tests/regressions/regression_issue_6971.py::TestTwoSequentialLogCalls.test_logs_fetched_in_single_api_call",
-        "tests/regressions/regression_issue_6975.py::TestDefaultsTestCompleteness.test_route_back_counts_asserted_in_canonical_defaults_test",
-    }
-)
+#: With nothing exempted, the scan below is unconditional: an ``xfail`` on an
+#: active test is an offence, full stop. Re-introducing a grandfather list
+#: would mean re-introducing the debt it existed to count down.
 
 
 def _key(rel: str, scope: str) -> str:
@@ -414,8 +280,6 @@ def test_active_tests_do_not_skip_xfail_or_comment_out_coverage() -> None:
     offenders: list[str] = []
     for rel, found in _scan().items():
         for scope, label, detail in found:
-            if _key(rel, scope) in DEFERRED_XFAILS and label == "xfail marker":
-                continue
             offenders.append(f"{rel}::{scope}: {label}: {detail}")
 
     assert not offenders, (
@@ -423,31 +287,6 @@ def test_active_tests_do_not_skip_xfail_or_comment_out_coverage() -> None:
         "active issue/PR workflow or out of pytest collection; do not hide it "
         "behind skip/xfail/commented tests:\n  " + "\n  ".join(sorted(offenders))
     )
-
-
-def test_no_stale_grandfather_entries() -> None:
-    """Every grandfathered entry must still name a live xfail marker.
-
-    Without this the set could only ever grow stale: a fixed test would leave
-    its line behind, and the guard would keep vouching for a suppression that
-    no longer exists. This is the half that makes it shrink-only.
-    """
-    live = {
-        _key(rel, scope)
-        for rel, found in _scan().items()
-        for scope, label, _ in found
-        if label == "xfail marker"
-    }
-    stale = sorted(DEFERRED_XFAILS - live)
-    assert not stale, (
-        f"{len(stale)} grandfathered xfail(s) no longer exist. The marker came "
-        f"off — delete the entry from DEFERRED_XFAILS:\n  " + "\n  ".join(stale)
-    )
-
-
-# ---------------------------------------------------------------------------
-# Anti-vacuity — a config-derived scan set can go empty and pass silently
-# ---------------------------------------------------------------------------
 
 
 def test_scan_set_covers_both_collected_file_shapes() -> None:
@@ -552,7 +391,12 @@ def test_detection_resolves_every_spelling(
 
 
 def test_offender_scope_is_the_test_name_not_a_line_number(tmp_path: Path) -> None:
-    """DEFERRED_XFAILS keys on this, so it must survive edits above the marker."""
+    """The offender key is the test NAME, so it survives edits above it.
+
+    The grandfather set keyed on this and is gone; the property still matters,
+    because a line-number key would make every offender report churn on an
+    unrelated edit above the marker.
+    """
     probe = tmp_path / "test_probe.py"
     probe.write_text(
         "import pytest\n\n\nclass TestOuter:\n"
@@ -563,28 +407,3 @@ def test_offender_scope_is_the_test_name_not_a_line_number(tmp_path: Path) -> No
     scopes = [scope for scope, _, _ in _offenders_in(probe, frozenset())]
 
     assert scopes == ["TestOuter.test_inner"]
-
-
-def test_grandfather_set_stays_within_its_cap() -> None:
-    """The half that makes "nothing may join" mechanical rather than aspirational."""
-    assert len(DEFERRED_XFAILS) <= DEFERRED_XFAILS_MAX, (
-        f"DEFERRED_XFAILS holds {len(DEFERRED_XFAILS)} entries against a cap of "
-        f"{DEFERRED_XFAILS_MAX}. Fix the xfail rather than raising the cap; it "
-        "is shrink-only."
-    )
-
-
-def test_grandfather_cap_is_not_left_slack() -> None:
-    """A cap far above the real count would re-open the growth path silently."""
-    assert len(DEFERRED_XFAILS) == DEFERRED_XFAILS_MAX, (
-        f"cap {DEFERRED_XFAILS_MAX} != {len(DEFERRED_XFAILS)} live entries. When "
-        "an entry leaves, lower the cap in the same change."
-    )
-
-
-def test_grandfather_set_is_populated() -> None:
-    """Anti-vacuity for the baseline itself: an empty set must not read as clean."""
-    assert DEFERRED_XFAILS, (
-        "DEFERRED_XFAILS is empty. If every deferral really was resolved, "
-        "delete the set and its two tests rather than leaving a hollow gate."
-    )

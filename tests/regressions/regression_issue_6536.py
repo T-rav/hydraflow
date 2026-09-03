@@ -57,7 +57,6 @@ class TestPhantomDiagnoseTransition:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6536 — fix not yet landed", strict=False)
     async def test_no_enqueue_when_both_escalation_paths_fail(self) -> None:
         """When ``escalate_to_diagnostic`` raises AND the fallback
         ``swap_pipeline_labels`` also raises, ``enqueue_transition``

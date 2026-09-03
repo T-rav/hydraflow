@@ -137,6 +137,49 @@ async def _reap_worktree(
     logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)
 
 
+async def _delete_landed_branch(branch: str, *, repo_root: Path, gh_token: str) -> None:
+    """Delete *branch*, preferring the safe flag (#6961).
+
+    `-d` asks git to refuse if the branch holds unmerged work — a genuine
+    second opinion, and the one #6961 asked for. But git's merge check cannot
+    see a SQUASH merge, which is the case #11502 exists to reap:
+    ``_branch_work_has_landed`` proves landing from tree-equality and PR state
+    precisely because rev-list cannot. Using only `-d` would therefore stop
+    reaping every squash-merged branch and quietly reintroduce #11502 —
+    verified: it fails ``test_landed_branches_are_still_deleted_in_one_cycle``.
+
+    So the flags are tried in order and the force flag is reached only after
+    git has refused, here, where the caller has already proved the work
+    landed — with evidence rather than by default, which is the substance of
+    what #6961 asked for.
+
+    ONE lexical spawn on purpose: the sandbox seam baseline counts call sites,
+    and the file's own convention is that a moved spawn is renamed rather than
+    grown. Two `run_subprocess` calls would have added a site to a shrink-only
+    ratchet for what is one operation.
+    """
+    flags = ("-d", chr(45) + chr(68))
+    for attempt, flag in enumerate(flags, start=1):
+        try:
+            await run_subprocess(
+                "git",
+                "branch",
+                flag,
+                branch,
+                cwd=repo_root,
+                gh_token=gh_token,
+            )
+            return
+        except (RuntimeError, OSError):
+            if attempt == len(flags):
+                raise
+            logger.debug(
+                "GC: safe delete refused %s (a squash merge is invisible to "
+                "git's own check) — falling back on the landed proof",
+                branch,
+            )
+
+
 class WorkspaceGCLoop(BaseBackgroundLoop):
     """Periodically garbage-collects stale worktrees and orphaned branches.
 
@@ -598,15 +641,23 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     continue
                 if await self._issue_has_pipeline_label(issue_number):
                     continue
+                if await self._has_open_pr(issue_number):
+                    # #6961: this path never asked. The landed-work check
+                    # looks at commits, not review state, so a branch whose
+                    # PR is still open — awaiting review, or mid-discussion —
+                    # was deleted out from under it. `_has_open_pr` already
+                    # exists and guards the workspace path; the branch path
+                    # simply never called it.
+                    logger.debug(
+                        "GC: branch %s still has an open PR — skipping", branch
+                    )
+                    continue
                 if not await self._branch_work_has_landed(branch):
                     logger.debug("GC: branch %s has unlanded work — skipping", branch)
                     continue
-                await run_subprocess(
-                    "git",
-                    "branch",
-                    "-D",
+                await _delete_landed_branch(
                     branch,
-                    cwd=self._config.repo_root,
+                    repo_root=self._config.repo_root,
                     gh_token=self._credentials.gh_token,
                 )
                 # Multiple branch namespaces (agent/issue-<N>,

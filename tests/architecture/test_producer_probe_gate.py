@@ -62,7 +62,18 @@ def persisting_producers() -> frozenset[str]:
             if "model_dump_json" not in line:
                 continue
             window = "\n".join(lines[max(0, index - 2) : index + 3])
-            if re.search(r"write_text|\.write\(|append_jsonl|open\(", window):
+            # `_safe_write` is repo_wiki's guarded write helper (#6599). It
+            # belongs here for the reason this list exists at all: the
+            # predicate names the ways a model reaches disk, and a module
+            # that starts routing through a NEW helper silently leaves the
+            # probe-able set — the count drops, `test_the_baseline_is_not_slack`
+            # asks for the baseline to be tightened, and tightening it makes
+            # the blind spot permanent. That is what happened when repo_wiki
+            # moved its seven `write_text` calls behind one guard. A new write
+            # helper goes here, not into a lowered baseline.
+            if re.search(
+                r"write_text|\.write\(|append_jsonl|open\(|_safe_write", window
+            ):
                 found.add(path.relative_to(SRC).as_posix())
                 break
     return frozenset(found)

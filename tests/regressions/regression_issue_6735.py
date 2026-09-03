@@ -85,7 +85,6 @@ class TestEpicSweeperPropagatesFatalErrors:
     ``_do_work``, not be caught by the per-epic handler."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6735 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError must NOT be caught by except Exception."""
         loop, fetcher, _prs, _state = _make_loop(tmp_path)
@@ -99,7 +98,6 @@ class TestEpicSweeperPropagatesFatalErrors:
             await loop._do_work()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6735 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates(self, tmp_path: Path) -> None:
         """CreditExhaustedError must NOT be caught by except Exception."""
         loop, fetcher, _prs, _state = _make_loop(tmp_path)

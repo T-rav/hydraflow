@@ -597,14 +597,19 @@ class GateHealthLoop(BaseBackgroundLoop):
         # recorded (so they are not re-filed individually) and folded into ONE
         # summary issue.
         budget = FilingBudget(cap=self._config.gate_health_max_issues_per_tick)
+        #: Over-cap subjects, recorded by `file_overflow_summary` only after
+        #: its filing is confirmed (#12070).
+        overflow_keys: list[str] = []
         seen = self._finding_dedup.get()
         for finding in findings:
             fingerprint = finding_fingerprint(finding)
             if fingerprint in seen:
                 continue
             if not budget.allow():
-                seen = seen | {fingerprint}
-                self._finding_dedup.set_all(seen)
+                # Collected, not recorded (#12070): `file_overflow_summary` records
+                # these only after its filing is confirmed, so a 0-sentinel retry
+                # still finds the batch.
+                overflow_keys.append(fingerprint)
                 budget.note_overflow(
                     overflow_line(fingerprint, str(finding.get("kind", "finding")))
                 )
@@ -625,6 +630,7 @@ class GateHealthLoop(BaseBackgroundLoop):
         summary_filed = await file_overflow_summary(
             create_issue=self._prs.create_issue,
             dedup=self._finding_dedup,
+            subject_keys=overflow_keys,
             budget=budget,
             key_prefix="gate_health",
             labels=["hydraflow-find"],

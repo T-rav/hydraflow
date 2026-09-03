@@ -186,6 +186,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("stale_report_threshold_hours", "HYDRAFLOW_STALE_REPORT_THRESHOLD_HOURS", 6),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
     ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
+    # Canonical name matches the field (#6733). The field was renamed
+    # workspace_gc_interval but its env var kept the old `WORKTREE` spelling,
+    # so the documented convention (HYDRAFLOW_<FIELD_NAME>) silently did not
+    # work for this one setting. The legacy spelling is kept below so an
+    # operator who already exports it is not broken by the rename.
+    ("workspace_gc_interval", "HYDRAFLOW_WORKSPACE_GC_INTERVAL", 1800),
     ("workspace_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
     (
         "worktree_gc_min_age_seconds",
@@ -375,6 +381,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
     ("retro_finder_timeout", "HYDRAFLOW_RETRO_FINDER_TIMEOUT", 180),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
+    ("max_concurrent_verifications", "HYDRAFLOW_MAX_CONCURRENT_VERIFICATIONS", 1),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
@@ -3152,8 +3159,11 @@ class HydraFlowConfig(BaseModel):
     # tests/regressions/ delta — the #10223 signature, with the same
     # Skip-Regression: opt-out). When ON, a post-merge observer REOPENS the
     # closed issue and re-triages it (re-applies find_label) so a delta-less
-    # "done" is actually driven to a fix. Default-OFF and fully inert until
-    # enabled — same rollout discipline as the G1 auto-recut actuator.
+    # "done" is actually driven to a fix. Ships ENABLED (#12072): it began
+    # disabled under the G1 auto-recut actuator's rollout discipline and the
+    # default has since flipped, so on an untouched deployment this actuator
+    # reopens and re-triages. Turn it off from the System tab, or with
+    # HYDRAFLOW_CLOSE_VERIFICATION_ENABLED=false.
     close_verification_enabled: bool = Field(
         default=True,
         description=(
@@ -3796,6 +3806,25 @@ class HydraFlowConfig(BaseModel):
         description="Minimum low-tier confidence before skipping debug escalation",
     )
     # Timeouts
+    # The verification budget (#12036), deliberately separate from the agent
+    # budget. Nothing counted concurrent suites before: N dispatched agents
+    # each shelled `make quality`, and the only thing between them was an
+    # ADVISORY host lock they discovered after they were already running. This
+    # is the number an operator sets; `max_workers` is the number of agents.
+    # Default 1 keeps today's behaviour exactly — one suite at a time.
+    max_concurrent_verifications: int = Field(
+        default=1,
+        ge=1,
+        le=16,
+        description=(
+            "How many `make quality` runs may execute concurrently on this "
+            "host. Separate from max_workers: agents are dispatched against "
+            "the board, verification is bounded by what the box can serve "
+            "without oversubscribing (past ~4 concurrent suites this repo "
+            "produces environmental failures that look like real ones)"
+        ),
+    )
+
     quality_timeout: int = Field(
         default=3600,
         ge=60,

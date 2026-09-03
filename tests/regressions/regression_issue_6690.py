@@ -17,8 +17,6 @@ code, which uses ``logger.debug(...)`` without ``exc_info=True``.
 
 from __future__ import annotations
 
-import pytest
-
 import logging
 import sys
 from pathlib import Path
@@ -48,7 +46,6 @@ def _capture_records(queue: RetrospectiveQueue) -> list[logging.LogRecord]:
 class TestIssue6690CorruptLineLogLevel:
     """load() must log corrupt queue lines at WARNING, not DEBUG."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6690 — fix not yet landed", strict=False)
     def test_invalid_json_logs_at_warning(self, tmp_path: Path) -> None:
         """A corrupt (non-JSON) line must produce a WARNING log record.
 
@@ -68,7 +65,6 @@ class TestIssue6690CorruptLineLogLevel:
             "BUG: load() currently logs at DEBUG instead of WARNING (issue #6690)."
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6690 — fix not yet landed", strict=False)
     def test_pydantic_validation_failure_logs_at_warning(self, tmp_path: Path) -> None:
         """Valid JSON that fails Pydantic validation must also warn.
 
@@ -89,7 +85,6 @@ class TestIssue6690CorruptLineLogLevel:
             "BUG: load() currently logs at DEBUG instead of WARNING (issue #6690)."
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6690 — fix not yet landed", strict=False)
     def test_warning_includes_exc_info(self, tmp_path: Path) -> None:
         """The WARNING record must include exc_info for diagnostics.
 

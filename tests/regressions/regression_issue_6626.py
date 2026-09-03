@@ -16,8 +16,6 @@ bare ``pass`` with no logging.
 
 from __future__ import annotations
 
-import pytest
-
 import logging
 from pathlib import Path
 from unittest.mock import patch
@@ -30,7 +28,6 @@ class TestIssue6626SilentPassOnErrors:
 
     # --- outcomes.jsonl: OSError on file read should log a warning ---
 
-    @pytest.mark.xfail(reason="Regression for issue #6626 — fix not yet landed", strict=False)
     def test_outcomes_oserror_logs_warning(
         self, tmp_path: Path, caplog: logging.LogRecord
     ) -> None:
@@ -140,8 +137,12 @@ class TestIssue6626SilentPassOnErrors:
         with caplog.at_level(logging.DEBUG, logger="hydraflow.health_monitor_loop"):
             result = compute_trend_metrics(outcomes, scores, failures)
 
-        # avg_memory_score defaults to 0.0 when parse fails
-        assert result.avg_memory_score == 0.0
+        # This line used to assert `== 0.0`, characterising the bug the
+        # docstring above calls out ("should emit a log, not silently return
+        # 0.0") rather than the contract. #6602 settled the direction: a
+        # failed parse yields None, which no consumer can mistake for a
+        # measured score. The log assertion below is this test's subject.
+        assert result.avg_memory_score is None
 
         # BUG: no log emitted about the parse failure.
         log_messages = [r.message for r in caplog.records]

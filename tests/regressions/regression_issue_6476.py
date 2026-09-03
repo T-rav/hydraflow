@@ -110,7 +110,6 @@ class TestStdinWriteFailureZombieSubprocess:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6476 — fix not yet landed", strict=False)
     async def test_stdin_write_failure_calls_proc_wait(self, event_bus) -> None:
         """proc.wait() must be called even when stdin.write() raises.
 
@@ -134,7 +133,6 @@ class TestStdinWriteFailureZombieSubprocess:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6476 — fix not yet landed", strict=False)
     async def test_stdin_drain_failure_calls_proc_wait(self, event_bus) -> None:
         """proc.wait() must be called even when stdin.drain() raises.
 
@@ -201,7 +199,6 @@ class TestProcWaitAlwaysCalledInFinally:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6476 — fix not yet landed", strict=False)
     async def test_unexpected_error_after_stderr_task_calls_proc_wait(
         self, event_bus
     ) -> None:

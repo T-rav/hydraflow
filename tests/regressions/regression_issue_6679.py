@@ -31,14 +31,15 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from tests.helpers import config_mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from models import Task
+from ports import AgentPort
 from review_insights import ReviewInsightStore
 from review_phase import ReviewPhase
-from ports import AgentPort
 
 
 def _make_review_phase(tmp_path: Path) -> ReviewPhase:
@@ -192,20 +193,27 @@ class TestAttributeErrorPropagates:
 
 
 class TestTransientErrorIsCaught:
-    """A transient RuntimeError (subprocess failure, network blip) is not
-    a programming bug and should be caught — the method should return True
-    so the merge isn't blocked by tool flakiness.
+    """A transient RuntimeError is caught, and the merge is BLOCKED.
 
-    This test is GREEN today and ensures the fix doesn't over-correct.
+    This asserted `is True` — fail open, so tool flakiness never blocks a
+    merge — which is what #6679 assumed the fix would preserve while it
+    stopped programming bugs from failing open. The codebase went further:
+    `_run_pre_merge_spec_check` now returns False for every caught exception,
+    with the reason in the log line itself ("blocking merge to avoid
+    fail-open").
+
+    That is stricter than #6679 asked for and strictly safer — a spec check
+    that did not run is not evidence that the spec matches. Loosening
+    production back to fail-open to satisfy this assertion would trade a
+    deliberate safety decision for a stale expectation, so the expectation
+    moves instead. #6679's actual concern is met and pinned by the two
+    classes above: a TypeError or AttributeError still propagates rather than
+    being absorbed.
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6679 — fix not yet landed", strict=False
-    )
     async def test_runtime_error_returns_true(self, tmp_path: Path) -> None:
-        """RuntimeError from _execute (subprocess failure) should be
-        caught and return True (fail-open, don't block merge)."""
+        """RuntimeError from _execute is caught and blocks the merge."""
         phase = _make_review_phase(tmp_path)
         task = _make_task()
 
@@ -219,6 +227,7 @@ class TestTransientErrorIsCaught:
             )
 
             result = await phase._run_pre_merge_spec_check(task, "diff")
-            assert result is True, (
-                "Transient RuntimeError should fail-open (return True)"
+            assert result is False, (
+                "A transient RuntimeError must still block the merge: a "
+                "spec check that did not run is not evidence the spec matches"
             )

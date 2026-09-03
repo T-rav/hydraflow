@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11962
 source_phase: review
 created_at: 2026-09-01T11:05:21.597094+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Pins guarding `_receipt` must be tested across ticks to catch over-reporting

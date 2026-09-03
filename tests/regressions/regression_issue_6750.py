@@ -71,7 +71,6 @@ class TestPipelineEscalatorPrimaryPathPropagatesFatalErrors:
     outer ``except Exception`` block."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6750 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates_from_primary(self) -> None:
         """AuthenticationError from escalate_to_diagnostic must NOT be swallowed."""
         escalator, _state, _prs, _store = _make_escalator()
@@ -89,7 +88,6 @@ class TestPipelineEscalatorPrimaryPathPropagatesFatalErrors:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6750 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates_from_primary(self) -> None:
         """CreditExhaustedError from escalate_to_diagnostic must NOT be swallowed."""
         escalator, _state, _prs, _store = _make_escalator()
@@ -140,7 +138,6 @@ class TestPipelineEscalatorFallbackPathPropagatesFatalErrors:
     inner ``except Exception`` block."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6750 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates_from_fallback(self) -> None:
         """AuthenticationError from fallback swap_pipeline_labels must NOT be swallowed."""
         escalator, _state, prs, _store = _make_escalator()
@@ -165,7 +162,6 @@ class TestPipelineEscalatorFallbackPathPropagatesFatalErrors:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6750 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates_from_fallback(self) -> None:
         """CreditExhaustedError from fallback swap_pipeline_labels must NOT be swallowed."""
         escalator, _state, prs, _store = _make_escalator()

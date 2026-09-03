@@ -139,8 +139,11 @@ class HealthMonitorHeavyPassMixin:
         metrics = compute_trend_metrics(
             self._outcomes_path, self._scores_path, self._failures_path
         )
+        # avg_score is None when item_scores.json is unparseable (#6602) and
+        # %.2f raises TypeError on that, so it goes through %s. stale_items
+        # carries -1 and stays %d.
         logger.info(
-            "Health monitor cycle: first_pass_rate=%.2f avg_score=%.2f "
+            "Health monitor cycle: first_pass_rate=%.2f avg_score=%s "
             "surprise_rate=%.2f hitl_rate=%.2f stale_items=%d",
             metrics.first_pass_rate,
             metrics.avg_memory_score,
@@ -181,7 +184,14 @@ class HealthMonitorHeavyPassMixin:
 
         return {
             "first_pass_rate": round(metrics.first_pass_rate, 4),
-            "avg_memory_score": round(metrics.avg_memory_score, 4),
+            # None when item_scores.json is unparseable (#6602); round() raises
+            # on it. The cycle result is status/telemetry, so None is the
+            # honest value — a rounded 0.0 would report a measurement.
+            "avg_memory_score": (
+                None
+                if metrics.avg_memory_score is None
+                else round(metrics.avg_memory_score, 4)
+            ),
             "surprise_rate": round(metrics.surprise_rate, 4),
             "hitl_escalation_rate": round(metrics.hitl_escalation_rate, 4),
             "stale_item_count": metrics.stale_item_count,
@@ -376,7 +386,13 @@ class HealthMonitorHeavyPassMixin:
                 logger.info("HITL recommendation: stale review insight '%s'", category)
         except ImportError:
             pass
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # `verify_proposals` now lets the infra-fatal signals out (#6680);
+            # without this they died here, one debug line deep, and the loop
+            # carried on spawning against a dead account. Both sibling methods
+            # in this file (`_file_harness_suggestions`,
+            # `_file_one_harness_suggestion`) already do exactly this.
+            reraise_on_credit_or_bug(exc)
             logger.debug("Proposal verification failed", exc_info=True)
 
     def _run_cross_project_pattern_cycle(self) -> None:

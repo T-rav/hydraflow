@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:ObservabilityPort"
 aliases: ["observability port", "sentry port", "error capture port"]
 related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KYABD5XVX4ZXFXT3Z76KMQZ0"}, {"kind": "depends_on", "target": "01KYBV9N8VSTKDRVDFC0FE40ZM"}]
-evidence: ["01KQNZEVQVRHE57A588EWZXKKD", "01KQP0HK6TCK1CTRYANSJ8NRTM", "01KQP10AJV73YGEATZKR6QXCAA"]
+evidence: ["01KQNZEVQVRHE57A588EWZXKKD", "01KQP0HK6TCK1CTRYANSJ8NRTM", "01KQP0XFBGMB32VFGNPV8GZ26K", "01KQP10AJV73YGEATZKR6QXCAA"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-07-26T10:16:32.370693+00:00"
+updated_at: "2026-09-02T21:39:55.176717+00:00"
 ---
 
 ## Definition

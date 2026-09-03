@@ -725,11 +725,15 @@ class TestAppendReviewOSError:
 
         with (
             patch("file_util.open", side_effect=OSError("disk full")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.review_insights"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.file_util"),
         ):
             store.append_review(record)  # should not raise
 
-        assert "Could not append review" in caplog.text
+        # The warning comes from `append_jsonl` now, which handles and
+        # logs its own I/O failures (#6623) — the local guard here was
+        # dead code and was removed. The property is unchanged: the
+        # write must not raise, and the failure must be visible.
+        assert "I/O error appending to" in caplog.text
 
     def test_append_review_handles_mkdir_failure(self, tmp_path, caplog) -> None:
         """When mkdir fails with PermissionError, log warning and don't raise."""
@@ -742,11 +746,15 @@ class TestAppendReviewOSError:
 
         with (
             patch.object(Path, "mkdir", side_effect=PermissionError("not allowed")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.review_insights"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.file_util"),
         ):
             store.append_review(record)  # should not raise
 
-        assert "Could not append review" in caplog.text
+        # The warning comes from `append_jsonl` now, which handles and
+        # logs its own I/O failures (#6623) — the local guard here was
+        # dead code and was removed. The property is unchanged: the
+        # write must not raise, and the failure must be visible.
+        assert "I/O error appending to" in caplog.text
 
 
 # ---------------------------------------------------------------------------

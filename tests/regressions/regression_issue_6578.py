@@ -53,7 +53,6 @@ class TestEnsureClientExhaustsThreadPool:
     """_ensure_client's blocking time.sleep starves thread pool under load."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6578 — fix not yet landed", strict=False)
     async def test_thread_pool_starved_by_concurrent_retries(self) -> None:
         """When Docker is unavailable, concurrent _ensure_client calls via
         run_in_executor each block a thread with time.sleep.  A small pool
@@ -123,7 +122,6 @@ class TestEnsureClientExhaustsThreadPool:
 class TestEnsureClientUsesBlockingSleep:
     """_ensure_client must not call time.sleep — it blocks executor threads."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6578 — fix not yet landed", strict=False)
     def test_retry_loop_calls_blocking_time_sleep(self) -> None:
         """Verify that _ensure_client currently calls time.sleep during retries.
 
@@ -162,4 +160,50 @@ class TestEnsureClientUsesBlockingSleep:
             f"_ensure_client called time.sleep {len(sleep_calls)} time(s) with "
             f"delays {sleep_calls} — blocking sleep in a run_in_executor "
             f"context starves the thread pool (issue #6578)"
+        )
+
+
+class TestAsyncRetryDoesNotBlock:
+    """The relocated retry must not reintroduce the blocking sleep.
+
+    #6578's fix moved the wait out of the sync `_ensure_client` and into
+    `_ensure_client_reachable`. The tests above pin the sync side — that it
+    no longer sleeps and no longer parks an executor thread — but nothing
+    watched the new home, so a `time.sleep` reintroduced there would restore
+    the original defect with every existing test still green.
+    """
+
+    @pytest.mark.asyncio
+    async def test_async_retry_yields_instead_of_sleeping(self) -> None:
+        runner = _make_failing_runner()
+
+        sleep_calls: list[float] = []
+        awaited: list[float] = []
+
+        failing_client = MagicMock()
+        failing_client.ping.side_effect = ConnectionError("Docker daemon not running")
+        mock_docker_mod = MagicMock()
+        mock_docker_mod.from_env.return_value = failing_client
+
+        real_async_sleep = asyncio.sleep
+
+        async def tracking_async_sleep(seconds: float, *a, **kw):
+            awaited.append(seconds)
+            return await real_async_sleep(0, *a, **kw)
+
+        with (
+            patch.dict("sys.modules", {"docker": mock_docker_mod}),
+            patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)),
+            patch("asyncio.sleep", side_effect=tracking_async_sleep),
+            pytest.raises(RuntimeError, match="not available after"),
+        ):
+            await runner._ensure_client_reachable(max_retries=2, delay=5.0)
+
+        assert sleep_calls == [], (
+            f"_ensure_client_reachable called blocking time.sleep{sleep_calls} — "
+            "the wait must yield, not occupy a thread (issue #6578)"
+        )
+        assert awaited == [5.0, 5.0], (
+            "the retry must actually wait between attempts, via asyncio.sleep; "
+            f"awaited delays were {awaited}"
         )

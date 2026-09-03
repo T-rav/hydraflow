@@ -351,10 +351,19 @@ def _save_prep_coverage_floor(data_root: Path, min_required: float) -> None:
         max(_PREP_COVERAGE_MIN_REQUIRED, min(_PREP_COVERAGE_TARGET, min_required))
     )
     state_path = data_root / _PREP_COVERAGE_STATE_PATH
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps({"min_required": value}, indent=2) + "\n", encoding="utf-8"
-    )
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            json.dumps({"min_required": value}, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        # #6699: neither the mkdir nor the write was guarded, so a read-only
+        # or full data root raised out of an admin task whose actual job had
+        # already succeeded. The floor is a remembered convenience — the next
+        # run recomputes it — so failing to persist it must not fail the task.
+        logger.warning(
+            "Could not persist the prep coverage floor to %s", state_path, exc_info=True
+        )
 
 
 def _detect_available_prep_tools() -> list[str]:

@@ -36,11 +36,17 @@ from tests.helpers import make_bg_loop_deps
 def _make_pr(
     pr: int, author: str = "dependabot[bot]", title: str = "Bump foo"
 ) -> PRListItem:
+    # `is_bot` is how the loop recognises a bot PR now (#9843 moved off
+    # author-login matching to GitHub's own flag), and it defaults False.
+    # Without it these fixtures never reached the loop body at all, so every
+    # test here was asserting against an empty queue rather than the abort
+    # behaviour it was written for.
     return PRListItem(
         pr=pr,
         author=author,
         title=title,
         url=f"https://github.com/o/r/pull/{pr}",
+        is_bot=True,
     )
 
 
@@ -60,6 +66,11 @@ def _make_state(
     )
     state.get_dependabot_merge_settings.return_value = settings
     state.get_dependabot_merge_processed.return_value = processed or set()
+    # Unstubbed, this returns a MagicMock that the loop compares against an
+    # int cap — TypeError, not the behaviour under test. The new per-PR guard
+    # correctly refuses to swallow that (a TypeError is a bug, not a
+    # transient), which is how the gap surfaced.
+    state.get_dependabot_update_branch_attempts.return_value = 0
     return state
 
 
@@ -77,6 +88,11 @@ def _make_loop(
     deps = make_bg_loop_deps(tmp_path, enabled=True, dependabot_merge_interval=60)
 
     cache = MagicMock()
+    # The loop reads the label-AGNOSTIC snapshot: bot PRs carry only
+    # GitHub-native labels, so the workflow-label-filtered `get_open_prs` is
+    # always empty for them in production (the s09 bug). Seeding only the
+    # filtered accessor left `bot_prs` empty here too.
+    cache.get_all_open_prs.return_value = open_prs or []
     cache.get_open_prs.return_value = open_prs or []
 
     if prs_mock is None:
@@ -84,6 +100,7 @@ def _make_loop(
         prs_mock.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
         prs_mock.submit_review = AsyncMock(return_value=True)
         prs_mock.merge_pr = AsyncMock(return_value=True)
+        prs_mock.update_pr_branch = AsyncMock(return_value=False)
         prs_mock.add_labels = AsyncMock()
         prs_mock.post_comment = AsyncMock()
         prs_mock.close_issue = AsyncMock()
@@ -104,7 +121,6 @@ class TestIssue6862TransientErrorDoesNotAbortBatch:
     """A transient RuntimeError on one PR must not abort the remaining PRs."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6862 — fix not yet landed", strict=False)
     async def test_runtime_error_on_first_pr_still_processes_remaining(
         self, tmp_path: Path
     ) -> None:
@@ -123,6 +139,10 @@ class TestIssue6862TransientErrorDoesNotAbortBatch:
         )
         prs.submit_review = AsyncMock(return_value=True)
         prs.merge_pr = AsyncMock(return_value=True)
+        # The merge-failure path awaits `update_pr_branch` (the #9889
+        # rebase-heal). Unstubbed it returns a bare MagicMock, which
+        # cannot be awaited — a gap in the fixture, not the loop.
+        prs.update_pr_branch = AsyncMock(return_value=False)
         prs.add_labels = AsyncMock()
         prs.post_comment = AsyncMock()
         prs.close_issue = AsyncMock()
@@ -140,7 +160,6 @@ class TestIssue6862TransientErrorDoesNotAbortBatch:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6862 — fix not yet landed", strict=False)
     async def test_runtime_error_on_merge_still_processes_remaining(
         self, tmp_path: Path
     ) -> None:
@@ -173,7 +192,6 @@ class TestIssue6862TransientErrorDoesNotAbortBatch:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6862 — fix not yet landed", strict=False)
     async def test_runtime_error_on_hitl_escalation_still_processes_remaining(
         self, tmp_path: Path
     ) -> None:
@@ -188,6 +206,10 @@ class TestIssue6862TransientErrorDoesNotAbortBatch:
         )
         prs.submit_review = AsyncMock(return_value=True)
         prs.merge_pr = AsyncMock(return_value=True)
+        # The merge-failure path awaits `update_pr_branch` (the #9889
+        # rebase-heal). Unstubbed it returns a bare MagicMock, which
+        # cannot be awaited — a gap in the fixture, not the loop.
+        prs.update_pr_branch = AsyncMock(return_value=False)
         # PR #1 add_labels raises; PRs #2 and #3 succeed
         prs.add_labels = AsyncMock(
             side_effect=[

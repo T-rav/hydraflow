@@ -274,7 +274,9 @@ async def _stream_and_collect(
     accumulated_text = ""
     early_killed = False
 
-    assert proc.stdout is not None
+    if proc.stdout is None:  # `python -O` strips assert (#6703)
+        msg = "agent process has no stdout pipe"
+        raise RuntimeError(msg)
     async for raw in proc.stdout:
         line = raw.decode(errors="replace").rstrip("\n")
         raw_lines.append(line)
@@ -436,11 +438,22 @@ async def stream_claude_process(
 
     stderr_task: asyncio.Task[bytes] | None = None
     try:
-        assert proc.stdout is not None
-        assert proc.stderr is not None
+        # These are facts about a spawned process, not internal consistency
+        # claims, so they must survive `python -O` — which strips `assert`
+        # entirely (#6703). Stripped, a None stdout surfaced much later as an
+        # AttributeError on NoneType from inside the streaming loop, naming
+        # neither the pipe nor the process.
+        if proc.stdout is None:
+            msg = "agent process has no stdout pipe"
+            raise RuntimeError(msg)
+        if proc.stderr is None:
+            msg = "agent process has no stderr pipe"
+            raise RuntimeError(msg)
 
         if stdin_mode == asyncio.subprocess.PIPE:
-            assert proc.stdin is not None
+            if proc.stdin is None:
+                msg = "agent process has no stdin pipe"
+                raise RuntimeError(msg)
             proc.stdin.write(prompt.encode())
             await proc.stdin.drain()
             proc.stdin.close()
@@ -477,10 +490,25 @@ async def stream_claude_process(
         # kill is self-suppressing (#9911: group, not just the child).
         _kill_proc_group(proc)
         raise
+    except BaseException:
+        # #6476: every OTHER failure used to propagate with the child still
+        # running. The commonest is a broken pipe from the stdin write/drain
+        # above — which raises BEFORE stderr_task exists, so the finally had
+        # nothing to cancel, dropped the bookkeeping, and returned. Only the
+        # timeout and cancellation paths killed anything, so an agent that
+        # closed its stdin early left a subprocess behind on each spawn.
+        _kill_proc_group(proc)
+        raise
     finally:
         if stderr_task is not None and not stderr_task.done():
             stderr_task.cancel()
             await asyncio.gather(stderr_task, return_exceptions=True)
+        # Reap unconditionally. On the success path `_stream_and_collect`
+        # has already waited and this returns the cached returncode; on every
+        # failure path it is the only wait there is, and without it the entry
+        # below removes our last handle on an unreaped child.
+        with contextlib.suppress(ProcessLookupError, OSError):
+            await proc.wait()
         active_procs.discard(proc)
         _ALL_TRACKED_PROCS.discard(proc)
 

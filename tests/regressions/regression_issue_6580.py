@@ -18,8 +18,6 @@ per-category loop so one bad entry is skipped rather than aborting the pass.
 
 from __future__ import annotations
 
-import pytest
-
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -71,7 +69,6 @@ def _make_record(
 class TestOneBadProposalAbortsEntireSweep:
     """Issue #6580: a single bad proposal should not abort the whole pass."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6580 — fix not yet landed", strict=False)
     def test_exception_in_update_proposal_verified_does_not_skip_remaining(
         self, tmp_path: Path
     ) -> None:
@@ -128,7 +125,6 @@ class TestOneBadProposalAbortsEntireSweep:
             "should not abort processing of subsequent proposals"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6580 — fix not yet landed", strict=False)
     def test_exception_midway_still_processes_earlier_and_later_proposals(
         self, tmp_path: Path
     ) -> None:

@@ -53,9 +53,6 @@ def _top_level_optional_imports(filepath: Path) -> list[tuple[int, str]]:
     OFFENDING_FILES,
     ids=[p.name for p in OFFENDING_FILES],
 )
-@pytest.mark.xfail(
-    reason="Regression for issue #6668 — fix not yet landed", strict=False
-)
 def test_no_top_level_httpx_import(filepath: Path) -> None:
     """Each regression test file must defer optional-dep imports to inside
     the test functions that use them — never at module level."""

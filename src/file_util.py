@@ -158,9 +158,49 @@ def atomic_write(path: Path, data: str) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
-        with contextlib.suppress(OSError):
+        # Best-effort cleanup must never REPLACE the exception that brought us
+        # here (#6630). `suppress(OSError)` let a non-OSError from unlink
+        # propagate out of this handler, so the caller saw the cleanup failure
+        # and the real write error was lost. `Exception` covers that while
+        # still letting KeyboardInterrupt/SystemExit through.
+        with contextlib.suppress(Exception):
             os.unlink(tmp)
         raise
+
+
+def _drop_torn_tail(path: Path) -> None:
+    """Remove a trailing partial line left by an earlier failed append.
+
+    A write interrupted mid-line (#6877) leaves bytes with no terminator.
+    Opening in "a" mode then concatenates the next record onto them, merging
+    two events into one unparseable line — the reader skips it and BOTH
+    vanish, the torn one and the good one behind it.
+
+    The torn bytes are dropped rather than terminated with a newline: a
+    partial JSON object cannot be recovered, so keeping it only preserves a
+    line every reader must skip. Truncating confines the loss to the record
+    that actually failed and leaves every surviving line parseable.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size == 0:
+        return
+    try:
+        with open(path, "r+", encoding="utf-8") as f:
+            f.seek(max(0, size - 1))
+            if f.read(1) == "\n":
+                return
+            f.seek(0)
+            content = f.read()
+            cut = content.rfind("\n")
+            f.seek(0)
+            f.truncate(cut + 1 if cut >= 0 else 0)
+    except (OSError, ValueError, UnicodeDecodeError):
+        # Unreadable or undecodable: leave it alone rather than risk
+        # truncating a file this helper does not understand.
+        logger.debug("append_jsonl: could not inspect tail of %s", path)
 
 
 def append_jsonl(path: Path, data: str) -> None:
@@ -170,23 +210,66 @@ def append_jsonl(path: Path, data: str) -> None:
     leaked credential never persists in the canonical audit/transcript/event
     stream, then ``flush`` + ``fsync`` ensure the record reaches stable storage
     before returning.
+
+    Best-effort by contract (#6623): an unwritable disk is logged, not raised.
+    This sits on the audit/event write path, and a failure to record work must
+    not fail the work being recorded.
+
+    The scrub and the write stay in THIS function on purpose. #9143's guard
+    parses ``append_jsonl``'s own AST for the ``scrub_secrets`` call, because
+    the ``codeql[py/clear-text-storage-sensitive-data]`` suppression below is
+    attached to this exact sink — moving the write into a helper silently
+    detaches the suppression from the thing it justifies. An earlier version
+    of the #6623 fix did that, and #9143 caught it.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        # scrub_secrets() is the ADR-0085 redaction sanitizer for this durable
-        # write path: it regex-redacts every credential-shaped substring to a
-        # [REDACTED:<label>] marker before the record is persisted, so no secret
-        # reaches the canonical audit stream. CodeQL's
-        # py/clear-text-storage-sensitive-data query cannot be taught this via a
-        # Models-as-Data barrier — that query's barrier set is a hardcoded QL
-        # `Sanitizer` class (CleartextStorageQuery.qll: isBarrier(n){ n instanceof
-        # Sanitizer }) with no barrierModel/ModelOutput hook, so it flags the
-        # scrub_secrets(data) -> f.write path as a false positive. Suppress it at
-        # the sink (the only supported lever for this query). See issue #9143.
-        # codeql[py/clear-text-storage-sensitive-data]
-        f.write(scrub_secrets(data) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
+    try:
+        # The mkdir is inside the guard too: a read-only parent is the same
+        # class of failure as a full disk, and a helper that swallows one
+        # while raising the other gives callers no usable contract.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _drop_torn_tail(path)
+        with open(path, "a", encoding="utf-8") as f:
+            # scrub_secrets() is the ADR-0085 redaction sanitizer for this
+            # durable write path: it regex-redacts every credential-shaped
+            # substring to a [REDACTED:<label>] marker before the record is
+            # persisted, so no secret reaches the canonical audit stream.
+            # CodeQL's py/clear-text-storage-sensitive-data query cannot be
+            # taught this via a Models-as-Data barrier — that query's barrier
+            # set is a hardcoded QL `Sanitizer` class
+            # (CleartextStorageQuery.qll: isBarrier(n){ n instanceof Sanitizer })
+            # with no barrierModel/ModelOutput hook, so it flags the
+            # scrub_secrets(data) -> f.write path as a false positive. Suppress
+            # it at the sink (the only supported lever for this query). See
+            # issue #9143.
+            start = f.tell()
+            try:
+                # codeql[py/clear-text-storage-sensitive-data]
+                f.write(scrub_secrets(data) + "\n")
+                f.flush()
+            except OSError:
+                # Roll back to the last complete line (#6877). A write
+                # interrupted mid-line leaves bytes with no terminator, and
+                # the next append concatenates onto them — merging two
+                # records into one unparseable line, so the reader skips it
+                # and BOTH vanish.
+                with contextlib.suppress(OSError):
+                    f.truncate(start)
+                raise
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                # Deliberately not rolled back: the bytes reached the kernel
+                # buffer and the line is complete and parseable. Losing the
+                # durability guarantee is worth reporting; throwing away a
+                # good record is not.
+                logger.warning(
+                    "append_jsonl: I/O error on fsync for %s — the line is "
+                    "written but not yet durable",
+                    path,
+                    exc_info=True,
+                )
+    except OSError:
+        logger.warning("append_jsonl: I/O error appending to %s", path, exc_info=True)
 
 
 def _parse_row_timestamp(value: object) -> datetime | None:

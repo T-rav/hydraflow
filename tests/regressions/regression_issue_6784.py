@@ -130,7 +130,6 @@ class TestSaveToDiskOSErrorLogging:
     where DEBUG is typically suppressed.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6784 — fix not yet landed", strict=False)
     def test_oserror_logged_at_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
