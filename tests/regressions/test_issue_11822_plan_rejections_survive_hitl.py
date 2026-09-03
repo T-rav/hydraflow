@@ -157,3 +157,111 @@ def test_a_reset_clears_every_class() -> None:
 
     assert state.get_plan_validation_rejections(11544, "Simplicity gate") == 0
     assert state.get_plan_validation_rejections(11544, "Testing gate") == 0
+
+
+# ---------------------------------------------------------------------------
+# The routing itself: at the threshold, decompose instead of escalating
+# ---------------------------------------------------------------------------
+
+
+class _Phase:
+    """The disposition mixin with only the collaborators the route touches."""
+
+    def __init__(self, *, ensemble, epic_manager, state, config, outcome):
+        from plan_phase_disposition import PlanDispositionMixin
+
+        self.__class__ = type("_P", (PlanDispositionMixin,), {})
+        self._decomposition_ensemble = ensemble
+        self._epic_manager = epic_manager
+        self._state = state
+        self._config = config
+        self._prs = object()
+        self._outcome = outcome
+
+
+async def _route(phase, issue_id: int, monkeypatch, outcome: str) -> bool:
+    import plan_phase_disposition as ppd
+    from models import Task
+
+    async def _fake(**_kw):
+        return outcome
+
+    # Patch the name where the CALLER binds it. #11822's imports were hoisted
+    # to module level to keep the suppressions ratchet shrinking, which moves
+    # the patch target: `preflight.decompose_terminal.decompose_or_escalate` is
+    # no longer what `_route_to_decomposition` looks up.
+    monkeypatch.setattr(ppd, "decompose_or_escalate", _fake)
+    monkeypatch.setattr(ppd, "reraise_on_credit_or_bug", lambda _e: None)
+    task = Task(id=issue_id, title="t", body="b", tags=[])
+    return await phase._route_to_decomposition(task, "Simplicity gate")
+
+
+async def test_a_decomposed_issue_is_not_also_escalated(tmp_path, monkeypatch) -> None:
+    """The whole point: it stops waiting on a human and waits on its children.
+
+    If the route reported success while the caller escalated anyway, the issue
+    would be decomposed AND sitting in HITL — the loop this fixes, plus an
+    epic nobody asked for.
+    """
+    from tests.helpers import ConfigFactory
+
+    state = _tracker()
+    state.bump_plan_validation_rejection(11544, "Simplicity gate")
+    phase = _Phase(
+        ensemble=object(),
+        epic_manager=object(),
+        state=state,
+        config=ConfigFactory.create(repo_root=tmp_path),
+        outcome="decomposed",
+    )
+
+    routed = await _route(phase, 11544, monkeypatch, "decomposed")
+
+    assert routed is True
+    assert state.get_plan_validation_rejections(11544, "Simplicity gate") == 0, (
+        "the counts must reset after a decomposition, or the children inherit "
+        "a parent's exhausted budget"
+    )
+
+
+async def test_a_declined_decomposition_still_escalates(tmp_path, monkeypatch) -> None:
+    """The decoy, and the safety property.
+
+    A gate refusing an oversized plan is a CORRECT refusal. If we cannot split
+    the issue, a human is the right next step — this must never swallow the
+    escalation.
+    """
+    from tests.helpers import ConfigFactory
+
+    state = _tracker()
+    phase = _Phase(
+        ensemble=object(),
+        epic_manager=object(),
+        state=state,
+        config=ConfigFactory.create(repo_root=tmp_path),
+        outcome="human-required",
+    )
+
+    routed = await _route(phase, 11795, monkeypatch, "human-required")
+
+    assert routed is False
+
+
+async def test_an_unwired_decomposer_still_escalates(tmp_path) -> None:
+    """Degrades to today's behaviour when the ensemble was never injected."""
+    from models import Task
+    from tests.helpers import ConfigFactory
+
+    phase = _Phase(
+        ensemble=None,
+        epic_manager=None,
+        state=_tracker(),
+        config=ConfigFactory.create(repo_root=tmp_path),
+        outcome="human-required",
+    )
+
+    routed = await phase._route_to_decomposition(
+        Task(id=1, title="t", body="b", tags=[]), "Simplicity gate"
+    )
+
+    assert routed is False

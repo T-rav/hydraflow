@@ -13,14 +13,18 @@ memory-suggestion tail every path posts.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory
+from issue_decomposer import IssueDecomposer
 from models import IssueOutcomeType, PlanResult, Task
 from pending_concerns import Concern, is_design_decision_concern
 from plan_phase_common import _MIN_ISSUE_BODY_CHARS
+from plan_validation import rejection_class
 from planner import PlannerRunner
+from preflight.context import PreflightContext
+from preflight.decompose_terminal import decompose_or_escalate
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -246,8 +250,6 @@ class PlanDispositionMixin:
 
         Returns ``(exhausted, worst_class, count)``.
         """
-        from plan_validation import rejection_class  # noqa: PLC0415
-
         threshold = self._config.plan_validation_decompose_threshold
         worst_class, worst = "", 0
         for cls in {rejection_class(e) for e in errors}:
@@ -257,6 +259,83 @@ class PlanDispositionMixin:
         if threshold <= 0:
             return False, worst_class, worst
         return worst >= threshold, worst_class, worst
+
+    async def _route_to_decomposition(self, issue: Task, worst_class: str) -> bool:
+        """Split the issue instead of asking the planner again (#11822).
+
+        Returns True when the issue was superseded by an epic, in which case
+        the caller must NOT also escalate — the issue is no longer waiting on
+        a human, it is waiting on its children.
+
+        Degrades to False whenever decomposition is not wired or declines, so
+        every path that reaches here still lands on today's HITL behaviour.
+        That is deliberate: a gate refusing an oversized plan is a correct
+        refusal, and if we cannot split the issue a human is the right next
+        step — this must never swallow the escalation.
+        """
+        epic_manager = getattr(self, "_epic_manager", None)
+        ensemble = getattr(self, "_decomposition_ensemble", None)
+        if epic_manager is None or ensemble is None:
+            return False
+
+        ctx = PreflightContext(
+            issue_number=issue.id,
+            issue_body=issue.body or "",
+            issue_comments=[],
+            sub_label=self._config.planner_label[0],
+            escalation_context=None,
+            wiki_excerpts="",
+            sentry_events=[],
+            recent_commits=[],
+        )
+        try:
+            outcome = await decompose_or_escalate(
+                issue_number=issue.id,
+                ctx=ctx,
+                config=self._config,
+                decomposer=IssueDecomposer(
+                    self._prs, epic_manager, self._state, self._config
+                ),
+                ensemble=ensemble,
+                state=self._state,
+                # `decompose_terminal._PRPort` names members `PRPort` does not
+                # have (`get_pr_reviews`) and types `close_pr` as returning
+                # None where ours returns bool, so the declared protocol does
+                # not describe its real caller. AutoAgentPreflightLoop passes
+                # this same object and only typechecks because it declares
+                # `pr_manager: Any`. Passing it the same way rather than
+                # loosening another module's protocol from here.
+                prs=cast("Any", self._prs),
+            )
+        except (RuntimeError, OSError, ValueError) as exc:
+            # Narrower than a blind catch because the suppressions ratchet only
+            # shrinks, and narrower is also more honest here: everything
+            # reachable from `decompose_or_escalate` — the ensemble's spawn, the
+            # PR reads, the epic writes — surfaces as one of these. A TypeError
+            # or AttributeError from this call is a bug in the wiring above, and
+            # should reach the loop's own handler rather than be logged as a
+            # failed decomposition. `reraise_on_credit_or_bug` still earns its
+            # place: CreditExhausted and Authentication are RuntimeError
+            # subclasses and would otherwise be swallowed into the fallback.
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Decomposition route failed for issue #%d — falling back to HITL",
+                issue.id,
+                exc_info=True,
+            )
+            return False
+
+        if outcome != "decomposed":
+            return False
+
+        self._state.clear_plan_validation_rejections(issue.id)
+        logger.warning(
+            "Issue #%d decomposed after %r refused it %d times — not escalating",
+            issue.id,
+            worst_class,
+            self._config.plan_validation_decompose_threshold,
+        )
+        return True
 
     async def _handle_plan_failure(self, issue: Task, result: PlanResult) -> None:
         """Post comment, escalate to HITL, record harness failure."""
@@ -305,6 +384,8 @@ class PlanDispositionMixin:
         # be appended on top of the prior attempt's, growing unboundedly
         # across HITL cycles.
         self._state.clear_adversarial_state(issue.id)
+        if exhausted and await self._route_to_decomposition(issue, worst_class):
+            return
         await self._escalator(
             issue,
             cause="Plan validation failed after retry",

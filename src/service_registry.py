@@ -1332,6 +1332,10 @@ def build_services(
     give_up_tracker: GiveUpTracker | None = None
     plan_retry_window: GiveUpWindow | None = None
     plan_retry_self_solver: PlanRetrySelfSolver | None = None
+    # Bound before the branch: PlanPhase takes this for #11822's
+    # decomposition route, and it is None whenever the give-up window is
+    # off — in which case the route degrades to today's HITL escalation.
+    giveup_ensemble: DecompositionEnsemble | None = None
     if config.giveup_window_enabled:
         # Reuse the shared epic_manager + subprocess_runner so the ensemble's
         # LLM calls route through the same docker/host dial as every other
@@ -1434,6 +1438,9 @@ def build_services(
         stop_event,
         transcript_summarizer=summarizer,
         harness_insights=harness_insights,
+        # #11822: the same ensemble the give-up path uses, so a plan the
+        # gates refuse N times for one class can be split instead of re-asked.
+        decomposition_ensemble=giveup_ensemble,
         epic_manager=epic_manager,
         research_runner=researcher,
         beads_manager=beads_mgr,

@@ -62,7 +62,7 @@ graph LR
     src -- "2" --> src_observability
     src -- "5" --> src_policy
     src -- "2" --> src_pr_unsticker
-    src -- "18" --> src_preflight
+    src -- "20" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "1" --> src_reviewer
     src -- "1" --> src_runners
