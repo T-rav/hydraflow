@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from backlog_budget import (
+    PROTECTED_LABELS,
     RETIREMENT_COMMENT,
     retirement_picks,
 )
@@ -358,7 +359,16 @@ class StaleIssueLoop(BaseBackgroundLoop):
         stats: dict[str, int] = {"scanned": 0, "closed": 0, "skipped": 0}
 
         # Fetch open issues that don't have HydraFlow lifecycle labels
+        # `PROTECTED_LABELS` is the canonical "untouchable regardless of age"
+        # set (#12073), shared with the backlog-budget valve rather than
+        # rebuilt here. The hand-built list held only the four pipeline stages,
+        # so `hydraflow-epic`, `hydraflow-epic-child` and `human-required` were
+        # all sweepable: an epic child parked without a stage label for
+        # `staleness_days` got commented and closed while its epic was still
+        # burning down, which is a false-close that re-fires every time the
+        # issue is reopened. Two lists over one concept is how they drift.
         exclude_labels = [
+            *PROTECTED_LABELS,
             *self._config.planner_label,
             *self._config.ready_label,
             *self._config.review_label,
