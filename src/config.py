@@ -7929,6 +7929,60 @@ def _validate_stage_tool_model(
         )
 
 
+def _demote_defaulted_gateway_for_non_claude_tools(config: HydraFlowConfig) -> None:
+    """Send a stage back to the direct harness when its tool cannot use the gateway.
+
+    ADR-0147 made ``gateway`` the dial default. The gateway serves the Claude
+    harness only, so a stage running Codex (a first-class tool on those dials)
+    would fail ``_validate_stage_provider`` at LOAD — a config that worked
+    yesterday raising today, which is not a routing decision anyone made.
+
+    Only a dial still sitting at its default is demoted. An operator who wrote
+    ``gateway`` next to a Codex tool still gets the error, because that pairing
+    is a mistake worth naming rather than silently rewriting.
+    """
+    explicit = config.__pydantic_fields_set__
+    for stage, tool, _model in _tool_model_stage_pairs(config):
+        if tool == "claude" or not tool:
+            continue
+        for field in _STAGE_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",)):
+            if field in explicit or field not in HydraFlowConfig.model_fields:
+                continue
+            if getattr(config, field, None) != "gateway":
+                continue
+            if HydraFlowConfig.model_fields[field].default != "gateway":
+                continue
+            object.__setattr__(config, field, "claude")
+            logger.debug(
+                "%s runs tool %r, which the gateway cannot serve — %s demoted "
+                "to the direct harness (ADR-0147)",
+                stage,
+                tool,
+                field,
+            )
+
+    # The maintenance family is validated against background_tool rather than a
+    # stage pair, so the loop above never sees it. Same rule, same reason.
+    maintenance_tool = (
+        "claude" if config.background_tool == "inherit" else config.background_tool
+    )
+    if maintenance_tool != "claude":
+        for field in (
+            GATEWAY_ONE_SHOT_PROVIDER_FIELDS + GATEWAY_INHERITED_PROVIDER_FIELDS
+        ):
+            if field in explicit or getattr(config, field, None) != "gateway":
+                continue
+            if HydraFlowConfig.model_fields[field].default != "gateway":
+                continue
+            object.__setattr__(config, field, "claude")
+            logger.debug(
+                "background_tool=%r cannot use the gateway — %s demoted to the "
+                "direct harness (ADR-0147)",
+                maintenance_tool,
+                field,
+            )
+
+
 def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
     """Validate that every (tool, model) pair is internally consistent.
 
@@ -7955,6 +8009,9 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         )
     object.__setattr__(config, "verification_judge_tool", config.review_tool)
 
+    # Before the gateway validators judge a dial: a DEFAULTED gateway on a
+    # tool the gateway cannot serve is not an operator's routing choice.
+    _demote_defaulted_gateway_for_non_claude_tools(config)
     _validate_gateway_capture_policy(config)
     _validate_gateway_enforcement_canary(config)
     _validate_governed_repo_has_no_ungoverned_face(config)
