@@ -7335,6 +7335,9 @@ class HydraFlowConfig(BaseModel):
         _apply_profile_overrides(self)
         _harmonize_tool_model_defaults(self)
         _validate_docker(self)
+        # After the dials settle: _apply_env_overrides and the harmonisation
+        # pass both move providers, so reading them earlier misses env-set ones.
+        warn_once_on_gateway_binding_gaps(self)
         return self
 
 
@@ -8075,25 +8078,44 @@ def _validate_repo_format(repo: str) -> None:
 #: bound to one of these; the gateway refuses the mint when the binding is
 #: absent (``GatewaySettings.from_env`` only adds an upstream whose env pair is
 #: set), so an unset key is a spawn failure, not a degraded route.
-_GATEWAY_UPSTREAM_ENV: dict[str, tuple[str, str]] = {
-    "anthropic": ("GATEWAY_ANTHROPIC_BASE_URL", "GATEWAY_ANTHROPIC_API_KEY"),
-    "zai-harness": ("GATEWAY_ZAI_HARNESS_BASE_URL", "GATEWAY_ZAI_HARNESS_API_KEY"),
-}
+#: Gateway binding gaps already reported by this process, keyed by the gap
+#: itself. ``HydraFlowConfig()`` is constructed on nearly every code path --
+#: the suite builds thousands -- and warning per construction would bury the
+#: one line an operator needs. Keyed rather than a plain flag so a DIFFERENT
+#: gap appearing later is still reported. Tests clear it via
+#: ``reset_gateway_binding_warnings()``.
+_gateway_binding_warned: set[str] = set()
+
+
+def reset_gateway_binding_warnings() -> None:
+    """Forget which gaps were reported. For tests asserting the once-only rule."""
+    _gateway_binding_warned.clear()
 
 
 def gateway_binding_gaps(
     config: HydraFlowConfig, *, env: Mapping[str, str] | None = None
 ) -> list[str]:
-    """Env pairs a gateway-routed deployment needs but does not have.
+    """Settings a gateway-routed factory needs in ITS OWN process but lacks.
 
-    ADR-0147 arms the fleet ratchet by default, so every still-Claude spawn
-    is rewritten to the gateway and the ledger sees all of them. That is fail-CLOSED: with no ``GATEWAY_ANTHROPIC_*`` pair the
-    gateway has no Anthropic upstream, every mint is refused, and the factory
-    stops. Reporting the missing pair by name at boot is the difference between
-    one actionable line and N spawn failures that each look like an outage.
+    ADR-0147 points the role dials at the gateway, so a factory that cannot
+    mint a virtual key cannot spawn at all. ``resolve_harness_env`` already
+    raises ``GatewayMintError`` at the point of use, which is correct but
+    arrives once per spawn; naming the gap at boot is the difference between
+    one actionable line and N failures that each look like an outage.
 
-    Returns the missing variable names, empty when the deployment is complete.
+    Deliberately scoped to the FACTORY's prerequisites. The upstream
+    credentials (``GATEWAY_ANTHROPIC_*``) are NOT checked here: they belong to
+    the gateway server's environment, and ``GATEWAY_CONTROL_PLANE_ENV_KEYS``
+    exists precisely to keep them out of this process. Demanding them here
+    reported a gap on every correctly-configured deployment that runs the
+    gateway as its own service -- the supported topology -- and a boot warning
+    that is wrong for the normal case teaches operators to ignore boot
+    warnings. Whether the gateway has an upstream is the gateway's to report.
+
+    Returns the missing names, empty when the factory is bound.
     """
+    from gateway_control_reader import GATEWAY_CONTROL_TOKEN_ENV
+
     environment = os.environ if env is None else env
     routed = bool(getattr(config, "gateway_fleet_ratchet_enabled", False)) or any(
         getattr(config, name, None) == "gateway"
@@ -8102,14 +8124,30 @@ def gateway_binding_gaps(
     )
     if not routed:
         return []
-    # Anthropic is the upstream every Claude-model role reaches through the
-    # gateway; the zai pair is only needed once a dial names a glm model, so it
-    # is not demanded here.
-    return [
-        var
-        for var in _GATEWAY_UPSTREAM_ENV["anthropic"]
-        if not environment.get(var, "").strip()
-    ]
+    missing: list[str] = []
+    if not environment.get(GATEWAY_CONTROL_TOKEN_ENV, "").strip():
+        missing.append(GATEWAY_CONTROL_TOKEN_ENV)
+    if not str(getattr(config, "gateway_base_url", "") or "").strip():
+        missing.append("HYDRAFLOW_GATEWAY_BASE_URL")
+    return missing
+
+
+def warn_once_on_gateway_binding_gaps(config: HydraFlowConfig) -> None:
+    """Report a gateway binding gap at boot, at most once per process."""
+    gaps = gateway_binding_gaps(config)
+    if not gaps:
+        return
+    seen_key = ",".join(gaps)
+    if seen_key in _gateway_binding_warned:
+        return
+    _gateway_binding_warned.add(seen_key)
+    logger.warning(
+        "Gateway-routed roles cannot mint a credential: %s unset. Every spawn "
+        "on a `gateway` dial will fail its mint until this is set in the "
+        "FACTORY environment (ADR-0147), or the affected *_provider dials are "
+        "pointed back at a direct backend.",
+        " and ".join(gaps),
+    )
 
 
 def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
@@ -8139,17 +8177,6 @@ def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
 
     if config.repo:
         _validate_repo_format(config.repo)
-
-    gaps = gateway_binding_gaps(config)
-    if gaps:
-        logger.warning(
-            "Gateway-routed roles have no Anthropic upstream: %s unset. Every "
-            "spawn on a `gateway` dial will fail its credential mint until "
-            "these are set in the GATEWAY process environment (ADR-0147). Set "
-            "them and restart the gateway, or point the affected *_provider "
-            "dials back at a direct backend.",
-            " and ".join(gaps),
-        )
 
     # Git identity:
     # explicit value → HYDRAFLOW_GIT_USER_NAME/EMAIL env vars

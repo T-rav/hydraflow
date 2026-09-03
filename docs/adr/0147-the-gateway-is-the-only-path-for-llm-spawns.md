@@ -42,15 +42,6 @@ complete, is the state this decision ends.
 **Every LLM spawn transits the gateway. The gateway ledger is the cost and
 attribution record of the factory.**
 
-The mechanism exists and is not new: `gateway_fleet_ratchet_enabled` rewrites a
-spawn whose provider resolves to `claude` into a `gateway` spawn at
-`base_runner`. It is the only lever that reaches everything — **20 of 24
-`BaseRunner` subclasses declare no `PROVIDER_FIELD`**, so `_resolve_provider`
-returns a hardcoded `"claude"` and no `*_provider` dial can move them. Flipping
-the fourteen dials is therefore both redundant (the ratchet catches them) and
-insufficient (it misses the twenty). The ratchet is the decision; the dials stay
-as the per-role escape hatch.
-
 ### The dials are the lever; the ratchet is not required
 
 Every one of the fourteen `*_provider` dials now defaults to `gateway`, and
@@ -67,24 +58,41 @@ requirement is a validator on `gateway_fleet_ratchet_enabled`, not on dials. A
 config with all fourteen dials on `gateway` loads and runs in host mode. Docker
 buys the last mile, not the first.
 
-### What the dials do not reach
+### What the dials do not reach, and what catches it anyway
 
 `_resolve_provider` returns a hardcoded `"claude"` for every `BaseRunner`
 subclass that declares no `PROVIDER_FIELD` — bug_reproducer, hitl, research,
-discover, shape, plan_reviewer, diagnostic. No dial moves them, and the fleet
-ratchet is the only thing that does.
+discover, shape, plan_reviewer, diagnostic. **20 of 24 subclasses declare
+none**, so no `*_provider` dial can move them.
 
-That ratchet requires `execution_mode="docker"`, and the reason is not
-ceremony: on the host an agent CLI reads provider OAuth/keychain state **even
-when its process environment is scrubbed**, so a rewritten provider would
-record a gateway spawn that never transited the gateway. `docker_extra_mounts`
-is forbidden for the same reason — a host mount re-exposes `.env` files and
-credential homes inside an otherwise isolated worker.
+They are still routed, by a third lever this ADR did not originally credit.
+`base_runner` applies `apply_repo_provider` to every spawn, and its contract is
+"reroute a spawn that is *still* `claude`" — which is exactly what a dial-less
+runner resolves to. With `repo_provider` now defaulting to `gateway`, those
+twenty are rewritten to `gateway` as well, in host mode, with no ratchet armed.
+The precedence chain (`role dial > repo_provider > credit-failover`) means the
+dials win where they exist and `repo_provider` sweeps up the rest.
 
-So the remaining roles stay direct until an operator accepts docker execution.
-That is a deliberate stopping point, not an oversight: a ledger that is
-complete for the roles that spend, and honest about the ones it does not cover,
-beats a ratchet that reports coverage isolation cannot back.
+The one class it does not reach is a spawn whose command runs `codex`:
+`apply_repo_provider` returns it untouched, because the gateway serves the
+Claude harness only.
+
+**The isolation caveat is now the honest residue.** `gateway_fleet_ratchet_enabled`
+requires `execution_mode="docker"` for a real reason: on the host an agent CLI
+reads provider OAuth/keychain state **even when its process environment is
+scrubbed**, so a spawn recorded as `gateway` may not have transited the
+gateway. `docker_extra_mounts` is forbidden for the same reason — a host mount
+re-exposes `.env` files and credential homes inside an otherwise isolated
+worker. That hazard does not disappear because the rewrite arrived via
+`repo_provider` instead of the ratchet: a host-mode deployment gets gateway
+*attribution* for the dial-less roles without the isolation that would make the
+attribution provable.
+
+This is accepted deliberately. Host execution is the shape the factory actually
+runs in, and a ledger row that is right in the ordinary case beats no row at
+all. What it is not is proof of transit — for that, the ledger's own rows are
+the evidence, and only docker execution closes the gap between "we told it to
+use the gateway" and "it could not have done anything else."
 
 ### Deployment sequence
 
@@ -93,7 +101,7 @@ this decision and a working ledger:
 
 | Precondition | Why it is not optional |
 |---|---|
-| `GATEWAY_ANTHROPIC_BASE_URL` + `GATEWAY_ANTHROPIC_API_KEY` in the **gateway process** environment | `GatewaySettings.from_env` only binds an upstream whose env pair is set. Without the Anthropic pair the gateway has no Anthropic upstream and **every mint is refused** — gateway selection is fail-closed (`GatewayMintError`), so this is a stopped factory, not a degraded route. `gateway_binding_gaps()` names the missing variables at boot rather than leaving N spawn failures to interpret. |
+| `GATEWAY_ANTHROPIC_BASE_URL` + `GATEWAY_ANTHROPIC_API_KEY` in the **gateway process** environment | `GatewaySettings.from_env` only binds an upstream whose env pair is set. Without the Anthropic pair the gateway has no Anthropic upstream and **every mint is refused** — gateway selection is fail-closed (`GatewayMintError`), so this is a stopped factory, not a degraded route. This pair is the gateway’s to hold, and `gateway_binding_gaps()` deliberately does **not** check it: it runs in the factory process, where `GATEWAY_CONTROL_PLANE_ENV_KEYS` exists to keep these very keys out. It checks the factory’s own prerequisite — `HYDRAFLOW_GATEWAY_CONTROL_TOKEN`, without which no mint is even attempted — and names that at boot rather than leaving N spawn failures to interpret. |
 
 
 1. **Bind Anthropic on the gateway** and restart it.

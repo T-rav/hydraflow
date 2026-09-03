@@ -61,7 +61,7 @@ _AGENTIC = frozenset(GATEWAY_AGENTIC_PROVIDER_FIELDS)
 
 def test_the_dial_set_is_derived_and_non_empty() -> None:
     """Anti-vacuity: an empty dial set would pass every case below."""
-    assert len(_DIALS) >= 13
+    assert len(_DIALS) >= 14
     assert _AGENTIC, "the agentic classification is empty; nothing would be checked"
 
 

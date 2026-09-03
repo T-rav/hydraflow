@@ -73,7 +73,7 @@ _DIALS = _provider_dials()
 
 def test_the_sweep_found_the_dials_it_was_built_from() -> None:
     """Anti-vacuity: an empty dial set would pass every parametrised case."""
-    assert len(_DIALS) >= 13, f"expected the ~13 dials #11991 names, got {_DIALS}"
+    assert len(_DIALS) >= 14, f"expected the 14 dials ADR-0147 routes, got {_DIALS}"
     assert "maintenance_provider" in _DIALS
 
 
@@ -88,18 +88,25 @@ class TestEveryDialCanReachTheGovernedSeam:
         )
 
 
-class TestThePreMigrationDefaultIsRecorded:
+class TestTheShippedDefaultIsRecorded:
     """What the dials resolve to today, captured before anything moves."""
 
     @pytest.mark.parametrize("dial", _DIALS, ids=_DIALS)
-    def test_the_default_is_claude(self, dial: str) -> None:
-        """Every dial ships defaulting to `claude`; the migration must agree.
+    def test_the_default_is_the_gateway(self, dial: str) -> None:
+        """Every dial ships defaulting to `gateway`; the migration must agree.
+
+        This recorded `claude` until ADR-0147, which moved the default so every
+        role's spend reaches the one ledger carrying per-spawn attribution. The
+        parity property is unchanged by that: the expectation is still captured
+        against the CURRENT resolver, before P6b moves it to read policy, so
+        later agreement still means the migration preserved behaviour rather
+        than that the new code agrees with itself.
 
         Asserted per dial rather than over the set so a single changed default
         names itself, and so adding a dial with a different default is a
         deliberate decision recorded here.
         """
-        assert HydraFlowConfig.model_fields[dial].default == "claude"
+        assert HydraFlowConfig.model_fields[dial].default == "gateway"
 
     @pytest.mark.parametrize("dial", _DIALS, ids=_DIALS)
     def test_the_default_resolves_to_the_anthropic_lane(self, dial: str) -> None:
@@ -109,19 +116,19 @@ class TestThePreMigrationDefaultIsRecorded:
         assert provider_binding_for(default, "sonnet").value == "anthropic"
 
     @pytest.mark.parametrize("dial", _DIALS, ids=_DIALS)
-    def test_a_default_dial_is_ungoverned_transport_today(self, dial: str) -> None:
-        """Pre-migration these route harness-direct, not through the gateway.
+    def test_a_default_dial_is_governed_transport_today(self, dial: str) -> None:
+        """A defaulted dial now routes through the gateway, not harness-direct.
 
-        This is the baseline the migration changes *deliberately*: after it, a
-        repository whose policy names the gateway resolves to
-        `RouteTransport.GATEWAY`. Recording the old value is what makes that
-        change visible rather than silent.
+        This recorded `HARNESS_DIRECT` before ADR-0147, and the inversion is the
+        point: an ungoverned default was exactly how the gateway ledger came to
+        hold 908 rows from one provider over two days while the proxy ran and
+        every dial pointed around it. Recording the new value keeps the next
+        move visible rather than silent, which is what the old assertion was
+        for.
         """
         default = str(HydraFlowConfig.model_fields[dial].default)
 
-        assert (
-            transport_for(default, RequestFace.AGENTIC) is RouteTransport.HARNESS_DIRECT
-        )
+        assert transport_for(default, RequestFace.AGENTIC) is RouteTransport.GATEWAY
 
 
 class TestMaintenanceInheritanceIsPinnedBeforeMigration:

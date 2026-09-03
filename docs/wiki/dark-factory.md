@@ -454,9 +454,15 @@ GATEWAY_ANTHROPIC_BASE_URL=https://api.anthropic.com
 GATEWAY_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Restart the gateway. Boot logs name any missing variable directly
-(`gateway_binding_gaps()`), so a misconfiguration is one line rather than N
-spawn failures that each look like an outage.
+Restart the gateway. Note the factory cannot verify this pair for you — it
+lives in the gateway's environment, and `GATEWAY_CONTROL_PLANE_ENV_KEYS` keeps
+it out of the factory process. The gateway reports it: the accounts view shows
+the Anthropic account `configured` rather than `UNVERIFIED / CREDENTIAL_MISSING`.
+
+What the factory *does* check at boot is its own prerequisite —
+`HYDRAFLOW_GATEWAY_CONTROL_TOKEN`, without which no mint is attempted at all.
+`gateway_binding_gaps()` names it once, rather than leaving N spawn failures
+that each look like an outage.
 
 **Verify** the ledger fills with the Anthropic lane:
 
@@ -466,18 +472,31 @@ tail -50 .hydraflow/gateway/requests.jsonl \
            | [.principal.id, .model_served, .cost_usd] | @tsv'
 ```
 
-### What is still direct
+### What the dials miss — and what sweeps it up
 
 `_resolve_provider` returns a hardcoded `"claude"` for every `BaseRunner`
 subclass with no `PROVIDER_FIELD` — bug_reproducer, hitl, research, discover,
-shape, plan_reviewer, diagnostic. No dial reaches them. Only the fleet ratchet
-does, and it requires `execution_mode="docker"` because a host agent CLI reads
-provider OAuth/keychain state **even when its process environment is scrubbed**
-— it would record a gateway spawn that never transited the gateway.
+shape, plan_reviewer, diagnostic (20 of 24 subclasses). No `*_provider` dial
+reaches them.
 
-Docker is slow, and these are the low-volume roles. Leaving them direct is a
-deliberate stopping point: the ledger is complete for the roles that spend, and
-honest about the ones it does not cover.
+They route anyway, via `repo_provider`. `base_runner` applies
+`apply_repo_provider` to every spawn, and it rewrites a spawn that is *still*
+`claude` — precisely what a dial-less runner resolves to. `repo_provider`
+defaults to `gateway`, so those roles transit the proxy in **host mode with no
+ratchet armed**. Precedence is `role dial > repo_provider > credit-failover`:
+the dials win where they exist, `repo_provider` sweeps up the rest.
+
+The exception is a `codex` command — `apply_repo_provider` leaves it untouched,
+because the gateway serves the Claude harness only.
+
+**What host mode does not buy you.** `gateway_fleet_ratchet_enabled` requires
+`execution_mode="docker"` because a host agent CLI reads provider
+OAuth/keychain state **even when its process environment is scrubbed**. That
+hazard is not specific to the ratchet: a `repo_provider` rewrite on the host
+gets you gateway *attribution* without the isolation that would make it proof
+of transit. Accepted deliberately — host is the shape the factory runs in, and
+a row that is right in the ordinary case beats no row — but do not read a
+ledger row as evidence the CLI could not have gone around it.
 
 ### Rolling back
 

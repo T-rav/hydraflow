@@ -52,7 +52,7 @@ def _governed(**overrides: object) -> dict[str, object]:
 
 def test_the_dial_set_is_derived_and_non_empty() -> None:
     """Anti-vacuity: an empty set would make every assertion below pass."""
-    assert len(_PROVIDER_DIALS) >= 13
+    assert len(_PROVIDER_DIALS) >= 14
     assert "maintenance_provider" in _PROVIDER_DIALS
 
 

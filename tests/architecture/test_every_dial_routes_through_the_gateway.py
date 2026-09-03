@@ -31,7 +31,7 @@ _DIALS = sorted(n for n in HydraFlowConfig.model_fields if n.endswith("_provider
 
 def test_there_are_dials_to_guard() -> None:
     """The decoy: an empty set makes every parametrised check below vacuous."""
-    assert len(_DIALS) >= 13, f"only {len(_DIALS)} dials found — did they move?"
+    assert len(_DIALS) >= 14, f"only {len(_DIALS)} dials found — did they move?"
 
 
 @pytest.mark.parametrize("dial", _DIALS)
@@ -71,3 +71,55 @@ def test_the_dial_keeps_a_direct_escape_hatch(dial: str) -> None:
     assert "claude" in str(HydraFlowConfig.model_fields[dial].annotation), (
         f"{dial} lost its direct-backend escape hatch"
     )
+
+
+class TestTheDialLessRunnersAreSweptUpByRepoProvider:
+    """The 20-of-24 `BaseRunner` subclasses no `*_provider` dial can reach.
+
+    `_resolve_provider` returns a hardcoded `"claude"` when `PROVIDER_FIELD` is
+    None, so the dials above cannot move them. ADR-0147 originally concluded
+    they stayed direct until an operator armed the fleet ratchet under docker.
+    That was wrong: `base_runner` applies `apply_repo_provider` to every spawn,
+    its contract is "reroute a spawn that is STILL claude", and `repo_provider`
+    now defaults to `gateway` — so they route in host mode with no ratchet.
+
+    The ADR's coverage claim rests entirely on this, and nothing pinned it.
+    """
+
+    def test_a_dial_less_spawn_is_rewritten_to_the_gateway(self) -> None:
+        from repo_backend import apply_repo_provider
+
+        config = HydraFlowConfig(repo="o/r")
+        assert config.execution_mode == "host", "host is the shape under test"
+        assert config.gateway_fleet_ratchet_enabled is False, "no ratchet armed"
+
+        provider, _ = apply_repo_provider(
+            "claude", ["claude", "--model", "sonnet"], config
+        )
+
+        assert provider == "gateway"
+
+    def test_a_spawn_already_routed_off_claude_is_left_alone(self) -> None:
+        """Decoy: `repo_provider` sweeps the residue, it does not overrule dials.
+
+        Precedence is `role dial > repo_provider`. A rewrite that ignored the
+        incoming provider would satisfy the test above while silently
+        overriding every explicitly-dialled role.
+        """
+        from repo_backend import apply_repo_provider
+
+        provider, _ = apply_repo_provider(
+            "zai", ["claude", "--model", "glm-4.6"], HydraFlowConfig(repo="o/r")
+        )
+
+        assert provider == "zai"
+
+    def test_a_codex_spawn_is_left_alone(self) -> None:
+        """The gateway serves the Claude harness only."""
+        from repo_backend import apply_repo_provider
+
+        provider, _ = apply_repo_provider(
+            "claude", ["codex", "--model", "gpt-5"], HydraFlowConfig(repo="o/r")
+        )
+
+        assert provider == "claude"
