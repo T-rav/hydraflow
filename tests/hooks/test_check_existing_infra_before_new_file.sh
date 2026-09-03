@@ -112,6 +112,20 @@ if [ "$elapsed" -gt 10 ]; then
   fail=1
 fi
 
+# The one-shot marker EXPIRES. A permanent one silently exempts a filename
+# forever: MARKER_DIR is keyed on the worktree's absolute path, worktree
+# directory names get reused across unrelated tasks (#11501/#11729), and this
+# repo runs multi-day unattended sessions — so one agent's considered "yes,
+# this really is new" would answer for an unrelated agent days later. Backdate
+# the marker past the 240-minute window and the guard must speak again.
+STALE_MARKERS="$(mktemp -d)"
+trap 'chmod u+rwx "$READONLY_MARKERS" 2>/dev/null; rm -rf "$MARKERS" "$READONLY_MARKERS" "$STALE_MARKERS"' EXIT
+DUPE="$REPO/tests/test_event_reducer_parity_readonly.py"
+expect 2 "first write of a duplicate is refused" "$DUPE" "$STALE_MARKERS"
+expect 0 "the one-shot lets the immediate re-issue through" "$DUPE" "$STALE_MARKERS"
+find "$STALE_MARKERS" -name 'infra-*' -exec touch -t 202001010000 {} + 2>/dev/null
+expect 2 "an EXPIRED marker does not answer for the next session" "$DUPE" "$STALE_MARKERS"
+
 # Anti-vacuity: every ALLOW above also passes against a hook that exits 0
 # unconditionally, and the BLOCK cases would pass against a hardcoded lookup
 # table. Assert the verdict still comes from a live git scan.

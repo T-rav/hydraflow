@@ -26,9 +26,12 @@
 # exits 0: a guard that cannot record "already warned" must let the work
 # through, never wedge an unattended run against an unwritable /tmp.
 
-# NOT `set -e`: `grep -v` below legitimately exits 1 when it filters every
-# line, and `cmd && exit 0` legitimately leaves a non-zero status when cmd
-# fails. Under -e both abort the hook. Do not "fix" this for consistency.
+# NOT `set -e`, and the reason is the code below, not history: `cmd && exit 0`
+# legitimately leaves a non-zero status when cmd fails (the tracked-path and
+# marker checks both use it), and under `pipefail` the scan's `... | sort |
+# head -5 | cut` pipeline legitimately reports non-zero when `head` closes the
+# pipe early. Under -e either aborts the hook, which fails CLOSED — the one
+# outcome every other path here is written to avoid. Do not "fix" this.
 set -uo pipefail
 
 INPUT=$(cat)
@@ -64,9 +67,17 @@ git ls-files --error-unmatch -- "$REL" >/dev/null 2>&1 && exit 0
 
 # One-shot, checked BEFORE the scan: having been told once, the author
 # decides. Keyed by path, so a refusal on one file never silences the next.
+#
+# TTL, not bare existence, and the same 240-minute window
+# hf.enforce-plan-and-explore.sh uses. MARKER_DIR is keyed on the worktree's
+# ABSOLUTE PATH, and worktree directory names are reused across unrelated
+# tasks (#11501/#11729) — so a permanent marker would let one agent's
+# considered "yes, this really is new" silently exempt that filename for an
+# unrelated agent days later, in a repo whose normal mode is multi-day
+# unattended runs. Expiring means the worst case is one extra tool call.
 MARKER_DIR="${HF_HOOK_MARKER_DIR:-/tmp/claude-code-markers/$(echo -n "$PROJECT_DIR" | (md5sum 2>/dev/null || md5) | cut -d' ' -f1)}"
 MARKER="$MARKER_DIR/infra-$(echo -n "$REL" | (md5sum 2>/dev/null || md5) | cut -d' ' -f1)"
-[ -f "$MARKER" ] && exit 0
+[ -f "$MARKER" ] && [ -n "$(find "$MARKER" -mmin -240 2>/dev/null)" ] && exit 0
 
 base="${REL##*/}"; base="${base%.py}"; base="${base#test_}"
 TOKENS=$(printf '%s\n' "$base" | tr '_' ' ')
