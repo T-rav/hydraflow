@@ -32,6 +32,13 @@ OUT_OF_SCOPE_PREFIXES: tuple[str, ...] = (
     "docs/standards/",
     "control/",
     ".github/workflows/",
+    # The governing declaration itself (#12116). The act-vs-ask policy used to
+    # live under `docs/standards/`, already covered above; moving it into
+    # `charter.yaml` walked the merge-gate rules out from behind this guard,
+    # because a bare top-level filename matches none of the directory prefixes.
+    # A PR that unwedges itself AND widens an `act` class is exactly what a
+    # standing lane grant cannot honestly speak for.
+    "charter.yaml",
 )
 
 

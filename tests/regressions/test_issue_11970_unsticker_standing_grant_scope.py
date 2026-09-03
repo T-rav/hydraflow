@@ -33,9 +33,30 @@ class TestWhatAStandingGrantCannotSpeakFor:
             pytest.param("docs/standards/testing/README.md", id="standard"),
             pytest.param("control/principles.yaml", id="control-plane"),
             pytest.param(".github/workflows/ci.yml", id="ci-gate"),
+            # #12116 moved the act-vs-ask policy into `charter.yaml`. Before
+            # that it lived under `docs/standards/`, which this list already
+            # covered — so the rules the standing grant must not speak for
+            # walked out from behind the guard when they were relocated, and a
+            # bare top-level filename matches none of the directory prefixes.
+            pytest.param("charter.yaml", id="governing-declaration"),
         ],
     )
     def test_a_change_to_the_rules_is_out_of_scope(self, path: str) -> None:
+        assert out_of_scope([path]) == [path]
+
+    @pytest.mark.parametrize("prefix", OUT_OF_SCOPE_PREFIXES)
+    def test_every_declared_prefix_actually_excludes_something(
+        self, prefix: str
+    ) -> None:
+        """Swept over the live tuple, not over the four cases above.
+
+        The named cases are a hand-kept copy of `OUT_OF_SCOPE_PREFIXES`, and a
+        fifth prefix added without a case beside it would be covered by
+        nothing. Directory prefixes need a file under them; a bare filename is
+        already a path.
+        """
+        path = f"{prefix}x.md" if prefix.endswith("/") else prefix
+
         assert out_of_scope([path]) == [path]
 
     def test_ordinary_source_and_tests_stay_in_scope(self) -> None:
