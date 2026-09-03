@@ -750,7 +750,7 @@ def verify_proposals(
                 # next category could do would succeed, so isolation would
                 # just repeat the failure once per record.
                 raise
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Deliberately NOT `reraise_on_credit_or_bug`: inside this
                 # loop the failure describes ONE record, and the records are
                 # persisted JSON that can bypass Pydantic. A None pre_count
@@ -793,7 +793,7 @@ def _verify_one(
     contained to that category (#6580, #6811). Appends to *stale_categories*
     in place when the proposal needs HITL escalation.
     """
-    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+    from datetime import UTC, datetime, timedelta
 
     try:
         proposed_at = datetime.fromisoformat(proposal.proposed_at)
