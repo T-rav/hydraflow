@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from epic import check_all_checkboxes, parse_epic_sub_issues
+from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from ports import IssueFetcherPort, PRPort
@@ -64,7 +65,13 @@ class EpicSweeperLoop(BaseBackgroundLoop):
                 closed = await self._try_sweep_epic(epic.number, epic.body, sub_issues)
                 if closed:
                     swept += 1
-            except Exception:
+            except Exception as exc:
+                # #6735: per-epic isolation is right, but an exhausted budget
+                # or dead credential is not this epic's problem and the next
+                # one will hit it too — skipping through the whole list logs
+                # the same fatal signal once per epic and reports a clean
+                # sweep.
+                reraise_on_credit_or_bug(exc)
                 logger.exception("Error sweeping epic #%d — skipping", epic.number)
         return {"checked": checked, "swept": swept, "total_open_epics": len(epics)}
 

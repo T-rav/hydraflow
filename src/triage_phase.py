@@ -516,6 +516,12 @@ class TriagePhase:
         try:
             result = await self._triage.evaluate(issue)
         except RuntimeError as exc:
+            # #6728: AuthenticationError and CreditExhaustedError are
+            # RuntimeError subclasses, so this clause parked them for bounded
+            # retry alongside the transient infra errors below. Retry cannot
+            # help a dead credential or an exhausted budget — it just spends
+            # the retry budget re-confirming it, one parked issue at a time.
+            reraise_on_credit_or_bug(exc)
             # Infrastructure errors (empty/unparseable LLM response, subprocess
             # crash/timeout) must NOT hot-retry. Leaving the issue find-labeled
             # means the next triage tick re-picks it immediately, so a

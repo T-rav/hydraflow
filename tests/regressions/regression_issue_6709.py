@@ -30,7 +30,6 @@ class TestIssue6709AuthErrorNotSwallowed:
     fetch_all_hydraflow_issues without attempting the REST fallback."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6709 — fix not yet landed", strict=False)
     async def test_authentication_error_propagates_immediately(
         self, config: HydraFlowConfig
     ) -> None:
@@ -62,7 +61,6 @@ class TestIssue6709AuthErrorNotSwallowed:
             mock_rest.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6709 — fix not yet landed", strict=False)
     async def test_credit_exhausted_error_propagates_immediately(
         self, config: HydraFlowConfig
     ) -> None:
