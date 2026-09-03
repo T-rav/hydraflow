@@ -427,8 +427,17 @@ class TestGatewayProxy:
         assert "transfer-encoding" not in observed_headers
         assert "content-length" not in observed_headers
         assert "accept" not in observed_headers
-        assert "accept-encoding" not in observed_headers
         assert "user-agent" not in observed_headers
+        # `accept-encoding` USED to be absent here too, on the same "invent no
+        # client-negotiation headers" grounds. The gateway now pins it to
+        # `identity` on every request, because the usage observer is fed
+        # `aiter_raw()` and a compressed stream is unparseable — which made the
+        # ledger silently cost-blind (see
+        # tests/regressions/test_gateway_ledger_blind_to_compressed_streams.py).
+        # It is set on every request rather than only on the ones that turn out
+        # to stream, because whether a response is SSE is not knowable when the
+        # request headers are built.
+        assert observed_headers["accept-encoding"] == "identity"
 
     @pytest.mark.parametrize(
         "headers",

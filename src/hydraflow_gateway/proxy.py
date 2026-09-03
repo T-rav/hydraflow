@@ -1003,10 +1003,34 @@ def replace_request_headers(
     same trap :meth:`GatewaySettings.governs` documents — and a credential is
     the last value that should reach a header unvalidated.
     """
-    blocked = _connection_scoped_names(raw_headers) | _CLIENT_AUTH_HEADERS | {b"host"}
+    blocked = (
+        _connection_scoped_names(raw_headers)
+        | _CLIENT_AUTH_HEADERS
+        | {b"host", b"accept-encoding"}
+    )
     forwarded = [
         (name, value) for name, value in raw_headers if name.lower() not in blocked
     ]
+    # The observer is fed `aiter_raw()`, so it sees exactly what the upstream
+    # sent. Let the client negotiate gzip and those bytes are compressed: every
+    # `data:` frame is unparseable, and the row lands with model_served=None,
+    # zero tokens, usage_complete=False and cost_unknown=True. Verified against
+    # api.anthropic.com — identical request, `accept-encoding: gzip` vs
+    # `identity`, is the difference between an empty row and 14/6 tokens priced.
+    #
+    # That makes the ledger — the thing ADR-0147 routed every spawn through the
+    # gateway to populate — silently cost-blind for any client that accepts
+    # compression, which is the default in every common HTTP client. Latent
+    # since the tap shipped (#11477) and invisible until ADR-0147 sent Anthropic
+    # traffic through it; z.ai does not compress, which is why the historical
+    # rows looked fine.
+    #
+    # Pinning identity costs bandwidth on the gateway->upstream hop and buys a
+    # ledger that is correct. Decompressing for the observer while streaming the
+    # compressed body onward would keep both, and is the better fix the day this
+    # bandwidth matters; it needs a streaming decoder per encoding (gzip, br,
+    # zstd), which is a larger change than the one that stops the bleeding.
+    forwarded.append((b"accept-encoding", b"identity"))
     if upstream.auth_style is UpstreamAuthStyle.OAUTH_BEARER:
         if not access_token:
             raise GatewayCredentialError(
