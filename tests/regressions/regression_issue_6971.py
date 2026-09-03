@@ -28,7 +28,6 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-
 from docker_runner import DockerRunner
 
 # ---------------------------------------------------------------------------
@@ -83,7 +82,6 @@ class TestLogsLostOnExceptionBetweenWaitAndLogs:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6971 — fix not yet landed", strict=False)
     async def test_stderr_logs_still_fetched_when_stdout_logs_raise(
         self, tmp_path: Path
     ) -> None:
@@ -150,7 +148,6 @@ class TestLogsCollectedOnTryBlockException:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6971 — fix not yet landed", strict=False)
     async def test_logs_attempted_before_container_removal_on_error(
         self, tmp_path: Path
     ) -> None:
@@ -190,8 +187,16 @@ class TestLogsCollectedOnTryBlockException:
         container.logs.side_effect = tracking_logs
         container.remove.side_effect = tracking_remove
 
-        with pytest.raises(RuntimeError, match="injected error"):
-            await runner.run_simple(["test-cmd"])
+        # This expected the injected error to escape `run_simple`, which is
+        # what the UNGUARDED code did. Guarding each fetch (the issue's own
+        # prescribed fix — "a nested try/except so logs are always attempted
+        # before container removal") means a log-fetch failure no longer
+        # destroys the run: the container ran, it has an exit status, and
+        # losing one stream's text is a degradation rather than a failure.
+        result = await runner.run_simple(["test-cmd"])
+        assert result.returncode == 0, (
+            "a failed log fetch must not cost the caller the exit status"
+        )
 
         # The fix should ensure logs are fetched BEFORE remove.
         # Current code: wait -> logs(stdout) -> EXCEPTION -> remove
@@ -237,12 +242,24 @@ class TestTwoSequentialLogCalls:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6971 — fix not yet landed", strict=False)
-    async def test_logs_fetched_in_single_api_call(self, tmp_path: Path) -> None:
-        """Verify that stdout and stderr are fetched in one API call
-        using ``demux=True``.
+    async def test_each_stream_is_fetched_independently(self, tmp_path: Path) -> None:
+        """Two calls is the only shape ``logs()`` offers — but each is guarded.
 
-        Fails until the two separate logs() calls are combined.
+        This asserted ``container.logs.call_count == 1``, following #6971's
+        Bug 2: collapse the two round-trips into one ``demux=True`` call.
+        That option does not exist. ``Container.logs`` forwards ``**kwargs``
+        straight to ``APIClient.logs``, whose parameters are (container,
+        stdout, stderr, stream, timestamps, tail, since, follow, until) — no
+        ``demux``, so the call raises ``TypeError`` against a real daemon.
+        ``demux`` is an ``exec_run`` parameter. Typeshed agrees: its two
+        ``logs`` overloads have no ``demux`` either, which is what surfaced
+        this — the mocked container accepted the kwarg happily and every test
+        passed.
+
+        So Bug 2 is not actionable as written, and the halved round-trip is
+        not available. What IS actionable is Bug 1, and this now pins it: two
+        calls, each independently guarded, so one failing cannot take the
+        other's output with it.
         """
         container = _make_mock_container(exit_code=0)
         container.logs.side_effect = [b"stdout output", b"stderr output"]
@@ -251,15 +268,16 @@ class TestTwoSequentialLogCalls:
         runner = _make_runner(log_dir=tmp_path / "logs", mock_client=client)
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        await runner.run_simple(["echo", "hello"])
+        result = await runner.run_simple(["echo", "hello"])
 
-        # The current code makes 2 calls:
-        #   container.logs(stdout=True, stderr=False)
-        #   container.logs(stdout=False, stderr=True)
-        # The fix should make 1 call:
-        #   container.logs(stdout=True, stderr=True, demux=True)
-        assert container.logs.call_count == 1, (
-            f"container.logs() was called {container.logs.call_count} times "
-            "but should be called exactly once with demux=True to avoid "
-            "redundant Docker API round-trips (issue #6971)"
+        assert container.logs.call_count == 2, (
+            "each stream needs its own call — `logs()` has no demux; got "
+            f"{container.logs.call_count}"
         )
+        for c in container.logs.call_args_list:
+            assert "demux" not in c.kwargs, (
+                "logs() does not accept demux — this raises TypeError against "
+                f"a real Docker daemon: {c}"
+            )
+        assert result.stdout == "stdout output"
+        assert result.stderr == "stderr output"
