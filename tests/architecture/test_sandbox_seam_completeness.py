@@ -26,6 +26,7 @@ from tests.architecture.sandbox_seam_scan import (
     scan_runner_constructions,
     scan_spawn_signatures,
     signature_module,
+    signature_seam_keys,
     undeclared_signatures,
 )
 
@@ -191,8 +192,10 @@ def test_declared_seams_map_to_scanned_spawn_modules() -> None:
     green-lighting an uncovered path under a near-miss name.
     """
     current = scan_spawn_signatures(REPO_ROOT)
-    scanned_modules = {signature_module(signature) for signature in current}
-    stale = set(SANDBOX_SEAMS) - scanned_modules
+    scanned: set[str] = set()
+    for signature in current:
+        scanned.update(signature_seam_keys(signature))
+    stale = set(SANDBOX_SEAMS) - scanned
     assert not stale, (
         f"SANDBOX_SEAMS declares seams for modules with no scanned spawn "
         f"sites: {sorted(stale)}. Rename or prune the declaration."
@@ -218,15 +221,36 @@ def test_baseline_entries_are_not_seam_declared() -> None:
     """
     conflicted = sorted(
         {
-            signature_module(signature)
+            key
             for signature in GRANDFATHERED_SPAWN_BASELINE
-            if signature_module(signature) in SANDBOX_SEAMS
+            for key in signature_seam_keys(signature)
+            if key in SANDBOX_SEAMS
         }
     )
     assert not conflicted, (
         f"Modules present in both SANDBOX_SEAMS and the grandfathered "
         f"baseline: {conflicted}. Prune their baseline entries."
     )
+
+
+def test_a_phase_seam_covers_only_its_own_phase() -> None:
+    """The phase-scoped key must not blanket the module it names.
+
+    ``workspace_gc_loop`` declares a seam for ONE phase while five of its
+    other spawn sites stay grandfathered; if ``undeclared_signatures`` keyed
+    on the module prefix those five would silently go quiet. This is the
+    known positive for that: a sibling phase in a phase-seamed module is
+    still undeclared.
+    """
+    declared = "workspace_gc_loop::_reap_abandoned_creations"
+    assert declared in SANDBOX_SEAMS, "fixture drifted — repoint this test"
+    covered = "src/workspace_gc_loop.py::_reap_abandoned_creations::run_subprocess"
+    sibling = "src/workspace_gc_loop.py::_reap_worktree::run_subprocess"
+
+    undeclared = undeclared_signatures({covered: 1, sibling: 1}, set(SANDBOX_SEAMS))
+
+    assert covered not in undeclared
+    assert undeclared == {sibling: 1}
 
 
 # ---------------------------------------------------------------------------

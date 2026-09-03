@@ -154,7 +154,13 @@ class TestPhaseOneMissingDirectory:
         with caplog.at_level(logging.DEBUG, logger=_GC_LOGGER):
             result = await loop._do_work()
 
-        assert result == {"collected": 2, "skipped": 0, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 2,
+            "skipped": 0,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert workspaces.destroyed == []
         assert (state.get_active_workspaces(), state.get_branch(_GONE)) == ({}, None)
         assert (
@@ -183,7 +189,13 @@ class TestPhaseOneMissingDirectory:
 
         result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert workspaces.destroyed == []
         assert state.get_active_workspaces() == {_UNAVAILABLE: str(path)}
 
@@ -203,7 +215,13 @@ class TestPhaseOneMissingDirectory:
         with caplog.at_level(logging.DEBUG, logger=_GC_LOGGER):
             result = await loop._do_work()
 
-        assert result == {"collected": 0, "skipped": 1, "errors": 0, "pruned_registrations": 0}
+        assert result == {
+            "collected": 0,
+            "skipped": 1,
+            "errors": 0,
+            "abandoned_creations": 0,
+            "pruned_registrations": 0,
+        }
         assert workspaces.destroyed == []
         assert state.get_active_workspaces() == {_PRESENT_UNLANDED: str(path)}
         assert _git(path, "rev-parse", "HEAD") == sha

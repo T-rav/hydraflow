@@ -287,14 +287,33 @@ def signature_module(signature: str) -> str:
     return seam_key(signature.split("::", 1)[0])
 
 
+def signature_phase(signature: str) -> str:
+    """The PHASE-scoped SANDBOX_SEAMS key for a signature.
+
+    ``"{seam_key}::{enclosing qualname}"``. A loop that cannot take a
+    module-wide seam because its OTHER phases must keep running in the sandbox
+    (``workspace_gc_loop`` under s46/s65) can still declare the one phase a
+    config flag turns off. Line-number-free like the signature itself, so the
+    declaration survives edits above it.
+    """
+    rel, qualname, _primitive = signature.split("::", 2)
+    return f"{seam_key(rel)}::{qualname}"
+
+
+def signature_seam_keys(signature: str) -> tuple[str, str]:
+    """Every SANDBOX_SEAMS key that can legitimately cover *signature*."""
+    return (signature_module(signature), signature_phase(signature))
+
+
 def undeclared_signatures(
     current: Mapping[str, int], declared_modules: Collection[str]
 ) -> dict[str, int]:
-    """Signatures whose module declares no seam in SANDBOX_SEAMS."""
+    """Signatures neither whose module nor whose phase declares a seam."""
+    declared = set(declared_modules)
     return {
         signature: count
         for signature, count in current.items()
-        if signature_module(signature) not in declared_modules
+        if declared.isdisjoint(signature_seam_keys(signature))
     }
 
 

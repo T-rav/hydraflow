@@ -126,6 +126,77 @@ def active_workspace_snapshot(
     return ActiveWorkspaceSnapshot(workspaces, path_owners)
 
 
+#: How long an ``initializing`` lock may stand before it is read as abandoned.
+#: `git worktree add` holds it for the length of one checkout; an hour is far
+#: beyond any legitimate one and far below the weeks a real phantom survives,
+#: so the window costs nothing to be generous with.
+_INITIALIZING_GRACE_S = 3600.0
+
+
+def stale_initializing_worktrees(
+    output: str,
+    *,
+    git_dir: Path,
+    now: float,
+    grace_s: float = _INITIALIZING_GRACE_S,
+) -> list[Path]:
+    """Worktrees whose CREATION died, leaving an abandoned lock behind.
+
+    `git worktree add` writes ``.git/worktrees/<name>/locked`` containing the
+    reason ``initializing`` and clears it on success. Killed partway — the
+    factory stopped, an OOM, a Ctrl-C — the lock stands forever. The directory
+    exists, so :func:`dead_registrations` correctly leaves it alone ("if it is
+    present the lock is not ours to break"), and :func:`parse_git_worktrees`
+    drops every locked row, so the collector never sees it either. Two
+    observed on 2026-09-02, both from the previous day, neither reapable by
+    any phase (#12081).
+
+    The distinction this makes, and the only one that is safe to make, is the
+    lock's REASON. A lock someone took deliberately says why; ``initializing``
+    is git's own, and once it is older than a whole checkout could take it
+    describes an operation that is not coming back. Age is read from the lock
+    FILE, not the worktree directory — a half-created tree can carry a fresh
+    mtime from the checkout that died.
+
+    Returns nothing for any other reason at any age, and nothing for an
+    ``initializing`` lock still inside the grace window: a worktree being
+    created right now looks exactly the same minus the elapsed time.
+    """
+    stale: list[Path] = []
+    for name, path in _registered_worktrees(git_dir):
+        lock = git_dir / "worktrees" / name / "locked"
+        try:
+            reason = lock.read_text(encoding="utf-8").strip()
+            age = now - lock.stat().st_mtime
+        except OSError:
+            continue
+        if reason != "initializing" or age < grace_s:
+            continue
+        if path is not None and path.exists():
+            stale.append(path)
+    return stale
+
+
+def _registered_worktrees(git_dir: Path) -> list[tuple[str, Path | None]]:
+    """``(admin-dir name, checkout path)`` for every registered worktree."""
+    out: list[tuple[str, Path | None]] = []
+    try:
+        entries = sorted((git_dir / "worktrees").iterdir())
+    except OSError:
+        return out
+    for admin in entries:
+        if not admin.is_dir():
+            continue
+        try:
+            raw = (admin / "gitdir").read_text(encoding="utf-8").strip()
+        except OSError:
+            out.append((admin.name, None))
+            continue
+        # ``gitdir`` points at the checkout's ``.git`` file.
+        out.append((admin.name, Path(raw).parent))
+    return out
+
+
 def dead_registrations(output: str) -> list[Path]:
     """Registered worktrees whose directory no longer exists.
 

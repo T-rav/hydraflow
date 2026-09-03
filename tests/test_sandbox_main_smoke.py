@@ -1001,3 +1001,21 @@ def test_auto_agent_scripts_load_identically_through_both_seed_loaders(
             "output_text": None,
         },
     ]
+
+
+def test_sandbox_overrides_disable_abandoned_creation_reap(tmp_path) -> None:
+    """#12081: the reap phase's ``config_disable`` seam is real, not declared.
+
+    ``SANDBOX_SEAMS`` is a registry of claims — the seam-completeness guard
+    checks that a spawn site is *named* there, never that the named mechanism
+    was wired. A ``config_disable`` entry whose override was dropped stays
+    green in every architecture test while the spawn runs for real in the
+    air-gapped sandbox, which is the s51/s56 wedge the registry exists to
+    prevent. This is the entry's own wiring check.
+    """
+    config = _seed_config(tmp_path)
+    assert config.worktree_gc_reap_abandoned_enabled is True  # production default
+
+    sandbox_main._apply_sandbox_config_overrides(config)
+
+    assert config.worktree_gc_reap_abandoned_enabled is False
