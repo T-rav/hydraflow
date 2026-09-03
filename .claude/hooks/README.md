@@ -6,7 +6,7 @@ Project hooks invoked by the Claude Code CLI. Configured in `.claude/settings.js
 
 Shell scripts that gate specific tool calls:
 
-- **PreToolUse** — `block-destructive-git`, `scan-secrets-before-commit`, `validate-tests-before-commit`, `enforce-plan-and-explore`, `check-test-counterpart`, `enforce-migrations`, `check-cross-service-impact`
+- **PreToolUse** — `block-destructive-git`, `scan-secrets-before-commit`, `validate-tests-before-commit`, `validate-functional-areas`, `block-generic-scratchpad-names`, `require-convergence-before-merge`, `enforce-plan-and-explore`, `check-test-counterpart`, `enforce-migrations`, `check-cross-service-impact`, `guard-overwriting-tracked-source`, `check-existing-infra-before-new-file`
 - **PostToolUse** — `track-exploration`, `track-planning`, `track-code-changes`, `auto-lint-after-edit`, `warn-new-file-creation`
 - **Stop** — `cleanup-code-change-marker`
 
