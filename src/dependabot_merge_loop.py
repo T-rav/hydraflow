@@ -539,7 +539,7 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                     skipped += 1
                 else:
                     failed += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # An exhausted budget or dead credential is not this PR's
                 # problem and will not improve on the next one.
                 reraise_on_credit_or_bug(exc)
