@@ -7850,25 +7850,42 @@ def _validate_gateway_capture_policy(config: HydraFlowConfig) -> None:
         raise ValueError(msg)
 
 
+def _dial_reaches_an_http_only_lane(field: str) -> bool:
+    """Whether *field* is a one-shot dial, read off its own Literal.
+
+    `openrouter` is the only lane that is a one-shot HTTP face and nothing
+    else, so a dial that can name it is a dial whose non-claude values are
+    HTTP faces rather than harnesses. Derived from the annotation instead of
+    from which tuple the field was declared in, because the declaration groups
+    do not line up with the shapes:
+    `GATEWAY_INHERITED_PROVIDER_FIELDS` holds one of each.
+    """
+    return "openrouter" in get_args(HydraFlowConfig.model_fields[field].annotation)
+
+
 def _gateway_direct_harness_roles(config: HydraFlowConfig) -> list[str]:
-    """Return gateway-capable roles that still bypass the terminal profile."""
-    # Stated as "not the gateway" rather than as a list of the lanes that are
-    # not it. The list read {"claude", "zai"} and was already one lane short
-    # the moment the kimi harness landed — a role bypassing the gateway would
-    # simply not have been reported, which is the one thing this function
-    # exists to make impossible.
-    direct = [
-        f"{field}={provider!r}"
-        for field in GATEWAY_AGENTIC_PROVIDER_FIELDS
-        if (provider := getattr(config, field)) != "gateway"
-    ]
-    # openrouter/zai/kimi are explicitly excluded one-shot HTTP faces. Only
-    # their direct Claude-CLI option is a gateway bypass.
-    direct.extend(
-        f"{field}='claude'"
-        for field in GATEWAY_ONE_SHOT_PROVIDER_FIELDS
-        if getattr(config, field) == "claude"
-    )
+    """Return gateway-capable roles that still bypass the terminal profile.
+
+    Swept over `GATEWAY_CAPABLE_PROVIDER_FIELDS` — the union of all three dial
+    groups — rather than over the groups one at a time. Two of the three were
+    scanned and `GATEWAY_INHERITED_PROVIDER_FIELDS` was scanned by neither, so
+    a direct `maintenance_provider` went unreported (#12125) while the four
+    caretaker roles that inherit it spawned outside the gateway ledger. The
+    union is the subject because it cannot be added to without being covered.
+
+    On an agentic dial any non-gateway value is a direct harness. On a one-shot
+    dial only `claude` is: `openrouter`/`zai`/`kimi` there are HTTP faces that
+    never spawn a CLI, are already their own billing identity, and are
+    deliberately excluded — reporting them would make this list unactionable.
+    """
+    direct: list[str] = []
+    for field in GATEWAY_CAPABLE_PROVIDER_FIELDS:
+        provider = getattr(config, field)
+        if provider == "gateway":
+            continue
+        if _dial_reaches_an_http_only_lane(field) and provider != "claude":
+            continue
+        direct.append(f"{field}={provider!r}")
     return direct
 
 
