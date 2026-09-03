@@ -125,9 +125,6 @@ class TestCrashVsNoIssueDistinguishable:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6408 — fix not yet landed", strict=False
-    )
     async def test_agent_crash_signals_crash_in_result(self, tmp_path: Path) -> None:
         """When the agent crashes, the result dict must include a crash indicator.
 
@@ -141,7 +138,14 @@ class TestCrashVsNoIssueDistinguishable:
         with patch(
             "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
-            mock_stream.side_effect = ValueError("boom")
+            # RuntimeError, not ValueError. ValueError is in
+            # LIKELY_BUG_EXCEPTIONS, so `reraise_on_credit_or_bug` propagates
+            # it out of the loop by design — a bug in the agent path should
+            # surface, not be recorded as "the agent crashed". This test's
+            # subject is that a crash is distinguishable from a clean
+            # no-issue result, which is what its sibling above already drives
+            # with a transient RuntimeError.
+            mock_stream.side_effect = RuntimeError("unexpected crash in agent")
             result = await loop._do_work()
 
         assert result is not None

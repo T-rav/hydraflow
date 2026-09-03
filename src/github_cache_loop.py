@@ -479,7 +479,15 @@ class GitHubDataCache:
                 data["issue_lists"] = issue_lists
             data["fetched_at"] = datetime.now(UTC).isoformat()
             self._cache_file.write_text(json.dumps(data, indent=2))
+        except OSError:
+            # WARNING for disk trouble (#6784): a full disk or a bad
+            # permission means the cache stops surviving restarts, and at
+            # DEBUG — off in production — that degradation was invisible.
+            logger.warning("Failed to persist github cache", exc_info=True)
         except Exception:
+            # Everything else stays at DEBUG: a serialisation quirk in one
+            # cached model is not an operator's problem the way a failing
+            # disk is.
             logger.debug("Failed to persist github cache", exc_info=True)
 
     def _load_from_disk(self) -> None:

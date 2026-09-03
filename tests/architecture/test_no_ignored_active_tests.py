@@ -300,7 +300,10 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: was fixed: a repo without a slash says so, the REST fallback and the triage
 #: park no longer absorb the fatal signals, and one bad bot PR stops costing
 #: the rest of the queue its tick.
-DEFERRED_XFAILS_MAX = 27
+#: 27 -> 18 when the final sweep (#6408/#6679/#6784/#6801/#6923) was
+#: fixed: a malformed PR URL names itself, disk trouble in the cache surfaces
+#: at WARNING, and the snapshot docstring describes the type it returns.
+DEFERRED_XFAILS_MAX = 18
 #: 92 -> 84 when the review-insights class (#6580/#6627/#6680/#6811) was
 #: fixed: `verify_proposals` isolates each category so one corrupt record no
 #: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
@@ -316,9 +319,7 @@ DEFERRED_XFAILS_MAX = 27
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
-        "tests/regressions/regression_issue_6408.py::TestCrashVsNoIssueDistinguishable.test_agent_crash_signals_crash_in_result",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
-        "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
         "tests/regressions/regression_issue_6681.py::TestRetrospectiveRecordTypeError.test_type_error_in_collect_propagates",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_invalid_json_logs_at_warning",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_pydantic_validation_failure_logs_at_warning",
@@ -333,13 +334,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6742.py::TestPlanPhaseSummarizerTruthy.test_plan_transcript_calls_summarizer_when_falsy",
         "tests/regressions/regression_issue_6742.py::TestReviewPhaseSummarizerTruthy.test_post_review_transcript_calls_summarizer_when_falsy",
         "tests/regressions/regression_issue_6782.py::TestRunRecorderCorruptManifestLogLevel.test_corrupt_manifest_logged_at_warning",
-        "tests/regressions/regression_issue_6784.py::TestSaveToDiskOSErrorLogging.test_oserror_logged_at_warning",
-        "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
-        "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
-        "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_pipeline_snapshot_entry",
-        "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_exception_is_runtime_error",
-        "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_non_numeric_segment_logs_runtime_error",
-        "tests/regressions/regression_issue_6923.py::TestCreatePrMalformedUrlRaisesRuntimeError.test_trailing_slash_only_logs_runtime_error",
         "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_branch_gc_uses_safe_delete_not_force",
         "tests/regressions/regression_issue_6961.py::TestOrphanedBranchOpenPRGuard.test_skips_branch_when_open_pr_exists",
         "tests/regressions/regression_issue_6975.py::TestDefaultsTestCompleteness.test_route_back_counts_asserted_in_canonical_defaults_test",

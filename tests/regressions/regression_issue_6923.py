@@ -64,7 +64,6 @@ class TestCreatePrMalformedUrlRaisesRuntimeError:
     """Issue #6923 — non-numeric PR URL segment should raise RuntimeError with URL context."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6923 — fix not yet landed", strict=False)
     async def test_trailing_slash_only_logs_runtime_error(
         self, config, event_bus, issue, caplog
     ) -> None:
@@ -76,7 +75,7 @@ class TestCreatePrMalformedUrlRaisesRuntimeError:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            caplog.at_level(logging.ERROR, logger="hydraflow.pr_manager"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
         ):
             result = await manager.create_pr(issue, "agent/issue-42")
 
@@ -84,8 +83,13 @@ class TestCreatePrMalformedUrlRaisesRuntimeError:
         # exception type, so we must inspect the logged error to distinguish.
         assert result.number == 0, "Expected fallback PRInfo with number=0"
 
-        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
-        assert error_records, "Expected an error log from create_pr"
+        # WARNING, not ERROR: `create_pr`'s handler logs the failure at
+        # WARNING and falls back to PRInfo(number=0). This test's subject is
+        # that the exception carries the URL (#6923), not which level reports
+        # it — filtering on ERROR found nothing and said "no log" about a
+        # message that was there all along.
+        error_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert error_records, "Expected a warning log from create_pr"
 
         logged_exc = error_records[0].args[-1] if error_records[0].args else None
         # The logged message format is: "PR creation failed for issue #%d: %s"
@@ -101,7 +105,6 @@ class TestCreatePrMalformedUrlRaisesRuntimeError:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6923 — fix not yet landed", strict=False)
     async def test_non_numeric_segment_logs_runtime_error(
         self, config, event_bus, issue, caplog
     ) -> None:
@@ -113,14 +116,19 @@ class TestCreatePrMalformedUrlRaisesRuntimeError:
 
         with (
             patch("asyncio.create_subprocess_exec", mock_create),
-            caplog.at_level(logging.ERROR, logger="hydraflow.pr_manager"),
+            caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
         ):
             result = await manager.create_pr(issue, "agent/issue-42")
 
         assert result.number == 0, "Expected fallback PRInfo with number=0"
 
-        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
-        assert error_records, "Expected an error log from create_pr"
+        # WARNING, not ERROR: `create_pr`'s handler logs the failure at
+        # WARNING and falls back to PRInfo(number=0). This test's subject is
+        # that the exception carries the URL (#6923), not which level reports
+        # it — filtering on ERROR found nothing and said "no log" about a
+        # message that was there all along.
+        error_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert error_records, "Expected a warning log from create_pr"
 
         logged_message = error_records[0].getMessage()
 
@@ -132,7 +140,6 @@ class TestCreatePrMalformedUrlRaisesRuntimeError:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6923 — fix not yet landed", strict=False)
     async def test_non_numeric_segment_exception_is_runtime_error(
         self, config, event_bus, issue
     ) -> None:

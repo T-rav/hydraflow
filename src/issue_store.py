@@ -978,8 +978,15 @@ class IssueStore:
     def get_pipeline_snapshot(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return a snapshot of all pipeline stages with their issues.
 
-        Each stage maps to a list of dicts with keys:
-        ``issue_number``, ``title``, ``url``, ``status``.
+        Each stage maps to a list of :class:`PipelineSnapshotEntry` — a
+        TypedDict, not a plain dict, and it carries more than the four keys
+        this docstring used to name (#6801). Beyond ``issue_number``,
+        ``title``, ``url`` and ``status`` an entry may also carry
+        ``epic_number`` and ``is_epic_child`` for epic lineage, and
+        ``priority`` / ``dispatch_rank`` for work-queue ordering (#10067) —
+        the last two only on *queued* entries. A caller reading the old
+        four-key description would drop the epic and queue fields on the
+        floor without ever seeing an error; see the type for the authority.
         """
         snapshot = self._snapshot_queued()
         for stage, entries in self._snapshot_in_flight().items():
