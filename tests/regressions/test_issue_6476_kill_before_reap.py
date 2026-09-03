@@ -14,6 +14,14 @@ of them green. This pins the ordering.
 `kill_process_group` is patched rather than exercised: the fake process
 carries a MagicMock pid, and letting that reach `os.killpg` is the mock-pid
 hazard `process_group` documents.
+
+Why this is the deepest layer that can see it: the harm is an unreaped OS
+child, and MockWorld has no OS child to leak. Its `FakeSubprocessRunner`
+"never spawns" (its own words) and hands back a `_FakeProcess` with
+`pid = None` and an in-memory `wait()`, so a scenario would exercise the same
+call ordering this test already asserts while observing nothing about
+reaping. The sandbox e2e layer runs real processes and is where a leak would
+eventually show as drift, not as a signal attributable to this code path.
 """
 
 from __future__ import annotations
