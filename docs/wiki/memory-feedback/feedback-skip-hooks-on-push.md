@@ -3,10 +3,11 @@ source: feedback_skip_hooks_on_push.md
 name: Skip lint on push when told PR is good
 description: When user says the PR is good / code quality is fine, don't re-run lint/typecheck
   on push — just push with --no-verify
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface reachable from this repo. --no-verify is a client-side
+  flag the server cannot see, and a hook cannot police the flag that disables hooks.
 created: '2026-04-07'
 ---
 

@@ -3,10 +3,14 @@ source: feedback_make_quality_pipe_exit_code.md
 name: Piping make to tail masks the make exit code
 description: '`make quality | tail -200` returns 0 even when make fails — the run-in-background
   notification was misleading; check tail content for actual failures'
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: Measured rather than assumed. Across every tracked .sh, .yml, Makefile,
+  scripts/ and .github/ file the make-piped-to-tail pattern occurs ONCE, and that
+  one is correct (make --version piped to head, with an echo fallback). The repo does
+  not commit this mistake; agents make it in the terminal, where no lint can see it.
+  A guard would fire on nothing.
 created: 2026-05-08
 ---
 

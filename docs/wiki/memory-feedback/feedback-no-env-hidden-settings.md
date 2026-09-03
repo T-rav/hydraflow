@@ -3,10 +3,13 @@ source: feedback_no_env_hidden_settings.md
 name: User-facing config belongs in the System tab, not .env
 description: Runtime-tunable config must be exposed as a settings card in the System
   tab; .env is for secrets and boot-time wiring only
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface for the rule as written. config.declared_env_keys()
+  is the nearest artifact, but it enumerates DECLARED keys and so cannot see a setting
+  a human chose to hide in .env instead of declaring, which is the behaviour the rule
+  forbids.
 created: '2026-04-18'
 ---
 

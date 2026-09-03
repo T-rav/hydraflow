@@ -3,10 +3,12 @@ source: feedback_never_skip_deps.md
 name: Never silently skip dependencies
 description: Required dependencies must fail hard, never degrade gracefully or skip
   with a warning
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface. The rule is about not deferring a dependency while
+  planning; by the time any artifact could observe it, the dependency has already
+  been skipped.
 created: '2026-03-27'
 ---
 

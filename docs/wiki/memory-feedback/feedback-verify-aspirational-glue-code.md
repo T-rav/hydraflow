@@ -4,10 +4,12 @@ name: Verify aspirational glue code at spec-write time, not plan-execute time
 description: Code in specs/plans that calls external constructors (e.g. TriageRunner,
   StateTracker) with invented kwargs survives into committed code if not cross-checked
   — gets caught by pre-push type checks
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface. Checking that glue code a subagent claims to have
+  written actually exists is the general verification duty; mechanising it IS the
+  test suite, which already exists for every specific case.
 created: '2026-04-21'
 ---
 

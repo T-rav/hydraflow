@@ -2,10 +2,13 @@
 source: feedback_backlog_to_loop_reflection.md
 name: feedback_backlog_to_loop_reflection
 description: When manually clearing a recurring backlog a bg worker should own, run the backlog-to-loop reflection and spec a resolver
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: 'No code surface. A lint cannot see that a session is grooming rather
+  than building, and a loop that files ''you should have reflected'' is the detector-without-resolver
+  shape the rule itself warns about. Resolved as CAPTURED on #12054 per the convention
+  guarded by tests/regressions/regression_issue_10292.py. The rule stays live in docs/methodology/backlog-to-loop-reflection.md.'
 created: '2026-07-18'
 ---
 

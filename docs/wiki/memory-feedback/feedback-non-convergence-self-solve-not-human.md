@@ -2,10 +2,12 @@
 source: feedback_non_convergence_self_solve_not_human.md
 name: feedback_non_convergence_self_solve_not_human
 description: Non-convergence / thrash / give-up routes to MACHINE self-solve (ADR-0105 decompose-to-converge, or auto-agent diagnose), NEVER reflexively to human-required. Human is the last resort, only for genuine mission/'should-this-exist' calls. Routing convergence-solvable work to a human is HITL scatter.
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface. Solving a non-converging review rather than escalating
+  is a choice made at the moment of escalation, and a guard that blocked escalation
+  would remove the valid case.
 created: '2026-07-27'
 ---
 

@@ -4,10 +4,12 @@ name: Make dark-factory decisions without asking
 description: User has explicitly delegated decision authority for tractable, reversible
   fixes that align with the dark-factory pattern; act first and report results instead
   of asking permission
-status: pending
+status: wontfix
 issue: null
 promoted_in: null
-wontfix_reason: null
+wontfix_reason: No code surface. Act-and-report rather than ask is a judgment about
+  which action to take; the classification table in docs/standards/factory_autonomy/README.md
+  is the artifact, and it is prose because the decision is contextual.
 created: '2026-05-06'
 ---
 
