@@ -386,16 +386,13 @@ class ReviewInsightStore:
 
     def append_review(self, record: ReviewRecord) -> None:
         """Append *record* as a JSON line to ``reviews.jsonl``."""
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
+        from file_util import append_jsonl  # noqa: PLC0415
 
-            append_jsonl(self._reviews_path, record.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append review to %s",
-                self._reviews_path,
-                exc_info=True,
-            )
+        # No local OSError guard — see the note in
+        # `RetrospectiveCollector.record`: `append_jsonl` handles and logs its
+        # own I/O failures now (#6623), and this block contains nothing else
+        # that raises OSError.
+        append_jsonl(self._reviews_path, record.model_dump_json())
 
         if self._obs is not None:
             self._obs.breadcrumb(
