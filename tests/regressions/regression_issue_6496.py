@@ -74,7 +74,6 @@ class TestRecordDoesNotMaskProgrammingErrors:
     incoming JSON are handled gracefully while true bugs surface.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6496 — fix not yet landed", strict=False)
     def test_record_propagates_attribute_error(self, tmp_path: Path) -> None:
         """AttributeError inside _record_inner must not be silently caught."""
         c = _make_collector(tmp_path)
@@ -88,7 +87,6 @@ class TestRecordDoesNotMaskProgrammingErrors:
         with pytest.raises(AttributeError, match="nonexistent_field"):
             c.record('{"type": "assistant"}')
 
-    @pytest.mark.xfail(reason="Regression for issue #6496 — fix not yet landed", strict=False)
     def test_record_propagates_assertion_error(self, tmp_path: Path) -> None:
         """AssertionError inside _record_inner must not be silently caught."""
         c = _make_collector(tmp_path)
@@ -127,7 +125,6 @@ class TestFinalizeDoesNotMaskProgrammingErrors:
     fails silently, factory_metrics sees a missing data point.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6496 — fix not yet landed", strict=False)
     def test_finalize_propagates_attribute_error(self, tmp_path: Path) -> None:
         """AttributeError in _finalize_inner must propagate, not return None."""
         c = _make_collector(tmp_path)
