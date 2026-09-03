@@ -56,16 +56,33 @@ def _make_repo_with_mirror(tmp_path: Path) -> Path:
 
 
 def _write_entry(
-    mirror_dir: Path, slug: str, *, status: str = "pending", body: str = "rule body"
+    mirror_dir: Path,
+    slug: str,
+    *,
+    status: str = "pending",
+    body: str = "rule body",
+    promoted_in: str | None = None,
+    wontfix_reason: str | None = None,
 ) -> Path:
-    """Write a well-formed mirror entry."""
+    """Write a well-formed mirror entry.
+
+    A terminal row must carry its evidence (#12058), so `promoted_in` /
+    `wontfix_reason` default to a placeholder for those statuses — writing one
+    without would be rejected by the loader, which is the point of the guard.
+    """
     path = mirror_dir / f"{slug}.md"
+    extra = ""
+    if status == "promoted":
+        extra = f"promoted_in: {promoted_in or 'docs/adr/0001-x.md'}\n"
+    elif status == "wontfix":
+        extra = f"wontfix_reason: {wontfix_reason or 'no code surface'}\n"
     path.write_text(
         "---\n"
         f"source: {slug}.md\n"
         f"name: {slug}\n"
         f"description: plain description for {slug}\n"
         f"status: {status}\n"
+        f"{extra}"
         "---\n\n"
         f"{body}\n"
     )
@@ -308,3 +325,56 @@ class TestASimulatedBoardNeverCommits:
         ).stdout
         assert dirty.strip()
         assert "docs" in dirty
+
+
+class TestSettledRowsAreNotRefiled:
+    """#12058: a settled row must stop consuming the per-tick filing budget.
+
+    The unit pins assert that the LOADER refuses a terminal row with no
+    evidence. This asserts the consequence that made #12058 an issue: the loop
+    files for the rows that still need work and leaves the settled ones alone.
+
+    Sixteen rows were `pending` while fourteen were already settled — two
+    enforced elsewhere, twelve with no code surface — so every tick re-filed
+    all fourteen and the backlog blew its cap. That is loop behaviour, and a
+    unit test on the loader cannot see it.
+    """
+
+    async def test_only_the_unsettled_row_is_filed(self, tmp_path: Path) -> None:
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        _write_entry(mirror, "feedback-still-open")
+        _write_entry(mirror, "feedback-already-enforced", status="promoted")
+        _write_entry(mirror, "feedback-no-surface", status="wontfix")
+        loop, github = _make_loop(repo)
+
+        result = await loop._do_work()
+
+        assert result["filed"] == 1
+        titles = [i.title for i in github._issues.values()]
+        assert len(titles) == 1
+        assert "feedback-still-open" in titles[0]
+
+    async def test_the_same_three_rows_all_file_when_none_is_settled(
+        self, tmp_path: Path
+    ) -> None:
+        """The decoy: the verdict is what suppresses the filing, not the count.
+
+        Without this, the assertion above passes against a loop that files at
+        most one row per tick, or one that has stopped filing the second and
+        third entry for any unrelated reason.
+        """
+        repo = _make_repo_with_mirror(tmp_path)
+        mirror = repo / "docs" / "wiki" / "memory-feedback"
+        for slug in (
+            "feedback-still-open",
+            "feedback-already-enforced",
+            "feedback-no-surface",
+        ):
+            _write_entry(mirror, slug)
+        loop, github = _make_loop(repo)
+
+        result = await loop._do_work()
+
+        assert result["filed"] == 3
+        assert len(github._issues) == 3

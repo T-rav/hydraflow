@@ -3,9 +3,11 @@ source: feedback_dont_close_unfixed_issues.md
 name: Never close issues that aren't actually fixed
 description: Only close issues with a merged PR that fixes them — never close as "deferred"
   or "tracked debt"
-status: pending
+status: promoted
 issue: null
-promoted_in: null
+promoted_in: src/close_verification.py::reconcile_false_close (live — close_verification_enabled
+  defaults True; reopens and re-triages an issue closed by a PR carrying no fix delta),
+  plus audit criterion P10.7
 wontfix_reason: null
 created: '2026-04-18'
 ---

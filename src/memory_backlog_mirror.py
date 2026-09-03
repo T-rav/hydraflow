@@ -119,6 +119,26 @@ def load_mirror_entry(path: Path) -> MirrorEntry:
             f"(docs/wiki/memory-feedback/README.md)"
         )
         raise ValueError(msg)
+    # ...and the converse, which was documented but never enforced (#12058).
+    # The verdict rules require the evidence, not just the label: "Promoted
+    # entries must cite a real artifact in `promoted_in`. Wontfix entries must
+    # carry `wontfix_reason`." Only the implication above was in code, so a row
+    # could be stamped terminal with no evidence at all — the same false-green
+    # as a passing test that asserts nothing, and the shape that let three
+    # already-enforced rows sit at `pending` while the loop re-filed them.
+    if status == "promoted" and front.get("promoted_in") is None:
+        msg = (
+            f"{path} is `promoted` with no promoted_in; a promotion must cite "
+            f"the artifact that enforces it (ADR, hook, ratchet, rule)"
+        )
+        raise ValueError(msg)
+    if status == "wontfix" and front.get("wontfix_reason") is None:
+        msg = (
+            f"{path} is `wontfix` with no wontfix_reason; declining to build "
+            f"enforcement has to say why, or the next reader cannot tell a "
+            f"considered verdict from an abandoned row"
+        )
+        raise ValueError(msg)
     return MirrorEntry(
         slug=path.stem,
         path=path,
