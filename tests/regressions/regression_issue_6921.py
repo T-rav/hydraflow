@@ -48,7 +48,6 @@ def _sample_record() -> RepoRecord:
 class TestLoadOSError:
     """Issue #6921 — load() should handle OSError gracefully."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6921 — fix not yet landed", strict=False)
     def test_permission_error_returns_empty_list(
         self, store: RepoRegistryStore
     ) -> None:
@@ -68,7 +67,6 @@ class TestLoadOSError:
             "this is the OSError bug from issue #6921"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6921 — fix not yet landed", strict=False)
     def test_io_error_returns_empty_list(self, store: RepoRegistryStore) -> None:
         """Generic OSError (I/O failure) on repos.json must return []."""
         store.save([_sample_record()])
@@ -89,7 +87,6 @@ class TestLoadOSError:
 class TestSaveOSError:
     """Issue #6921 — save() should handle OSError gracefully."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6921 — fix not yet landed", strict=False)
     def test_permission_error_on_save_does_not_propagate(
         self,
         store: RepoRegistryStore,
@@ -109,7 +106,6 @@ class TestSaveOSError:
                     "this is the OSError bug from issue #6921"
                 )
 
-    @pytest.mark.xfail(reason="Regression for issue #6921 — fix not yet landed", strict=False)
     def test_disk_full_on_save_does_not_propagate(
         self,
         store: RepoRegistryStore,
