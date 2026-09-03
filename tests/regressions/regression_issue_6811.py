@@ -18,8 +18,6 @@ inside the ``for category, proposal in meta.items()`` loop.
 
 from __future__ import annotations
 
-import pytest
-
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -80,7 +78,6 @@ class TestCorruptProposalDataAbortsEntireSweep:
     in the comparison logic (lines 608-634), outside the inner try/except.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6811 — fix not yet landed", strict=False)
     def test_none_pre_count_does_not_abort_remaining_proposals(
         self, tmp_path: Path
     ) -> None:
@@ -147,7 +144,6 @@ class TestCorruptProposalDataAbortsEntireSweep:
             "(pre_count=None) should not abort processing of subsequent proposals"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6811 — fix not yet landed", strict=False)
     def test_non_string_proposed_at_type_error_does_not_abort(
         self, tmp_path: Path
     ) -> None:
@@ -187,7 +183,6 @@ class TestCorruptProposalDataAbortsEntireSweep:
             "'bad_timestamp' (proposed_at=int) should not abort subsequent proposals"
         )
 
-    @pytest.mark.xfail(reason="Regression for issue #6811 — fix not yet landed", strict=False)
     def test_attribute_error_on_proposal_does_not_abort(self, tmp_path: Path) -> None:
         """A proposal object missing expected attributes (e.g. a plain dict
         sneaked through somehow) causes an ``AttributeError``.  The outer

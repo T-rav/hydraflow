@@ -11,11 +11,12 @@ from pydantic import BaseModel, ValidationError
 
 from dedup_store import DedupStore
 from escalation_reconcile import is_bot_close
-from exception_classify import reraise_on_credit_or_bug
+from exception_classify import INFRA_FATAL_EXCEPTIONS, reraise_on_credit_or_bug
 from models import IsoTimestamp, ReviewVerdict
 from text_match import keyword_matches
 
 if TYPE_CHECKING:
+    from collections import Counter
     from datetime import datetime
 
     from ports import ObservabilityPort, PRPort, ReviewInsightStorePort  # noqa: TCH004
@@ -416,7 +417,12 @@ class ReviewInsightStore:
             try:
                 records.append(ReviewRecord.model_validate_json(line))
             except ValidationError:
-                logger.warning("Skipping malformed review record: %s", line[:80])
+                # exc_info carries WHICH field failed and what value it saw
+                # (#6627). Without it the log names the record but not the
+                # defect, so a systematic schema drift reads as one-off noise.
+                logger.warning(
+                    "Skipping malformed review record: %s", line[:80], exc_info=True
+                )
         return records
 
     def get_proposed_categories(self) -> set[str]:
@@ -447,7 +453,11 @@ class ReviewInsightStore:
                 try:
                     result[cat] = ProposalMetadata.model_validate(entry)
                 except ValidationError:
-                    logger.warning("Skipping malformed proposal metadata for %s", cat)
+                    logger.warning(
+                        "Skipping malformed proposal metadata for %s",
+                        cat,
+                        exc_info=True,
+                    )
             return result
         except (json.JSONDecodeError, OSError):
             logger.warning(
@@ -701,7 +711,7 @@ def verify_proposals(
     Returns a list of category names that are stale and need HITL escalation.
     Never raises — all errors are logged and swallowed.
     """
-    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+    from datetime import UTC, datetime  # noqa: PLC0415
 
     stale_categories: list[str] = []
     try:
@@ -724,54 +734,110 @@ def verify_proposals(
             if proposal.verified:
                 continue  # Already resolved
 
+            # Per-category isolation (#6580, #6811). Every statement below
+            # used to sit under the function-wide `except` at the bottom, so
+            # the FIRST category that raised ended the sweep: a single record
+            # with a None pre_count (TypeError on the `> 0` compare) or one
+            # OSError from update_proposal_verified silently stopped every
+            # later category from being verified or escalated, and the caller
+            # got a partial stale list indistinguishable from a complete one.
             try:
-                proposed_at = datetime.fromisoformat(proposal.proposed_at)
-                # Ensure timezone-aware comparison
-                if proposed_at.tzinfo is None:
-                    proposed_at = proposed_at.replace(tzinfo=UTC)
-            except ValueError:
+                _verify_one(
+                    store, category, proposal, cat_counts, now, stale_categories
+                )
+            except INFRA_FATAL_EXCEPTIONS:
+                # No credential, no billing budget, no memory: nothing the
+                # next category could do would succeed, so isolation would
+                # just repeat the failure once per record.
+                raise
+            except Exception:  # noqa: BLE001
+                # Deliberately NOT `reraise_on_credit_or_bug`: inside this
+                # loop the failure describes ONE record, and the records are
+                # persisted JSON that can bypass Pydantic. A None pre_count
+                # (TypeError on `> 0`), a non-string proposed_at (TypeError in
+                # fromisoformat), a missing field (AttributeError), a disk
+                # error or any other failure from update_proposal_verified —
+                # each is a fact about that record, not about the code, and
+                # none may end the sweep for every later category (#6580,
+                # #6811). #6680 is unaffected: its cases all raise during
+                # SETUP, before this loop, where the outer handler still
+                # classifies and re-raises them.
                 logger.warning(
-                    "Could not parse proposed_at for category %s: %s",
+                    "Proposal verification failed for category %s — continuing "
+                    "with the remaining categories",
                     category,
-                    proposal.proposed_at,
-                )
-                continue
-
-            current_count = cat_counts.get(category, 0)
-
-            # Check improvement: >50% reduction in frequency
-            if (
-                proposal.pre_count > 0
-                and current_count < proposal.pre_count * _PROPOSAL_IMPROVEMENT_THRESHOLD
-            ):
-                store.update_proposal_verified(category, verified=True)
-                logger.info(
-                    "Proposal for category '%s' verified: count dropped from %d to %d",
-                    category,
-                    proposal.pre_count,
-                    current_count,
-                )
-                continue
-
-            # Check staleness: unchanged after 30 days
-            age = now - proposed_at
-            if (
-                age >= timedelta(days=_PROPOSAL_STALE_DAYS)
-                and current_count >= proposal.pre_count
-            ):
-                stale_categories.append(category)
-                logger.warning(
-                    "Proposal for category '%s' is stale after %d days (count: %d -> %d)",
-                    category,
-                    age.days,
-                    proposal.pre_count,
-                    current_count,
+                    exc_info=True,
                 )
 
-    except Exception:
+    except Exception as exc:
+        # #6680: a bare `except Exception` here swallowed programming bugs and
+        # credit exhaustion alike, so the loop reported "no stale proposals"
+        # when it had in fact never run.
+        reraise_on_credit_or_bug(exc)
         logger.warning("Error during proposal verification", exc_info=True)
 
     return stale_categories
+
+
+def _verify_one(
+    store: ReviewInsightStorePort,
+    category: str,
+    proposal: ProposalMetadata,
+    cat_counts: Counter[str],
+    now: datetime,
+    stale_categories: list[str],
+) -> None:
+    """Classify ONE proposal: verified, stale, or neither.
+
+    Extracted from :func:`verify_proposals` so a failure on one category is
+    contained to that category (#6580, #6811). Appends to *stale_categories*
+    in place when the proposal needs HITL escalation.
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    try:
+        proposed_at = datetime.fromisoformat(proposal.proposed_at)
+        # Ensure timezone-aware comparison
+        if proposed_at.tzinfo is None:
+            proposed_at = proposed_at.replace(tzinfo=UTC)
+    except ValueError:
+        logger.warning(
+            "Could not parse proposed_at for category %s: %s",
+            category,
+            proposal.proposed_at,
+        )
+        return
+
+    current_count = cat_counts.get(category, 0)
+
+    # Check improvement: >50% reduction in frequency
+    if (
+        proposal.pre_count > 0
+        and current_count < proposal.pre_count * _PROPOSAL_IMPROVEMENT_THRESHOLD
+    ):
+        store.update_proposal_verified(category, verified=True)
+        logger.info(
+            "Proposal for category '%s' verified: count dropped from %d to %d",
+            category,
+            proposal.pre_count,
+            current_count,
+        )
+        return
+
+    # Check staleness: unchanged after 30 days
+    age = now - proposed_at
+    if (
+        age >= timedelta(days=_PROPOSAL_STALE_DAYS)
+        and current_count >= proposal.pre_count
+    ):
+        stale_categories.append(category)
+        logger.warning(
+            "Proposal for category '%s' is stale after %d days (count: %d -> %d)",
+            category,
+            age.days,
+            proposal.pre_count,
+            current_count,
+        )
 
 
 # ---------------------------------------------------------------------------

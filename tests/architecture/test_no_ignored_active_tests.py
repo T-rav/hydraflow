@@ -280,7 +280,11 @@ def _offenders_in(path: Path, optional: frozenset[str]) -> list[tuple[str, str, 
 #: `.finalize` stopped swallowing AttributeError/AssertionError, so all three
 #: of that file's pins pass unmarked. Unlike the 109 -> 107 drop, nothing was
 #: deleted here — the pins are live tests now.
-DEFERRED_XFAILS_MAX = 104
+#: 104 -> 96 when the review-insights class (#6580/#6627/#6680/#6811) was
+#: fixed: `verify_proposals` isolates each category so one corrupt record no
+#: longer ends the sweep, the infra-fatal signals are re-raised ahead of that
+#: isolation, and both loader warnings carry exc_info. All 8 pins are live.
+DEFERRED_XFAILS_MAX = 96
 
 DEFERRED_XFAILS: frozenset[str] = frozenset(
     {
@@ -291,8 +295,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6536.py::TestPhantomDiagnoseTransition.test_no_enqueue_when_both_escalation_paths_fail",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientExhaustsThreadPool.test_thread_pool_starved_by_concurrent_retries",
         "tests/regressions/regression_issue_6578.py::TestEnsureClientUsesBlockingSleep.test_retry_loop_calls_blocking_time_sleep",
-        "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_in_update_proposal_verified_does_not_skip_remaining",
-        "tests/regressions/regression_issue_6580.py::TestOneBadProposalAbortsEntireSweep.test_exception_midway_still_processes_earlier_and_later_proposals",
         "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_last_lint_index_write_failure_does_not_crash",
         "tests/regressions/regression_issue_6599.py::TestActiveLintWriteFailure.test_topic_write_failure_during_stale_marking_does_not_crash",
         "tests/regressions/regression_issue_6599.py::TestEnsureRepoDirWriteFailure.test_index_seeding_failure_does_not_crash",
@@ -308,15 +310,12 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_fsync_oserror_is_logged",
         "tests/regressions/regression_issue_6623.py::TestAppendJsonlOSErrorHandling.test_write_oserror_is_caught_not_propagated",
         "tests/regressions/regression_issue_6626.py::TestIssue6626SilentPassOnErrors.test_outcomes_oserror_logs_warning",
-        "tests/regressions/regression_issue_6627.py::TestIssue6627ExcInfoOnMalformedRecords.test_load_proposal_metadata_includes_exc_info_on_malformed_entry",
-        "tests/regressions/regression_issue_6627.py::TestIssue6627ExcInfoOnMalformedRecords.test_load_recent_includes_exc_info_on_malformed_line",
         "tests/regressions/regression_issue_6630.py::TestIssue6630AuthenticationErrorNotSuppressed.test_authentication_error_not_logged_as_transient",
         "tests/regressions/regression_issue_6630.py::TestIssue6630DecisionFileCleanup.test_cleanup_suppresses_all_exceptions_on_unlink",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_empty_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6653.py::TestIssue6653FetchAllGraphqlNoSlashGuard.test_fetch_all_graphql_no_slash_repo_raises_descriptive_error",
         "tests/regressions/regression_issue_6668.py::test_no_top_level_httpx_import",
         "tests/regressions/regression_issue_6679.py::TestTransientErrorIsCaught.test_runtime_error_returns_true",
-        "tests/regressions/regression_issue_6680.py::TestVerifyProposalsAttributeError.test_attribute_error_propagates",
         "tests/regressions/regression_issue_6681.py::TestRetrospectiveRecordTypeError.test_type_error_in_collect_propagates",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_invalid_json_logs_at_warning",
         "tests/regressions/regression_issue_6690.py::TestIssue6690CorruptLineLogLevel.test_pydantic_validation_failure_logs_at_warning",
@@ -361,9 +360,6 @@ DEFERRED_XFAILS: frozenset[str] = frozenset(
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_does_not_say_plain_dicts",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_epic_metadata",
         "tests/regressions/regression_issue_6801.py::TestGetPipelineSnapshotDocstring.test_docstring_mentions_pipeline_snapshot_entry",
-        "tests/regressions/regression_issue_6811.py::TestCorruptProposalDataAbortsEntireSweep.test_attribute_error_on_proposal_does_not_abort",
-        "tests/regressions/regression_issue_6811.py::TestCorruptProposalDataAbortsEntireSweep.test_non_string_proposed_at_type_error_does_not_abort",
-        "tests/regressions/regression_issue_6811.py::TestCorruptProposalDataAbortsEntireSweep.test_none_pre_count_does_not_abort_remaining_proposals",
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_first_pr_still_processes_remaining",
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_hitl_escalation_still_processes_remaining",
         "tests/regressions/regression_issue_6862.py::TestIssue6862TransientErrorDoesNotAbortBatch.test_runtime_error_on_merge_still_processes_remaining",
