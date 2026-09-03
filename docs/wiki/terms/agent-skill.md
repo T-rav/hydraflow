@@ -4,7 +4,7 @@ name: "AgentSkill"
 kind: "policy"
 bounded_context: "builder"
 code_anchor: "src/skill_registry.py:AgentSkill"
-aliases: ["skill", "post-implementation check", "quality gate skill"]
+aliases: ["post-implementation check", "quality gate skill"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6KA"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B4"}]
 evidence: []
 superseded_by: null

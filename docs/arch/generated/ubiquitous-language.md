@@ -99,7 +99,7 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 ## AgentSkill
 
 **Kind:** `policy` · **Context:** `builder` · **Anchor:** `src/skill_registry.py:AgentSkill` · **Confidence:** `accepted`
-**Aliases:** `skill`, `post-implementation check`, `quality gate skill`
+**Aliases:** `post-implementation check`, `quality gate skill`
 
 A declarative post-implementation check that runs against the branch diff after the implementation agent finishes (e.g. diff-sanity, scope-check, plan-compliance, test-adequacy). Each AgentSkill names a workflow checkpoint with a purpose string surfaced to the agent's prompt, a config_key controlling max retry attempts, a blocking flag that determines whether a failed check stops the pipeline or only warns, prompt/result-parser callables, and optional VerifierSpec (independent second-opinion pass) and repair (in-run fix-forward) hooks. BUILTIN_SKILLS is the registry of these checks, orchestrated by AgentRunner._run_skill() in execution order.
 
