@@ -18,11 +18,12 @@ preference — the inverse of `role dial > repo_provider`, which `config.py`
 documents. Naming the repo alongside the role earns `REPO_ROLE` (3) and
 restores the order. See `TestThePolicyLadderInvertsTheLegacyOrder` (#12028).
 
-**A dial still on its default emits nothing.** The legacy route for a
-`"claude"` dial is the Anthropic lane reached with no managed policy at all, and
-`explain` reports exactly that as `legacy-compatibility`. Emitting a policy that
-re-states the default would change the decision's *source* without changing its
-route, which is a behaviour change dressed as a no-op.
+**A dial still on its default emits nothing.** A dial nobody moved is reached
+with no managed policy at all, and `explain` reports exactly that as
+`legacy-compatibility`. Emitting a policy that re-states the default would
+change the decision's *source* without changing its route, which is a behaviour
+change dressed as a no-op. The default is read from the dial itself, so this
+holds across ADR-0147's move from `claude` to `gateway` and any move after it.
 
 **The dials this cannot express are a list, not a silence.** Six of the fourteen
 have no expressible join today, for three different reasons, and each is
@@ -45,8 +46,23 @@ from hydraflow_gateway.routing_policy import (
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
+
 #: The provider value a dial carries when nobody has moved it.
-_DEFAULT = "claude"
+#:
+#: Read from the model rather than spelled out. It was the literal `"claude"`
+#: until ADR-0147 moved every dial default to `gateway`, at which point a
+#: fleet sitting entirely on its defaults generated twelve policies that each
+#: re-stated the default -- the exact behaviour-change-dressed-as-a-no-op this
+#: module exists to avoid. A per-dial lookup cannot fall out of step with the
+#: dial it describes (docs/standards/parametrised_guards/).
+def _dial_default(dial: str) -> str:
+    """The declared default of *dial*, or `"claude"` if it declares none."""
+    from config import HydraFlowConfig  # noqa: PLC0415 - avoids a config cycle
+
+    field = HydraFlowConfig.model_fields.get(dial)
+    default = getattr(field, "default", None) if field is not None else None
+    return str(default) if isinstance(default, str) and default else "claude"
+
 
 #: Every routing dial, mapped to the `principal_id` set its spawns carry.
 #:
@@ -124,8 +140,9 @@ def baseline_policies(config: HydraFlowConfig) -> tuple[RoutingPolicy, ...]:
 
 def _moved_binding(config: HydraFlowConfig, dial: str) -> ProviderBinding | None:
     """The binding *dial* names, or ``None`` when it is still on its default."""
-    value = str(getattr(config, dial, _DEFAULT) or _DEFAULT)
-    if value == _DEFAULT:
+    default = _dial_default(dial)
+    value = str(getattr(config, dial, default) or default)
+    if value == default:
         return None
     return ProviderBinding.ZAI_HARNESS if value == "zai" else ProviderBinding.ANTHROPIC
 
