@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import signal
+import time
 from pathlib import Path
 
 import pytest
@@ -517,6 +518,33 @@ def test_timed_out_turn_sentinel_is_distinguishable_from_a_real_exit_code() -> N
     assert TURN_TIMED_OUT < 0
 
 
+def _pids_alive_after(pids: list[int], *, grace_seconds: float) -> list[int]:
+    """PIDs still alive after *grace_seconds*, polled rather than sampled once.
+
+    `os.kill(pid, 0)` succeeds for a process that has been SIGKILLed but not
+    yet reaped. The grandchild here is reparented to init when the fake CLI
+    dies, so its reaping is asynchronous and, on a loaded host, lands after
+    the assertion — a false red on a correct `killpg`. Observed twice in one
+    session, on two branches that touched neither this file nor the probe.
+
+    The grace does not weaken the check. A genuine leak is a process nothing
+    signalled, sleeping 120s; it is still alive at any deadline this side of
+    two minutes. What the grace absorbs is teardown latency, not survival.
+    """
+    deadline = time.monotonic() + grace_seconds
+    while True:
+        alive = []
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                continue
+            alive.append(pid)
+        if not alive or time.monotonic() >= deadline:
+            return alive
+        time.sleep(0.1)
+
+
 def test_a_hung_turn_is_killed_at_its_budget_and_leaves_no_descendant(
     tmp_path: Path,
 ) -> None:
@@ -542,13 +570,8 @@ def test_a_hung_turn_is_killed_at_its_budget_and_leaves_no_descendant(
     )
 
     pids = [int(x) for x in marker.read_text().split() if x.strip()]
-    survivors = []
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            continue
-        survivors.append(pid)
+    survivors = _pids_alive_after(pids, grace_seconds=10.0)
+    for pid in survivors:
         with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGKILL)
 
