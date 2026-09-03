@@ -90,17 +90,16 @@ def test_every_row_on_disk_carries_its_evidence() -> None:
 def test_the_backlog_no_longer_re_files_a_settled_rule() -> None:
     """Only genuinely-buildable rules stay `pending`, and re-filing them is right.
 
-    16 rows were pending; 14 were settled (2 already enforced, 12 with no code
-    surface) and were re-filed every tick regardless. The two that remain have
-    a named blocker rather than no surface at all, so their re-filing is the
-    loop working, not thrashing.
+    16 rows were pending; 15 were settled (3 already enforced, 12 with no code
+    surface) and were re-filed every tick regardless. The one that remains has
+    a named blocker rather than no surface at all, so its re-filing is the loop
+    working, not thrashing.
     """
     from memory_backlog_mirror import pending_entries
 
     pending = {e.slug for e in pending_entries(_MIRROR)}
 
     assert pending == {
-        "feedback-ci-no-global-git-config",
         "feedback-cleanup-prs-need-full-suite",
     }, (
         "a row moved into or out of `pending` without a verdict — if it is "
