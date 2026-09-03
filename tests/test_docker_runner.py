@@ -21,6 +21,7 @@ from docker_runner import (
     get_docker_runner,
 )
 from execution import HostRunner, SimpleResult, SubprocessRunner
+from subprocess_util import SubprocessTimeoutError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -919,9 +920,12 @@ class TestDockerRunnerRunSimple:
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
         # Use very short timeout to trigger TimeoutError from wait_for
+        # run_simple raises the house type now, so callers written against
+        # `except SubprocessTimeoutError` actually catch a Docker timeout
+        # (#6959). It is a RuntimeError, not a TimeoutError.
         with (
             patch("asyncio.wait_for", side_effect=TimeoutError),
-            pytest.raises(TimeoutError),
+            pytest.raises(SubprocessTimeoutError),
         ):
             await runner.run_simple(["sleep", "999"], timeout=0.01)
 
@@ -1761,7 +1765,10 @@ class TestContainerCleanupLogging:
         )
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        with pytest.raises(TimeoutError), patch("docker_runner.logger") as mock_logger:
+        with (
+            pytest.raises(SubprocessTimeoutError),
+            patch("docker_runner.logger") as mock_logger,
+        ):
             await runner.run_simple(["echo", "hi"], timeout=0.01)
 
         # Should have logged the kill failure with exc_info
@@ -1802,8 +1809,14 @@ class TestContainerCleanupLogging:
 
 
 class TestEnsureClientLogging:
-    def test_initial_ping_failure_logs_debug(self) -> None:
-        """Initial ping failure should log at DEBUG with exc_info."""
+    async def test_initial_ping_failure_logs_debug(self) -> None:
+        """Initial ping failure should log at DEBUG with exc_info.
+
+        The retry loop moved from the sync `_ensure_client` to the async
+        `_ensure_client_reachable` (#6578) — a `time.sleep` retry pushed
+        through `run_in_executor` was starving the default thread pool. The
+        logging contract is unchanged; only its home moved.
+        """
         runner, client = _make_runner()
         # First ping fails, second (after retry) succeeds
         client.ping.side_effect = [ConnectionError("daemon down"), True]
@@ -1812,7 +1825,7 @@ class TestEnsureClientLogging:
             patch("docker_runner.logger") as mock_logger,
             patch("docker.from_env", return_value=client),
         ):
-            runner._ensure_client(max_retries=1, delay=0.01)
+            await runner._ensure_client_reachable(max_retries=1, delay=0.01)
 
         # Should have logged initial failure at debug level
         debug_calls = mock_logger.debug.call_args_list
@@ -1821,8 +1834,8 @@ class TestEnsureClientLogging:
         )
         assert initial_call[1].get("exc_info") is True
 
-    def test_retry_failure_logs_warning_with_exc_info(self) -> None:
-        """Retry failures should log at WARNING with exc_info."""
+    async def test_retry_failure_logs_warning_with_exc_info(self) -> None:
+        """Retry failures should log at WARNING with exc_info (see above)."""
         runner, client = _make_runner()
         # All pings fail
         client.ping.side_effect = ConnectionError("daemon down")
@@ -1832,7 +1845,7 @@ class TestEnsureClientLogging:
             patch("docker.from_env", return_value=client),
             pytest.raises(RuntimeError, match="Docker daemon not available"),
         ):
-            runner._ensure_client(max_retries=2, delay=0.01)
+            await runner._ensure_client_reachable(max_retries=2, delay=0.01)
 
         # Should have warning logs with exc_info for retry failures
         warning_calls = mock_logger.warning.call_args_list

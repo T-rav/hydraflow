@@ -203,7 +203,14 @@ class IssueCache:
         try:
             path = self._issue_path(record.issue_id)
             append_jsonl(path, record.model_dump_json())
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError covers PydanticSerializationError, which is one
+            # (#6907). `model_dump_json` raises it for a payload holding a
+            # type pydantic cannot encode — and that escaped the OSError-only
+            # guard, so an unserialisable field in a cached GitHub payload
+            # took down the caller. A broken cache must never break the
+            # domain layer; this mirrors the read path's own
+            # (json.JSONDecodeError, ValueError) below.
             logger.warning(
                 "issue_cache: failed to append %s for issue #%d",
                 record.kind,

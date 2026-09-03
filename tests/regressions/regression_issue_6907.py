@@ -37,7 +37,6 @@ class _NotSerializable:
 class TestRecordBestEffortContract:
     """Issue #6907 — PydanticSerializationError escapes the OSError guard."""
 
-    @pytest.mark.xfail(reason="Regression for issue #6907 — fix not yet landed", strict=False)
     def test_record_does_not_raise_on_serialization_error(self, tmp_path: Path) -> None:
         """``record()`` must swallow serialization failures, not just IO errors.
 
@@ -66,7 +65,6 @@ class TestRecordBestEffortContract:
                 f"A broken cache must never break the domain layer."
             )
 
-    @pytest.mark.xfail(reason="Regression for issue #6907 — fix not yet landed", strict=False)
     def test_record_fetch_does_not_raise_on_serialization_error(
         self, tmp_path: Path
     ) -> None:
@@ -81,7 +79,6 @@ class TestRecordBestEffortContract:
                 f"Bug #6907: serialization error escapes best-effort guard."
             )
 
-    @pytest.mark.xfail(reason="Regression for issue #6907 — fix not yet landed", strict=False)
     def test_record_plan_stored_does_not_raise_on_serialization_error(
         self, tmp_path: Path
     ) -> None:
