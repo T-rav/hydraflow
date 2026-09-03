@@ -777,7 +777,7 @@ class DockerRunner:
         except TimeoutError:
             logger.warning("Timed out fetching container %s logs", which)
             return ""
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to fetch container %s logs", which, exc_info=True)
             return ""
         return raw.decode(errors="replace")
