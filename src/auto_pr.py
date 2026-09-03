@@ -609,6 +609,50 @@ def _status_check_rollup_is_green(rollup: list[dict[str, Any]]) -> bool:
     return True
 
 
+# StatusContext entries carry no ``status`` field, so their un-settled states
+# have to be recognised from ``state`` alone or a queued legacy check reads as
+# a settled failure.
+_PENDING_STATES: frozenset[str] = frozenset({"pending", "expected", ""})
+
+
+def _rollup_has_settled_failure(rollup: list[dict[str, Any]]) -> bool:
+    """True iff some check has FINISHED and finished badly (#12068).
+
+    This is the question the arm decision needs, and it is not the same as
+    "is the PR green". ``_status_check_rollup_is_green`` answers the latter
+    correctly and is still the right predicate for asking whether a PR is
+    mergeable *now*; using it to decide whether to ARM ``--auto`` made the
+    gate self-defeating, because ``--auto`` is armed the instant
+    ``gh pr create`` returns, when no check has settled and many are not yet
+    registered. It could therefore never pass, and no bot PR was ever armed.
+
+    Un-settled is not a failure:
+    - a CheckRun whose ``status`` is not ``completed`` is still running;
+    - a StatusContext whose ``state`` is ``pending``/``expected`` likewise;
+    - an empty rollup means no check has registered yet.
+
+    A settled non-green conclusion IS a failure, and refusing to arm there is
+    the whole of #10672's belt — #10663's harm was arming on a PR already
+    known to be bad, which this still prevents.
+
+    Everything else is held by branch protection, not by this function: the
+    live ``staging protect`` ruleset requires ``CI Gate``, both ``quality``
+    jobs, ``Detect Changes`` and ``discover-projects``, so an armed ``--auto``
+    cannot merge until those pass.
+    """
+    for check in rollup:
+        status = str(check.get("status") or "").strip().lower()
+        if status:
+            if status != "completed":
+                continue  # CheckRun still running
+        elif str(check.get("state") or "").strip().lower() in _PENDING_STATES:
+            continue  # StatusContext not settled
+        raw = check.get("conclusion") or check.get("state") or ""
+        if str(raw).strip().lower() not in _GREEN_CONCLUSIONS:
+            return True
+    return False
+
+
 def _auto_merge_enabled() -> bool:
     """Resolve the ``auto_pr_auto_merge_enabled`` kill-switch from live config.
 
@@ -625,12 +669,14 @@ def _auto_merge_enabled() -> bool:
     return bool(cfg.auto_pr_auto_merge_enabled)
 
 
-def _rollup_payload_is_green(payload: str, pr_url: str) -> bool:
+def _rollup_payload_is_armable(payload: str, pr_url: str) -> bool:
     """Parse a ``gh pr view --json statusCheckRollup`` payload; fail-closed.
 
-    Returns ``True`` only when the payload parses to a rollup list that
-    :func:`_status_check_rollup_is_green` accepts. Any parse problem →
-    ``False`` (never arm auto-merge on an indeterminate PR).
+    ``True`` when the payload parses and no check has SETTLED badly — see
+    :func:`_rollup_has_settled_failure` for why that, and not "fully green",
+    is the arm question (#12068). A parse problem stays fail-closed: an
+    unreadable rollup is indeterminate, and this is the one branch where
+    refusing costs nothing, since the next tick re-reads it.
     """
     try:
         data = json.loads(payload)
@@ -650,9 +696,10 @@ def _rollup_payload_is_green(payload: str, pr_url: str) -> bool:
             pr_url,
         )
         return False
-    if not _status_check_rollup_is_green(rollup):
+    if _rollup_has_settled_failure(rollup):
         logger.info(
-            "auto_pr green-gate: PR %s not fully green; not arming auto-merge",
+            "auto_pr arm-gate: PR %s has a settled failing check; not arming "
+            "auto-merge",
             pr_url,
         )
         return False
@@ -686,7 +733,7 @@ def _auto_merge_allowed(pr_url: str, *, worktree_path: Path) -> bool:
             proc.stderr or proc.stdout,
         )
         return False
-    return _rollup_payload_is_green(proc.stdout, pr_url)
+    return _rollup_payload_is_armable(proc.stdout, pr_url)
 
 
 async def _auto_merge_allowed_async(
@@ -721,7 +768,7 @@ async def _auto_merge_allowed_async(
             exc,
         )
         return False
-    return _rollup_payload_is_green(stdout, pr_url)
+    return _rollup_payload_is_armable(stdout, pr_url)
 
 
 # ---------------------------------------------------------------------------
