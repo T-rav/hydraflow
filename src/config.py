@@ -3153,8 +3153,11 @@ class HydraFlowConfig(BaseModel):
     # tests/regressions/ delta — the #10223 signature, with the same
     # Skip-Regression: opt-out). When ON, a post-merge observer REOPENS the
     # closed issue and re-triages it (re-applies find_label) so a delta-less
-    # "done" is actually driven to a fix. Default-OFF and fully inert until
-    # enabled — same rollout discipline as the G1 auto-recut actuator.
+    # "done" is actually driven to a fix. Ships ENABLED (#12072): it began
+    # disabled under the G1 auto-recut actuator's rollout discipline and the
+    # default has since flipped, so on an untouched deployment this actuator
+    # reopens and re-triages. Turn it off from the System tab, or with
+    # HYDRAFLOW_CLOSE_VERIFICATION_ENABLED=false.
     close_verification_enabled: bool = Field(
         default=True,
         description=(
