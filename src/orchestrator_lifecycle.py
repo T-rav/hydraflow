@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from models import (
     SessionEndPayload,
     SessionLog,
@@ -159,6 +160,13 @@ class OrchestratorLifecycleMixin:
                 await self._start_session()
             logger.info("Pipeline enabled — repo initialized and session started")
         except Exception as exc:  # noqa: BLE001
+            # #6765: this runs as a background task, so an exhausted budget or
+            # dead credential during repo init was logged here and nowhere
+            # else. The pipeline toggle flipped back to False, which looks
+            # like graceful handling — but the operator sees "start failed"
+            # rather than "the account is dead", and a retry burns the same
+            # signal again. Let the fatal ones reach the supervisor.
+            reraise_on_credit_or_bug(exc)
             logger.exception("Failed deferred pipeline start")
             self._pipeline_enabled = False
             data: SystemAlertPayload = {

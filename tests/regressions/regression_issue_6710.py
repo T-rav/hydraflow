@@ -34,7 +34,6 @@ from subprocess_util import AuthenticationError, CreditExhaustedError
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Regression for issue #6710 — fix not yet landed", strict=False)
 async def test_auth_error_awaits_cancelled_siblings() -> None:
     """AuthenticationError must cancel AND await siblings before propagating.
 
@@ -70,7 +69,6 @@ async def test_auth_error_awaits_cancelled_siblings() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Regression for issue #6710 — fix not yet landed", strict=False)
 async def test_credit_exhausted_awaits_cancelled_siblings() -> None:
     """CreditExhaustedError must cancel AND await siblings before propagating."""
     stop = asyncio.Event()
@@ -98,7 +96,6 @@ async def test_credit_exhausted_awaits_cancelled_siblings() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Regression for issue #6710 — fix not yet landed", strict=False)
 async def test_auth_error_all_siblings_fully_done() -> None:
     """After AuthenticationError, every sibling task must be done (not just cancelled).
 
