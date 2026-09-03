@@ -10,6 +10,17 @@ HOOK="$REPO/.claude/hooks/hf.check-existing-infra-before-new-file.sh"
 
 # Hermetic markers: the one-shot escape valve must not read or write the
 # operator's real /tmp marker dir, and must not leak state between runs.
+# The harness's own precondition. Outside a git repo this hook allows
+# everything, so every ALLOW case below would pass and every BLOCK case would
+# fail — which is exactly the shape #12117 was reported as, from a tree
+# extracted with `git archive` and therefore carrying no `.git`. Asserting it
+# up front turns "the tests are wrong" into "you ran me in the wrong place".
+if ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "FAIL: $REPO is not a git repository — this test needs a real"
+  echo "      checkout, because the hook it exercises scans git ls-files."
+  exit 1
+fi
+
 MARKERS="$(mktemp -d)"
 READONLY_MARKERS="$(mktemp -d)"
 trap 'chmod u+rwx "$READONLY_MARKERS" 2>/dev/null; rm -rf "$MARKERS" "$READONLY_MARKERS"' EXIT

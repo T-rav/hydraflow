@@ -62,6 +62,21 @@ esac
 
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 
+# The scan is only meaningful inside a git repo: outside one `git ls-files`
+# returns nothing, `CANDIDATES` is empty, and the hook allows — reporting a
+# clean bill of health for a check it never performed (#12117).
+#
+# Still allow, because wedging an unattended run is worse than missing a
+# duplicate. But say so on stderr, so "nothing matched" and "I could not
+# look" stop being the same silent outcome. Everything else here fails open
+# QUIETLY on purpose; this one path fails open LOUDLY, because it is the only
+# one where the guard's whole subject was unreadable.
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "hf.check-existing-infra: $PROJECT_DIR is not a git repository — " \
+       "cannot scan for duplicates, allowing (#12117)" >&2
+  exit 0
+fi
+
 # A tracked path is an overwrite, not a parallel build — #11947's hook owns it.
 git ls-files --error-unmatch -- "$REL" >/dev/null 2>&1 && exit 0
 
