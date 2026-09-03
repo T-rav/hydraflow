@@ -77,6 +77,7 @@ LEGACY_DISPLAY_NAMES: Mapping[ProviderBinding, str] = MappingProxyType(
     {
         ProviderBinding.ANTHROPIC: "Anthropic (legacy upstream)",
         ProviderBinding.ZAI_HARNESS: "z.ai harness (legacy upstream)",
+        ProviderBinding.KIMI_HARNESS: "Moonshot Kimi harness (legacy upstream)",
     }
 )
 
@@ -84,6 +85,7 @@ LEGACY_CREDENTIAL_ENV: Mapping[ProviderBinding, str] = MappingProxyType(
     {
         ProviderBinding.ANTHROPIC: "GATEWAY_ANTHROPIC_API_KEY",
         ProviderBinding.ZAI_HARNESS: "GATEWAY_ZAI_HARNESS_API_KEY",
+        ProviderBinding.KIMI_HARNESS: "GATEWAY_KIMI_HARNESS_API_KEY",
     }
 )
 
@@ -91,6 +93,7 @@ _LEGACY_AUTH_STYLE: Mapping[ProviderBinding, UpstreamAuthStyle] = MappingProxyTy
     {
         ProviderBinding.ANTHROPIC: UpstreamAuthStyle.X_API_KEY,
         ProviderBinding.ZAI_HARNESS: UpstreamAuthStyle.BEARER,
+        ProviderBinding.KIMI_HARNESS: UpstreamAuthStyle.BEARER,
     }
 )
 

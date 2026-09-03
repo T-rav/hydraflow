@@ -95,9 +95,13 @@ def _store(settings: GatewaySettings, environ: dict[str, str] | None = None):  #
 def test_a_deployment_with_no_accounts_file_has_only_the_legacy_accounts() -> None:
     pool = load_account_pool(_settings(), {})
 
-    assert pool.registry.account_ids == (
-        legacy_account_id(ProviderBinding.ANTHROPIC),
-        _ZAI,
+    # Derived from ProviderBinding, exactly as `_settings()` derives the
+    # upstreams it feeds in. Hand-listing the pair made this read as "the pool
+    # holds anthropic and zai" when what it pins is "the pool holds one legacy
+    # account per configured upstream and nothing else" — the second survives a
+    # third lane, the first just fails on the day one arrives.
+    assert pool.registry.account_ids == tuple(
+        sorted(legacy_account_id(binding) for binding in ProviderBinding)
     )
 
 

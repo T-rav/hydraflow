@@ -128,7 +128,7 @@ async def test_an_available_read_carries_the_gateway_payload(tmp_path: Path) -> 
     """Validation must pass the gateway's model through, not a reshaped copy."""
     result = await _reader(tmp_path).accounts()
 
-    assert len(result.data["accounts"]) == 2  # type: ignore[index]
+    assert len(result.data["accounts"]) == len(ProviderBinding)  # type: ignore[index]
 
 
 async def test_a_missing_control_token_is_not_configured(tmp_path: Path) -> None:

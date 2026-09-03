@@ -35,6 +35,7 @@ would look complete while leaving the two dials with the widest reach unmoved.
 from __future__ import annotations
 
 from config import HydraFlowConfig
+from hydraflow_gateway.models import binding_for_lane
 from hydraflow_gateway.routing_policy import (
     ProviderBinding,
     RoutingAction,
@@ -139,7 +140,7 @@ def _moved_binding(config: HydraFlowConfig, dial: str) -> ProviderBinding | None
     value = str(getattr(config, dial, default) or default)
     if value == default:
         return None
-    return ProviderBinding.ZAI_HARNESS if value == "zai" else ProviderBinding.ANTHROPIC
+    return binding_for_lane(value)
 
 
 def _policy(

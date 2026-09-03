@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
-from credit_failover import zai_key_present
 from dashboard_routes._common import _SAFE_SLUG_COMPONENT
 from dashboard_routes._routes import (
     RouteContext,
@@ -24,6 +23,7 @@ from dashboard_routes._routes import (
 from models import RepoRuntimeInfo
 from operator_start import apply_operator_start
 from prompt_gate import is_valid_data_class
+from repo_backend import _DIRECT_HARNESS_KEY_PRESENT  # noqa: PLC2701
 
 logger = logging.getLogger("hydraflow.dashboard")
 
@@ -31,13 +31,20 @@ logger = logging.getLogger("hydraflow.dashboard")
 def _effective_repo_provider(repo_config: Any) -> str:
     """The backend a repo's spawns actually resolve to, not just its configured dial.
 
-    Mirrors ``repo_backend.apply_repo_provider``'s fail-safe: ``repo_provider ==
-    "zai"`` with no ``ZAI_API_KEY`` present is a silent no-op at spawn time (the
-    repo stays on native Claude), so the UI must report "claude" too — a badge
-    that shows the configured intent instead of the resolved effect would hide
-    exactly the misconfiguration (a missing key) an operator needs to notice.
+    Mirrors ``repo_backend.apply_repo_provider``'s fail-safe: a direct harness
+    lane with no key present is a silent no-op at spawn time (the repo stays on
+    native Claude), so the UI must report "claude" too — a badge that shows the
+    configured intent instead of the resolved effect would hide exactly the
+    misconfiguration (a missing key) an operator needs to notice.
+
+    The lane→key-presence map is imported from ``repo_backend`` rather than
+    restated here. This function's whole contract is "agrees with what the
+    spawn will do", and a second copy of that map is a copy that can disagree —
+    which would put the badge back to showing intent, in the one case where it
+    matters.
     """
-    if repo_config.repo_provider == "zai" and not zai_key_present():
+    check = _DIRECT_HARNESS_KEY_PRESENT.get(repo_config.repo_provider)
+    if check is not None and not check():
         return "claude"
     return repo_config.repo_provider
 

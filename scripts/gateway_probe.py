@@ -29,8 +29,12 @@ from pydantic import (
     model_validator,
 )
 
-ProviderBinding = Literal["anthropic", "zai-harness"]
-_PROVIDER_BINDINGS: tuple[ProviderBinding, ...] = ("anthropic", "zai-harness")
+ProviderBinding = Literal["anthropic", "zai-harness", "kimi-harness"]
+_PROVIDER_BINDINGS: tuple[ProviderBinding, ...] = (
+    "anthropic",
+    "zai-harness",
+    "kimi-harness",
+)
 _CAPTURE_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,128}\Z")
 _COMPARISON_METHOD = "gateway_captured_upstream_vs_downstream_raw_bytes"
 

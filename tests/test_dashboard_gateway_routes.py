@@ -33,6 +33,7 @@ from hydraflow_gateway.models import (
     MintKeyRequest,
     ProviderBinding,
     RepoClass,
+    legacy_account_id,
 )
 from hydraflow_gateway.settings import (
     GatewaySettings,
@@ -221,10 +222,9 @@ def test_accounts_route_returns_the_gateway_account_inventory(tmp_path: Path) ->
     """The dashboard surfaces the gateway's compiled account identities."""
     body = _dashboard(tmp_path).get("/api/gateway/accounts").json()
 
-    assert [account["account_id"] for account in body["data"]["accounts"]] == [
-        "legacy-anthropic",
-        "legacy-zai-harness",
-    ]
+    assert [account["account_id"] for account in body["data"]["accounts"]] == sorted(
+        legacy_account_id(binding) for binding in ProviderBinding
+    )
 
 
 def test_accounts_route_marks_an_available_source(tmp_path: Path) -> None:
@@ -535,7 +535,12 @@ def test_a_committed_state_change_is_visible_on_the_next_accounts_read(
     _mutate(client, _STATE_ROUTE, headers=_AUTH)
     accounts = client.get("/api/gateway/accounts").json()["data"]["accounts"]
 
-    assert [a["administrative_state"] for a in accounts] == ["enabled", "draining"]
+    states = {a["account_id"]: a["administrative_state"] for a in accounts}
+
+    assert states[_ZAI_ACCOUNT] == "draining"
+    assert [id_ for id_, state in states.items() if state != "enabled"] == [
+        _ZAI_ACCOUNT
+    ], "the overlay moved an account it was never asked to move"
 
 
 # --------------------------------------------------------------------------

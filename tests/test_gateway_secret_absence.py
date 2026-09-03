@@ -474,7 +474,12 @@ async def test_account_view_publishes_only_the_upstream_origin(
     accounts = json.loads(payload.split("\n", maxsplit=1)[0])["accounts"]
     origins = [account["base_origin"] for account in accounts]
 
-    assert origins == ["https://upstream.test", "https://zai.test"]
+    # Origins only — never a path, never a credential. A lane with no
+    # credential publishes no origin at all: `compile_legacy_accounts` gives it
+    # the placeholder internally, and the view declines to republish even that.
+    # Asserted in place rather than filtered out, because "an unconfigured lane
+    # leaks nothing" is the same property this test exists to hold.
+    assert origins == ["https://upstream.test", None, "https://zai.test"]
 
 
 # --------------------------------------------------------------------------

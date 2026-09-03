@@ -3446,6 +3446,17 @@ class HydraFlowConfig(BaseModel):
             "env var (a secret — never stored on config or shown in the UI)."
         ),
     )
+    kimi_harness_base_url: str = Field(
+        default="https://api.moonshot.ai/anthropic",
+        description=(
+            "Anthropic-compatible base URL for the 'kimi' *harness* backend — the "
+            "endpoint the Claude CLI is pointed at (via ANTHROPIC_BASE_URL) when "
+            "an agentic role sets provider='kimi', so a tool-using loop runs on "
+            "Kimi. Distinct from kimi_base_url (the one-shot /v1 face). Auth is a "
+            "bearer token from MOONSHOT_API_KEY; Moonshot sells no separate "
+            "coding-plan credential, so there is no second key to prefer."
+        ),
+    )
     # Per-role backend dials for the one-shot (no-tools) loops. "claude" keeps
     # the direct CLI harness, "gateway" sends that same harness through the tap,
     # and "openrouter", "zai", and "kimi" call a cheap direct model over an
@@ -3495,19 +3506,19 @@ class HydraFlowConfig(BaseModel):
     # ac_provider; the verification judge shares review's tool+model so it runs
     # on review_provider. Adding a dead dial here would validate at config-load
     # yet never route at runtime — a footgun, so we don't.
-    implementation_provider: Literal["claude", "gateway", "zai"] = Field(
+    implementation_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway", description="Harness backend for implementation agents."
     )
-    review_provider: Literal["claude", "gateway", "zai"] = Field(
+    review_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway", description="Harness backend for review agents."
     )
-    planner_provider: Literal["claude", "gateway", "zai"] = Field(
+    planner_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway", description="Harness backend for planning agents."
     )
-    triage_provider: Literal["claude", "gateway", "zai"] = Field(
+    triage_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway", description="Harness backend for triage agents."
     )
-    ac_provider: Literal["claude", "gateway", "zai"] = Field(
+    ac_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway", description="Harness backend for acceptance-criteria agents."
     )
     # One knob to route ALL maintenance loops to a backend, coherently. Unlike
@@ -3519,7 +3530,7 @@ class HydraFlowConfig(BaseModel):
     # prompt refinement inherit these values at their lightweight seam. It NEVER
     # touches implement/review/plan/triage. Leave at claude/"" to configure
     # dedicated roles individually.
-    maintenance_provider: Literal["claude", "gateway", "zai"] = Field(
+    maintenance_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway",
         description=(
             "Backend applied to every maintenance loop (not the work loops). "
@@ -3542,7 +3553,7 @@ class HydraFlowConfig(BaseModel):
     # already routed a role off "claude") and UNDER credit-failover (which only
     # further reroutes a spawn still resolving to "claude"). Resolution order:
     # role dial > repo_provider > credit-failover.
-    repo_provider: Literal["claude", "gateway", "zai"] = Field(
+    repo_provider: Literal["claude", "gateway", "zai", "kimi"] = Field(
         default="gateway",
         description=(
             "Repo-wide harness backend override for this repo's work spawns. "
@@ -6945,16 +6956,37 @@ class HydraFlowConfig(BaseModel):
 
     @field_validator("repo_model")
     @classmethod
-    def repo_model_must_be_glm_when_set(cls, v: str) -> str:
-        """A non-empty repo_model runs on the zai backend, which requires glm-* (#11211).
+    def repo_model_matches_its_harness_lane(cls, v: str, info: Any) -> str:
+        """A non-empty repo_model runs on a harness backend that serves one
+        model family, so the two must agree (#11211).
 
         Empty is the "unset — fall back to credit_failover_model" sentinel and
         is always valid.
+
+        This asked for glm-* specifically while z.ai was the only harness lane
+        a repo could be pinned to. Asking the lane table instead means adding a
+        provider does not leave `repo_provider` accepting a value whose model
+        this validator then rejects — the shape that would have made the kimi
+        repo override unusable while looking configured.
         """
-        if v and not v.startswith("glm"):
+        if not v:
+            return v
+        required = _required_provider_for_model(v)
+        if required is None:
+            families = ", ".join(
+                f"{prefix}-*" for prefix, _ in _MODEL_PROVIDER_REQUIRED
+            )
             msg = (
-                f"repo_model must be a glm-* model (got '{v}') — the zai "
-                "harness backend only accepts glm-* models."
+                f"repo_model must be a model one of the harness lanes serves "
+                f"({families}); got '{v}'."
+            )
+            raise ValueError(msg)
+        repo_provider = info.data.get("repo_provider")
+        if repo_provider in _PROVIDER_MODEL_PREFIX and repo_provider != required:
+            msg = (
+                f"repo_model '{v}' runs on the {required!r} harness but "
+                f"repo_provider is {repo_provider!r} — a repo override that "
+                "names one lane and a model from another routes to neither."
             )
             raise ValueError(msg)
         return v
@@ -7551,6 +7583,7 @@ _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
     ("haiku", "claude"),
     ("claude-", "claude"),
     ("glm", "claude"),
+    ("kimi", "claude"),
 ]
 
 # Model prefix → required provider (harness backend). A glm-* model only runs on
@@ -7559,7 +7592,18 @@ _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
 # check (a "zai" provider requires a glm-* model).
 _MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
     ("glm", "zai"),
+    ("kimi", "kimi"),
 ]
+
+#: Provider -> the model-family prefix its backend serves, inverted from the
+#: table above rather than re-listed. These lanes are locked in BOTH directions:
+#: the model requires the provider, and the provider requires the model. Derived
+#: so a third single-family lane cannot be added to one table and forgotten in
+#: the validator, which is how `kimi` would otherwise have gained a dial that
+#: accepted any model at all.
+_PROVIDER_MODEL_PREFIX: dict[str, str] = {
+    provider: prefix for prefix, provider in _MODEL_PROVIDER_REQUIRED
+}
 
 # Stages without a dedicated *_provider dial inherit a provider from another
 # config field. Map each to that source so its effective model is validated
@@ -7762,10 +7806,15 @@ def _validate_gateway_capture_policy(config: HydraFlowConfig) -> None:
 
 def _gateway_direct_harness_roles(config: HydraFlowConfig) -> list[str]:
     """Return gateway-capable roles that still bypass the terminal profile."""
+    # Stated as "not the gateway" rather than as a list of the lanes that are
+    # not it. The list read {"claude", "zai"} and was already one lane short
+    # the moment the kimi harness landed — a role bypassing the gateway would
+    # simply not have been reported, which is the one thing this function
+    # exists to make impossible.
     direct = [
         f"{field}={provider!r}"
         for field in GATEWAY_AGENTIC_PROVIDER_FIELDS
-        if (provider := getattr(config, field)) in {"claude", "zai"}
+        if (provider := getattr(config, field)) != "gateway"
     ]
     # openrouter/zai/kimi are explicitly excluded one-shot HTTP faces. Only
     # their direct Claude-CLI option is a gateway bypass.
@@ -7911,7 +7960,7 @@ def _validate_stage_provider(
         msg = f"{stage}: provider 'gateway' requires tool 'claude'; got tool {tool!r}"
         raise ValueError(msg)
     provider_matches = provider == required_provider or (
-        provider == "gateway" and required_provider == "zai"
+        provider == "gateway" and required_provider in _PROVIDER_MODEL_PREFIX
     )
     if required_provider is not None and not provider_matches:
         msg = (
@@ -7920,10 +7969,11 @@ def _validate_stage_provider(
             f"{provider!r}"
         )
         raise ValueError(msg)
-    if provider == "zai" and required_provider != "zai":
+    if provider in _PROVIDER_MODEL_PREFIX and required_provider != provider:
+        prefix = _PROVIDER_MODEL_PREFIX[provider]
         msg = (
-            f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
-            f"model, got {model!r}"
+            f"{stage}: provider {provider!r} (the {prefix}-* harness) requires "
+            f"a {prefix}-* model, got {model!r}"
         )
         raise ValueError(msg)
 

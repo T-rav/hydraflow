@@ -206,6 +206,18 @@ class GatewaySettings(BaseModel):
             api_key_name="GATEWAY_ZAI_HARNESS_API_KEY",
             auth_style=UpstreamAuthStyle.BEARER,
         )
+        # Moonshot speaks the Anthropic wire shape at /anthropic and
+        # authenticates with a bearer token, so it rides the same lane machinery
+        # as z.ai. Absent credentials, `_add_upstream` simply registers nothing
+        # and the lane stays unconfigured rather than half-present.
+        _add_upstream(
+            upstreams,
+            env,
+            provider=ProviderBinding.KIMI_HARNESS,
+            base_url_name="GATEWAY_KIMI_HARNESS_BASE_URL",
+            api_key_name="GATEWAY_KIMI_HARNESS_API_KEY",
+            auth_style=UpstreamAuthStyle.BEARER,
+        )
         return cls(
             control_token=SecretStr(control_token),
             upstreams=upstreams,
