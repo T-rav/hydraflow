@@ -196,15 +196,36 @@ def test_sync_red_rollup_does_not_arm_auto_merge(
     assert merge_calls == [], "a red statusCheckRollup must NOT arm auto-merge"
 
 
-def test_sync_pending_rollup_does_not_arm_auto_merge(
+def test_sync_pending_rollup_DOES_arm_auto_merge(
     local_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Inverted by #12068 — deliberately, and this is the reasoning.
+
+    This test used to assert that a pending rollup must NOT arm. That
+    requirement forbade the only state that exists at the moment the gate is
+    consulted: `open_automated_pr` arms in the same breath as `gh pr create`
+    returns, and CI triggers on `pull_request`, so every check is unregistered
+    or queued. The gate could therefore never pass, and no bot PR was ever
+    armed — the belt did not tighten, it disconnected.
+
+    `--auto` is a QUEUE, not a merge. Arming it on a pending PR is what it is
+    for; GitHub re-evaluates and will not merge against branch protection. The
+    live `staging protect` ruleset requires `CI Gate`, both `quality` jobs,
+    `Detect Changes` and `discover-projects`.
+
+    #10672's actual requirement is the test above this one — a RED rollup must
+    not arm — which is #10663's harm and still holds.
+    """
     merge_calls: list[list[str]] = []
     monkeypatch.setattr(
         "auto_pr._run_gh", _make_sync_gh(_rollup_json(PENDING_ROLLUP), merge_calls)
     )
     _open_sync(local_repo, "feature/pending")
-    assert merge_calls == [], "a pending statusCheckRollup must NOT arm auto-merge"
+    assert merge_calls, (
+        "a pending rollup is the shape at arm time; refusing it is #12068 — "
+        "the gate would never pass and no bot PR would ever merge"
+    )
+    assert any("--auto" in call for call in merge_calls)
 
 
 def test_sync_unfetchable_rollup_fails_closed(
