@@ -162,7 +162,7 @@ def laundered_metrics(
     ``methods`` at whatever it currently is — growth no PR accounted for, on the
     line below the one being reviewed (#12142).
 
-    The signature is **mixed movement**, not any rise. A uniform rise is the
+    The signature is a rise beside a metric that does NOT rise, not any rise. A uniform rise is the
     tool's documented "a new oversized class is an accepted decision" flow, and
     adopting an unbaselined entry is not raising an existing mark; refusing
     those would break the mode this script exists to serve. It is the entry that
@@ -186,8 +186,12 @@ def laundered_metrics(
             for m in shared
             if new_entry[m] > old_entry[m]
         }
-        falls = [m for m in shared if new_entry[m] < old_entry[m]]
-        if rises and falls:
+        # "does not rise", not "falls": requiring a strict fall let the worst
+        # case through. loc UNCHANGED while methods climbs is a pure
+        # unaccounted rise with nothing improving anywhere — a weaker reason
+        # to touch the entry than the mixed case, and it passed silently.
+        non_rising = [m for m in shared if new_entry[m] <= old_entry[m]]
+        if rises and non_rising:
             laundered[key] = rises
     return laundered
 

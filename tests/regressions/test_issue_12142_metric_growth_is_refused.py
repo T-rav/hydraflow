@@ -42,6 +42,42 @@ def test_a_metric_that_rises_while_another_falls_is_reported() -> None:
     assert grown == {"src/config.py:Cfg": {"methods": (45, 50)}}
 
 
+def test_a_rise_beside_an_UNCHANGED_metric_is_reported() -> None:
+    """The hole the first predicate had: `falls` required a STRICT fall.
+
+    With `loc` unchanged and `methods` climbing, nothing improved anywhere —
+    a pure unaccounted rise on one axis, and a weaker reason to touch the entry
+    than the mixed case that WAS caught. It passed silently, exit 0, no warning.
+    Found in review of #12151; the predicate is now "rises beside a metric that
+    does not rise", not "rises beside a fall".
+    """
+    recorded = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 45}})
+    live = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 50}})
+
+    grown = laundered_metrics(recorded, live, ["src/config.py:Cfg"])
+
+    assert grown == {"src/config.py:Cfg": {"methods": (45, 50)}}
+
+
+def test_the_same_hole_in_the_other_direction() -> None:
+    """`methods` unchanged while `loc` climbs is the identical shape."""
+    recorded = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 45}})
+    live = MassBaseline(classes={"src/config.py:Cfg": {"loc": 6000, "methods": 45}})
+
+    grown = laundered_metrics(recorded, live, ["src/config.py:Cfg"])
+
+    assert grown == {"src/config.py:Cfg": {"loc": (5059, 6000)}}
+
+
+def test_an_entry_that_did_not_move_at_all_reports_nothing() -> None:
+    """No rise means nothing to account for, however many metrics are equal."""
+    entry = {"loc": 5059, "methods": 45}
+    recorded = MassBaseline(classes={"src/config.py:Cfg": dict(entry)})
+    live = MassBaseline(classes={"src/config.py:Cfg": dict(entry)})
+
+    assert laundered_metrics(recorded, live, ["src/config.py:Cfg"]) == {}
+
+
 def test_a_pure_shrink_reports_nothing() -> None:
     """The mode this flag must not obstruct: everything moved the right way."""
     recorded = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 45}})
