@@ -14,6 +14,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, get_args
 
+import yaml
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -1300,6 +1301,28 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
     ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
 ]
+
+
+def _declares_a_policy(charter: Path) -> bool:
+    """True when *charter* carries a non-empty ``policy:`` section (#12116).
+
+    Deliberately total. An unreadable or unparseable charter answers False so
+    the resolver falls through to the legacy file the repo is still governed
+    by — a YAML error in a section a repo may not even use yet must not deny
+    every merge in it. The strict reading still happens: whichever path is
+    resolved, ``load_merge_policy`` validates it and fails closed.
+    """
+    try:
+        raw = yaml.safe_load(charter.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    # PRESENCE, matching `load_merge_policy`'s own `"policy" in raw` test. The
+    # two must agree or they disagree in the worst possible place: on a
+    # truthiness test, a charter with an empty `policy:` would be handed to the
+    # legacy file instead, so an operator's declaration would be silently
+    # overridden by the file they were migrating away from. Present-and-empty
+    # reaches the loader and is refused there, which is a deny they can see.
+    return isinstance(raw, dict) and "policy" in raw
 
 
 class HydraFlowConfig(BaseModel):
@@ -7246,7 +7269,9 @@ class HydraFlowConfig(BaseModel):
     def merge_policy_path(self) -> Path:
         """Resolve the factory-autonomy merge policy file (CH-3, #9731).
 
-        A managed repo's own ``docs/standards/factory_autonomy/policy.yaml``
+        The repo's ``charter.yaml`` when it DECLARES a policy (#12116 — the
+        charter is the single governing declaration); otherwise a managed
+        repo's own ``docs/standards/factory_autonomy/policy.yaml``
         when present; otherwise the copy in the HydraFlow *checkout* (the
         standard applies to every HydraFlow-format project). ``docs/`` is
         documentation, not package data, so a wheel install has no second
@@ -7254,7 +7279,16 @@ class HydraFlowConfig(BaseModel):
         location, which is the one path an operator can act on.
         ``merge_policy.enforce_merge_policy`` fails CLOSED on a missing or
         invalid file either way (#11589).
+
+        "Declares" rather than "exists" is the whole of the migration rule.
+        Every HydraFlow repo already carries a ``charter.yaml`` and almost none
+        of them declare a policy yet, so keying on presence would point the
+        merge gate at a file with no policy in it — and fail-closed means those
+        repos stop merging, not that they fall back.
         """
+        charter = self.repo_root / "charter.yaml"
+        if _declares_a_policy(charter):
+            return charter
         repo_local = (
             self.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
         )

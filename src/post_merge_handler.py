@@ -374,7 +374,11 @@ class PostMergeHandler:
                         f"{policy_verdict.reason}\n\n"
                         "Approve the PR (or add a `policy-override:<reason-slug>` "
                         "label for an audited break-glass merge) and re-queue. "
-                        "See docs/standards/factory_autonomy/policy.yaml."
+                        # The resolved path, not a hardcoded one: #12116 moved
+                        # this repo's policy into `charter.yaml`, so naming the
+                        # legacy file would send an operator to edit something
+                        # that has no effect on the decision they are reading.
+                        f"See {self._config.merge_policy_path}."
                     ),
                     event_cause="merge_policy_denied",
                     task=issue,

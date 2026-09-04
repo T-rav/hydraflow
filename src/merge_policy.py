@@ -431,6 +431,23 @@ def load_merge_policy(path: Path) -> MergePolicy:
         raise MergePolicyError(f"policy file unreadable/unparseable: {exc}") from exc
     if not isinstance(raw, dict):
         raise MergePolicyError(f"policy root must be a mapping, got {type(raw)}")
+    # `charter.yaml` carries the policy under `policy:` (#12116); a legacy
+    # `policy.yaml` IS the policy. Keyed on the section's presence rather than
+    # on the filename, so a repo mid-migration keeps merging either way and
+    # neither shape gets a weaker schema than the other — everything below
+    # validates whichever mapping we descended to.
+    #
+    # A charter with no `policy:` falls through to the legacy branch and is
+    # refused for its own keys (`purpose`, `articles`, ...) being unknown here.
+    # That refusal is the correct one: fail closed. Treating an unmigrated
+    # charter as an empty policy would hand the merge seam no classes and no
+    # gate, which reads as "nothing is restricted".
+    if "policy" in raw:
+        raw = raw["policy"]
+        if not isinstance(raw, dict):
+            raise MergePolicyError(
+                f"charter `policy:` must be a mapping, got {type(raw)}"
+            )
     unknown = set(raw) - _TOP_LEVEL_KEYS
     if unknown:
         raise MergePolicyError(f"unknown top-level key(s) {sorted(unknown)}")

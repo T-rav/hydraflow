@@ -358,7 +358,8 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                     f"Blocked by merge policy: {policy_verdict.reason}\n\n"
                     "Approve the PR (or add a `policy-override:<reason-slug>` "
                     "label for an audited break-glass merge). "
-                    "See docs/standards/factory_autonomy/policy.yaml.",
+                    # Resolved, not hardcoded — see post_merge_handler.
+                    f"See {self._config.merge_policy_path}.",
                 )
                 return {"status": "policy_denied", "pr": pr_number}
             # An allow verdict for this PR ends the deny event: re-arm so a

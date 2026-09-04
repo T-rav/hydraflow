@@ -252,6 +252,11 @@ _PURE_ANNOTATIONS: dict[str, frozenset[str]] = {
             "LoopOutput",
             "LoopSpec",
             "LoopsBlock",
+            # The charter's `policy:` section (#12116). A dataclass in this
+            # same pure module, holding the act-vs-ask policy as an opaque
+            # mapping — `merge_policy` owns its schema, so nothing about it
+            # reaches across the seam.
+            "PolicyBlock",
             "Purpose",
             "RailsBlock",
             "Sequence",

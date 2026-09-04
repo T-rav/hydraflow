@@ -106,3 +106,76 @@ loops:
     actor: vp-eng
     enabled: false
     goal: Convened by a human for a design-chamber run; not scheduled.
+
+# The act-vs-ask policy this repo governs its own merges by (#12116).
+#
+# Moved here from `docs/standards/factory_autonomy/policy.yaml` on the operator
+# ruling that the charter should be the single governing declaration. This is
+# the NORMATIVE copy: `config.merge_policy_path` prefers a charter that
+# declares a policy, and `merge_policy.enforce_merge_policy` gates the
+# factory's own merges on it.
+#
+# The prose table in `docs/standards/factory_autonomy/README.md` is commentary
+# bound to this section by drift CI: every table row has exactly one entry here
+# and vice versa, matched on `readme_row`. Editing one without the other
+# reddens CI.
+#
+# `policy.yaml` still ships in the standards directory because the kernel
+# writer stamps it into newly onboarded repos, which have no policy in their
+# charter yet. While both exist they are held identical by
+# `tests/architecture/test_charter_policy_is_the_standard_policy.py` — two
+# normative-looking files with only one of them checked is the shape this
+# consolidation exists to remove, and it must not be reintroduced by the
+# migration itself.
+policy:
+  schema_version: 1
+  merge_gate:
+    unapproved_merge_class: high-blast-radius
+    break_glass_label_prefix: 'policy-override:'
+    escalation: hitl
+  classes:
+  - id: tractable-reversible
+    readme_row: Tractable + reversible
+    autonomy: act
+    default: true
+    description: Act, then report what you did. Don't ask first.
+    actions:
+    - arch-regen-push
+    - lint-fix-push
+    - retarget-pr-base
+    - skip-adr-tag
+    - file-hydraflow-find-issue
+    - rebase-stale-branch
+    paths: []
+    labels: []
+  - id: high-blast-radius
+    readme_row: High blast radius
+    autonomy: ask
+    description: Confirm before acting. Surface the proposal, get explicit OK.
+    actions:
+    - force-push-default-branch
+    - delete-branch-unmerged-work
+    - drop-persisted-data
+    - modify-repo-permissions-or-rulesets
+    - send-messages-on-behalf
+    - merge-unapproved-pr
+    paths: []
+    labels: []
+    required_approvals:
+      count: 1
+      roles:
+      - operator
+      - orchestrator-reviewer
+    forbidden_actors: []
+    escalation: hitl
+  - id: authorial-scope
+    readme_row: Authorial / scope
+    autonomy: act
+    description: 'Needs alignment, not permission: brainstorm -> spec -> plan -> TDD execute
+      per the workflow skills. Permission is implicit once the spec is approved.'
+    actions:
+    - new-feature
+    - refactor
+    - architectural-change
+    paths: []
+    labels: []

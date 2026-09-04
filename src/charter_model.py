@@ -537,6 +537,41 @@ class LoopsBlock:
         return tuple(sorted({loop.actor for loop in self.loops}))
 
 
+@dataclass(frozen=True)
+class PolicyBlock:
+    """The act-vs-ask policy the charter carries, and whether it was there.
+
+    Held as an OPAQUE mapping on purpose. `merge_policy.load_merge_policy` is
+    the schema authority for this content and validates it strictly; teaching
+    the charter model the same schema would put two definitions of one thing in
+    two files, which is the duplication #12116 exists to remove — reproduced
+    inside the fix.
+
+    What this class owes is narrower and load-bearing: round-trip fidelity.
+    `Charter.to_dict` emits a fixed key set, so a section the model does not
+    carry is silently dropped the first time anything re-renders the charter —
+    and dropping THIS section does not fail loudly, it produces a charter whose
+    merge gate has no classes at all.
+
+    `present` follows `LoopsBlock`: absent means an unmigrated repo whose
+    policy still lives in `docs/standards/factory_autonomy/policy.yaml`;
+    present-but-empty is a repo declaring something, and the loader refuses it
+    rather than reading it as "nothing is restricted".
+    """
+
+    present: bool = False
+    data: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> PolicyBlock:
+        if raw is None:
+            return cls()
+        return cls(present=True, data=raw if isinstance(raw, dict) else {})
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.data)
+
+
 _CRON_FIELDS = 5
 
 
@@ -730,6 +765,8 @@ class Charter:
     #: that nothing runs. The caretaker skips the first and must not skip the
     #: second, which is why this is not a bare tuple.
     loops: LoopsBlock = field(default_factory=LoopsBlock)
+    #: The `policy:` block (#12116). Opaque here; `merge_policy` validates it.
+    policy: PolicyBlock = field(default_factory=PolicyBlock)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Charter:
@@ -750,6 +787,7 @@ class Charter:
             schema_version=_as_int(
                 "schema_version", data.get("schema_version"), CHARTER_SCHEMA_VERSION
             ),
+            policy=PolicyBlock.from_dict(data.get("policy")),
             # `"loops" in data` is the absent-vs-empty distinction (guard 3):
             # a v1 charter has no key at all, while `loops:` with nothing under
             # it is a repo declaring that nothing runs.
@@ -800,6 +838,11 @@ class Charter:
                 if self.loops.present
                 else {}
             ),
+            # Same present-gating, and for a sharper reason than `loops`: a
+            # charter that never declared a policy must not be re-rendered with
+            # an empty one, because an empty `policy:` is refused at load and
+            # would fail the repo's merges closed on a file nobody edited.
+            **({"policy": self.policy.to_dict()} if self.policy.present else {}),
         }
 
     @classmethod
