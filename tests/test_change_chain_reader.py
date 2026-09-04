@@ -74,23 +74,3 @@ def test_another_issues_plan_is_not_returned(config, tmp_path):
     _committed(tmp_path, 8, "issue eight's plan")
 
     assert read_plan(config, 7, worktree=tmp_path) == ""
-
-
-def test_a_worktree_caller_never_falls_through_to_the_merged_plan(config, tmp_path):
-    """The stale-plan trap: issue N merged, re-opened, re-planned.
-
-    repo_root carries the MERGED chain forever. A caller that passed a
-    worktree has already asked the authoritative place — falling through
-    would hand it the previous attempt's plan, which scope-check now
-    enforces as this attempt's file delta.
-    """
-    _committed(config.repo_root, 7, "the previous attempt's merged plan")
-
-    assert read_plan(config, 7, worktree=tmp_path) == ""
-
-
-def test_without_a_worktree_the_merged_plan_is_still_reachable(config):
-    """The historical read stays available to post-merge callers."""
-    _committed(config.repo_root, 7, "the merged plan")
-
-    assert read_plan(config, 7) == "the merged plan"

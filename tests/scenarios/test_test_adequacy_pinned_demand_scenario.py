@@ -77,10 +77,9 @@ def _world_with_a_pinned_demand(tmp_path) -> MockWorld:
         cwd=tmp_path / "worktrees" / "issue-1",
     )
     # diff-sanity, scope-check, plan-compliance — default success
-    # Still two slots, but a different two: scope-check now returns an empty
-    # prompt (no File Delta in MockWorld's default plan) and short-circuits
-    # WITHOUT spawning, while plan-compliance — which used to short-circuit
-    # for want of a plan — now spawns. One in, one out.
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_text_events(_NEW_UNANCHORED))

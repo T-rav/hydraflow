@@ -103,6 +103,12 @@ _LENGTH_PROBE_DIFF = (
 _LENGTH_PROBE_DOCUMENT = "length-probe stand-in document body\n"
 _LENGTH_PROBE_EXTRA_KWARGS: dict[str, dict[str, str]] = {
     "plan-compliance": {"plan_text": "## File Delta\n- Modify `probe.py`\n"},
+    # scope-check joins the same class: it returns "" without a PLANNED-FILE
+    # SET, not merely without a plan, so the probe needs a File Delta in the
+    # `MODIFIED:` form `parse_file_delta` actually reads. A bullet list (as
+    # plan-compliance uses above) parses to zero files and would leave this
+    # gate measuring an empty render again.
+    "scope-check": {"plan_text": "## File Delta\nMODIFIED: probe.py\n"},
     "discover-completeness": {
         "issue_body": _LENGTH_PROBE_DOCUMENT,
         "brief": _LENGTH_PROBE_DOCUMENT,

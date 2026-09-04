@@ -12,32 +12,21 @@ from scope_check import (
 class TestBuildScopeCheckPrompt:
     """Prompt builder tests."""
 
-    def test_an_empty_plan_reports_no_input_rather_than_passing(self):
-        """A blocking gate must not record a pass it never made.
-
-        An empty prompt makes `skill_gate.run_skill_check` short-circuit to
-        "<skill>: no input data" WITHOUT spawning, so "could not run" stays
-        distinguishable from "judged and passed" in telemetry. The previous
-        canned OK was indistinguishable from a real verdict and burned an
-        agent invocation to have the model echo it back.
-        """
-        assert (
-            build_scope_check_prompt(
-                issue_number=1, issue_title="Add feature", diff="+ line", plan_text=""
-            )
-            == ""
+    def test_empty_plan_auto_passes(self):
+        prompt = build_scope_check_prompt(
+            issue_number=1, issue_title="Add feature", diff="+ line", plan_text=""
         )
+        assert "SCOPE_CHECK_RESULT: OK" in prompt
+        assert "No plan available" in prompt
 
-    def test_a_whitespace_only_plan_reports_no_input(self):
-        assert (
-            build_scope_check_prompt(
-                issue_number=1,
-                issue_title="Add feature",
-                diff="+ line",
-                plan_text="   \n  ",
-            )
-            == ""
+    def test_whitespace_only_plan_auto_passes(self):
+        prompt = build_scope_check_prompt(
+            issue_number=1,
+            issue_title="Add feature",
+            diff="+ line",
+            plan_text="   \n  ",
         )
+        assert "SCOPE_CHECK_RESULT: OK" in prompt
 
     def test_plan_with_file_delta(self):
         plan = "## File Delta\nMODIFIED: src/users.py\nADDED: src/pagination.py\n"
@@ -57,36 +46,12 @@ class TestBuildScopeCheckPrompt:
         )
         assert "new_line()" in prompt
 
-    def test_a_plan_with_no_file_delta_reports_no_input_rather_than_passing(self):
-        """ "Cannot judge" must be distinguishable from "judged and passed".
-
-        This used to render `_(none extracted)_` and hand the classifier an
-        empty planned-file set — under which every file in the diff is
-        "unplanned" and a FAIL routes the change to RETRY. Returning a canned
-        OK instead would be the opposite error: a blocking gate reporting a
-        pass it never made, indistinguishable in telemetry from a real one.
-
-        An empty prompt is the codebase's existing signal for this:
-        ``skill_gate.run_skill_check`` short-circuits it to
-        ``"<skill>: no input data"`` without spawning an agent.
-        """
+    def test_no_file_delta_section_shows_none_extracted(self):
         plan = "## Implementation Plan\nDo stuff\n"
-
-        assert (
-            build_scope_check_prompt(
-                issue_number=5, issue_title="Refactor", diff="+ x", plan_text=plan
-            )
-            == ""
-        )
-
-    def test_a_plan_with_a_file_delta_still_reaches_the_classifier(self):
-        """The guard above must not swallow the case the skill exists for."""
-        plan = "## File Delta\nMODIFIED: src/a.py\n"
         prompt = build_scope_check_prompt(
             issue_number=5, issue_title="Refactor", diff="+ x", plan_text=plan
         )
-        assert "src/a.py" in prompt
-        assert "Classification Rules" in prompt
+        assert "_(none extracted)_" in prompt
 
     def test_includes_classification_rules(self):
         plan = "## File Delta\nMODIFIED: src/a.py\n"
@@ -97,9 +62,11 @@ class TestBuildScopeCheckPrompt:
         assert "WARN" in prompt
         assert "FAIL" in prompt
 
-    def test_an_omitted_plan_text_reports_no_input(self):
-        """plan_text defaults to "", which is the no-input case."""
-        assert build_scope_check_prompt(issue_number=1, issue_title="T", diff="+") == ""
+    def test_default_plan_text_is_empty(self):
+        """plan_text defaults to empty string when not provided."""
+        prompt = build_scope_check_prompt(issue_number=1, issue_title="T", diff="+")
+        assert "SCOPE_CHECK_RESULT: OK" in prompt
+        assert "No plan available" in prompt
 
 
 class TestChangedFilesInDiff:

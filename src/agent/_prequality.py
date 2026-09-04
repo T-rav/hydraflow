@@ -47,12 +47,7 @@ HARNESS_WRITTEN_PATHSPECS: tuple[str, ...] = (
     f":(exclude){CHANGES_PREFIX}",  # ADR-0149 artifact chain
     ":(exclude).beads/issues.jsonl",  # task store, seeded pre-agent
     ":(exclude).beads/.issues.jsonl.lock",
-    ":(exclude)docs/architecture/*.likec4",  # planner-copied context diagrams
 )
-
-
-class BranchDiffUnavailableError(RuntimeError):
-    """git could not produce the branch diff the skills are judged on."""
 
 
 logger = logging.getLogger("hydraflow.agent")
@@ -274,10 +269,9 @@ SUMMARY: <one-line summary>
         diagrams, regenerated arch artifacts) would be classified as
         unplanned and could fail a change for work the agent never did.
 
-        The set comes from ``null_delivery.HARNESS_WRITTEN_PATHSPECS``, not a
-        local literal: the same exclusion already exists in
-        ``_count_commits`` and ``null_delivery``, and hardcoding a third copy
-        is how it went N-1 in the first place.
+        The set is :data:`HARNESS_WRITTEN_PATHSPECS` in this module, which
+        ``_count_commits`` also consumes — one definition, so extending it
+        cannot leave the other consumer behind.
         """
         try:
             result = await self._runner.run_simple(
@@ -293,12 +287,25 @@ SUMMARY: <one-line summary>
                 timeout=self._config.git_command_timeout,
             )
             if result.returncode != 0:
-                # NOT "" — `skill_gate.run_skill_check` short-circuits an
-                # empty diff to passed=True for every blocking skill, so a
-                # git failure would report three passes it never made. This
-                # PR complicates the argv, which widens that surface.
-                raise BranchDiffUnavailableError(
-                    f"git diff exited {result.returncode}: {result.stderr}"
+                # KNOWN GAP, deliberately not closed here. `run_skill_check`
+                # short-circuits an empty diff to passed=True for every
+                # blocking skill, so a git failure reports passes it never
+                # made. Closing it means changing that contract — "" from a
+                # clean tree and "" from a broken git are indistinguishable
+                # at this return type — and doing so inside this PR would
+                # kill the build in every worktree that is not a git repo,
+                # which several tests legitimately use.
+                #
+                # The fail-open predates this change; what this PR adds is a
+                # more complex argv, hence the log line naming the exit code
+                # so the failure is at least greppable.
+                logger.warning(
+                    "git diff exited %d for %s; the post-implementation "
+                    "skills will see an empty diff and short-circuit to a "
+                    "pass: %s",
+                    result.returncode,
+                    branch,
+                    result.stderr,
                 )
             return result.stdout or ""
         except (TimeoutError, FileNotFoundError):

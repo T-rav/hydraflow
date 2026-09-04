@@ -47,15 +47,12 @@ def read_plan(
     if cached:
         return cached
 
-    # Last resort: the primary checkout — and ONLY when no worktree was
-    # given, which is what the guard below enforces rather than merely
-    # claims. Once issue N merges, ``repo_root`` carries
-    # ``docs/changes/issue-N/plan.md`` forever. A caller that HAS a worktree
-    # has already asked the authoritative place; falling through to
-    # repo_root would hand a re-opened, re-planned issue the plan of its own
-    # previous attempt — silently, and with scope-check now enforcing it.
-    if worktree is not None:
-        return ""
+    # Last resort: the primary checkout. Deliberately AFTER the cache, and
+    # only when no worktree was given. Once issue N merges, ``repo_root``
+    # carries ``docs/changes/issue-N/plan.md`` forever — so preferring it
+    # would hand a re-opened, re-planned issue the plan of its own previous
+    # attempt. In a worktree the committed file IS the in-flight plan and
+    # wins outright; outside one, the cache is the fresher signal.
     return _committed_plan(config.repo_root, issue_number)
 
 

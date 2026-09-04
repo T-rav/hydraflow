@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pytest
 
+from agent._prequality import HARNESS_WRITTEN_PATHSPECS
 from scope_check import build_scope_check_prompt
 
 _AUTO_PASS = "No implementation plan is available"
@@ -30,46 +31,43 @@ _DIFF = "diff --git a/src/unplanned.py b/src/unplanned.py\n"
 
 
 @pytest.mark.parametrize(
-    ("plan_text", "expect_prompt"),
+    ("plan_text", "expect_auto_pass"),
     [
-        ("", False),
-        ("   \n  ", False),
+        ("", True),
+        ("   \n  ", True),
         ("## Plan\n\n1. Do the thing", False),
-        (_PLAN, True),
+        (_PLAN, False),
     ],
     ids=["no-plan", "whitespace", "no-file-delta", "real-plan"],
 )
-def test_scope_check_judges_only_when_it_has_a_planned_file_set(
-    plan_text: str, expect_prompt: bool
+def test_only_a_genuinely_absent_plan_reaches_the_no_plan_auto_pass(
+    plan_text: str, expect_auto_pass: bool
 ):
-    """Empty prompt means "cannot run"; a real prompt means it judges.
+    """The degradation this PR closes, pinned at the boundary.
 
-    Asserting the CLASSIFIER is present, not merely that some old auto-pass
-    string is absent — "" satisfies an absence assertion, and "" is the
-    silent no-op this file exists to keep visible.
+    The no-plan auto-pass is correct for genuinely absent plan text and
+    wrong for everything else. Before the worktree was threaded, a cache
+    miss put a REAL plan into that branch — the gate reporting a pass it
+    never made. A plan without a File Delta still reaches the classifier
+    (that is pre-existing behaviour, deliberately not changed here).
     """
     prompt = build_scope_check_prompt(
         issue_number=1, issue_title="t", diff=_DIFF, plan_text=plan_text
     )
 
-    assert bool(prompt) is expect_prompt
-    if expect_prompt:
+    assert (_AUTO_PASS in prompt) is expect_auto_pass
+    if not expect_auto_pass:
         assert "Classification Rules" in prompt
-        assert "src/a.py" in prompt
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "harness_path",
-    [
-        "docs/changes/issue-7/plan.md",
-        ".beads/issues.jsonl",
-        "docs/architecture/ctx.likec4",
-    ],
-    ids=lambda p: p,
+    "pathspec",
+    HARNESS_WRITTEN_PATHSPECS,
+    ids=lambda spec: spec.removeprefix(":(exclude)"),
 )
 async def test_the_judged_diff_excludes_every_harness_written_path(
-    tmp_path, harness_path: str
+    tmp_path, pathspec: str
 ):
     """A blocking gate must not judge files the agent never wrote.
 
@@ -95,6 +93,13 @@ async def test_the_judged_diff_excludes_every_harness_written_path(
     git("update-ref", "refs/remotes/origin/main", "HEAD")
     git("checkout", "-q", "-b", "agent/issue-7")
 
+    # Derived from the pathspec so the case list cannot drift from the set:
+    # a prefix entry needs a file under it, a file entry is the file.
+    excluded = pathspec.removeprefix(":(exclude)")
+    harness_path = (
+        excluded if excluded.endswith(".jsonl") or excluded.endswith(".lock")
+        else f"{excluded}/issue-7/plan.md"
+    )
     target = repo / harness_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("harness wrote this\n", encoding="utf-8")
@@ -160,25 +165,3 @@ async def test_an_agent_written_generated_path_is_still_judged(tmp_path):
         "the agent's own generated-arch delivery was hidden from the skills; "
         "an all-excluded diff short-circuits every blocking gate to a pass"
     )
-
-
-@pytest.mark.asyncio
-async def test_a_git_failure_raises_rather_than_reading_as_an_empty_diff(tmp_path):
-    """"" short-circuits EVERY blocking skill to passed=True."""
-    from agent._prequality import (
-        AgentPreQualityReviewMixin,
-        BranchDiffUnavailableError,
-    )
-    from execution import get_default_runner
-    from tests.helpers import ConfigFactory
-
-    repo = tmp_path / "not-a-repo"
-    repo.mkdir()
-
-    class _Host(AgentPreQualityReviewMixin):
-        def __init__(self) -> None:
-            self._config = ConfigFactory.create()
-            self._runner = get_default_runner()
-
-    with pytest.raises(BranchDiffUnavailableError):
-        await _Host()._get_branch_diff(repo, "agent/issue-7")

@@ -63,10 +63,9 @@ async def test_adequacy_rejection_is_repaired_in_run_and_the_issue_merges(
         cwd=worktree_cwd,
     )
     # 2–3) diff-sanity + plan-compliance — default success
-    # Still two slots, but a different two: scope-check now returns an empty
-    # prompt (no File Delta in MockWorld's default plan) and short-circuits
-    # WITHOUT spawning, while plan-compliance — which used to short-circuit
-    # for want of a plan — now spawns. One in, one out.
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     # 4) test-adequacy finder — EXPLICIT RETRY with a concrete gap
@@ -128,10 +127,9 @@ async def test_repair_telemetry_records_the_rescue(tmp_path) -> None:
         events=_OK, commits=[("x.py", "def frob(): return 1\n")], cwd=worktree_cwd
     )
     # diff-sanity + plan-compliance — default success
-    # Still two slots, but a different two: scope-check now returns an empty
-    # prompt (no File Delta in MockWorld's default plan) and short-circuits
-    # WITHOUT spawning, while plan-compliance — which used to short-circuit
-    # for want of a plan — now spawns. One in, one out.
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(
