@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import sys
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,35 @@ class TestTheSplitDidNotJustRelocateTheProblem:
         recorded = baseline["classes"]["src/config.py:HydraFlowConfig"]["loc"]
 
         assert recorded < 5059, "the pre-decomposition baseline was 5059"
+
+
+class TestTheDecompositionStaysHighFanout:
+    """A dial that moved off config.py is still a dial the world imports."""
+
+    @pytest.mark.parametrize("mixin", MIXINS, ids=lambda m: m.__name__)
+    def test_every_mixin_module_is_high_fanout(self, mixin: type) -> None:
+        """`impacted_tests` runs the full suite for `src/config.py` because a
+        change there can regress almost anything. That reason does not stop
+        applying when a dial moves one module over — but the membership is a
+        hand-written path set, so it stopped seeing its subject.
+
+        Derived here from the config's own bases rather than re-listed, so the
+        NEXT cluster extracted from HydraFlowConfig cannot land outside the
+        set quietly. Without this the gap is invisible: the selector still
+        picks a test file, it just picks far too few, and the autonomous build
+        gate runs it `--bounded` with no full-suite fallback.
+        """
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from impacted_tests import HIGH_FANOUT_SRC  # noqa: PLC0415
+
+        module = sys.modules[mixin.__module__].__file__
+        assert module is not None
+        rel = f"src/{Path(module).name}"
+
+        assert rel in HIGH_FANOUT_SRC, (
+            f"{rel} carries HydraFlowConfig dials but is not high-fanout, so a "
+            "change to it selects a narrow test set"
+        )
 
 
 class TestTheFieldsDidNotMoveInName:
