@@ -7,12 +7,14 @@ import pytest
 from change_chain import (
     ChainArtifact,
     ChainRecord,
+    archive_root,
     chain_dir,
     digest,
+    render_criteria,
     render_evidence,
     render_intent,
     render_plan,
-    render_spec,
+    resolve_chain_dir,
 )
 
 
@@ -56,32 +58,32 @@ def test_render_intent_carries_the_issue_body():
     assert "The body text" in rendered
 
 
-def test_render_spec_lists_each_acceptance_criterion():
-    rendered = render_spec(7, ["returns 404 for an unknown id"], "PASS", [])
+def test_render_criteria_lists_each_acceptance_criterion():
+    rendered = render_criteria(7, ["returns 404 for an unknown id"], "PASS", [])
 
     assert "- returns 404 for an unknown id" in rendered
 
 
-def test_render_spec_records_the_judge_verdict():
-    rendered = render_spec(7, ["a criterion"], "CONCERNS", [])
+def test_render_criteria_records_the_judge_verdict():
+    rendered = render_criteria(7, ["a criterion"], "CONCERNS", [])
 
     assert "CONCERNS" in rendered
 
 
-def test_render_spec_says_so_when_no_criteria_were_drafted():
-    rendered = render_spec(7, [], "PASS", [])
+def test_render_criteria_says_so_when_no_criteria_were_drafted():
+    rendered = render_criteria(7, [], "PASS", [])
 
     assert "_(none drafted)_" in rendered
 
 
-def test_render_spec_lists_forwarded_concerns():
-    rendered = render_spec(7, ["a criterion"], "CONCERNS", ["unresolved thing"])
+def test_render_criteria_lists_forwarded_concerns():
+    rendered = render_criteria(7, ["a criterion"], "CONCERNS", ["unresolved thing"])
 
     assert "- unresolved thing" in rendered
 
 
-def test_render_spec_omits_the_concerns_heading_when_there_are_none():
-    rendered = render_spec(7, ["a criterion"], "PASS", [])
+def test_render_criteria_omits_the_concerns_heading_when_there_are_none():
+    rendered = render_criteria(7, ["a criterion"], "PASS", [])
 
     assert "Concerns forwarded unresolved" not in rendered
 
@@ -154,3 +156,42 @@ def test_from_json_dict_ignores_an_unknown_artifact_name():
 @pytest.mark.parametrize("artifact", list(ChainArtifact))
 def test_every_artifact_value_is_a_safe_filename_stem(artifact: ChainArtifact):
     assert artifact.value.isalpha()
+
+
+def test_resolve_finds_a_live_change(tmp_path: Path):
+    chain_dir(tmp_path, 7).mkdir(parents=True)
+
+    assert resolve_chain_dir(tmp_path, 7) == chain_dir(tmp_path, 7)
+
+
+def test_resolve_finds_a_change_folded_into_the_quarterly_archive(tmp_path: Path):
+    archived = archive_root(tmp_path) / "2026-Q3" / "issue-7"
+    archived.mkdir(parents=True)
+
+    assert resolve_chain_dir(tmp_path, 7) == archived
+
+
+def test_resolve_prefers_the_live_directory_over_an_archived_one(tmp_path: Path):
+    (archive_root(tmp_path) / "2026-Q3" / "issue-7").mkdir(parents=True)
+    chain_dir(tmp_path, 7).mkdir(parents=True)
+
+    assert resolve_chain_dir(tmp_path, 7) == chain_dir(tmp_path, 7)
+
+
+def test_resolve_returns_none_when_the_change_has_no_chain(tmp_path: Path):
+    assert resolve_chain_dir(tmp_path, 7) is None
+
+
+def test_resolve_searches_the_newest_quarter_first(tmp_path: Path):
+    (archive_root(tmp_path) / "2025-Q1" / "issue-7").mkdir(parents=True)
+    newest = archive_root(tmp_path) / "2026-Q3" / "issue-7"
+    newest.mkdir(parents=True)
+
+    assert resolve_chain_dir(tmp_path, 7) == newest
+
+
+def test_resolve_ignores_a_stray_file_in_the_archive_root(tmp_path: Path):
+    archive_root(tmp_path).mkdir(parents=True)
+    (archive_root(tmp_path) / "stray.md").write_text("not a quarter")
+
+    assert resolve_chain_dir(tmp_path, 7) is None

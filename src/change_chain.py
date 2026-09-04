@@ -20,13 +20,14 @@ from enum import StrEnum
 from pathlib import Path
 
 CHANGES_DIRNAME = "changes"
+ARCHIVE_DIRNAME = "archive"
 
 
 class ChainArtifact(StrEnum):
     """One file in a change's chain. The value is the filename stem."""
 
     INTENT = "intent"
-    SPEC = "spec"
+    CRITERIA = "criteria"
     PLAN = "plan"
     EVIDENCE = "evidence"
 
@@ -86,8 +87,42 @@ def digest(text: str) -> str:
 
 
 def chain_dir(repo_root: Path, issue_number: int) -> Path:
-    """Return the chain directory for *issue_number* inside *repo_root*."""
+    """Return the LIVE chain directory for *issue_number* inside *repo_root*.
+
+    Where a change's files are written. Readers want :func:`resolve_chain_dir`
+    instead — this one does not know about the archive.
+    """
     return repo_root / "docs" / CHANGES_DIRNAME / f"issue-{issue_number}"
+
+
+def archive_root(repo_root: Path) -> Path:
+    """Return the compaction archive root (ADR-0149 ruling 2)."""
+    return repo_root / "docs" / CHANGES_DIRNAME / ARCHIVE_DIRNAME
+
+
+def resolve_chain_dir(repo_root: Path, issue_number: int) -> Path | None:
+    """Find *issue_number*'s chain directory, live or archived.
+
+    ADR-0149 ruling 2 folds each quarter into
+    ``docs/changes/archive/YYYY-Qn/``, so a reader that only knows the live
+    path stops finding a change the first time it is compacted — and a gate
+    that stops finding its subject goes green, which is the failure mode
+    this repo has shipped before. Every reader resolves; nobody memoises.
+
+    Returns ``None`` when the change has no chain in either place.
+    """
+    live = chain_dir(repo_root, issue_number)
+    if live.is_dir():
+        return live
+    archive = archive_root(repo_root)
+    if not archive.is_dir():
+        return None
+    name = f"issue-{issue_number}"
+    for quarter in sorted(archive.iterdir(), reverse=True):
+        candidate = quarter / name
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def render_intent(issue_number: int, title: str, body: str, captured_at: str) -> str:
@@ -103,7 +138,7 @@ def render_intent(issue_number: int, title: str, body: str, captured_at: str) ->
     )
 
 
-def render_spec(
+def render_criteria(
     issue_number: int,
     criteria: Sequence[str],
     judge_verdict: str,
@@ -111,7 +146,7 @@ def render_spec(
 ) -> str:
     """Render the pre-implementation acceptance criteria and judge verdict."""
     lines = [
-        f"# Spec — Issue #{issue_number}",
+        f"# Criteria — Issue #{issue_number}",
         "",
         "Acceptance criteria drafted from the plan before any code existed,",
         "and the SpecJudge verdict on them.",
