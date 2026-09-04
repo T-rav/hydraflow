@@ -545,12 +545,18 @@ def _hermetic_credentials(monkeypatch):
     #11317, #11368 class). Tests that need a credential set it explicitly via
     monkeypatch.setenv, which layers on top of this deletion.
     """
-    for key in (
-        "ZAI_API_KEY",
-        "ZAI_CODING_PLAN_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_AUTH_TOKEN",
-    ):
+    from runner_utils import provider_api_key_envs  # noqa: PLC0415
+
+    # Union the canonical set rather than hand-listing names, which is what
+    # provider_api_key_envs()'s own docstring asks callers to do: "the single
+    # source of truth for the provider-credential scrub surface: test fixtures
+    # union this in instead of hand-listing names". The hand-listed four missed
+    # seven -- MOONSHOT_API_KEY, KIMI_API_KEY, OPENROUTER_API_KEY and the
+    # HYDRAFLOW_-prefixed forms -- so a developer shell carrying any of them
+    # could still reach a real, billed one-shot HTTP backend from a test
+    # (#12144 review). Backends added later are covered without a second edit.
+    redirect_pair = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+    for key in sorted(provider_api_key_envs() | set(redirect_pair)):
         monkeypatch.delenv(key, raising=False)
 
 

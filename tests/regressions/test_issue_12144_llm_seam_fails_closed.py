@@ -170,8 +170,15 @@ def test_every_lazily_built_client_routes_through_the_guarded_seam(
     tree = ast.parse((SRC / module).read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == client:
-            body = ast.dump(node)
-            assert "run_lightweight_agent" in body, (
+            # A real Call node, not a substring of ast.dump(): a docstring
+            # merely NAMING the seam would satisfy a string match, which would
+            # make this guard pass for a class that never calls it.
+            calls = {
+                inner.func.id
+                for inner in ast.walk(node)
+                if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+            }
+            assert "run_lightweight_agent" in calls, (
                 f"{module}::{client} builds an LLM client but does not reach "
                 f"the guarded seam; the guard in run_lightweight_agent does "
                 f"not protect it."
