@@ -310,6 +310,22 @@ async def _wait_for_rate_limit_cooldown() -> None:
         await asyncio.sleep(min(remaining, _RATE_LIMIT_POLL_INTERVAL))
 
 
+class UnstubbedSpawnError(RuntimeError):
+    """A test would have reached a real model spawn (#12144, #12147).
+
+    Never raised in production: both guards return early unless
+    ``_running_under_pytest()``. It is a distinct type, and a member of
+    ``INFRA_FATAL_EXCEPTIONS``, because a bare ``RuntimeError`` is in neither
+    fatal set — so every ``except Exception: reraise_on_credit_or_bug(exc)``
+    site (the idiom this repo mandates for spawning runners) SWALLOWED it and
+    degraded the refusal into an ordinary crash. The spawn was still prevented,
+    but the signal the guard exists to produce was lost: `report_issue_loop`
+    turned it into ``agent_crashed=True`` and `verification_judge` into a
+    logged warning, both of which a loosely-asserting test reads as a
+    legitimate negative path.
+    """
+
+
 class AuthenticationError(RuntimeError):
     """Raised when a subprocess fails due to GitHub authentication issues."""
 
