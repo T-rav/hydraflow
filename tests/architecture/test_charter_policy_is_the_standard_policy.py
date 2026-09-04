@@ -27,7 +27,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -55,10 +54,24 @@ def test_the_charter_declares_a_policy() -> None:
     )
 
 
-@pytest.mark.skipif(
-    not _STANDARD.exists(),
-    reason="policy.yaml has been retired; this guard retires with it",
-)
+def test_the_standard_copy_still_exists() -> None:
+    """The premise of the guard below, asserted rather than skipped around.
+
+    A `skipif` on `_STANDARD.exists()` was the obvious way to write "this
+    retires when policy.yaml does", and `test_no_ignored_active_tests` refuses
+    it — correctly. A skip that fires is a guard that stopped guarding while
+    still reporting green, and the condition here is one a PR can change.
+
+    So it fails instead. When `policy.yaml` is retired this whole file is
+    deleted with it, which is a deliberate act on a red test rather than a
+    silent transition to covering nothing.
+    """
+    assert _STANDARD.exists(), (
+        f"{_STANDARD} is gone. If that was deliberate, delete this file too — "
+        "it exists only to hold the stamped copy to the governing one."
+    )
+
+
 def test_the_two_declarations_are_identical() -> None:
     """The stamped copy and the governing copy must not diverge.
 

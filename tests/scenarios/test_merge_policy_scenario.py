@@ -34,7 +34,12 @@ from models import MergeApprovalContext
 from post_merge_handler import PostMergeHandler
 from state import StateTracker
 from tests.conftest import PRInfoFactory, ReviewResultFactory, TaskFactory
-from tests.helpers import STRICT_MERGE_POLICY, ConfigFactory, install_repo_merge_policy
+from tests.helpers import (
+    STRICT_MERGE_POLICY,
+    ConfigFactory,
+    install_charter_merge_policy,
+    install_repo_merge_policy,
+)
 
 pytestmark = pytest.mark.scenario_loops
 
@@ -117,6 +122,49 @@ class TestMergePolicyScenario:
             "v1 default policy has no matchers — the allow path must not read PR labels"
         )
         assert not config.approval_records_path.exists()
+
+    async def test_a_charter_declared_policy_gates_the_same_seam(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """#12116: the policy moved into `charter.yaml` and still gates merges.
+
+        The unit tests prove the loader reads the section and the resolver
+        prefers the file. Neither can show that the value reaches
+        `PostMergeHandler` — the seam where a deny actually stops a merge — and
+        that is the whole point of moving it: a governing declaration nothing
+        enforces is a document, not a policy.
+
+        No legacy file is written here on purpose. If one were present, a build
+        that ignored the charter entirely would still deny and this would pass.
+        """
+        config, handler, github, ctx = _make_world(tmp_path)
+        install_charter_merge_policy(config)
+        _fake_label_transport(monkeypatch, github)
+
+        await handler.handle_approved(ctx)
+
+        assert github.pr(_PR_NUMBER).merged is False
+        ctx.escalate_fn.assert_awaited_once()
+
+    async def test_an_undeclared_charter_does_not_gate_anything(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The decoy. A charter with no `policy:` must not deny by existing.
+
+        Every repo has a charter; almost none declare a policy yet. If merely
+        having the file were enough to route the gate at it, this merge would
+        be blocked — and every unmigrated repo's merges with it.
+        """
+        config, handler, github, ctx = _make_world(tmp_path)
+        (config.repo_root).mkdir(parents=True, exist_ok=True)
+        (config.repo_root / "charter.yaml").write_text(
+            "schema_version: 2\n", encoding="utf-8"
+        )
+        _fake_label_transport(monkeypatch, github)
+
+        await handler.handle_approved(ctx)
+
+        assert github.pr(_PR_NUMBER).merged is True
 
     async def test_tightened_policy_blocks_merge_and_escalates(
         self, tmp_path, monkeypatch

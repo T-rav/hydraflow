@@ -26,6 +26,8 @@ from typing import (
 )
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import yaml
+
 from config import Credentials
 
 SMOKE_SUITE_SIZE = 8
@@ -893,6 +895,30 @@ def install_repo_merge_policy(config: Any, text: str = STRICT_MERGE_POLICY) -> P
     path = config.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    return path
+
+
+def install_charter_merge_policy(config: Any, text: str = STRICT_MERGE_POLICY) -> Path:
+    """Write *text* as the `policy:` section of the repo's `charter.yaml` (#12116).
+
+    The charter is the governing declaration, and
+    ``HydraFlowConfig.merge_policy_path`` prefers it over the legacy standards
+    file when it declares a policy — so this is how a seam test proves the
+    charter's own section is what the gate actually read, rather than that a
+    legacy file happened to say the same thing.
+    """
+    path = config.repo_root / "charter.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 2,
+                "purpose": {"product": "seam test", "goals": ["g"]},
+                "policy": yaml.safe_load(text),
+            }
+        ),
+        encoding="utf-8",
+    )
     return path
 
 
