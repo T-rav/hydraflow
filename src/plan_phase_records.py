@@ -66,7 +66,7 @@ class PlanRecordsMixin:
 
         async def _run_spec_ac_and_judge(
             self, issue: Task, adv: AdversarialState, plan_text: str
-        ) -> None: ...  # provided by PlanAdversarialMixin
+        ) -> CriteriaDraft | None: ...  # provided by PlanAdversarialMixin
 
         def _skip_plan_review(
             self, issue: Task
