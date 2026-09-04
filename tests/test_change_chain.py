@@ -211,17 +211,13 @@ def test_an_issue_body_quoting_a_merge_conflict_cannot_produce_markers():
     ]
 
 
-def test_the_quoted_body_still_carries_its_content():
-    rendered = render_intent(7, "t", "<<<<<<< HEAD\nthe real text", "2026-01-01")
-
-    assert "the real text" in rendered
-
-
-def test_a_blank_line_in_the_body_stays_a_quoted_blank():
-    rendered = render_intent(7, "t", "first\n\nsecond", "2026-01-01")
-
-    assert ">\n" in rendered
-
-
-def test_an_empty_body_renders_without_crashing():
-    assert render_intent(7, "t", "", "2026-01-01").endswith(">\n")
+@pytest.mark.parametrize(
+    ("body", "expected", "why"),
+    [
+        ("<<<<<<< HEAD\nthe real text", "the real text", "quoting keeps content"),
+        ("first\n\nsecond", ">\n", "a blank line stays a quoted blank"),
+        ("", ">\n", "an empty body still renders"),
+    ],
+)
+def test_the_quoted_intent_body_survives_its_input(body: str, expected: str, why: str):
+    assert expected in render_intent(7, "t", body, "2026-01-01"), why
