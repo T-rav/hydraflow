@@ -321,9 +321,8 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
 
         1. Initial agent _execute (streaming) — commits broken code
         2. diff-sanity skill _execute — default success (no marker → passed)
-    3. scope-check skill _execute — reports "no input data" (MockWorld's
-       default plan declares no File Delta, so there is nothing to compare);
-       it no longer takes the no-PLAN auto-pass, which is a different branch
+    3. scope-check skill _execute — spawns as it always has; the committed
+       plan reaches it where a cache miss previously left it with none
     3b. plan-compliance skill _execute — runs, which it previously did not
             4. test-adequacy skill _execute — default success
         5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
@@ -388,7 +387,7 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
     )
     # FakeDocker invocations:
     # 1 agent + 4 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
-    # + 1 fix-agent + 1 quality-lite-pass + 1 test step = 11.
+    # + 1 fix-agent + 1 quality-lite-pass + 1 test step = 12.
     # Names the skill rather than counting: the previous `>= 11` lower bound
     # passed with the fix reverted, because a misaligned queue still produced
     # 12 invocations. Plan-compliance running at all IS the change.
@@ -399,10 +398,9 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         "plan-compliance did not run — the plan fallback is cache-only again "
         "and both it and scope-check have silently disarmed"
     )
-    # MockWorld's default plan carries no `## File Delta`, so scope-check
-    # legitimately reports "no input data" here rather than comparing. What
-    # this pins is that it is no longer taking the no-PLAN branch — that
-    # would mean the fallback went cache-only again and BOTH skills disarmed.
+    # What this pins is that scope-check is not taking the no-PLAN branch.
+    # Reaching it would mean the fallback went cache-only again and both
+    # skills disarmed — plan-compliance silently, scope-check on a canned OK.
     assert not any("No implementation plan is available" in p for p in prompts), (
         "scope-check took its no-plan auto-pass; the plan fallback is cache-only again"
     )
@@ -465,8 +463,8 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
         commits=[("x.py", "ok")],
         cwd=worktree_cwd,
     )
-    # 2–5) Three post-implementation skill _execute calls + the coverage probe
-    # (diff-sanity, plan-compliance, test-adequacy) — default success
+    # 2–6) Four post-implementation skill _execute calls + the coverage probe
+    # (diff-sanity, scope-check, plan-compliance, test-adequacy)
     # One MORE slot than before: plan-compliance now spawns (it has plan
     # text at last, from the committed chain). scope-check still spawns as
     # it always did — its behaviour is deliberately unchanged here.
@@ -1134,9 +1132,8 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
 
         1. Initial agent _execute (streaming) — commits code
         2. diff-sanity skill _execute — default success (no marker)
-    3. scope-check skill _execute — reports "no input data" (MockWorld's
-       default plan declares no File Delta, so there is nothing to compare);
-       it no longer takes the no-PLAN auto-pass, which is a different branch
+    3. scope-check skill _execute — spawns as it always has; the committed
+       plan reaches it where a cache miss previously left it with none
     3b. plan-compliance skill _execute — runs, which it previously did not
         4. test-adequacy finder _execute — EXPLICIT OK marker via assistant event
         5. ``make coverage 0`` (run_simple via FakeDocker) — exit 0, no

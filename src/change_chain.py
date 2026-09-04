@@ -29,6 +29,37 @@ ARCHIVE_DIRNAME = "archive"
 CHANGES_PREFIX = f"docs/{CHANGES_DIRNAME}"
 
 
+#: Paths the HARNESS puts in the worktree BEFORE the implementer agent runs.
+#: Consumed by ``agent/_prequality._get_branch_diff`` (the diff the blocking
+#: post-implementation skills judge) and ``agent/_commit._count_commits``
+#: (delivery counting). One definition, so a path added here cannot leave
+#: either consumer behind.
+#:
+#: Homed here rather than in one of the two mixins: ``_commit`` and
+#: ``_prequality`` are siblings that already declare seams on each other,
+#: and putting a shared constant in one made it a load-order dependency of
+#: the other.
+#:
+#: ``docs/architecture/*.likec4`` is on the list because
+#: ``PlannerRunner.copy_diagrams_to_workspace`` drops the planner's context
+#: diagrams there before the agent starts (``implement_phase/_build.py``),
+#: so they are in every change's diff. Narrowed to the ``.likec4`` glob, not
+#: the whole directory — the same trade ``null_delivery`` already makes, so
+#: a hand-written ``docs/architecture/README.md`` stays a real deliverable.
+#:
+#: NOT derived from ``null_delivery._NON_DELIVERABLE_PREFIXES``: that set
+#: answers "is this a standalone deliverable", which also covers
+#: ``repo_wiki/`` and ``docs/arch/generated/`` — paths the AGENT writes via
+#: ``make arch-regen``. Excluding those would hide a real delivery from
+#: every skill, and an all-excluded diff short-circuits them all to a pass.
+HARNESS_WRITTEN_PATHSPECS: tuple[str, ...] = (
+    f":(exclude){CHANGES_PREFIX}",
+    ":(exclude).beads/issues.jsonl",
+    ":(exclude).beads/.issues.jsonl.lock",
+    ":(exclude)docs/architecture/*.likec4",
+)
+
+
 class ChainArtifact(StrEnum):
     """One file in a change's chain. The value is the filename stem."""
 
