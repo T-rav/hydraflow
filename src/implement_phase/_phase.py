@@ -17,6 +17,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from change_chain_writer import ChangeChainWriter
 from dispatch_overlap import DispatchOverlapTracker
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory
@@ -98,6 +99,7 @@ class ImplementPhase(
         self._config = config
         self._state = state
         self._workspaces = workspaces
+        self._chain_writer = ChangeChainWriter(config=config)
         self._agents = agents
         self._prs = prs
         self._transitioner: TaskTransitioner = prs

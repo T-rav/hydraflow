@@ -21,6 +21,8 @@ import time
 from typing import TYPE_CHECKING
 
 from adr_utils import is_adr_issue_title, next_adr_number
+from change_chain_writer import ChangeChainWriter
+from exception_classify import reraise_on_credit_or_bug
 from harness_insights import (
     FailureCategory,
     format_known_traps_for_prompt,
@@ -61,6 +63,7 @@ class ImplementBuildMixin:
     # ------------------------------------------------------------------
     _agents: AgentRunner
     _beads_manager: BeadsManager | None
+    _chain_writer: ChangeChainWriter
     _config: HydraFlowConfig
     _harness_insights: HarnessInsightStore | None
     _issue_cache: IssueCache | None
@@ -287,6 +290,7 @@ class ImplementBuildMixin:
         else:
             wt_path = await self._workspaces.create(issue.id, branch)
         self._state.set_workspace(issue.id, str(wt_path))
+        await self._materialise_chain(issue, wt_path)
         await self._prs.push_branch(wt_path, branch, force=reset_for_retry)
         await self._transitioner.post_comment(
             issue.id,
@@ -295,6 +299,29 @@ class ImplementBuildMixin:
             f"Implementation in progress.",
         )
         return wt_path
+
+    async def _materialise_chain(self, issue: Task, wt_path: Path) -> None:
+        """Commit the artifact chain into the worktree before the agent runs.
+
+        ADR-0149: the implementer inherits the chain as history it cannot
+        rewrite, rather than authoring the files the gate later reads. Runs
+        before ``push_branch`` so the chain commit ships with the branch.
+
+        Never aborts the build. A change planned before the chain existed
+        has no record, and refusing to implement it would stall the factory
+        on its own backlog; a missing chain is a gate finding instead.
+        """
+        try:
+            await self._chain_writer.materialise(wt_path, issue.id)
+        except Exception as exc:  # noqa: BLE001 - reraised selectively below
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Chain materialisation failed for issue #%d — the change will "
+                "carry no committed chain",
+                issue.id,
+                exc_info=True,
+                extra={"issue": issue.id},
+            )
 
     async def _record_impl_metrics(
         self, issue: Task, result: WorkerResult, review_feedback: str
