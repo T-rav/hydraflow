@@ -146,7 +146,6 @@ def test_repo_runtime_has_no_database_backed_task_cli_path():
         ".dockerignore",
         ".env.sample",
         ".gitignore",
-        ".lgtm.yml",
         "claude.sh",
         "docker-compose.sandbox.yml",
         "pyproject.toml",
