@@ -324,8 +324,7 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
       3. scope-check skill _execute — real comparison against the committed
          plan (ADR-0149), no longer the no-plan auto-pass
       3b. plan-compliance skill _execute — runs for the same reason
-         plan-compliance is SKIPPED (empty prompt when no plan → no _execute call)
-      4. test-adequacy skill _execute — default success
+          4. test-adequacy skill _execute — default success
       5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
       6. pre-quality review _execute, attempt 1, review pass — default success
       7. pre-quality run-tool _execute, attempt 1, run_tool pass — default success
@@ -336,9 +335,9 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
          (run_simple) — default success
 
     The implement gate never runs the host-locked `make quality` (#11568).
-    plan-compliance returns an empty prompt string when no plan is present,
-    causing _run_skill to return early without calling _execute. Only 3 of the
-    4 registered skills consume an agent slot; test-adequacy also spends one
+    All 4 registered skills consume an agent slot: ADR-0149's committed chain
+    supplies the plan text, so plan-compliance no longer returns an empty
+    prompt and scope-check no longer takes its no-plan auto-pass; test-adequacy also spends one
     on its coverage probe. All skill/pre-quality slots must be explicitly
     queued in FIFO order so that the fail/fix scripts land in the correct
     positions.
@@ -390,8 +389,21 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         f"docker_invocations={len(world.docker.invocations)}"
     )
     # FakeDocker invocations:
-    # 1 agent + 3 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
+    # 1 agent + 4 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
     # + 1 fix-agent + 1 quality-lite-pass + 1 test step = 11.
+    # Names the skill rather than counting: the previous `>= 11` lower bound
+    # passed with the fix reverted, because a misaligned queue still produced
+    # 12 invocations. Plan-compliance running at all IS the change.
+    prompts = [
+        inv.command[2] for inv in world.docker.invocations if len(inv.command) > 2
+    ]
+    assert any("Plan Compliance skill" in p for p in prompts), (
+        "plan-compliance did not run — the plan fallback is cache-only again "
+        "and both it and scope-check have silently disarmed"
+    )
+    assert not any("No implementation plan is available" in p for p in prompts), (
+        "scope-check took its no-plan auto-pass; it is not comparing anything"
+    )
     assert len(world.docker.invocations) >= 11
     make_cmds = [
         inv.command for inv in world.docker.invocations if inv.command[:1] == ["make"]
@@ -411,11 +423,10 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     (ConfigFactory default is 0, which skips wait_for_ci entirely in
     PostMergeHandler._run_ci_gate). We pass a custom config so the CI gate runs.
 
-    FakeDocker invocations (9 total — the gate passes first attempt):
+    FakeDocker invocations (10 total — the gate passes first attempt):
       1. Initial agent _execute (streaming) — commits code
-      2–4. Three post-implementation skill _execute calls — default success
-           (diff-sanity, scope-check, test-adequacy;
-           plan-compliance is skipped: empty prompt with no plan)
+      2–5. Four post-implementation skill _execute calls — default success
+           (diff-sanity, scope-check, plan-compliance, test-adequacy)
       5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
       6. Pre-quality review _execute, attempt 1 — default success
       7. Pre-quality run-tool _execute, attempt 1 — default success
@@ -452,10 +463,11 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
         commits=[("x.py", "ok")],
         cwd=worktree_cwd,
     )
-    # 2–5) Three post-implementation skill _execute calls + the coverage probe
-    # (diff-sanity, scope-check, test-adequacy) — default success
-    # plan-compliance is skipped: returns empty prompt with no plan → no _execute
-    for _ in range(4):
+    # 2–6) Four post-implementation skill _execute calls + the coverage probe
+    # (diff-sanity, scope-check, plan-compliance, test-adequacy) — success.
+    # plan-compliance now runs: ADR-0149's committed chain supplies the plan
+    # text that previously left it with an empty prompt.
+    for _ in range(5):
         world.docker.script_run(_ok)
     # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
     world.docker.script_run(_ok)  # review pass
@@ -1165,7 +1177,7 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
     world.docker.script_run(
         _text_events("TEST_ADEQUACY_RESULT: OK\nSUMMARY: coverage adequate")
     )
-    # 5) make coverage 0 — exit 0, no coverage.xml (graceful preserve)
+    # 6) make coverage 0 — exit 0, no coverage.xml (graceful preserve)
     world.docker.script_run(_ok)
     # 6) independent verifier — CONCUR keeps the pass
     world.docker.script_run(

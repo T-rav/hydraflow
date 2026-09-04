@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from change_chain import CHANGES_PREFIX
 from models import (
     LoopResult,
     Task,
@@ -237,13 +238,28 @@ SUMMARY: <one-line summary>
         )
 
     async def _get_branch_diff(self, worktree_path: Path, branch: str) -> str:
-        """Return the combined diff of *branch* against the base branch."""
+        """Return the combined diff of *branch* against the base branch.
+
+        ``docs/changes/`` is excluded (ADR-0149). The harness commits a
+        change's artifact chain into the worktree BEFORE the agent starts, so
+        it is in this diff for every change — and this diff is what the
+        post-implementation skills judge. scope-check is blocking: without
+        the exclusion it sees chain files that no plan's File Delta names,
+        classifies them as unplanned, and can fail a change for artifacts the
+        agent never wrote.
+
+        Same exclusion, same reason, as the two other consumers of the branch
+        diff: ``_count_commits`` and ``null_delivery``.
+        """
         try:
             result = await self._runner.run_simple(
                 [
                     "git",
                     "diff",
                     f"origin/{self._config.base_branch()}...{branch}",
+                    "--",
+                    ".",
+                    f":(exclude){CHANGES_PREFIX}",
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,

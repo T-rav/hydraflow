@@ -225,6 +225,7 @@ class AgentPromptMixin(BaseRunner):
         bead_mapping: dict[str, str] | None = None,
         human_guidance: str = "",
         attempt_number: int = 0,
+        worktree: Path | None = None,
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         builder = PromptBuilder()
@@ -233,7 +234,10 @@ class AgentPromptMixin(BaseRunner):
 
         # Fallback to saved plan file
         if not plan_comment:
-            plan_comment = self._load_plan_fallback(issue.id)
+            # With the worktree, so the IMPLEMENTER sees the committed chain
+            # too. Arming scope-check without this would judge the agent's
+            # diff against a plan the agent itself was never shown.
+            plan_comment = self._load_plan_fallback(issue.id, worktree)
             raw_plan = plan_comment
             if not plan_comment:
                 logger.error(

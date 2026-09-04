@@ -85,6 +85,24 @@ def build_scope_check_prompt(
             "SUMMARY: Landing-only/verification-only task — no changes to planned files"
         )
 
+    # No planned files means nothing to compare against, and the classifier
+    # below treats every unlisted file as a FAIL candidate — so arming it
+    # with an empty list would fail every change whose plan carries no
+    # `## File Delta` section. That is not scope creep, it is a plan this
+    # skill cannot judge. Auto-pass, the same answer the empty-plan branch
+    # gives, for the same reason (ADR-0149 armed this path by supplying plan
+    # text where there previously was none).
+    if not planned_files:
+        return (
+            f"You are running the Scope Check skill for issue #{issue_number}: "
+            f"{issue_title}.\n\n"
+            "The plan declares no File Delta, so there is no planned-file set "
+            "to compare the diff against — auto-pass. A plan this skill "
+            "cannot judge is not evidence of scope creep.\n\n"
+            "SCOPE_CHECK_RESULT: OK\n"
+            "SUMMARY: Plan declares no File Delta — nothing to compare"
+        )
+
     planned_section = (
         "\n".join(f"- `{f}`" for f in planned_files)
         if planned_files

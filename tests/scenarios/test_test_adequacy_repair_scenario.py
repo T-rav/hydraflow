@@ -13,8 +13,8 @@ host against the real worktree and consumes no slots):
 
   1. Initial agent _execute (streaming) — commits code
   2. diff-sanity skill _execute — default success (no marker)
-  3. scope-check skill _execute — default success
-     (plan-compliance is skipped: empty prompt with no plan)
+  3. scope-check skill _execute — real comparison against the committed plan
+  3b. plan-compliance skill _execute — runs for the same reason (ADR-0149)
   4. test-adequacy finder _execute — EXPLICIT RETRY with GAPS
   5. REPAIR _execute — commits the missing test (HEAD moves)  ← #11593
   6. re-check finder _execute — EXPLICIT OK
@@ -60,7 +60,12 @@ async def test_adequacy_rejection_is_repaired_in_run_and_the_issue_merges(
         commits=[("x.py", "def frob(): return 1\n")],
         cwd=worktree_cwd,
     )
-    # 2–3) diff-sanity + scope-check — default success
+    # 2–4) diff-sanity + scope-check + plan-compliance — default success
+    # plan-compliance now runs too: ADR-0149 threads the issue worktree
+    # into the plan fallback, so the committed chain supplies the plan
+    # text that previously left it with an empty prompt (and left
+    # scope-check auto-passing for the same reason).
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     # 4) test-adequacy finder — EXPLICIT RETRY with a concrete gap
@@ -121,6 +126,9 @@ async def test_repair_telemetry_records_the_rescue(tmp_path) -> None:
     world.docker.script_run_with_commits(
         events=_OK, commits=[("x.py", "def frob(): return 1\n")], cwd=worktree_cwd
     )
+    # diff-sanity, scope-check, plan-compliance — default success.
+    # plan-compliance now runs (ADR-0149 supplies the plan from the chain).
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(

@@ -188,6 +188,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             cmd = self._build_command(worktree_path)
             prompt, prompt_stats = await self._build_prompt_with_stats(
                 task,
+                worktree=worktree_path,
                 review_feedback=review_feedback,
                 prior_failure=prior_failure,
                 bead_mapping=bead_mapping,
