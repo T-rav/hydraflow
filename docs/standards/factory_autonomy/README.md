@@ -29,7 +29,7 @@ document.
 ## Machine-readable policy (normative)
 
 The table above is **commentary**. The normative, enforced encoding of it is
-the `policy:` section of this repo's [`charter.yaml`](../../../charter.yaml)
+the `policy:` section of this repo's root `charter.yaml`
 (CH-3, #9731; moved there by #12116): machine-readable change classes that
 `src/merge_policy.py` consults at the factory's own autonomous merge seams
 (post-review Monitor merges, the PR unsticker, the bot-PR loop, epic bundle
