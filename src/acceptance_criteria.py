@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
+from change_chain_reader import read_plan
 from execution import get_default_runner
 from models import VerificationCriteria
 from precheck import run_precheck_context
@@ -282,13 +283,16 @@ Diff summary:
         )
 
     def _read_plan_file(self, issue_number: int) -> str:
-        """Read the plan from ``.hydraflow/plans/issue-N.md``."""
-        plan_path = self._config.plans_dir / f"issue-{issue_number}.md"
-        try:
-            return plan_path.read_text()
-        except OSError:
-            logger.debug("Plan file not found for issue #%d", issue_number)
-            return ""
+        """Read the plan. Runs post-merge with no worktree, so cache-first.
+
+        `repo_root` does carry a merged change's chain, but it is consulted
+        last: preferring it would hand a re-opened, re-planned issue the
+        plan of its own previous attempt.
+        """
+        plan_text = read_plan(self._config, issue_number)
+        if not plan_text:
+            logger.debug("No plan found for issue #%d", issue_number)
+        return plan_text
 
     def _summarize_diff(self, diff: str) -> str:
         """Truncate diff to fit in the prompt."""

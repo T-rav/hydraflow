@@ -19,6 +19,7 @@ exclude_docs: |
   prompt-audit-*.md
   superpowers/**
   diagnostics/**
+  changes/**
 
 theme:
   name: material

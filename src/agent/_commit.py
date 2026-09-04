@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from base_runner import BaseRunner
+from change_chain import CHANGES_PREFIX
 from models import (
     Task,
 )
@@ -154,6 +155,12 @@ class AgentCommitMixin(BaseRunner):
         be committed alongside implementation work, but a commit which changes
         only the task store is not implementation delivery and must not satisfy
         the zero-commit gate.
+
+        ``docs/changes/`` is excluded on exactly the same grounds (ADR-0149):
+        the harness materialises and commits a change's artifact chain into
+        the worktree *before* the agent starts, so counting it would hand
+        every zero-delivery run a commit it did not make and let a
+        null-delivery build past the zero-commit gate.
         """
         try:
             result = await self._runner.run_simple(
@@ -166,6 +173,7 @@ class AgentCommitMixin(BaseRunner):
                     ".",
                     ":(exclude).beads/issues.jsonl",
                     ":(exclude).beads/.issues.jsonl.lock",
+                    f":(exclude){CHANGES_PREFIX}",
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,
