@@ -146,6 +146,12 @@ def test_gateway_failover_keeps_transport_and_needs_no_real_zai_key(
 ) -> None:
     monkeypatch.delenv("ZAI_API_KEY", raising=False)
     monkeypatch.delenv("ZAI_CODING_PLAN_KEY", raising=False)
+    # The worker still holds no credential — that is this test's point and it is
+    # unchanged. What #12131 added is that the PROXY must have somewhere to mint
+    # against; "no local key needed" was never the same claim as "no z.ai lane
+    # needed", and the code read it as though it were.
+    monkeypatch.setenv("GATEWAY_ZAI_HARNESS_BASE_URL", "https://zai.invalid")
+    monkeypatch.setenv("GATEWAY_ZAI_HARNESS_API_KEY", "not-a-real-credential")
     credit_failover.engage(now=NOW, resume_at=None, cooldown_minutes=15)
     cmd = ["claude", "--model", "claude-opus-4-8", "-p", "x"]
 

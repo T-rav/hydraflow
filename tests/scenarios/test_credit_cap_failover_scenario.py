@@ -46,8 +46,17 @@ pytestmark = pytest.mark.scenario
 
 @pytest.fixture
 def capped(monkeypatch: pytest.MonkeyPatch):
-    """Claude credits exhausted, a z.ai credential present — failover armed."""
+    """Claude credits exhausted, a z.ai lane reachable — failover armed.
+
+    Both credentials, because the two lanes need different things (#12131): a
+    direct `claude` spawn addresses z.ai itself and needs `ZAI_API_KEY`, while a
+    `gateway` spawn needs the PROXY to have a z.ai upstream to mint against.
+    Arming only the first left the gateway dials testing a failover that, in a
+    deployment without that upstream, refuses to happen.
+    """
     monkeypatch.setenv("ZAI_API_KEY", "test-key-not-a-real-credential")
+    monkeypatch.setenv("GATEWAY_ZAI_HARNESS_BASE_URL", "https://zai.invalid")
+    monkeypatch.setenv("GATEWAY_ZAI_HARNESS_API_KEY", "test-key-not-a-real-credential")
     credit_failover.reset_for_tests()
     credit_failover.engage(now=datetime.now(UTC), resume_at=None, cooldown_minutes=60)
     yield
