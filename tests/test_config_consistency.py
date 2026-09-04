@@ -68,35 +68,22 @@ def _parse_override_table(text: str, table_name: str) -> list[tuple[str, str]]:
 
 
 def _parse_config_fields() -> set[str]:
-    """Extract all field names from HydraFlowConfig class definition."""
-    text = (SRC / "config.py").read_text()
-    # Match lines like:  field_name: int = Field(...)  or  field_name: str = "default"
-    # within the class body. We look for attribute-style definitions.
-    fields: set[str] = set()
-    in_class = False
-    for line in text.splitlines():
-        if re.match(r"^class HydraFlowConfig", line):
-            in_class = True
-            continue
-        if in_class:
-            # End of class: non-indented, non-empty, non-comment line
-            stripped = line.strip()
-            if (
-                stripped
-                and not line.startswith(" ")
-                and not line.startswith("\t")
-                and not stripped.startswith("#")
-                and not stripped.startswith('"""')
-            ):
-                break
-            # Field definition: indented, has a colon for type annotation
-            field_match = re.match(r"\s+(\w+)\s*:", line)
-            if field_match:
-                name = field_match.group(1)
-                # Skip dunder/private and class-level constants
-                if not name.startswith("_") and name[0].islower():
-                    fields.add(name)
-    return fields
+    """Every field on ``HydraFlowConfig``, asked of the model itself.
+
+    This used to scan ``config.py`` line by line: match ``^class
+    HydraFlowConfig``, then read indented ``name:`` lines until the first
+    unindented one. That is a reader keyed on the class's *physical layout*,
+    and #11547's decomposition breaks it two ways at once — a base list long
+    enough to wrap makes ``):`` the first unindented line, so the scan stops
+    before a single field and reports EVERY override as missing; and fields
+    that move onto a mixin are not in this file at all.
+
+    ``model_fields`` is the same question asked of the thing that answers it,
+    and it is immune to both. Same failure class as #12140, one directory over.
+    """
+    from config import HydraFlowConfig  # noqa: PLC0415
+
+    return set(HydraFlowConfig.model_fields)
 
 
 def _parse_interval_bounds_keys() -> set[str]:

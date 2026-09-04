@@ -946,8 +946,58 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                     return dotted not in policy_purity._MIXED_DEPENDENCIES  # noqa: SLF001
         return False
 
+    def _trust_fleet_mixin_drop_is_caught(member: str) -> bool:
+        """A mixin dropped from ``HydraFlowConfig``'s bases takes its dials with it.
+
+        ``MIXINS`` is derived from ``HydraFlowConfig.__bases__``, so a mixin
+        that stops being a base leaves the sweep and the config in the same
+        motion — every parametrised case over it simply stops running, which is
+        the vacuity this registry exists to notice. The witness is
+        ``test_all_three_mixins_are_bases_of_the_config``, which asserts the
+        derived set equals the three classes named explicitly, so a drop is an
+        inequality rather than a silently shorter sweep.
+
+        Checked here the way the gateway-dial detector checks its own: confirm
+        the member is genuinely part of the live derivation — its declared
+        dials really are on ``HydraFlowConfig`` — so removing it is something
+        ``model_fields`` and the named-set assertion can both see.
+        """
+        import config_trust_fleet_dials as dials  # noqa: PLC0415
+
+        cls = getattr(dials, member, None)
+        if cls is None:
+            # A name that was never a mixin is not a drop this guard catches —
+            # answering True here would make the detector vacuous, which the
+            # gate's own never-there meta-test exists to notice.
+            return False
+        declared = set(cls.model_fields)
+        return bool(declared) and declared <= set(_hydraflow_config().model_fields)
+
     return (
         # --- SUBJECTS, derived ------------------------------------------
+        GuardedEnumeration(
+            name="test_config_trust_fleet_dials.MIXINS",
+            members=(
+                "TrustFleetHealthDials",
+                "TrustFleetSteeringDials",
+                "TrustFleetVocabularyDials",
+            ),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_trust_fleet_mixin_drop_is_caught,
+            why=(
+                "#11547's config decomposition. The trust-fleet dials moved "
+                "off HydraFlowConfig onto three mixins, and every case that "
+                "checks the move held — fields present, defaults and "
+                "constraints surviving inheritance, no mixin over the "
+                "god-class threshold — is parametrised over the config's own "
+                "__bases__. A mixin dropped from those bases therefore leaves "
+                "the sweep at the same instant it leaves the config, so the "
+                "cases do not fail, they stop existing. "
+                "test_all_three_mixins_are_bases_of_the_config pins the "
+                "derived set against the three classes by name, which is what "
+                "turns that silence into a red."
+            ),
+        ),
         GuardedEnumeration(
             name="test_routing_baseline_generator._GENERATABLE",
             members=tuple(sorted(routing_baseline._PRINCIPAL_DIALS)),  # noqa: SLF001

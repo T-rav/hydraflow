@@ -105,6 +105,16 @@ HIGH_FANOUT_SRC: frozenset[str] = frozenset(
         "src/orchestrator_restart.py",
         "src/orchestrator_stats.py",
         "src/orchestrator_work.py",
+        # HydraFlowConfig is assembled from mixins for the same reason (#11547).
+        # A dial that moved off config.py is exactly as high-fanout in its new
+        # module, and `config_trust_fleet_dials` would otherwise name-map to
+        # one test file — so a wrong default or a dropped `ge=` on an interval
+        # would be verified by that file alone, including inside the
+        # autonomous build gate, which runs this selector --bounded and never
+        # falls back to the full suite.
+        # A guard derives this membership rather than trusting the next author
+        # to remember: see test_config_trust_fleet_dials.
+        "src/config_trust_fleet_dials.py",
         "src/service_registry.py",  # dependency-injection wiring for all loops
         "src/ports.py",  # the Port boundary every runner/loop depends on
     }
