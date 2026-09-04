@@ -36,6 +36,14 @@ LIKELY_BUG_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     IndexError,
     NotImplementedError,
+    # A test that reached a real model spawn IS a code bug — in the test, not
+    # the harness — so it belongs in this set rather than among the
+    # infrastructure failures, which are documented as "the harness cannot
+    # continue". Never raised in production: both spawn guards return early
+    # outside pytest. It is here so a refusal cannot be downgraded to a routine
+    # crash by the `except Exception: reraise_on_credit_or_bug(exc)` idiom every
+    # spawning runner uses (#12144, #12147).
+    UnstubbedSpawnError,
 )
 
 
@@ -48,10 +56,6 @@ INFRA_FATAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AuthenticationError,
     CreditExhaustedError,
     MemoryError,
-    # Test-only, and never raised in production: the spawn guards return early
-    # outside pytest. Listed here so a refusal cannot be downgraded to a routine
-    # crash by the catch-and-continue idiom every spawning runner uses.
-    UnstubbedSpawnError,
 )
 
 #: The canonical "must never be swallowed" set — the infrastructure failures

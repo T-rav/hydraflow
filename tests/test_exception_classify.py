@@ -78,6 +78,8 @@ class TestIsLikelyBug:
         assert is_likely_bug(TimeoutError("timed out")) is False
 
     def test_likely_bug_exceptions_tuple_has_expected_types(self) -> None:
+        from subprocess_util import UnstubbedSpawnError
+
         expected = {
             TypeError,
             KeyError,
@@ -85,6 +87,10 @@ class TestIsLikelyBug:
             ValueError,
             IndexError,
             NotImplementedError,
+            # A test reaching a real model spawn is a bug in the test. It lives
+            # here rather than in INFRA_FATAL, whose three members are all
+            # "the harness cannot continue" — an unstubbed spawn is not that.
+            UnstubbedSpawnError,
         }
         assert set(LIKELY_BUG_EXCEPTIONS) == expected
 

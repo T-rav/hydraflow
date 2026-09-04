@@ -83,6 +83,38 @@ class _FakeAuditor:
         return self._response
 
 
+class _FakeAdjudicator:
+    """Injected auto-adjudicator stand-in (#12144 / #12147).
+
+    `_make_loop` defaults to one of these because
+    ``sampled_audit_auto_adjudicate_enabled`` defaults to True and the helper
+    turns on ``sampled_audit_reaudit_enabled``, so ANY test whose sample reaches
+    a disagreement traverses adjudication. Without an injection the loop lazily
+    built a real ``_CLIAdjudicatorLLM`` and spawned.
+
+    That went unnoticed for as long as it did because #12144's guard surfaced
+    through the seam's soft-failure contract (rc=-1), which the loop swallowed —
+    the tests still passed. Making the refusal fatal (#12147) exposed seven of
+    them here, in the file the original issue was filed about.
+
+    The default verdict is ``inconclusive`` — "leave it for a human" — because
+    that is what the pre-guard path actually produced: the spawn failed, the
+    loop treated the adjudication as unresolved, and the sample stayed pending.
+    Defaulting to ``upheld`` instead would RESOLVE disagreements these tests
+    never meant to resolve, changing six of them. A stand-in has to reproduce
+    the semantics the tests were written against, not merely stop the spawn.
+    """
+
+    def __init__(self, verdict: str = "inconclusive") -> None:
+        self._verdict = verdict
+        self.calls = 0
+
+    async def adjudicate(self, *, prompt: str) -> str:
+        self.calls += 1
+        _ = prompt
+        return f'{{"verdict": "{self._verdict}", "rationale": "test"}}'
+
+
 class _RaisingAuditor:
     def __init__(self, exc: Exception) -> None:
         self._exc = exc
@@ -128,6 +160,15 @@ def _make_prs(
     prs.create_issue = AsyncMock(return_value=issue)
     prs.get_issue_state = AsyncMock(return_value=state)
     prs.get_issue_labels = AsyncMock(return_value=labels or [])
+    # Reached only once adjudication actually returns a verdict. Before the
+    # #12147 guard these tests never got here: the lazily-built real
+    # adjudicator failed, `_auto_adjudicate` bailed, and `_apply_adjudication`
+    # was dead code from this file's point of view. A bare MagicMock attribute
+    # is not awaitable, so it surfaced as `object MagicMock can't be used in
+    # 'await' expression` the moment the path became live.
+    prs.post_comment = AsyncMock()
+    prs.add_labels = AsyncMock()
+    prs.close_issue = AsyncMock()
     return prs
 
 
@@ -136,6 +177,7 @@ def _make_loop(
     repo: Path,
     *,
     auditor: Any,
+    adjudicator: Any = None,
     state: MagicMock | None = None,
     dedup: MagicMock | None = None,
     prs: MagicMock | None = None,
@@ -155,6 +197,7 @@ def _make_loop(
         dedup=dedup if dedup is not None else _make_dedup(),
         deps=bg.loop_deps,
         auditor=auditor,
+        adjudicator=adjudicator if adjudicator is not None else _FakeAdjudicator(),
     )
 
 
