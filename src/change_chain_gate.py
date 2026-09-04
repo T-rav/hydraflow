@@ -26,7 +26,7 @@ reports no findings — which reads exactly like a clean change.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,8 +63,23 @@ def verify_chain(
     issue_number: int,
     record: ChainRecord | Mapping[str, object] | None,
     changed_files: Sequence[str],
+    *,
+    required: Collection[str] = (),
 ) -> tuple[ChainFinding, ...]:
-    """Return findings for *issue_number*'s chain. Empty means clean."""
+    """Return findings for *issue_number*'s chain. Empty means clean.
+
+    *required* is the repo's ``charter.yaml`` ``artifacts.chain`` declaration.
+    Passing it is what makes that declaration mean something: without it the
+    gate only checks what happens to be anchored, so a change that silently
+    stopped anchoring an artifact would verify clean.
+
+    **Reads the working tree, not the branch.** An implementer that runs
+    ``git rm --cached`` on a chain file, or amends the harness's chain commit
+    away, leaves the file on disk and this returns clean. Closing that needs
+    content from ``git show <ref>:<path>``; the gate is report-only until the
+    caller that supplies it exists, and the limitation is stated here rather
+    than implied by the finding text.
+    """
     if record is None:
         return (
             ChainFinding(
@@ -94,6 +109,14 @@ def verify_chain(
     for artifact in ChainArtifact:
         expected = anchored.digests.get(artifact)
         if expected is None:
+            if artifact.value in required:
+                findings.append(
+                    ChainFinding(
+                        FINDING_MISSING,
+                        f"{artifact.value}.md is required by the charter but "
+                        "was never anchored for this change",
+                    )
+                )
             continue
         path = directory / f"{artifact.value}.md"
         if not path.is_file():
@@ -104,7 +127,7 @@ def verify_chain(
                 )
             )
             continue
-        body = path.read_text()
+        body = path.read_text(encoding="utf-8")
         if digest(body) != expected:
             findings.append(
                 ChainFinding(

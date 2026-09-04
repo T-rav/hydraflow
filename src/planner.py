@@ -12,6 +12,7 @@ from typing import ClassVar
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from change_chain import render_plan
 from events import EventType, HydraFlowEvent
 from exception_classify import exc_detail, reraise_on_credit_or_bug
 from human_steering import fenced_steering_guidance
@@ -1011,9 +1012,9 @@ SUMMARY: <brief one-line description of the plan>
         try:
             plan_dir.mkdir(parents=True, exist_ok=True)
             path = plan_dir / f"issue-{issue_number}.md"
-            path.write_text(
-                f"# Plan for Issue #{issue_number}\n\n{plan}\n\n---\n**Summary:** {summary}\n"
-            )
+            # One renderer, so the cache and the committed chain copy cannot
+            # drift (agent/_plan.py strips this exact header/footer back off).
+            path.write_text(render_plan(issue_number, plan, summary), encoding="utf-8")
             logger.info("Plan saved to %s", path, extra={"issue": issue_number})
         except OSError:
             logger.warning(

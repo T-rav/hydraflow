@@ -120,7 +120,8 @@ def test_chain_record_json_keys_are_plain_strings():
     assert record.to_json_dict()["digests"] == {"plan": "b" * 64}
 
 
-def test_chain_record_json_carries_the_rendered_bodies():
+def test_the_stream_payload_never_carries_a_rendered_body():
+    """Bodies are scrubbed by AuditChain and would break their own digests."""
     record = ChainRecord(
         issue_number=7,
         digests={ChainArtifact.PLAN: "b" * 64},
@@ -128,14 +129,14 @@ def test_chain_record_json_carries_the_rendered_bodies():
         recorded_at="2026-09-03T00:00:00Z",
     )
 
-    assert record.to_json_dict()["rendered"] == {"plan": "the body"}
+    assert "rendered" not in record.to_json_dict()
 
 
-def test_chain_record_round_trips_through_its_json_form():
+def test_the_anchor_round_trips_through_its_json_form():
     record = ChainRecord(
         issue_number=7,
         digests={ChainArtifact.PLAN: "b" * 64},
-        rendered={ChainArtifact.PLAN: "the body"},
+        rendered={},
         recorded_at="2026-09-03T00:00:00Z",
     )
 

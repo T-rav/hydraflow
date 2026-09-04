@@ -9,10 +9,14 @@ path serves that rationale more directly than the digest does, and leaves
 the digest as corroboration rather than the sole defence.
 
 **One authoritative location.** ``docs/changes/`` is written here and
-nowhere else. The planner writes ``.hydraflow/plans/`` (a cache) and appends
-the CH-1 record (the anchor); neither is the committed chain. There is no
-second copy to drift out of sync with this one, and no move between two
-places — the bodies travel in the stream and land once, in the worktree.
+nowhere else. The planner writes ``.hydraflow/plans/`` (a cache) and the
+recorder writes the CH-1 anchor plus the body cache; neither is the
+committed chain. There is no second copy of the committed artifact to drift.
+
+**The body cache is not trusted.** Bodies travel through
+``config.chain_bodies_dir``, which is ordinary mutable disk state. Every
+body is digest-checked against its CH-1 anchor before it is written into
+the worktree, so a mutated cache is caught rather than committed.
 
 Materialisation is best-effort by design. A change planned before this
 feature existed has no chain record, and a factory that refused to
@@ -28,7 +32,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from change_chain import ChainArtifact, ChainRecord, chain_dir
+from change_chain import (
+    CHANGES_PREFIX,
+    ChainArtifact,
+    ChainRecord,
+    chain_dir,
+    digest,
+)
 from subprocess_util import run_subprocess_result
 
 if TYPE_CHECKING:
@@ -45,6 +55,12 @@ class ChainMaterialisation:
 
     written: tuple[ChainArtifact, ...]
     committed: bool
+    rejected: tuple[ChainArtifact, ...] = ()
+
+    @property
+    def is_clean(self) -> bool:
+        """True when everything anchored landed and was committed."""
+        return bool(self.written) and self.committed and not self.rejected
 
 
 @dataclass
@@ -69,24 +85,63 @@ class ChangeChainWriter:
             )
             return ChainMaterialisation(written=(), committed=False)
 
-        written = self._write_files(worktree_path, record)
+        written, rejected = self._write_files(worktree_path, record)
         committed = await self._commit(worktree_path, issue_number, written)
-        return ChainMaterialisation(written=written, committed=committed)
+        return ChainMaterialisation(
+            written=written, committed=committed, rejected=rejected
+        )
 
     def _write_files(
         self, worktree_path: Path, record: ChainRecord
-    ) -> tuple[ChainArtifact, ...]:
-        """Write every rendered body the record carries. Returns what landed."""
+    ) -> tuple[tuple[ChainArtifact, ...], tuple[ChainArtifact, ...]]:
+        """Write every anchored body whose cached bytes match its digest.
+
+        Returns ``(written, rejected)``. A rejected artifact is one whose
+        cached body does not hash to the anchored digest — the cache was
+        edited after the plan phase recorded it. Refusing to commit it is
+        the point: writing it anyway would put a file on the branch that the
+        gate is guaranteed to flag, and would let whoever edited the cache
+        choose what the agent reads.
+        """
         target = chain_dir(worktree_path, record.issue_number)
-        target.mkdir(parents=True, exist_ok=True)
+        source = self.config.chain_bodies_dir / f"issue-{record.issue_number}"
         written: list[ChainArtifact] = []
+        rejected: list[ChainArtifact] = []
         for artifact in ChainArtifact:
-            body = record.rendered.get(artifact)
-            if body is None:
+            anchored = record.digests.get(artifact)
+            if anchored is None:
                 continue
-            (target / f"{artifact.value}.md").write_text(body)
+            body = self._cached_body(source, artifact)
+            if body is None:
+                rejected.append(artifact)
+                logger.warning(
+                    "Chain body for issue #%d %s is missing from the cache",
+                    record.issue_number,
+                    artifact.value,
+                    extra={"issue": record.issue_number},
+                )
+                continue
+            if digest(body) != anchored:
+                rejected.append(artifact)
+                logger.warning(
+                    "Chain body for issue #%d %s does not match its anchored "
+                    "digest — refusing to commit it",
+                    record.issue_number,
+                    artifact.value,
+                    extra={"issue": record.issue_number},
+                )
+                continue
+            target.mkdir(parents=True, exist_ok=True)
+            (target / f"{artifact.value}.md").write_text(body, encoding="utf-8")
             written.append(artifact)
-        return tuple(written)
+        return tuple(written), tuple(rejected)
+
+    def _cached_body(self, source: Path, artifact: ChainArtifact) -> str | None:
+        """Read one cached body as UTF-8, or None when it cannot be read."""
+        try:
+            return (source / f"{artifact.value}.md").read_text(encoding="utf-8")
+        except OSError:
+            return None
 
     def _latest_record(self, issue_number: int) -> ChainRecord | None:
         """Return the newest chain record for *issue_number*, or None.
@@ -99,7 +154,7 @@ class ChangeChainWriter:
             return None
         newest: ChainRecord | None = None
         try:
-            lines = path.read_text().splitlines()
+            lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
             logger.warning(
                 "Could not read the chain stream for issue #%d",
@@ -128,11 +183,19 @@ class ChangeChainWriter:
         issue_number: int,
         written: tuple[ChainArtifact, ...],
     ) -> bool:
-        """Commit the chain files. Returns True when a commit was made."""
+        """Commit the chain files. Returns True when a commit was made.
+
+        The commit carries an explicit pathspec. A bare ``git commit`` would
+        sweep in whatever else was already staged — and this runs on the
+        resumed-worktree path too, where a prior interrupted run can have left
+        work in the index. That would produce a commit labelled as the
+        artifact chain carrying unrelated delivery, which the
+        ``docs/changes`` exclusions would then wrongly discount.
+        """
         if not written:
             return False
-        rel = f"docs/changes/issue-{issue_number}"
-        add = await run_subprocess_result("git", "add", rel, cwd=worktree_path)
+        rel = f"{CHANGES_PREFIX}/issue-{issue_number}"
+        add = await run_subprocess_result("git", "add", "--", rel, cwd=worktree_path)
         if add.returncode != 0:
             logger.warning(
                 "Could not stage the chain for issue #%d: %s",
@@ -144,8 +207,11 @@ class ChangeChainWriter:
         commit = await run_subprocess_result(
             "git",
             "commit",
+            "--only",
             "-m",
             f"{COMMIT_SUBJECT_PREFIX} artifact chain for issue #{issue_number}",
+            "--",
+            rel,
             cwd=worktree_path,
         )
         if commit.returncode != 0:

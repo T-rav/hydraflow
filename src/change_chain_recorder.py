@@ -98,6 +98,7 @@ def record_chain(
         recorded_at=datetime.now(UTC).isoformat(),
     )
     try:
+        _write_bodies(config, record)
         config.change_chain_path.parent.mkdir(parents=True, exist_ok=True)
         AuditChain(config.change_chain_path).append(record.to_json_dict())
     except OSError:
@@ -116,3 +117,22 @@ def record_chain(
         extra={"issue": issue.id},
     )
     return record
+
+
+def _write_bodies(config: HydraFlowConfig, record: ChainRecord) -> None:
+    """Write the rendered bodies to the local chain cache.
+
+    Separate from the CH-1 append because the two carry different things: the
+    stream anchors digests and must stay small, scrub-safe and permanent; the
+    cache holds bytes for the worktree that will materialise them, and is
+    ordinary disposable disk state. The writer digest-checks the cache against
+    the anchor before committing anything, so a mutated cache is caught rather
+    than trusted.
+
+    Always UTF-8: ``digest`` hashes UTF-8 bytes, so a locale-encoded write
+    would hash one thing and store another.
+    """
+    directory = config.chain_bodies_dir / f"issue-{record.issue_number}"
+    directory.mkdir(parents=True, exist_ok=True)
+    for artifact, body in record.rendered.items():
+        (directory / f"{artifact.value}.md").write_text(body, encoding="utf-8")

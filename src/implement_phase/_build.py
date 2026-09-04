@@ -21,9 +21,9 @@ import time
 from typing import TYPE_CHECKING
 
 from adr_utils import is_adr_issue_title, next_adr_number
-from change_chain_reader import read_plan
+from change_chain import CHANGES_PREFIX, chain_dir
+from change_chain_reader import active_worktree, read_plan
 from change_chain_writer import ChangeChainWriter
-from exception_classify import reraise_on_credit_or_bug
 from harness_insights import (
     FailureCategory,
     format_known_traps_for_prompt,
@@ -33,6 +33,7 @@ from implement_timeout import tiered_implement_timeout
 from issue_cache import classification_complexity
 from models import PipelineStage
 from phase_utils import record_harness_failure
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 from ._common import _pinned_adequacy_demand
 
@@ -205,7 +206,11 @@ class ImplementBuildMixin:
 
     def _read_plan_for_recording(self, issue_number: int) -> str:
         """Read the plan: the committed chain first, then the disk cache."""
-        return read_plan(self._config, issue_number)
+        return read_plan(
+            self._config,
+            issue_number,
+            worktree=active_worktree(self._state, issue_number),
+        )
 
     def _prepare_adr_plan(self, issue: Task) -> None:
         """Seed a deterministic ADR execution plan when an ADR issue lacks one."""
@@ -304,14 +309,37 @@ class ImplementBuildMixin:
         rewrite, rather than authoring the files the gate later reads. Runs
         before ``push_branch`` so the chain commit ships with the branch.
 
-        Never aborts the build. A change planned before the chain existed
-        has no record, and refusing to implement it would stall the factory
-        on its own backlog; a missing chain is a gate finding instead.
+        Never aborts the build on an infrastructure failure. A change planned
+        before the chain existed has no record, and refusing to implement it
+        would stall the factory on its own backlog; a missing chain is a gate
+        finding instead.
+
+        The except is narrow, not broad-with-``reraise_on_credit_or_bug``.
+        That guard exists for runners that spawn an *agent*, where a
+        swallowed ``CreditExhaustedError`` burns attempt budget against an
+        exhausted billing signal. This writer spawns ``git``, so no credit
+        signal can originate here — and anything outside the two
+        infrastructure failures below is a bug that should surface, not be
+        logged and stepped over.
         """
         try:
-            await self._chain_writer.materialise(wt_path, issue.id)
-        except Exception as exc:  # noqa: BLE001 - reraised selectively below
-            reraise_on_credit_or_bug(exc)
+            outcome = await self._chain_writer.materialise(wt_path, issue.id)
+            if outcome.written and not outcome.committed:
+                # The files are on disk and untracked. The agent's own
+                # `git add -A` would sweep them into ITS commit, which hands
+                # back the write path ADR-0149 removed while leaving the
+                # digest matching. Remove them rather than leave the property
+                # silently gone.
+                await self._discard_uncommitted_chain(wt_path, issue.id)
+            elif outcome.rejected:
+                logger.warning(
+                    "Chain for issue #%d: %d artifact(s) failed their digest "
+                    "check and were not committed",
+                    issue.id,
+                    len(outcome.rejected),
+                    extra={"issue": issue.id},
+                )
+        except (OSError, SubprocessTimeoutError):
             logger.warning(
                 "Chain materialisation failed for issue #%d — the change will "
                 "carry no committed chain",
@@ -319,6 +347,36 @@ class ImplementBuildMixin:
                 exc_info=True,
                 extra={"issue": issue.id},
             )
+
+    async def _discard_uncommitted_chain(
+        self, wt_path: Path, issue_number: int
+    ) -> None:
+        """Delete chain files that were written but not committed.
+
+        An uncommitted chain is worse than no chain: the agent inherits
+        writable, untracked files that its own commit will absorb, so the
+        branch ends up carrying a chain the agent authored while the digests
+        still match. Leaving nothing is the honest outcome — the gate then
+        reports the change as unanchored.
+        """
+        # Unstage FIRST. `_commit` runs `git add` before `git commit`, so on
+        # the add-succeeded/commit-failed path the blobs are already in the
+        # index; unlinking the files alone leaves them staged, and the
+        # implementer's next plain commit carries them anyway.
+        rel = f"{CHANGES_PREFIX}/issue-{issue_number}"
+        await run_subprocess_result("git", "reset", "-q", "--", rel, cwd=wt_path)
+        directory = chain_dir(wt_path, issue_number)
+        for path in directory.glob("*.md"):
+            with contextlib.suppress(OSError):
+                path.unlink()
+        with contextlib.suppress(OSError):
+            directory.rmdir()
+        logger.warning(
+            "Chain for issue #%d was written but not committed — discarded it "
+            "so the agent cannot absorb it into its own commit",
+            issue_number,
+            extra={"issue": issue_number},
+        )
 
     async def _record_impl_metrics(
         self, issue: Task, result: WorkerResult, review_feedback: str

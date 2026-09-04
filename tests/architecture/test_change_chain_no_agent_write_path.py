@@ -52,11 +52,26 @@ def _relative(path: Path) -> str:
     return str(path.relative_to(REPO_ROOT))
 
 
-def test_at_least_one_prompt_root_exists():
-    """A sweep whose roots have all moved matches nothing and passes."""
-    present = [root for root in PROMPT_ROOTS if (REPO_ROOT / root).is_dir()]
+#: Roots that must exist and must contribute files. Asserted individually,
+#: not as "at least one survives": `src/hydraflow_resources/prompts` holds
+#: roughly half the corpus, and a check satisfied by any one surviving root
+#: would let that half stop being swept while staying green — the exact
+#: silent-hollowing failure this module says it exists to prevent.
+REQUIRED_ROOTS = (
+    Path("src/hydraflow_resources/prompts"),
+    Path(".claude/commands"),
+    Path("agents"),
+)
 
-    assert present, f"none of {PROMPT_ROOTS} exist — the prompt roots moved"
+
+@pytest.mark.parametrize("root", REQUIRED_ROOTS, ids=str)
+def test_each_required_prompt_root_still_contributes_files(root: Path):
+    swept = [p for p in _prompt_files() if str(root) in str(p.relative_to(REPO_ROOT))]
+
+    assert swept, (
+        f"{root} contributed no files to the sweep — it moved or was renamed, "
+        "and its prompts are now unswept while this guard stays green"
+    )
 
 
 def test_the_prompt_corpus_is_not_empty():

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from change_chain_reader import read_plan
+from change_chain_reader import active_worktree, read_plan
 from models import MergeApprovalContext, ReviewVerdict
 from phase_utils import run_with_fatal_guard
 
@@ -327,7 +327,11 @@ class SelfFixMixin:
         """
         from delta_verifier import parse_file_delta, verify_delta
 
-        plan_text = read_plan(self._config, pr.issue_number)
+        plan_text = read_plan(
+            self._config,
+            pr.issue_number,
+            worktree=active_worktree(self._state, pr.issue_number),
+        )
         if not plan_text:
             return ""
 

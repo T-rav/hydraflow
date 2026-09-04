@@ -835,6 +835,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
     ("evidence_pack_enabled", "HYDRAFLOW_EVIDENCE_PACK_ENABLED", True),
     ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
+    ("change_chain_enabled", "HYDRAFLOW_CHANGE_CHAIN_ENABLED", True),
     (
         "close_verification_enabled",
         "HYDRAFLOW_CLOSE_VERIFICATION_ENABLED",
@@ -6652,6 +6653,26 @@ class HydraFlowConfig(
         the pack directories themselves live under :attr:`evidence_dir`.
         """
         return self.repo_data_root / "audit" / "evidence_packs.jsonl"
+
+    @property
+    def chain_bodies_dir(self) -> Path:
+        """Local cache of rendered chain bodies, keyed by issue (ADR-0149).
+
+        The CH-1 stream anchors digests; the bodies live here, beside
+        ``plans_dir`` and with the same lifetime. Kept out of the stream
+        because ``AuditChain.append`` secret-scrubs its payload, which would
+        both change the bytes the digest was taken over and feed arbitrary
+        issue prose to a regex rewriter.
+
+        Repo-scoped, for the same reason the stream three properties below is:
+        issue numbers are per-repo, so a shared cache would let repo B's
+        issue #7 overwrite repo A's and fail every digest check on A's next
+        build.
+
+        The cache is ordinary mutable disk state, so the writer digest-checks
+        every body against its anchor before committing it.
+        """
+        return self.repo_data_root / "chain"
 
     @property
     def change_chain_path(self) -> Path:

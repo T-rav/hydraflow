@@ -576,3 +576,16 @@ class TestArtifactsChain:
             "intent",
             "plan",
         )
+
+
+def test_the_charter_vocabulary_matches_the_chain_artifacts():
+    """Two writers, one set (ADR-0149).
+
+    charter_model holds the artifact NAMES so it can stay inside its purity
+    pin; change_chain holds the enum with the behaviour. Neither may move
+    without the other.
+    """
+    from change_chain import ChainArtifact
+    from charter_model import CHAIN_ARTIFACT_NAMES
+
+    assert {artifact.value for artifact in ChainArtifact} == CHAIN_ARTIFACT_NAMES

@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
-from change_chain import ChainArtifact
 from data_class_vocabulary import is_regulated_class, is_valid_data_class
 
 CHARTER_FILENAME = "charter.yaml"
@@ -308,6 +307,22 @@ class Articles:
         }
 
 
+#: The per-change artifact names a charter may require (ADR-0149).
+#:
+#: Held here, not imported from ``change_chain``, because that module owns the
+#: chain's *behaviour* — digests, renderers, filesystem resolution — and
+#: importing it would drag ``pathlib.Path`` across this module's purity pin
+#: (``tests/architecture/test_policy_engine_is_pure.py``). Same move
+#: ``data_class_vocabulary`` already makes: a pure module gets to ask "is this
+#: a valid name?" without dragging I/O in behind the answer.
+#:
+#: Two writers, one set: ``tests/test_charter.py`` binds this to
+#: ``ChainArtifact`` so the copy cannot rot.
+CHAIN_ARTIFACT_NAMES: frozenset[str] = frozenset(
+    {"intent", "criteria", "plan", "evidence"}
+)
+
+
 @dataclass(frozen=True)
 class Artifacts:
     """The Artifacts layer: paths whose presence the repo commits to.
@@ -337,12 +352,11 @@ class Artifacts:
                 )
                 raise CharterError(msg)
         chain = _as_str_tuple("artifacts.chain", raw.get("chain"))
-        known = {artifact.value for artifact in ChainArtifact}
         for name in chain:
-            if name not in known:
+            if name not in CHAIN_ARTIFACT_NAMES:
                 msg = (
                     f"charter `artifacts.chain` entry {name!r} names no chain "
-                    f"artifact. Known artifacts: {sorted(known)}. A declaration "
+                    f"artifact. Known: {sorted(CHAIN_ARTIFACT_NAMES)}. A declaration "
                     "naming a subject that cannot exist is worse than no "
                     "declaration — nothing would ever check it."
                 )

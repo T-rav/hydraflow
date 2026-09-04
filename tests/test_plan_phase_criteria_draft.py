@@ -124,3 +124,38 @@ async def test_the_stage_still_marks_itself_current(ac_agent, judge_agent):
     await phase._run_spec_ac_and_judge(_task(), adv, "a plan")
 
     assert adv.current_stage == "spec_judge"
+
+
+@pytest.mark.asyncio
+async def test_the_judge_is_not_invoked_a_second_time_for_the_verdict(
+    ac_agent, judge_agent
+):
+    """The verdict comes from the loop's own last call, not a fresh one.
+
+    A second evaluate() would be an unbudgeted inference on every plan,
+    invisible to RunMetrics and the stage events, and — because it would see
+    the original context rather than the loop's final one — free to
+    contradict the convergence the stage history just recorded.
+    """
+    phase = _Phase(ac_agent=ac_agent, judge_agent=judge_agent)
+
+    await phase._run_spec_ac_and_judge(
+        _task(), AdversarialState(phase="plan"), "a plan"
+    )
+
+    assert judge_agent.run.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_judge_that_never_returned_is_not_recorded_as_pass(ac_agent):
+    """Silence is not approval — criteria.md must not claim an unrendered PASS."""
+    broken = AsyncMock()
+    broken.run = AsyncMock(side_effect=RuntimeError("judge exploded"))
+    phase = _Phase(ac_agent=ac_agent, judge_agent=broken)
+
+    result = await phase._run_spec_ac_and_judge(
+        _task(), AdversarialState(phase="plan"), "a plan"
+    )
+
+    assert result is not None
+    assert result.judge_verdict != "PASS"

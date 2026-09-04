@@ -173,3 +173,28 @@ def test_every_artifact_is_checked_for_presence(tmp_path, artifact):
     )
 
     assert _codes(verify_chain(tmp_path, 7, record, [])) == [FINDING_MISSING]
+
+
+def test_an_artifact_the_charter_requires_but_nothing_anchored_is_a_finding(tmp_path):
+    """Passing the declaration is what makes it mean anything."""
+    record = _seed(tmp_path, 7, "touch src/a.py")
+
+    findings = verify_chain(
+        tmp_path, 7, record, ["src/a.py"], required=("plan", "intent")
+    )
+
+    assert [f.code for f in findings] == [FINDING_MISSING]
+
+
+def test_the_finding_names_the_missing_required_artifact(tmp_path):
+    record = _seed(tmp_path, 7, "touch src/a.py")
+
+    findings = verify_chain(tmp_path, 7, record, [], required=("intent",))
+
+    assert "intent.md" in findings[0].detail
+
+
+def test_nothing_is_required_when_the_charter_declares_nothing(tmp_path):
+    record = _seed(tmp_path, 7, "touch src/a.py")
+
+    assert verify_chain(tmp_path, 7, record, ["src/a.py"], required=()) == ()

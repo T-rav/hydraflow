@@ -241,12 +241,21 @@ class PlanAdversarialMixin:
 
         judge = SpecJudge(agent=self._spec_judge_agent)
 
+        last_verdict: JudgeResult | None = None
+
         async def _critic(_ctx: str) -> JudgeResult:
-            return await judge.evaluate(
+            nonlocal last_verdict
+            # Captured, not re-run. Calling judge.evaluate again after the
+            # loop would add an unbudgeted inference per plan, emit none of
+            # the loop's stage events, and evaluate the ORIGINAL context — so
+            # a converged loop could still write a contradicting verdict into
+            # criteria.md.
+            last_verdict = await judge.evaluate(
                 plan_text=_ctx,
                 acceptance_criteria=acceptance_criteria,
                 pending_concerns=list(adv.pending_concerns),
             )
+            return last_verdict
 
         async def _retry(_result: JudgeResult, ctx: str) -> str:
             return ctx  # see Ensemble retry note above
@@ -293,6 +302,12 @@ class PlanAdversarialMixin:
         self._persist_adversarial_state(issue, adv)
         return CriteriaDraft(
             criteria=tuple(acceptance_criteria),
-            judge_verdict="PASS" if not unresolved else "CONCERNS",
+            # The judge's own last verdict, not a count of leftover concerns:
+            # a FAIL carrying no itemised findings, and a run whose critic
+            # calls all errored, both yield `unresolved == []`. "UNKNOWN"
+            # when the judge never returned at all — never a default PASS.
+            judge_verdict=(
+                last_verdict.verdict if last_verdict is not None else "UNKNOWN"
+            ),
             forwarded_concerns=tuple(str(c) for c in unresolved),
         )

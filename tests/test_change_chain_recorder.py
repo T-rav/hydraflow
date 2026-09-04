@@ -116,8 +116,29 @@ def test_nothing_is_written_when_the_kill_switch_is_off():
     assert not config.change_chain_path.exists()
 
 
-def test_the_stream_carries_the_rendered_bodies_not_only_digests(config):
+def test_the_stream_carries_digests_only(config):
+    """Bodies are scrubbed by AuditChain; a digest taken before would break."""
     record_chain(config, _task(), "step one", "does a thing", None)
 
     payload = json.loads(config.change_chain_path.read_text().splitlines()[-1])
-    assert payload["rendered"]["plan"] == render_plan(7, "step one", "does a thing")
+    assert "rendered" not in payload
+
+
+def test_the_bodies_land_in_the_local_cache(config):
+    record_chain(config, _task(), "step one", "does a thing", None)
+
+    cached = (config.chain_bodies_dir / "issue-7" / "plan.md").read_text(
+        encoding="utf-8"
+    )
+    assert cached == render_plan(7, "step one", "does a thing")
+
+
+def test_an_issue_body_with_a_credential_shaped_token_does_not_crash(config):
+    """Arbitrary issue prose used to reach AuditChain's regex scrubber."""
+    hostile = Task(
+        id=7,
+        title="Rotate a key",
+        body='secret_key: AAAAAAAAAAAAAAAAAAAAAAAAA"quoted" and leaks.',
+    )
+
+    assert record_chain(config, hostile, "step one", "s", None) is not None

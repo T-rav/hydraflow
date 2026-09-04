@@ -22,6 +22,12 @@ from pathlib import Path
 CHANGES_DIRNAME = "changes"
 ARCHIVE_DIRNAME = "archive"
 
+#: The chain tree's repo-relative prefix. The single source for every site
+#: that must recognise a chain path — the writer's commit pathspec, the
+#: delivery-commit exclusion in ``agent/_commit.py``, and the non-deliverable
+#: classification in ``null_delivery``. Moving the tree means editing this.
+CHANGES_PREFIX = f"docs/{CHANGES_DIRNAME}"
+
 
 class ChainArtifact(StrEnum):
     """One file in a change's chain. The value is the filename stem."""
@@ -34,12 +40,21 @@ class ChainArtifact(StrEnum):
 
 @dataclass(frozen=True)
 class ChainRecord:
-    """One CH-1 record: a change's artifacts as the planner rendered them.
+    """One CH-1 record: the digests a change's artifacts had at plan time.
 
-    Carries the rendered bodies as well as their digests, because the stream
-    is the transport as well as the anchor — the worktree that materialises
-    the chain is often not the process that planned it, and a digest with no
-    body cannot be materialised anywhere.
+    ``rendered`` is populated in memory by the recorder and written to the
+    local body cache; it is deliberately NOT part of the stream payload (see
+    :meth:`to_json_dict`), so a record read back from the stream always has
+    ``rendered == {}``.
+
+    The consequence is real and bounded: the anchor is permanent and the
+    bodies are not. A change planned on one host and implemented on another,
+    or planned before a data-root GC sweep and implemented after it, finds no
+    cached bodies — the writer then rejects every artifact and the change
+    ships with no chain, which the gate reports as unanchored rather than
+    passing silently. Both hosts today are the same host (the plan and
+    implement phases run in one factory process against one data root), so
+    this is a constraint to preserve, not a live gap.
     """
 
     issue_number: int
@@ -48,11 +63,26 @@ class ChainRecord:
     recorded_at: str
 
     def to_json_dict(self) -> dict[str, object]:
-        """Render for the append-only stream (StrEnum keys become strings)."""
+        """Render for the append-only stream (StrEnum keys become strings).
+
+        **Digests only — never the bodies.** Two reasons, both load-bearing:
+
+        1. ``AuditChain.append`` secret-scrubs the payload it writes. Scrubbing
+           a rendered body changes it, so a digest taken before the append
+           would no longer match what the stream carried, and the gate's one
+           tamper signal would fire on an entirely honest change.
+        2. The scrubber rewrites serialized JSON, and its credential value
+           class does not exclude a backslash — an issue body containing a
+           credential-shaped token next to an escaped quote produced invalid
+           JSON and crashed the plan phase. Arbitrary, externally-authored
+           prose does not belong in an audit payload.
+
+        Bodies travel through the local chain cache instead (see
+        ``change_chain_recorder``); this record anchors them.
+        """
         return {
             "issue_number": self.issue_number,
             "digests": {k.value: v for k, v in sorted(self.digests.items())},
-            "rendered": {k.value: v for k, v in sorted(self.rendered.items())},
             "recorded_at": self.recorded_at,
         }
 
