@@ -28,16 +28,26 @@ document.
 
 ## Machine-readable policy (normative)
 
-The table above is **commentary**. The normative, enforced encoding of it
-lives in [`policy.yaml`](policy.yaml) (CH-3, #9731): machine-readable change
-classes that `src/merge_policy.py` consults at the factory's own autonomous
-merge seams (post-review Monitor merges, the PR unsticker, the bot-PR loop,
-epic bundle releases, RC promotion) before every merge. A `deny` verdict
-blocks the merge and escalates instead of merging; human/terminal merges are
-not intercepted (CH-2 approval records evidence those).
+The table above is **commentary**. The normative, enforced encoding of it is
+the `policy:` section of this repo's [`charter.yaml`](../../../charter.yaml)
+(CH-3, #9731; moved there by #12116): machine-readable change classes that
+`src/merge_policy.py` consults at the factory's own autonomous merge seams
+(post-review Monitor merges, the PR unsticker, the bot-PR loop, epic bundle
+releases, RC promotion) before every merge. A `deny` verdict blocks the merge
+and escalates instead of merging; human/terminal merges are not intercepted
+(CH-2 approval records evidence those).
 
-Two writers, one set — the same pattern as ADRs: edit `policy.yaml` and this
-table **together**. Drift CI
+`config.merge_policy_path` resolves it: the repo's own charter when it
+declares a `policy:`; otherwise a legacy policy.yaml in this directory, for a
+repo that has not migrated yet and still carries one (HydraFlow itself no
+longer does); otherwise the shipped default at
+`src/assets/factory_autonomy_policy.yaml`.
+That default is the seed onboarding stamps into a new repo's charter — it is
+package data rather than a `docs/` file precisely so it reaches a wheel
+install, which `docs/` never did.
+
+Two writers, one set — the same pattern as ADRs: edit the charter's `policy:`
+section and this table **together**. Drift CI
 (`tests/architecture/test_factory_autonomy_policy_drift.py`) fails when a
 table row and a policy entry (matched on `readme_row`) don't line up in both
 directions, or when a row's Action direction disagrees with its entry's
@@ -50,7 +60,7 @@ Operational levers:
   to the CH-2 approval-records audit chain (audited override, not a bypass).
 - **Kill-switch** — `merge_policy_enabled` (env
   `HYDRAFLOW_MERGE_POLICY_ENABLED`, default true). While it is on, a missing
-  or unparseable `policy.yaml` fails CLOSED at the merge seams.
+  or unparseable policy fails CLOSED at the merge seams.
 - **Tightening** — adding `paths:` globs, `labels:`, `forbidden_actors`, or
   stricter `required_approvals` to a class is a policy edit here plus its
   table row, not a code change.

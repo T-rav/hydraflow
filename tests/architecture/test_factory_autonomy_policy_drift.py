@@ -91,9 +91,34 @@ class TestTableAndPolicyAreOneSet:
 
 
 class TestNormativeMarker:
-    def test_readme_declares_policy_yaml_normative(self, readme_text: str) -> None:
+    def test_readme_points_at_the_file_that_actually_decides(
+        self, readme_text: str, real_repo_root: Path
+    ) -> None:
+        """The README must name the charter, and every path it cites must exist.
+
+        This asserted the bare substring `"policy.yaml"` — which #12116 left
+        passing on a dead relative link to a deleted file, since the string
+        still appeared in the prose describing it. A marker test that survives
+        the thing it marks going away is not marking anything.
+
+        So it checks the pointer, and then resolves every repo path the section
+        mentions. A broken link in the one document `CLAUDE.md` sends an
+        operator to for autonomy policy is worse than no document.
+        """
         assert "## Machine-readable policy (normative)" in readme_text
-        assert "policy.yaml" in readme_text
+        assert "charter.yaml" in readme_text, (
+            "the README does not name charter.yaml, which is what "
+            "config.merge_policy_path resolves to for this repo"
+        )
+
+        cited = set(re.findall(r"`([a-z0-9_./]+\.(?:yaml|py))`", readme_text))
+        missing = sorted(
+            path
+            for path in cited
+            if "/" in path and not (real_repo_root / path).exists()
+        )
+
+        assert not missing, f"README cites paths that do not exist: {missing}"
 
     def test_readme_documents_break_glass_and_kill_switch(
         self, readme_text: str, policy: MergePolicy

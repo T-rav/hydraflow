@@ -165,6 +165,7 @@ __all__ = [
     "LocalArticle",
     "ADVISORY_FINDING_CLASSES",
     "NON_FATAL_FINDING_CLASSES",
+    "PolicyBlock",
     "Purpose",
     "RAILS_SCHEMA_VERSION",
     "RailsBlock",
@@ -176,6 +177,7 @@ __all__ = [
     "_as_mapping",
     "_as_str_tuple",
     "_parse_actors",
+    "default_autonomy_policy",
 ]
 
 
@@ -757,10 +759,11 @@ def charter_from_snapshot(
         articles=Articles(standards=tuple(standards)),
         artifacts=Artifacts(required=("docs/adr",)),
         # A stamped repo is born governed (#12116). Without this its charter
-        # declares no policy, `merge_policy_path` falls through to a
-        # `docs/standards/` file the stamp no longer delivers, and the repo's
-        # first merge is denied — fail-closed is right, but a repo that cannot
-        # merge on day one is not a working stamp.
+        # declares no policy and the merge gate falls through to the shipped
+        # default — which works, so this is not about keeping the repo able to
+        # merge. It is that a governing declaration silent on how the repo
+        # governs merges is not governing them; the operator would have to know
+        # to read HydraFlow's package data to find out what applies.
         policy=PolicyBlock(present=True, data=default_autonomy_policy()),
         rails=RailsBlock(
             template_version=str(snapshot.get("template_version", "1")),

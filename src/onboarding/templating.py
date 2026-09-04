@@ -11,8 +11,10 @@ from charter import (
     Articles,
     Artifacts,
     Charter,
+    PolicyBlock,
     Purpose,
     RailsBlock,
+    default_autonomy_policy,
     render_charter,
 )
 from onboarding.kernel_templates import render
@@ -163,6 +165,14 @@ def _charter(ctx: _TemplateContext) -> str:
         purpose=Purpose(product=ctx.spec.description),
         articles=Articles(standards=()),
         artifacts=Artifacts(required=("docs/adr", "docs/wiki", "tests")),
+        # Declared here as well as in `charter_from_snapshot` (#12116). This is
+        # the from-scratch bootstrap; that one is the stamp onto an existing
+        # repo. A charter written without it is not broken — the merge gate
+        # falls through to the same shipped default — but the repo's governing
+        # declaration would then be silent about how it governs merges, and
+        # "governed from its first commit" above would be true of every layer
+        # except the one that decides what may merge.
+        policy=PolicyBlock(present=True, data=default_autonomy_policy()),
         rails=RailsBlock(
             template_version="1",
             layers=("language_pack",),

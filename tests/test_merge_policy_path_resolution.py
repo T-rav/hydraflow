@@ -1,10 +1,11 @@
 """Which file the merge gate reads, while both shapes exist (#12116).
 
-`charter.yaml` is becoming the single governing declaration, but a repo that
-has not migrated still keeps its policy in
-`docs/standards/factory_autonomy/policy.yaml` — and the kernel writer still
-stamps that file into every newly onboarded repo. Both must keep working, and
-the order between them has to be decided somewhere rather than discovered.
+`charter.yaml` is the single governing declaration, but a repo that has not
+migrated still keeps its policy in `docs/standards/factory_autonomy/policy.yaml`.
+HydraFlow no longer ships that file — onboarding stamps the policy into the new
+repo's charter instead — but repos migrated before that still carry one, so both
+shapes must keep working and the order between them has to be decided somewhere
+rather than discovered.
 
 The rule: a charter that DECLARES a policy wins; otherwise the legacy file.
 Declaring is the test, not existing — every HydraFlow repo has a `charter.yaml`
