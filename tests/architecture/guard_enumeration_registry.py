@@ -765,6 +765,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         test_issue_11939_port_fake_name_is_a_hint,
         test_issue_11969_mirror_pins_are_real,
         test_issue_12144_llm_seam_fails_closed,
+        test_issue_12148_raw_io_overrides_fail_closed,
     )
     from tests.regressions import (
         test_mirrored_mixin_seam_signatures as mirrored_seams,
@@ -1446,6 +1447,23 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             why=(
                 "AST-derived at import: (loop, attr) for each loop that lazily "
                 "builds a real LLM client. Floored by the same known-positive test."
+            ),
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_12148_raw_io_overrides_fail_closed._OVERRIDES",
+            members=tuple(
+                str(item)
+                for item in test_issue_12148_raw_io_overrides_fail_closed._OVERRIDES
+            ),
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "AST-derived at import from the catalog's own "
+                "_override_or_refuse call sites, so a seventh raw-I/O override "
+                "is covered without editing the test. Floored by "
+                "test_the_sweep_finds_its_own_known_positive, which caught this "
+                "producer returning empty when it matched only ast.Assign and "
+                "_BUILDERS is an ast.AnnAssign."
             ),
             undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
