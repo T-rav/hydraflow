@@ -33,7 +33,11 @@ from implement_timeout import tiered_implement_timeout
 from issue_cache import classification_complexity
 from models import PipelineStage
 from phase_utils import record_harness_failure
-from subprocess_util import SubprocessTimeoutError, run_subprocess_result
+from subprocess_util import (
+    CircuitBreakerOpenError,
+    SubprocessTimeoutError,
+    run_subprocess_result,
+)
 
 from ._common import _pinned_adequacy_demand
 
@@ -339,7 +343,7 @@ class ImplementBuildMixin:
                     len(outcome.rejected),
                     extra={"issue": issue.id},
                 )
-        except (OSError, SubprocessTimeoutError):
+        except (OSError, SubprocessTimeoutError, CircuitBreakerOpenError):
             logger.warning(
                 "Chain materialisation failed for issue #%d — the change will "
                 "carry no committed chain",
@@ -364,6 +368,23 @@ class ImplementBuildMixin:
         # index; unlinking the files alone leaves them staged, and the
         # implementer's next plain commit carries them anyway.
         rel = f"{CHANGES_PREFIX}/issue-{issue_number}"
+
+        # Never delete something git is already tracking. The writer treats
+        # "already committed" as success now, so this should be unreachable
+        # on the resumed path — but the cost of being wrong here is deleting
+        # a committed chain and letting the agent commit the deletions, so
+        # the check stays as a floor rather than a comment.
+        tracked = await run_subprocess_result(
+            "git", "ls-files", "--error-unmatch", "--", rel, cwd=wt_path
+        )
+        if tracked.returncode == 0:
+            logger.warning(
+                "Chain for issue #%d is tracked at HEAD — refusing to discard it",
+                issue_number,
+                extra={"issue": issue_number},
+            )
+            return
+
         await run_subprocess_result("git", "reset", "-q", "--", rel, cwd=wt_path)
         directory = chain_dir(wt_path, issue_number)
         for path in directory.glob("*.md"):

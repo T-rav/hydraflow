@@ -6684,16 +6684,6 @@ class HydraFlowConfig(
         return self.repo_data_root / "audit" / "change_chain.jsonl"
 
     @property
-    def changes_dir(self) -> Path:
-        """Git-tracked per-change artifact chain root (ADR-0149).
-
-        Under ``repo_root``, not ``data_root``: the chain is committed
-        content that travels with the branch and lands in the same PR as
-        the diff, not runtime state that lives on one host.
-        """
-        return self.repo_root / "docs" / "changes"
-
-    @property
     def evidence_dir(self) -> Path:
         """Root of the per-RC release evidence packs (CH-4, #9732)."""
         return self.repo_data_root / "evidence"

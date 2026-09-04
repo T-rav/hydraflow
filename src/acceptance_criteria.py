@@ -283,7 +283,12 @@ Diff summary:
         )
 
     def _read_plan_file(self, issue_number: int) -> str:
-        """Read the plan: the committed chain first, then the disk cache."""
+        """Read the plan. Runs post-merge with no worktree, so cache-first.
+
+        `repo_root` does carry a merged change's chain, but it is consulted
+        last: preferring it would hand a re-opened, re-planned issue the
+        plan of its own previous attempt.
+        """
         plan_text = read_plan(self._config, issue_number)
         if not plan_text:
             logger.debug("No plan found for issue #%d", issue_number)

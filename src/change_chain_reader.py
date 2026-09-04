@@ -93,18 +93,10 @@ def active_worktree(state: StateTracker, issue_number: int) -> Path | None:
     on the integration branch and never carries an in-flight change's
     ``docs/changes/issue-N/``.
     """
-    try:
-        raw = state.get_active_workspaces().get(issue_number)
-    except OSError:
-        # A state read failure is a cache miss, not a crash: the caller falls
-        # back to the plan cache. Deliberately NOT a bare getattr probe —
-        # duck-typing this would turn a rename of get_active_workspaces into
-        # a silent, permanent revert to pre-chain behaviour with no failing
-        # test anywhere.
-        logger.warning(
-            "Could not read active workspaces for issue #%d",
-            issue_number,
-            exc_info=True,
-        )
-        return None
+    # Called directly, not probed with getattr: duck-typing this would turn a
+    # rename of get_active_workspaces into a silent, permanent revert to
+    # pre-chain behaviour with no failing test anywhere. No try/except —
+    # the method is an in-memory dict transform over already-loaded state
+    # and performs no I/O, so there is no read failure to catch here.
+    raw = state.get_active_workspaces().get(issue_number)
     return Path(raw) if raw else None

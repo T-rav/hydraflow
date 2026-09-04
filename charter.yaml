@@ -69,7 +69,6 @@ artifacts:
     - docs/standards
     - docs/changes
     - control/principles.yaml
-    - control/setpoints.yaml
     - tests/architecture/adr_enforcement_baseline.json
     - agents
   # ADR-0149: the per-change artifact chain. Names ARTIFACTS, not paths —

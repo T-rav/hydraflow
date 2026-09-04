@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from change_chain import (
-    CHANGES_DIRNAME,
+    CHANGES_PREFIX,
     ChainArtifact,
     ChainRecord,
     digest,
@@ -127,7 +127,20 @@ def verify_chain(
                 )
             )
             continue
-        body = path.read_text(encoding="utf-8")
+        try:
+            body = path.read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            # ValueError covers UnicodeDecodeError: a chain file that is not
+            # valid UTF-8 is a corrupt chain, which is a finding this gate
+            # exists to emit — not a crash of whatever wired it.
+            findings.append(
+                ChainFinding(
+                    FINDING_DIGEST_MISMATCH,
+                    f"{artifact.value}.md could not be read as UTF-8 — the "
+                    "committed file is not the one that was planned",
+                )
+            )
+            continue
         if digest(body) != expected:
             findings.append(
                 ChainFinding(
@@ -168,10 +181,10 @@ def _scope_findings(
 
 def _is_own_chain(path: str, issue_number: int) -> bool:
     """True when *path* is this change's own chain artifact."""
-    parts = Path(path).parts
-    if CHANGES_DIRNAME not in parts:
+    normalised = Path(path).as_posix().removeprefix("./")
+    if not normalised.startswith(f"{CHANGES_PREFIX}/"):
         return False
-    return f"issue-{issue_number}" in parts
+    return f"issue-{issue_number}" in Path(normalised).parts
 
 
 def _is_named(path: str, named: set[str]) -> bool:

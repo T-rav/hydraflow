@@ -164,8 +164,26 @@ def render_intent(issue_number: int, title: str, body: str, captured_at: str) ->
         "> Snapshot of the issue body at plan time. Written by the harness;\n"
         "> not hand-edited, and not a live view of the issue.\n\n"
         "---\n\n"
-        f"{body.strip()}\n"
+        f"{_quote(body)}"
     )
+
+
+def _quote(body: str) -> str:
+    """Blockquote the issue body so its content cannot be read as markup.
+
+    An issue body is externally authored and lands in a file the harness
+    commits. HydraFlow issues routinely paste merge-conflict hunks, and this
+    repo runs `scripts/check_conflict_markers.py` over tracked files — a
+    line starting `<<<<<<< ` would either block the chain commit via the
+    pre-commit hook or, on a host without hooks, fail CI permanently on
+    staging in a file no agent is allowed to edit.
+
+    Prefixing every line with "> " defuses that and every other line-start
+    construct in one move, and the digest covers the quoted form, so the
+    committed bytes are the bytes that were anchored.
+    """
+    lines = body.strip().splitlines() or [""]
+    return "".join(f"> {line}\n" if line else ">\n" for line in lines)
 
 
 def render_criteria(

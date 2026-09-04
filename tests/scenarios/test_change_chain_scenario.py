@@ -67,9 +67,11 @@ def config():
     return ConfigFactory.create()
 
 
-async def _plan_then_implement(config, repo, *, draft=_draft()):
+async def _plan_then_implement(config, repo, *, draft: CriteriaDraft | None = None):
     """Run the recorder (plan phase) then the writer (implement phase)."""
-    record = record_chain(config, _task(), _PLAN, "adds the port method", draft)
+    record = record_chain(
+        config, _task(), _PLAN, "adds the port method", draft or _draft()
+    )
     await ChangeChainWriter(config=config).materialise(repo, 4242)
     return record
 

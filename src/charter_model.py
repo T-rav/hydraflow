@@ -364,7 +364,15 @@ class Artifacts:
         return cls(required=required, chain=chain)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"required": list(self.required), "chain": list(self.chain)}
+        # `chain` is emitted only when declared. Absent and empty are
+        # different claims: rendering `chain: []` into a repo that never
+        # opted into ADR-0149 writes a positive "this repo requires no chain
+        # artifacts" into a file the drift caretaker then audits. Same rule
+        # `Charter.to_dict` applies to its own optional blocks.
+        rendered: dict[str, Any] = {"required": list(self.required)}
+        if self.chain:
+            rendered["chain"] = list(self.chain)
+        return rendered
 
 
 @dataclass(frozen=True)

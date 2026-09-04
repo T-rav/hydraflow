@@ -196,3 +196,32 @@ def test_resolve_ignores_a_stray_file_in_the_archive_root(tmp_path: Path):
     (archive_root(tmp_path) / "stray.md").write_text("not a quarter")
 
     assert resolve_chain_dir(tmp_path, 7) is None
+
+
+def test_an_issue_body_quoting_a_merge_conflict_cannot_produce_markers():
+    """The repo's own check_conflict_markers gate rejects these at line start."""
+    rendered = render_intent(
+        7, "t", "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch", "2026-01-01"
+    )
+
+    assert not [
+        line
+        for line in rendered.splitlines()
+        if line.startswith(("<<<<<<< ", ">>>>>>> ", "||||||| "))
+    ]
+
+
+def test_the_quoted_body_still_carries_its_content():
+    rendered = render_intent(7, "t", "<<<<<<< HEAD\nthe real text", "2026-01-01")
+
+    assert "the real text" in rendered
+
+
+def test_a_blank_line_in_the_body_stays_a_quoted_blank():
+    rendered = render_intent(7, "t", "first\n\nsecond", "2026-01-01")
+
+    assert ">\n" in rendered
+
+
+def test_an_empty_body_renders_without_crashing():
+    assert render_intent(7, "t", "", "2026-01-01").endswith(">\n")

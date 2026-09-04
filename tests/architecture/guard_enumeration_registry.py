@@ -932,21 +932,21 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
 
         return member in HydraFlowConfig.model_fields
 
-    def _mirrored_seam_drop_is_caught(member: str) -> bool:
-        """The set is re-derived from source, so a live seam cannot leave it."""
-        declarations, implementations = mirrored_seams._collect()  # noqa: SLF001
-        return member in (set(declarations) & set(implementations))
-
     def _required_prompt_root_drop_is_caught(member: str) -> bool:
-        """Dropping a required root leaves its files unswept and unrequired.
+        """A dropped root leaves real prompt files unrequired by the sweep.
 
-        Witnessed by PROMPT_ROOTS: every required root is also a swept root,
-        so removing one from REQUIRED_ROOTS while it still holds files is
-        exactly what the per-root test would stop asserting.
+        Witnessed against the FILESYSTEM, not against PROMPT_ROOTS: the
+        latter is a superset of REQUIRED_ROOTS by construction, so reading
+        it answers True for every member and certifies nothing. The real
+        question is whether the tree still holds prompts that would stop
+        being required — which is what the per-root test asserts.
         """
+        root = chain_write_path.REPO_ROOT / member  # noqa: SLF001
+        if not root.is_dir():
+            return False
         return any(
-            str(root) == member
-            for root in chain_write_path.PROMPT_ROOTS  # noqa: SLF001
+            path.is_file() and path.suffix in chain_write_path.PROMPT_SUFFIXES  # noqa: SLF001
+            for path in root.rglob("*")
         )
 
     def _policy_purity_drop_is_caught(member: str) -> bool:
@@ -1061,17 +1061,19 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         GuardedEnumeration(
             name="test_mirrored_mixin_seam_signatures._MIRRORED",
             members=tuple(mirrored_seams._MIRRORED),  # noqa: SLF001
-            kind=EnumerationKind.SUBJECT,
-            detects_drop=_mirrored_seam_drop_is_caught,
+            kind=EnumerationKind.CORPUS,
             why=(
                 "Every mixin method declared in one file as a TYPE_CHECKING "
-                "stub and implemented in another. A dropped name stops having "
-                "its two declarations compared, and the mismatch it would have "
-                "caught is invisible at runtime — the stub never executes, so "
-                "no test can call the difference into failure. The set is "
-                "derived from source on every run, so a seam that still exists "
-                "cannot leave it."
+                "stub and implemented in another. The mismatch it catches is "
+                "invisible at runtime — the stub never executes, so no test "
+                "can call the difference into failure, only a type checker. "
+                "Derived from source by AST at import, not listed, so the "
+                "producer's own floor is what guards the population: "
+                "test_the_sweep_found_mirrored_seams (non-empty) and "
+                "test_the_known_regression_subject_is_in_the_set (the seam "
+                "whose stale mirror this exists for)."
             ),
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
         GuardedEnumeration(
             name="test_change_chain_no_agent_write_path._prompt_files()",
@@ -1102,7 +1104,10 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "The roots that must keep contributing files to the prompt "
                 "sweep. This IS the population check: dropping a root stops "
                 "that tree being required, which is how half the corpus could "
-                "leave the sweep while it stayed green."
+                "leave the sweep while it stayed green. Witnessed against the "
+                "prompt roots actually present on disk, not against "
+                "PROMPT_ROOTS — a superset literal would answer True for "
+                "every member and certify a detection that does not exist."
             ),
         ),
         GuardedEnumeration(

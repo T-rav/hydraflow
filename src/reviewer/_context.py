@@ -61,7 +61,9 @@ class ReviewContextMixin(BaseRunner):
             if PLAN_COMMENT_HEADING in comment:
                 return comment
 
-        # Fallback to the committed chain, then the disk cache
+        # Fallback to the plan cache, then the committed chain. No
+        # worktree in scope here, so the cache is the fresher signal —
+        # see read_plan for why repo_root is consulted last.
         return read_plan(self._config, issue.id).strip()
 
     async def _run_precheck_context(

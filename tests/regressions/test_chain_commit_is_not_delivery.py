@@ -121,3 +121,45 @@ async def test_a_chain_only_branch_counts_zero_delivery_commits(tmp_path):
         f"{observed} delivery commit(s) — a null delivery would pass the "
         "zero-commit gate"
     )
+
+
+@pytest.mark.asyncio
+async def test_re_materialising_a_committed_chain_does_not_report_failure(tmp_path):
+    """A resumed worktree must not look like a failed commit.
+
+    `_setup_worktree_and_branch` calls materialise again on the resumed
+    path. The files are already tracked with identical bytes, so nothing
+    stages and `git commit` exits 1 with "nothing to commit". Reporting that
+    as committed=False made the caller DELETE the tracked chain, and the
+    agent's own `git add -A` then committed the deletions as its delivery —
+    the PR shipped with the chain removed and the gate reported every
+    artifact missing.
+    """
+    import subprocess
+
+    from change_chain_recorder import record_chain
+    from change_chain_writer import ChangeChainWriter
+    from models import Task
+    from tests.helpers import ConfigFactory
+
+    config = ConfigFactory.create()
+    repo = tmp_path / "wt"
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "t@example.com"],
+        ["git", "config", "user.name", "Test"],
+        ["git", "commit", "-q", "--allow-empty", "-m", "base"],
+    ):
+        subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+
+    record_chain(config, Task(id=4242, title="t", body="b"), "a plan", "s", None)
+    writer = ChangeChainWriter(config=config)
+    first = await writer.materialise(repo, 4242)
+    second = await writer.materialise(repo, 4242)
+
+    assert first.committed is True
+    assert second.committed is True, (
+        "re-materialising an already-committed chain reported a failed "
+        "commit; the caller deletes the tracked chain on that signal"
+    )

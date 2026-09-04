@@ -216,6 +216,14 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             # Load plan text for skills that need it (e.g. plan-compliance)
             skill_plan_text, _ = self._extract_plan_comment(task.comments)
             if not skill_plan_text:
+                # NOT `worktree_path` — deliberately. Passing it makes the
+                # fallback find the committed chain, which flips scope-check
+                # from "auto-pass, no plan" to actually checking the diff
+                # against the plan's declared files. That is the point of
+                # ADR-0149 and it is a real behaviour change to a safety
+                # skill, so it lands in its own change with its own scenario
+                # updates (test_A10, test_A25 encode the current counts) —
+                # not silently inside the PR that establishes the chain.
                 skill_plan_text = self._load_plan_fallback(task.id)
 
             # Run registered post-implementation skills (diff-sanity, test-adequacy, etc.)

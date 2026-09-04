@@ -57,11 +57,6 @@ class ChainMaterialisation:
     committed: bool
     rejected: tuple[ChainArtifact, ...] = ()
 
-    @property
-    def is_clean(self) -> bool:
-        """True when everything anchored landed and was committed."""
-        return bool(self.written) and self.committed and not self.rejected
-
 
 @dataclass
 class ChangeChainWriter:
@@ -152,7 +147,6 @@ class ChangeChainWriter:
         path = self.config.change_chain_path
         if not path.exists():
             return None
-        newest: ChainRecord | None = None
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -163,7 +157,11 @@ class ChangeChainWriter:
                 extra={"issue": issue_number},
             )
             return None
-        for line in lines:
+        # Scanned from the END: newest wins, so the first match walking
+        # backwards is the answer. The stream defaults to keep-forever and
+        # gains a record per planned issue, and this sits in the critical
+        # path between workspaces.create and push_branch on every build.
+        for line in reversed(lines):
             if not line.strip():
                 continue
             try:
@@ -172,10 +170,9 @@ class ChangeChainWriter:
                 continue
             if not isinstance(payload, dict):
                 continue
-            if payload.get("issue_number") != issue_number:
-                continue
-            newest = ChainRecord.from_json_dict(payload)
-        return newest
+            if payload.get("issue_number") == issue_number:
+                return ChainRecord.from_json_dict(payload)
+        return None
 
     async def _commit(
         self,
@@ -204,6 +201,25 @@ class ChangeChainWriter:
                 extra={"issue": issue_number},
             )
             return False
+
+        # Already committed is committed. `_setup_worktree_and_branch` calls
+        # materialise again on the RESUMED-worktree path, where the files are
+        # already tracked at HEAD with identical bytes: nothing stages, `git
+        # commit` exits 1 with "nothing to commit", and reporting that as a
+        # failure made the caller delete the tracked chain it had committed
+        # on the first pass — the agent's `git add -A` then committed the
+        # deletions as its own delivery.
+        staged = await run_subprocess_result(
+            "git", "diff", "--cached", "--quiet", "--", rel, cwd=worktree_path
+        )
+        if staged.returncode == 0:
+            logger.info(
+                "Chain for issue #%d is already committed — nothing to do",
+                issue_number,
+                extra={"issue": issue_number},
+            )
+            return True
+
         commit = await run_subprocess_result(
             "git",
             "commit",

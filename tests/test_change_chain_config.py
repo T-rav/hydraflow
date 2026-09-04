@@ -51,19 +51,7 @@ def test_change_chain_can_be_disabled():
     assert config.change_chain_enabled is False
 
 
-def test_changes_dir_is_under_the_repo_not_the_data_root():
-    config = ConfigFactory.create()
-
-    assert config.changes_dir == config.repo_root / "docs" / "changes"
-
-
 def test_change_chain_path_is_a_runtime_stream_not_committed_content():
     config = ConfigFactory.create()
 
     assert config.data_root in config.change_chain_path.parents
-
-
-def test_the_chain_directory_and_the_chain_stream_are_different_places():
-    config = ConfigFactory.create()
-
-    assert config.changes_dir != config.change_chain_path.parent
