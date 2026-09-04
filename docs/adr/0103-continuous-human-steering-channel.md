@@ -121,4 +121,4 @@ The feature ships behind `human_steering_enabled` (default `True` as of 2026-07-
 - ADR-0099 (Orchestration as a Control System — names surface #4, this ADR closes it)
 - ADR-0092 (Untrusted-text trust boundary — the fencing regime `/steer` guidance reuses)
 - ADR-0049 (Kill-switch convention — `human_steering_enabled` + `enabled_cb`, default-on since 2026-07-05, env-controllable via `HYDRAFLOW_HUMAN_STEERING_ENABLED`)
-- `src/human_steering.py:parse_directives`, `src/human_steering.py:apply_steering`, `src/human_steering.py:fenced_steering_guidance`, `src/human_steering_loop.py:HumanSteeringLoop`, `src/models.py:SteeringState`, `src/orchestrator_hitl.py:OrchestratorHITLMixin._apply_human_steering`, `src/config.py:HydraFlowConfig.human_steering_authorized_users`
+- `src/human_steering.py:parse_directives`, `src/human_steering.py:apply_steering`, `src/human_steering.py:fenced_steering_guidance`, `src/human_steering_loop.py:HumanSteeringLoop`, `src/models.py:SteeringState`, `src/orchestrator_hitl.py:OrchestratorHITLMixin._apply_human_steering`, `src/config_trust_fleet_dials.py:TrustFleetSteeringDials.human_steering_authorized_users`
