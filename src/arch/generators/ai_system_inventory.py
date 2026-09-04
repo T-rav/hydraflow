@@ -46,6 +46,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from arch import config_surface
 from arch._functional_areas_schema import load_functional_areas
 from arch._models import LoopInfo
 
@@ -211,44 +212,28 @@ def _parse_bg_worker_defs(control_routes_py: Path) -> dict[str, tuple[str, str]]
     )
 
 
-def _parse_role_table(config_py: Path) -> list[tuple[str, str, str]]:
-    """(env combo, tool field, model field) rows from ``_ENV_COMBO_OVERRIDES``."""
-    for node in ast.walk(_parse_tree(config_py)):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        value = _assigned_value(node, "_ENV_COMBO_OVERRIDES")
-        if not isinstance(value, ast.List):
-            continue
-        out: list[tuple[str, str, str]] = []
-        for elt in value.elts:
-            if isinstance(elt, ast.Tuple) and len(elt.elts) == 3:
-                parts = [
-                    e.value
-                    for e in elt.elts
-                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                ]
-                if len(parts) == 3:
-                    out.append((parts[0], parts[1], parts[2]))
-        return out
-    return []
+def _parse_role_table(src_dir: Path) -> list[tuple[str, str, str]]:
+    """(env combo, tool field, model field) rows from the role registry.
+
+    Read across the config surface, and loudly: this used to answer ``[]`` when
+    the registry was not in ``config.py``'s own text, rendering "Model roles" as
+    a header with no rows while its sibling readers here raised (#11547).
+    """
+    return config_surface.role_table(src_dir)
 
 
-def _parse_model_field_names(config_py: Path) -> list[str]:
-    """``HydraFlowConfig`` field names ending in ``_model``, sorted."""
-    for node in _parse_tree(config_py).body:
-        if not (isinstance(node, ast.ClassDef) and node.name == "HydraFlowConfig"):
-            continue
-        return sorted(
-            stmt.target.id
-            for stmt in node.body
-            if isinstance(stmt, ast.AnnAssign)
-            and isinstance(stmt.target, ast.Name)
-            and stmt.target.id.endswith("_model")
-        )
-    raise RuntimeError(
-        f"{config_py}: no HydraFlowConfig class found — "
-        "the AI system inventory cannot be derived"
-    )
+def _parse_model_field_names(src_dir: Path) -> list[str]:
+    """``HydraFlowConfig`` field names ending in ``_model``, sorted.
+
+    Follows base classes across the config surface. Reading only the class's
+    own body meant a decomposition that moved role dials onto a mixin left
+    every worker's model role rendering as a dash (#11547).
+    """
+    return [
+        name
+        for name in config_surface.annotated_field_names(src_dir, "HydraFlowConfig")
+        if name.endswith("_model")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -257,58 +242,22 @@ def _parse_model_field_names(config_py: Path) -> list[str]:
 
 
 def _resolve_local_module(dotted: str, src_dir: Path) -> list[Path]:
-    """Every file ``dotted`` names: one module, or a whole package.
-
-    A package resolves to ALL of its modules, not just ``__init__.py``. Under
-    the god-class recipe (#11547) a decomposed module's ``__init__`` is a
-    re-export facade with no logic left in it, so resolving ``import
-    pr_unsticker`` to that facade shrinks the one-hop scan to nothing and the
-    rendered row silently loses every model role the class actually resolves
-    — the same "stops seeing its subject when a module becomes a package"
-    failure as #11673, but in a generator, where the only symptom is a table
-    cell quietly turning into a dash.
-    """
-    parts = dotted.split(".")
-    as_file = src_dir.joinpath(*parts).with_suffix(".py")
-    if as_file.is_file():
-        return [as_file]
-    as_pkg = src_dir.joinpath(*parts) / "__init__.py"
-    if as_pkg.is_file():
-        return sorted(as_pkg.parent.rglob("*.py"))
-    return []
+    """Every file *dotted* names — one module, or a whole package."""
+    return config_surface.resolve_local_module(dotted, src_dir)
 
 
 def _one_hop_imports(module_path: Path, src_dir: Path) -> list[Path]:
-    """src-local files imported directly by *module_path*, sorted."""
-    try:
-        tree = _parse_tree(module_path)
-    except (OSError, SyntaxError):
-        return []
-    found: set[Path] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                found.update(_resolve_local_module(alias.name, src_dir))
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                base = module_path.parent
-                for _ in range(node.level - 1):
-                    base = base.parent
-                prefix = base.relative_to(src_dir).parts if base != src_dir else ()
-            else:
-                prefix = ()
-            dotted_prefix = ".".join(prefix)
-            module = node.module or ""
-            dotted = f"{dotted_prefix}.{module}".strip(".") if dotted_prefix else module
-            if dotted:
-                found.update(_resolve_local_module(dotted, src_dir))
-                for alias in node.names:
-                    found.update(
-                        _resolve_local_module(f"{dotted}.{alias.name}", src_dir)
-                    )
-    return sorted(
-        p for p in found if p.stem not in _SCAN_EXCLUDED_MODULES or p.parent != src_dir
-    )
+    """src-local files imported directly by *module_path*, minus scan exclusions.
+
+    ``config`` and ``service_registry`` are dropped here rather than in the
+    shared resolver: excluding them is this generator's model-role *scan
+    policy*, not a fact about the import graph.
+    """
+    return [
+        p
+        for p in config_surface.local_imports(module_path, src_dir)
+        if p.stem not in _SCAN_EXCLUDED_MODULES or p.parent != src_dir
+    ]
 
 
 def _scan_scope_text(entry_files: list[Path], src_dir: Path) -> str:
@@ -407,7 +356,7 @@ def collect_inventory(
     registry = _parse_bg_loop_registry(orchestrator_py)
     svc_classes = _parse_service_annotations(src_dir / "service_registry.py")
     worker_defs = _parse_bg_worker_defs(control_routes_py)
-    model_field_names = _parse_model_field_names(config_py)
+    model_field_names = _parse_model_field_names(src_dir)
     fa = load_functional_areas(fa_path)
     area_by_class = {
         loop_cls: area.label for area in fa.areas.values() for loop_cls in area.loops
@@ -547,7 +496,7 @@ def render_ai_system_inventory(loops: list[LoopInfo], *, repo_root: Path) -> str
     if rows is None:
         return _PLACEHOLDER
 
-    role_table = _parse_role_table(Path(repo_root) / "src" / "config.py")
+    role_table = _parse_role_table(Path(repo_root) / "src")
 
     parts: list[str] = [_HEADER]
 

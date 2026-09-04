@@ -13,6 +13,7 @@ import ast
 import re
 from pathlib import Path
 
+from arch import config_surface
 from arch._models import LoopInfo
 
 _ADR_RE = re.compile(r"ADR-(\d{4})")
@@ -69,38 +70,14 @@ def _module_int_constants(tree: ast.Module) -> dict[str, int]:
 
 
 def _load_config_defaults(src_dir: Path) -> dict[str, int]:
-    """Parse ``src/config.py`` and return a map of field_name → default int value.
+    """``field_name -> default int`` for the config, wherever its fields live.
 
-    The map is used to resolve ``return self._config.<field>`` in
-    ``_get_default_interval`` methods.  Only ``Field(default=<int>)`` entries
-    are captured; computed defaults or non-integer defaults are ignored.
+    Used to resolve ``return self._config.<field>`` in ``_get_default_interval``
+    methods. Reads the whole config surface rather than ``config.py``'s text, so
+    a decomposition that moves interval dials onto a base class in a sibling
+    module does not silently leave every tick interval unresolvable (#11547).
     """
-    config_path = src_dir / "config.py"
-    if not config_path.exists():
-        return {}
-    try:
-        tree = ast.parse(config_path.read_text(), filename=str(config_path))
-    except SyntaxError:
-        return {}
-
-    result: dict[str, int] = {}
-    for node in ast.walk(tree):
-        # AnnAssign: field_name: int = Field(default=<int>, ...)
-        if not isinstance(node, ast.AnnAssign):
-            continue
-        if not isinstance(node.target, ast.Name):
-            continue
-        if not isinstance(node.value, ast.Call):
-            continue
-        for kw in node.value.keywords:
-            if (
-                kw.arg == "default"
-                and isinstance(kw.value, ast.Constant)
-                and isinstance(kw.value.value, int)
-            ):
-                result[node.target.id] = kw.value.value
-                break
-    return result
+    return config_surface.int_field_defaults(src_dir)
 
 
 def _tick_interval(
