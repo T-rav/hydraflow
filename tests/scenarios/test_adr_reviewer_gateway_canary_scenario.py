@@ -258,6 +258,12 @@ class TestADRReviewerGatewayCanaryScenario:
         _write_proposed_adr(repo_root)
 
         monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+        # This canary deliberately spawns a subprocess: `_write_claude_shim`
+        # put a deterministic `claude` on PATH above, so the spawn is
+        # hermetic and the process boundary is part of what is under test.
+        # The #12144 seam guard cannot see that the binary is a shim, so
+        # say so explicitly rather than let it refuse a legitimate spawn.
+        monkeypatch.setenv("HYDRAFLOW_ALLOW_REAL_LLM_SPAWN", "1")
         monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", _CONTROL_TOKEN)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-real-anthropic-key")
         monkeypatch.setenv("OPENAI_ADMIN_KEY", "ambient-real-admin-key")
