@@ -26,7 +26,6 @@ a gate finding, not an implementation failure.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +38,7 @@ from change_chain import (
     chain_dir,
     digest,
 )
+from change_chain_recorder import latest_record
 from subprocess_util import run_subprocess_result
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ class ChangeChainWriter:
         if not self.config.change_chain_enabled:
             return ChainMaterialisation(written=(), committed=False)
 
-        record = self._latest_record(issue_number)
+        record = latest_record(self.config, issue_number)
         if record is None:
             logger.info(
                 "No chain record for issue #%d — nothing to materialise",
@@ -137,42 +137,6 @@ class ChangeChainWriter:
             return (source / f"{artifact.value}.md").read_text(encoding="utf-8")
         except OSError:
             return None
-
-    def _latest_record(self, issue_number: int) -> ChainRecord | None:
-        """Return the newest chain record for *issue_number*, or None.
-
-        Newest wins: a re-planned issue appends a second record, and the
-        worktree must carry the plan the implementer was actually given.
-        """
-        path = self.config.change_chain_path
-        if not path.exists():
-            return None
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            logger.warning(
-                "Could not read the chain stream for issue #%d",
-                issue_number,
-                exc_info=True,
-                extra={"issue": issue_number},
-            )
-            return None
-        # Scanned from the END: newest wins, so the first match walking
-        # backwards is the answer. The stream defaults to keep-forever and
-        # gains a record per planned issue, and this sits in the critical
-        # path between workspaces.create and push_branch on every build.
-        for line in reversed(lines):
-            if not line.strip():
-                continue
-            try:
-                payload = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            if payload.get("issue_number") == issue_number:
-                return ChainRecord.from_json_dict(payload)
-        return None
 
     async def _commit(
         self,
