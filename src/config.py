@@ -7916,10 +7916,9 @@ def _validate_gateway_fleet_profile(config: HydraFlowConfig) -> None:
         raise ValueError(msg)
     if direct := _gateway_direct_harness_roles(config):
         msg = (
-            "gateway fleet ratchet forbids direct Claude/z.ai harness "
-            "providers; set gateway-capable roles to provider='gateway' "
-            "(one-shot OpenAI-compatible providers remain allowed): "
-            + ", ".join(direct)
+            "gateway fleet ratchet forbids direct harness providers; set "
+            "gateway-capable roles to provider='gateway' (one-shot "
+            "OpenAI-compatible providers remain allowed): " + ", ".join(direct)
         )
         raise ValueError(msg)
 
