@@ -780,6 +780,11 @@ _ENV_OPT_INT_OVERRIDES: list[tuple[str, str, int | None]] = [
         "HYDRAFLOW_AUDIT_RETENTION_DAYS_EVIDENCE_PACKS",
         None,
     ),
+    (
+        "audit_retention_days_change_chain",
+        "HYDRAFLOW_AUDIT_RETENTION_DAYS_CHANGE_CHAIN",
+        None,
+    ),
 ]
 
 # Float overrides with tight [0, 1] bounds — handled separately from the
@@ -3172,6 +3177,24 @@ class HydraFlowConfig(
             "Days to retain evidence-pack summary records (CH-4, #9732; "
             "audit/evidence_packs.jsonl). None = keep forever — the "
             "recommended setting for release evidence."
+        ),
+    )
+    audit_retention_days_change_chain: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Days to retain per-change artifact-chain records (ADR-0149; "
+            "audit/change_chain.jsonl). None = keep forever — the "
+            "recommended setting, since a pruned record leaves a merged "
+            "change's committed chain permanently unverifiable."
+        ),
+    )
+    change_chain_enabled: bool = Field(
+        default=True,
+        description=(
+            "Write and verify the per-change artifact chain (ADR-0149): "
+            "intent/spec/plan digests anchored on CH-1 at plan time, "
+            "materialised into the issue worktree by the harness."
         ),
     )
 
@@ -6629,6 +6652,25 @@ class HydraFlowConfig(
         the pack directories themselves live under :attr:`evidence_dir`.
         """
         return self.repo_data_root / "audit" / "evidence_packs.jsonl"
+
+    @property
+    def change_chain_path(self) -> Path:
+        """Repo-scoped hash-chained per-change artifact digests (ADR-0149).
+
+        Issue numbers are repo-scoped, so the stream lives under
+        ``repo_data_root`` — one chain per managed repo, like CH-2.
+        """
+        return self.repo_data_root / "audit" / "change_chain.jsonl"
+
+    @property
+    def changes_dir(self) -> Path:
+        """Git-tracked per-change artifact chain root (ADR-0149).
+
+        Under ``repo_root``, not ``data_root``: the chain is committed
+        content that travels with the branch and lands in the same PR as
+        the diff, not runtime state that lives on one host.
+        """
+        return self.repo_root / "docs" / "changes"
 
     @property
     def evidence_dir(self) -> Path:

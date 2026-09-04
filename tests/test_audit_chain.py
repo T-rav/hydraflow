@@ -664,7 +664,7 @@ class TestPruneBefore:
 
 
 class TestAuditStreams:
-    def test_registry_lists_the_five_chained_streams(self, tmp_path: Path) -> None:
+    def test_registry_lists_the_six_chained_streams(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
         specs = {s.name: s for s in audit_streams(config)}
         assert set(specs) == {
@@ -673,6 +673,7 @@ class TestAuditStreams:
             "inference_telemetry",
             "approval_records",
             "evidence_packs",
+            "change_chain",
         }
         assert (
             specs["preflight"].path == config.data_root / "auto_agent" / "audit.jsonl"
@@ -690,6 +691,12 @@ class TestAuditStreams:
             == config.repo_data_root / "audit" / "evidence_packs.jsonl"
         )
         assert specs["evidence_packs"].timestamp_key == "timestamp"
+        assert specs["change_chain"].path == config.change_chain_path
+        assert (
+            specs["change_chain"].path
+            == config.repo_data_root / "audit" / "change_chain.jsonl"
+        )
+        assert specs["change_chain"].timestamp_key == "recorded_at"
 
     def test_retention_defaults_to_none_meaning_keep_forever(
         self, tmp_path: Path
