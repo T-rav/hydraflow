@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
+import post_merge_handler
 from events import EventBus
 from models import (
     CriterionResult,
@@ -1942,3 +1943,58 @@ class TestSelfMaintenanceWikiSkip:
 
         s.handler._prs.merge_pr.assert_awaited_once()
         s.handler._prs.get_pr_diff_names.assert_not_awaited()
+
+
+class TestChainGateWiring:
+    """ADR-0149 P4: the chain gate runs on the approve path, advisory only."""
+
+    @pytest.mark.asyncio
+    async def test_handle_approved_runs_the_chain_gate(self, monkeypatch) -> None:
+        calls: list[tuple[int, int]] = []
+
+        async def _spy(*, config, prs, pr_number, issue_number):
+            calls.append((pr_number, issue_number))
+            return ()
+
+        monkeypatch.setattr(post_merge_handler, "report_chain_findings", _spy)
+        setup = _setup_approved(ConfigFactory.create())
+
+        await setup.call()
+
+        assert calls == [(setup.pr.number, setup.pr.issue_number)]
+
+    @pytest.mark.asyncio
+    async def test_a_chain_finding_does_not_stop_the_merge(self, monkeypatch) -> None:
+        from change_chain_gate import ChainFinding
+
+        async def _finds(*, config, prs, pr_number, issue_number):
+            return (ChainFinding("chain-digest-mismatch", "plan.md was rewritten"),)
+
+        monkeypatch.setattr(post_merge_handler, "report_chain_findings", _finds)
+        setup = _setup_approved(ConfigFactory.create())
+
+        await setup.call()
+
+        setup.handler._prs.merge_pr.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_call_site_does_not_guard_because_the_reporter_does(
+        self, monkeypatch
+    ) -> None:
+        """Where the safety lives, stated as a test rather than a comment.
+
+        `report_chain_findings` swallows everything it can raise, so the
+        merge path needs no try/except around it — and this pins that the
+        guarantee is the reporter's. If someone ever removes the reporter's
+        internal handler, this test says plainly what breaks: an exception
+        from the gate reaches the merge path unguarded.
+        """
+
+        async def _explodes(*, config, prs, pr_number, issue_number):
+            raise RuntimeError("gate exploded")
+
+        monkeypatch.setattr(post_merge_handler, "report_chain_findings", _explodes)
+        setup = _setup_approved(ConfigFactory.create())
+
+        with pytest.raises(RuntimeError):
+            await setup.call()

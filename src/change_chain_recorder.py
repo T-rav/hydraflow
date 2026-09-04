@@ -19,6 +19,7 @@ than an absent one.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -143,3 +144,39 @@ def _write_bodies(config: HydraFlowConfig, record: ChainRecord) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     for artifact, body in record.rendered.items():
         (directory / f"{artifact.value}.md").write_text(body, encoding="utf-8")
+
+
+def latest_record(config: HydraFlowConfig, issue_number: int) -> ChainRecord | None:
+    """The newest anchored record for *issue_number*, or None.
+
+    Shared by the writer (which materialises the bodies it names) and the
+    gate (which verifies the committed files against it), so the two cannot
+    disagree about which record is current.
+
+    Scanned from the END: newest wins, so the first match walking backwards
+    is the answer. A re-planned issue appends a second record, and both
+    readers must see the plan the implementer was actually given.
+    """
+    path = config.change_chain_path
+    if not path.exists():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        logger.warning(
+            "Could not read the chain stream for issue #%d",
+            issue_number,
+            exc_info=True,
+            extra={"issue": issue_number},
+        )
+        return None
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("issue_number") == issue_number:
+            return ChainRecord.from_json_dict(payload)
+    return None

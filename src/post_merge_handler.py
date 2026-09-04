@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
+from change_chain_report import report_chain_findings
 from close_verification import reconcile_false_close
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
@@ -322,6 +323,17 @@ class PostMergeHandler:
 
         if not await self._run_visual_gate(ctx):
             return
+
+        # ADR-0149 P4: report the artifact chain's state for this change.
+        # Advisory — it returns findings, never a verdict, and the merge
+        # proceeds either way. Placed before the policy call so a chain
+        # finding is on the PR even when policy then denies the merge.
+        await report_chain_findings(
+            config=self._config,
+            prs=self._prs,
+            pr_number=pr.number,
+            issue_number=pr.issue_number,
+        )
 
         # CH-3 (#9731): consult the factory-autonomy policy before the
         # autonomous merge. This seam's approval evidence is the review
