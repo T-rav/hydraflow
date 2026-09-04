@@ -13,6 +13,7 @@ to a plan — wiring the four optional agents, persisting the shared
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from adversarial_agents import AgentLike
@@ -27,6 +28,27 @@ from spec_judge import JudgeResult, SpecJudge
 if TYPE_CHECKING:
     from events import EventBus
     from state import StateTracker
+
+
+@dataclass(frozen=True)
+class CriteriaDraft:
+    """The pre-implementation acceptance criteria and the judge's verdict.
+
+    Returned by :meth:`PlanAdversarialMixin._run_spec_ac_and_judge` so the
+    planner can persist it as the change chain's ``criteria.md`` (ADR-0149).
+    Before this existed the criteria were a local variable, and the only
+    trace they left was the judge verdict in the stage history — the one
+    artifact that could gate a merge was computed, used once and dropped.
+
+    Distinct from ``acceptance_criteria.VerificationCriteria``, which is
+    generated POST-merge against real code and diffs. Same words, different
+    artifact, different moment; collapsing them would lose the question each
+    one answers.
+    """
+
+    criteria: tuple[str, ...]
+    judge_verdict: str
+    forwarded_concerns: tuple[str, ...]
 
 
 class PlanAdversarialMixin:
@@ -198,8 +220,13 @@ class PlanAdversarialMixin:
         issue: Task,
         adv: AdversarialState,
         plan_text: str,
-    ) -> None:
+    ) -> CriteriaDraft | None:
         """Stages 5 + 6: draft AC, then judge plan+AC.
+
+        Returns the drafted criteria and verdict so the caller can persist
+        them as the change chain's ``criteria.md`` (ADR-0149); ``None`` when
+        the stage is unconfigured. Every pre-existing side effect on *adv*
+        is unchanged — this adds a return value, not a behaviour.
 
         AC generation is one-shot (no retry). The judge runs through
         AdversarialRetryLoop so a FAIL verdict drives the configured
@@ -208,7 +235,7 @@ class PlanAdversarialMixin:
         the dark-factory contract.
         """
         if self._spec_ac_agent is None or self._spec_judge_agent is None:
-            return
+            return None
         ac_gen = SpecACGenerator(agent=self._spec_ac_agent)
         acceptance_criteria = await ac_gen.draft(plan_text)
 
@@ -264,3 +291,8 @@ class PlanAdversarialMixin:
             )
         )
         self._persist_adversarial_state(issue, adv)
+        return CriteriaDraft(
+            criteria=tuple(acceptance_criteria),
+            judge_verdict="PASS" if not unresolved else "CONCERNS",
+            forwarded_concerns=tuple(str(c) for c in unresolved),
+        )

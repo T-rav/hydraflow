@@ -16,9 +16,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from analysis import PlanAnalyzer
+from change_chain_recorder import record_chain
 from exception_classify import reraise_on_credit_or_bug
 from models import PlanFinding, PlanResult, PlanReview, Task
 from pending_concerns import AdversarialState
+from plan_phase_adversarial import CriteriaDraft
 from planner import PlannerRunner
 from traceability import extract_req_id, missing_required_req_id
 
@@ -189,6 +191,7 @@ class PlanRecordsMixin:
         # Run AFTER PlanReviewer (which is invoked from inside
         # ``_write_plan_records``). No-op when SpecAC/Judge agents are
         # not configured.
+        criteria_draft: CriteriaDraft | None = None
         if (
             self._spec_ac_agent is not None
             and self._spec_judge_agent is not None
@@ -198,7 +201,9 @@ class PlanRecordsMixin:
                 phase="plan"
             )
             try:
-                await self._run_spec_ac_and_judge(issue, adv, result.plan)
+                criteria_draft = await self._run_spec_ac_and_judge(
+                    issue, adv, result.plan
+                )
             except Exception as exc:  # noqa: BLE001
                 # Dark-factory contract: credit-exhaustion / auth / likely-bug
                 # exceptions MUST propagate so the outer loop pauses on the
@@ -212,6 +217,14 @@ class PlanRecordsMixin:
                     issue.id,
                     exc_info=True,
                 )
+
+        # ADR-0149: anchor the plan-time chain on CH-1 here, not in the
+        # planner. This is the only point where all three artifacts exist —
+        # the planner writes its plan before the criteria stage runs.
+        if result.plan:
+            record_chain(
+                self._config, issue, result.plan, result.summary, criteria_draft
+            )
         return result
 
     async def _write_plan_records(self, issue: Task, result: PlanResult) -> int:
