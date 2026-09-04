@@ -12,6 +12,8 @@
   <a href="https://t-rav.github.io/hydraflow/"><img src="https://img.shields.io/badge/arch-knowledge-blueviolet" alt="Architecture Knowledge"></a>
 </p>
 
+📄 **[Software Manufacturing — white paper](https://aibuddy.software/papers/Software_Manufacturing_white_paper.pdf)** — the operating model behind HydraFlow: treating software delivery as a manufacturing process, with stations, gates, throughput and yield.
+
 📖 **[HydraFlow Architecture site](https://t-rav.github.io/hydraflow/)** — auto-generated, refreshed every 4h by the DiagramLoop and on every PR by the arch-regen CI guard.
 
 Log an issue. Agents handle the rest - triaging, planning, implementing, reviewing, and merging every change.
@@ -19,6 +21,25 @@ Log an issue. Agents handle the rest - triaging, planning, implementing, reviewi
 HydraFlow is a delivery kernel for GitHub repositories: it accepts intent, compiles it through a staged pipeline, enforces quality gates, and produces merged software changes.
 
 It scales your workflow, not just your output, turning your repository into a programmable delivery engine powered by your hooks and skills. This is __Harness engineering__ at scale.
+
+## Project Status
+
+HydraFlow began as an applied research effort with a single question: can a software
+delivery factory be **operated** rather than demonstrated — running continuously, under
+enforced quality gates, with an auditable record behind every change?
+
+It can. Since February 2026 the system has carried **3,000+ pull requests** from intent
+to merge under its own gates, producing 143 architecture decision records and a
+continuously regenerated architecture knowledge base along the way.
+
+With that established, the project is entering the next stage of its life: **ownership
+and stewardship of HydraFlow are transferring to [8th Light](https://8thlight.com)**,
+moving it from exploration into supported, productised use under an organisation
+equipped to carry it long term.
+
+Details of the transition — timelines, the project's future home, and support
+arrangements — will be published here as they are confirmed. Until then, this
+repository remains the reference implementation.
 
 ## What Makes It Different
 
