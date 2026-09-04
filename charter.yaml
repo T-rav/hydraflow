@@ -67,9 +67,22 @@ artifacts:
     - docs/arch/generated
     - docs/wiki/terms
     - docs/standards
+    - docs/changes
     - control/principles.yaml
+    - control/setpoints.yaml
     - tests/architecture/adr_enforcement_baseline.json
     - agents
+  # ADR-0149: the per-change artifact chain. Names ARTIFACTS, not paths —
+  # ruling 2 folds each quarter into `docs/changes/archive/YYYY-Qn/`, and a
+  # declaration pinned to a path goes stale the first time a quarter folds.
+  # `evidence` is declared and not yet written: it lands at merge, in the
+  # CH-3 half of the epic. The gate reports its absence rather than failing
+  # a change for it, until then.
+  chain:
+    - intent
+    - criteria
+    - plan
+    - evidence
 
 # ADR-0121, unchanged semantics: which template layers this repo carries.
 rails:

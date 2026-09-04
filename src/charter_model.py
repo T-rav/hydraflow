@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from change_chain import ChainArtifact
 from data_class_vocabulary import is_regulated_class, is_valid_data_class
 
 CHARTER_FILENAME = "charter.yaml"
@@ -309,9 +310,18 @@ class Articles:
 
 @dataclass(frozen=True)
 class Artifacts:
-    """The Artifacts layer: paths whose presence the repo commits to."""
+    """The Artifacts layer: paths whose presence the repo commits to.
+
+    ``required`` names standing paths — directories and files that must
+    exist in the repo at all times. ``chain`` names the PER-CHANGE
+    artifacts every change must carry (ADR-0149); its entries are artifact
+    names, not paths, because a change's directory moves under quarterly
+    compaction and a declaration pinned to a path would go stale the first
+    time a quarter folded.
+    """
 
     required: tuple[str, ...] = ()
+    chain: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: Any) -> Artifacts:
@@ -326,10 +336,21 @@ class Artifacts:
                     "declares nothing about that repo."
                 )
                 raise CharterError(msg)
-        return cls(required=required)
+        chain = _as_str_tuple("artifacts.chain", raw.get("chain"))
+        known = {artifact.value for artifact in ChainArtifact}
+        for name in chain:
+            if name not in known:
+                msg = (
+                    f"charter `artifacts.chain` entry {name!r} names no chain "
+                    f"artifact. Known artifacts: {sorted(known)}. A declaration "
+                    "naming a subject that cannot exist is worse than no "
+                    "declaration — nothing would ever check it."
+                )
+                raise CharterError(msg)
+        return cls(required=required, chain=chain)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"required": list(self.required)}
+        return {"required": list(self.required), "chain": list(self.chain)}
 
 
 @dataclass(frozen=True)
@@ -884,6 +905,7 @@ class Charter:
         return not (
             self.articles.standards
             or self.artifacts.required
+            or self.artifacts.chain
             or self.rails.layers
             or self.rails.domain_gate_scripts
             or self.rails.coverage_floor > 0
