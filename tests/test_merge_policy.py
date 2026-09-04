@@ -22,6 +22,7 @@ from approval_records import (
     RECORD_TYPE_BREAK_GLASS,
 )
 from audit_chain import AuditChain
+from config import DEFAULT_AUTONOMY_POLICY_PATH
 from merge_policy import (
     AUTONOMY_ACT,
     AUTONOMY_ASK,
@@ -35,13 +36,13 @@ from merge_policy import (
 from ports import PRPort
 from tests.helpers import ConfigFactory
 
-_PACKAGED_POLICY = (
-    Path(__file__).resolve().parents[1]
-    / "docs"
-    / "standards"
-    / "factory_autonomy"
-    / "policy.yaml"
-)
+# Imported rather than reconstructed: this is the same constant
+# `config.merge_policy_path` falls back to, so "the packaged policy" here and
+# the packaged policy the factory actually resolves cannot drift into being two
+# different files. Rebuilding the path by hand is how these tests kept asserting
+# against `docs/standards/factory_autonomy/policy.yaml` after #12116 moved it
+# into package data.
+_PACKAGED_POLICY = DEFAULT_AUTONOMY_POLICY_PATH
 
 _MINIMAL_POLICY = """\
 schema_version: 1

@@ -86,8 +86,6 @@ from typing import Any
 
 import yaml
 
-# Re-exported so every existing `from charter import X` keeps working; the
-# model itself lives in a pure module the decision seam can also import.
 from charter_model import (
     ACTORS_DIRECTORY,
     ADVISORY_FINDING_CLASSES,
@@ -119,6 +117,7 @@ from charter_model import (
     CharterError,
     CharterFinding,
     LocalArticle,
+    PolicyBlock,
     Purpose,
     RailsBlock,
     _as_float,
@@ -131,6 +130,10 @@ from charter_model import (
     enumerate_actors,
     unresolved_actors,
 )
+
+# Re-exported so every existing `from charter import X` keeps working; the
+# model itself lives in a pure module the decision seam can also import.
+from config import DEFAULT_AUTONOMY_POLICY_PATH
 
 #: Re-exported from :mod:`charter_model`. Declared rather than suppressed:
 #: a `noqa` would be a new entry in the suppressions ratchet, which only
@@ -715,6 +718,19 @@ def write_charter(repo_root: Path, charter: Charter) -> Path:
     return path
 
 
+def default_autonomy_policy() -> dict[str, Any]:
+    """The act-vs-ask policy HydraFlow ships, parsed.
+
+    Read from package data rather than re-declared here: the file is also the
+    fallback `config.merge_policy_path` resolves to, and a second copy of the
+    same table in Python is the duplication #12116 exists to remove.
+    """
+    loaded = _load_yaml_rejecting_duplicates(
+        DEFAULT_AUTONOMY_POLICY_PATH.read_text(encoding="utf-8")
+    )
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def charter_from_snapshot(
     snapshot: dict[str, Any], *, standards: tuple[str, ...] = ()
 ) -> Charter:
@@ -740,6 +756,12 @@ def charter_from_snapshot(
         purpose=Purpose(product=description),
         articles=Articles(standards=tuple(standards)),
         artifacts=Artifacts(required=("docs/adr",)),
+        # A stamped repo is born governed (#12116). Without this its charter
+        # declares no policy, `merge_policy_path` falls through to a
+        # `docs/standards/` file the stamp no longer delivers, and the repo's
+        # first merge is denied — fail-closed is right, but a repo that cannot
+        # merge on day one is not a working stamp.
+        policy=PolicyBlock(present=True, data=default_autonomy_policy()),
         rails=RailsBlock(
             template_version=str(snapshot.get("template_version", "1")),
             layers=tuple(layers),

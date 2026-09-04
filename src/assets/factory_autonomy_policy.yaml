@@ -1,11 +1,26 @@
-# Factory Autonomy — machine-readable act-vs-ask policy (CH-3, #9731).
+# Factory Autonomy — the SHIPPED DEFAULT act-vs-ask policy (CH-3, #9731).
 #
-# NORMATIVE: this file is what the factory's own merge seam enforces
-# (src/merge_policy.py). The prose table in README.md is commentary bound to
-# this file by drift CI (tests/architecture/test_factory_autonomy_policy_drift.py):
-# every README table row must have exactly one entry here (matched on
-# `readme_row`, with the row's Action column direction matching `autonomy`)
-# and vice versa. Editing one without the other reddens CI.
+# This is no longer a governing declaration. Since #12116 the policy a repo is
+# governed by lives in its own `charter.yaml` under `policy:`, and
+# `config.merge_policy_path` reads it from there. This file is the seed the
+# onboarding stamp copies into a new repo's charter, and the last-resort
+# fallback for a repo that declares none.
+#
+# It moved out of `docs/standards/factory_autonomy/` for two reasons. One is
+# that two normative-looking files describing one thing is the duplication
+# #12116 removed. The other is that `docs/` is documentation, not package data:
+# `checkout_path` exists for "development-only inputs deliberately absent from
+# the wheel", so the old fallback silently had nothing to fall back to in a
+# wheel install. As package data beside `model_pricing.json` it ships.
+#
+# The prose table in `docs/standards/factory_autonomy/README.md` is commentary
+# bound to THIS repo's governing copy — `charter.yaml`'s `policy:` section — by
+# drift CI (tests/architecture/test_factory_autonomy_policy_drift.py): every
+# README table row must have exactly one entry there (matched on `readme_row`,
+# with the row's Action column direction matching `autonomy`) and vice versa.
+# A second guard holds this default identical to that section, so the standard
+# HydraFlow ships is the standard HydraFlow runs. Editing one surface without
+# the other reddens CI.
 #
 # v1 encodes the README table 1:1 — no restrictions beyond the prose.
 # `paths` / `labels` matchers are intentionally empty: tightening the policy

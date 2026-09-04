@@ -1,25 +1,21 @@
-"""While both policy files exist, they say the same thing (#12116).
+"""The standard HydraFlow ships is the standard HydraFlow runs (#12116).
 
-`charter.yaml`'s `policy:` section is now the normative copy for this repo —
-`config.merge_policy_path` prefers a charter that declares one. But
-`docs/standards/factory_autonomy/policy.yaml` has not gone away: the kernel
-writer (`onboarding/kernel_writer.py:STANDARDS_DIRS`) stamps the whole
-`factory_autonomy/` directory into every newly onboarded repo, and those repos
-have no policy in their charter yet. Deleting it would leave them with no
-governing policy at all, which fails their merges closed on day one.
+`charter.yaml`'s `policy:` section is what governs THIS repo's merges.
+`src/assets/factory_autonomy_policy.yaml` is what the onboarding stamp copies
+into a NEW repo's charter, and the fallback `config.merge_policy_path` resolves
+to for a repo that declares none.
 
-So the migration leaves two files in place for a while, and that is precisely
-the shape this issue exists to remove: two normative-looking declarations of
-one thing. The difference between a migration and a regression is whether the
-duplication is *checked*. This is the check.
+They are two files on purpose — a repo may tighten its own policy without
+changing what HydraFlow ships — but while HydraFlow is its own reference
+implementation they must agree. A divergence would first be observed as an
+onboarded repo governing itself by different rules than the factory that
+onboarded it, which is the failure this guard exists to make impossible.
 
-It is deliberately an equality, not a floor. A subset relation would let the
-charter grow a class the stamped file never gets, and the divergence would
-first be observed as a newly onboarded repo governing itself by different
-rules than the factory that onboarded it.
-
-Delete this file together with `policy.yaml`, not before — while the second
-file ships, something has to hold it to the first.
+It replaces the guard that held the charter to
+`docs/standards/factory_autonomy/policy.yaml`. That file is gone: it was a
+second normative-looking declaration of one thing, and `docs/` is absent from
+the wheel, so the fallback that pointed at it had nothing to reach in an
+installed HydraFlow.
 """
 
 from __future__ import annotations
@@ -29,11 +25,11 @@ from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+
 _CHARTER = _REPO_ROOT / "charter.yaml"
-_STANDARD = _REPO_ROOT / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
+_SHIPPED = _REPO_ROOT / "src" / "assets" / "factory_autonomy_policy.yaml"
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -43,47 +39,29 @@ def _load(path: Path) -> dict[str, object]:
 
 
 def test_the_charter_declares_a_policy() -> None:
-    """Fail closed on the premise. Every case below is vacuous without it —
-    an empty `policy:` would make the comparison trivially true against a
-    standard file that had drifted arbitrarily far."""
-    charter = _load(_CHARTER)
-
-    assert charter.get("policy"), (
-        "charter.yaml declares no `policy:` section, so the merge gate has "
-        "silently fallen back to docs/standards/factory_autonomy/policy.yaml"
+    """Fail closed on the premise. Every case below is vacuous without it: an
+    absent `policy:` would make the comparison trivially true against a shipped
+    default that had drifted arbitrarily far."""
+    assert _load(_CHARTER).get("policy"), (
+        "charter.yaml declares no `policy:` section, so this repo's merge gate "
+        "has fallen back to the shipped default instead of its own declaration"
     )
 
 
-def test_the_standard_copy_still_exists() -> None:
-    """The premise of the guard below, asserted rather than skipped around.
-
-    A `skipif` on `_STANDARD.exists()` was the obvious way to write "this
-    retires when policy.yaml does", and `test_no_ignored_active_tests` refuses
-    it — correctly. A skip that fires is a guard that stopped guarding while
-    still reporting green, and the condition here is one a PR can change.
-
-    So it fails instead. When `policy.yaml` is retired this whole file is
-    deleted with it, which is a deliberate act on a red test rather than a
-    silent transition to covering nothing.
-    """
-    assert _STANDARD.exists(), (
-        f"{_STANDARD} is gone. If that was deliberate, delete this file too — "
-        "it exists only to hold the stamped copy to the governing one."
-    )
+def test_the_shipped_default_exists() -> None:
+    """It is package data and the last-resort fallback, so its absence is not a
+    missing test fixture — it is every repo without a declared policy losing
+    the thing `merge_policy_path` resolves to."""
+    assert _SHIPPED.exists(), f"{_SHIPPED} is missing from package data"
 
 
-def test_the_two_declarations_are_identical() -> None:
-    """The stamped copy and the governing copy must not diverge.
-
-    Compared as parsed documents rather than as text: comment and formatting
-    differences between the two files are expected and mean nothing, while a
-    single reordered `roles:` entry means the onboarded repo approves merges a
-    different set of actors can approve.
-    """
-    assert _load(_CHARTER)["policy"] == _load(_STANDARD), (
-        "charter.yaml's `policy:` section and "
-        "docs/standards/factory_autonomy/policy.yaml have drifted. The charter "
-        "is what governs this repo; the standard file is what the kernel writer "
-        "stamps into new ones. Update both, or retire policy.yaml and delete "
-        "this guard with it."
+def test_the_shipped_default_matches_the_charter() -> None:
+    """Compared as parsed documents, so comment and formatting differences
+    between the two files mean nothing while a single reordered `roles:` entry
+    — which changes who may approve a merge — reddens."""
+    assert _load(_CHARTER)["policy"] == _load(_SHIPPED), (
+        "charter.yaml's `policy:` section and src/assets/"
+        "factory_autonomy_policy.yaml have drifted. The charter governs this "
+        "repo; the asset is stamped into new ones and is the fallback for a "
+        "repo declaring none. Update both."
     )
