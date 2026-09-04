@@ -50,6 +50,7 @@ from stream_parser import StreamParser, parse_result_envelope
 from subprocess_util import (
     PROVIDER_ANTHROPIC,
     CreditExhaustedError,
+    UnstubbedSpawnError,
     is_credit_exhaustion,
     make_clean_env,
     parse_credit_resume_time,
@@ -418,6 +419,7 @@ async def stream_claude_process(
     if config.harness_transport == _GATEWAY:
         env = scrub_gateway_spawn_env(env)
     runner = config.runner or get_default_runner()
+    _refuse_unstubbed_stream(runner)
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
     # Rate-aware backpressure (#10289): if repeated mid-run failures have
@@ -1522,6 +1524,60 @@ def _running_under_pytest() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules
 
 
+#: The genuine spawn functions, captured at import so a later patch at any of
+#: the three levels a test may stub is detectable by identity.
+_REAL_STREAMING_SPAWN = HostRunner.create_streaming_process
+_REAL_SUBPROCESS_EXEC = asyncio.create_subprocess_exec
+
+
+def _would_really_spawn(runner: SubprocessRunner) -> bool:
+    """True when *runner* would reach a real ``create_subprocess_exec``.
+
+    A type check cannot answer this: a test may legitimately hold a genuine
+    ``HostRunner`` whose spawn is stubbed, on the class or on the instance. That
+    is precisely what made the #12144 guard's first two positions wrong, and the
+    streaming seam has far more such tests. Identity against the function
+    captured at import answers it exactly -- any patch, at either level, makes
+    this False and the guard stands aside.
+    """
+    if not isinstance(runner, HostRunner):
+        return False
+    if "create_streaming_process" in vars(runner):
+        return False  # patched on the instance
+    if (
+        getattr(type(runner), "create_streaming_process", None)
+        is not _REAL_STREAMING_SPAWN
+    ):
+        return False  # patched on the class
+    # Deepest level, and the one most streaming tests actually use:
+    # ``patch("asyncio.create_subprocess_exec", ...)``. A guard above this
+    # reddens 43 tests that hold a genuine HostRunner and never spawn.
+    return asyncio.create_subprocess_exec is _REAL_SUBPROCESS_EXEC
+
+
+def _refuse_unstubbed_stream(runner: SubprocessRunner) -> None:
+    """Fail CLOSED when a test would reach a real streaming spawn (#12147).
+
+    The sibling of :func:`_refuse_unstubbed_spawn` for the streaming seam, and
+    it shares that function's opt-in so a deliberate live spawn is declared once
+    rather than twice. The predicate is :func:`_would_really_spawn` rather than
+    an ``isinstance`` check, for the reason spelled out there.
+    """
+    if not _running_under_pytest():
+        return
+    if os.environ.get(_REAL_SPAWN_OPT_IN_ENV, "").strip():
+        return
+    if not _would_really_spawn(runner):
+        return
+    msg = (
+        "refusing to spawn a real streaming model call from a test. Inject a "
+        "fake runner (StreamConfig(runner=...)), stub the spawn, or set "
+        f"{_REAL_SPAWN_OPT_IN_ENV}=1 if this test genuinely intends a live "
+        "call. See #12147."
+    )
+    raise UnstubbedSpawnError(msg)
+
+
 def _refuse_unstubbed_spawn(runner: SubprocessRunner, *, source: str) -> None:
     """Fail CLOSED when a test would spawn a real model call (#12144).
 
@@ -1557,7 +1613,7 @@ def _refuse_unstubbed_spawn(runner: SubprocessRunner, *, source: str) -> None:
         f"{_REAL_SPAWN_OPT_IN_ENV}=1 if this test genuinely intends a live "
         f"call. See #12144."
     )
-    raise RuntimeError(msg)
+    raise UnstubbedSpawnError(msg)
 
 
 async def run_lightweight_agent(
