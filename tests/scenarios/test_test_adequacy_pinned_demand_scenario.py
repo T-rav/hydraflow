@@ -16,8 +16,8 @@ host against the real worktree and consumes no slots):
 
   1. Initial agent _execute (streaming) — commits code
   2. diff-sanity skill _execute — default success (no marker)
-  3. scope-check skill _execute — default success
-     (plan-compliance is skipped: empty prompt with no plan)
+  3. plan-compliance skill _execute — runs, which it previously did not
+     (scope-check returns an empty prompt and never reaches FakeDocker)
   4. test-adequacy finder _execute — RETRY naming a NEW, UNANCHORED gap
      → the pinned demand is closed, so the contract records it as advisory
   5. ``make coverage 0`` — exit 0, no coverage.xml → the pass is preserved
@@ -76,6 +76,10 @@ def _world_with_a_pinned_demand(tmp_path) -> MockWorld:
         commits=[("x.py", "def frob(): return 1\n")],
         cwd=tmp_path / "worktrees" / "issue-1",
     )
+    # diff-sanity, scope-check, plan-compliance — default success
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_text_events(_NEW_UNANCHORED))

@@ -310,36 +310,38 @@ async def test_A8_find_stage_to_done_realistic_agent(tmp_path) -> None:
 async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
     """quality-lite fails → fix agent runs → second quality-lite passes.
 
-    Proves the realistic path exercises production `AgentRunner._run_quality_fix_loop`.
-    `max_quality_fix_attempts` defaults to 2 in ConfigFactory, so one retry is
-    enough to pass.
+      Proves the realistic path exercises production `AgentRunner._run_quality_fix_loop`.
+      `max_quality_fix_attempts` defaults to 2 in ConfigFactory, so one retry is
+      enough to pass.
 
-    FakeDocker scripts are consumed FIFO by ALL run_agent calls (both
-    create_streaming_process for agent _execute calls and run_simple for
-    ``make`` calls). The post-implementation pipeline after the initial agent
-    run is:
+      FakeDocker scripts are consumed FIFO by ALL run_agent calls (both
+      create_streaming_process for agent _execute calls and run_simple for
+      ``make`` calls). The post-implementation pipeline after the initial agent
+      run is:
 
-      1. Initial agent _execute (streaming) — commits broken code
-      2. diff-sanity skill _execute — default success (no marker → passed)
-      3. scope-check skill _execute — default success (auto-pass, no plan)
-         plan-compliance is SKIPPED (empty prompt when no plan → no _execute call)
-      4. test-adequacy skill _execute — default success
-      5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
-      6. pre-quality review _execute, attempt 1, review pass — default success
-      7. pre-quality run-tool _execute, attempt 1, run_tool pass — default success
-      8. First `make quality-lite` (run_simple) — FAILS with exit_code=1
-      9. Quality-fix agent _execute (streaming) — commits fix
-     10. Second `make quality-lite` (run_simple) — PASSES with exit_code=0
-     11. Test step (`make test`: no ``test-impacted`` target in this worktree)
-         (run_simple) — default success
+        1. Initial agent _execute (streaming) — commits broken code
+        2. diff-sanity skill _execute — default success (no marker → passed)
+    3. scope-check skill _execute — reports "no input data" (MockWorld's
+       default plan declares no File Delta, so there is nothing to compare);
+       it no longer takes the no-PLAN auto-pass, which is a different branch
+    3b. plan-compliance skill _execute — runs, which it previously did not
+            4. test-adequacy skill _execute — default success
+        5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
+        6. pre-quality review _execute, attempt 1, review pass — default success
+        7. pre-quality run-tool _execute, attempt 1, run_tool pass — default success
+        8. First `make quality-lite` (run_simple) — FAILS with exit_code=1
+        9. Quality-fix agent _execute (streaming) — commits fix
+       10. Second `make quality-lite` (run_simple) — PASSES with exit_code=0
+       11. Test step (`make test`: no ``test-impacted`` target in this worktree)
+           (run_simple) — default success
 
-    The implement gate never runs the host-locked `make quality` (#11568).
-    plan-compliance returns an empty prompt string when no plan is present,
-    causing _run_skill to return early without calling _execute. Only 3 of the
-    4 registered skills consume an agent slot; test-adequacy also spends one
-    on its coverage probe. All skill/pre-quality slots must be explicitly
-    queued in FIFO order so that the fail/fix scripts land in the correct
-    positions.
+      The implement gate never runs the host-locked `make quality` (#11568).
+      All 4 registered skills consume an agent slot: ADR-0149's committed chain
+      supplies the plan text, so plan-compliance no longer returns an empty
+      prompt and scope-check no longer takes its no-plan auto-pass; test-adequacy also spends one
+      on its coverage probe. All skill/pre-quality slots must be explicitly
+      queued in FIFO order so that the fail/fix scripts land in the correct
+      positions.
     """
     world = MockWorld(tmp_path, use_real_agent_runner=True)
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
@@ -356,9 +358,11 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
     )
     # 2–5) Three post-implementation skill _execute calls + test-adequacy's
     # ``make coverage 0`` probe — default success
-    # (diff-sanity, scope-check, test-adequacy)
-    # plan-compliance is skipped: returns empty prompt with no plan → no _execute
-    for _ in range(4):
+    # (diff-sanity, plan-compliance, test-adequacy)
+    # One MORE slot than before: plan-compliance now spawns (it has plan
+    # text at last, from the committed chain). scope-check still spawns as
+    # it always did — its behaviour is deliberately unchanged here.
+    for _ in range(5):
         world.docker.script_run(_ok)
     # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
     world.docker.script_run(_ok)  # review pass
@@ -383,9 +387,26 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         f"docker_invocations={len(world.docker.invocations)}"
     )
     # FakeDocker invocations:
-    # 1 agent + 3 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
+    # 1 agent + 4 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
     # + 1 fix-agent + 1 quality-lite-pass + 1 test step = 11.
-    assert len(world.docker.invocations) >= 11
+    # Names the skill rather than counting: the previous `>= 11` lower bound
+    # passed with the fix reverted, because a misaligned queue still produced
+    # 12 invocations. Plan-compliance running at all IS the change.
+    prompts = [
+        inv.command[2] for inv in world.docker.invocations if len(inv.command) > 2
+    ]
+    assert any("Plan Compliance skill" in p for p in prompts), (
+        "plan-compliance did not run — the plan fallback is cache-only again "
+        "and both it and scope-check have silently disarmed"
+    )
+    # MockWorld's default plan carries no `## File Delta`, so scope-check
+    # legitimately reports "no input data" here rather than comparing. What
+    # this pins is that it is no longer taking the no-PLAN branch — that
+    # would mean the fallback went cache-only again and BOTH skills disarmed.
+    assert not any("No implementation plan is available" in p for p in prompts), (
+        "scope-check took its no-plan auto-pass; the plan fallback is cache-only again"
+    )
+    assert len(world.docker.invocations) == 12, world.docker.invocations
     make_cmds = [
         inv.command for inv in world.docker.invocations if inv.command[:1] == ["make"]
     ]
@@ -404,11 +425,10 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     (ConfigFactory default is 0, which skips wait_for_ci entirely in
     PostMergeHandler._run_ci_gate). We pass a custom config so the CI gate runs.
 
-    FakeDocker invocations (9 total — the gate passes first attempt):
+    FakeDocker invocations (10 total — the gate passes first attempt):
       1. Initial agent _execute (streaming) — commits code
-      2–4. Three post-implementation skill _execute calls — default success
-           (diff-sanity, scope-check, test-adequacy;
-           plan-compliance is skipped: empty prompt with no plan)
+      2–5. Four post-implementation skill _execute calls — default success
+           (diff-sanity, scope-check, plan-compliance, test-adequacy)
       5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
       6. Pre-quality review _execute, attempt 1 — default success
       7. Pre-quality run-tool _execute, attempt 1 — default success
@@ -446,9 +466,11 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
         cwd=worktree_cwd,
     )
     # 2–5) Three post-implementation skill _execute calls + the coverage probe
-    # (diff-sanity, scope-check, test-adequacy) — default success
-    # plan-compliance is skipped: returns empty prompt with no plan → no _execute
-    for _ in range(4):
+    # (diff-sanity, plan-compliance, test-adequacy) — default success
+    # One MORE slot than before: plan-compliance now spawns (it has plan
+    # text at last, from the committed chain). scope-check still spawns as
+    # it always did — its behaviour is deliberately unchanged here.
+    for _ in range(5):
         world.docker.script_run(_ok)
     # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
     world.docker.script_run(_ok)  # review pass
@@ -1102,28 +1124,30 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
 ) -> None:
     """A25: explicit adequacy OK dispatches the independent verifier (#9546).
 
-    The verifier is gated on the finder's EXPLICIT ``TEST_ADEQUACY_RESULT: OK``
-    marker — the no-marker default-pass used by every other scenario in this
-    file must stay verifier-free (A0/A10/A11 passing unchanged with the
-    verifier default-enabled IS that pin). Here the finder emits the explicit
-    marker, so the pipeline grows exactly one loop-visible verifier dispatch.
+      The verifier is gated on the finder's EXPLICIT ``TEST_ADEQUACY_RESULT: OK``
+      marker — the no-marker default-pass used by every other scenario in this
+      file must stay verifier-free (A0/A10/A11 passing unchanged with the
+      verifier default-enabled IS that pin). Here the finder emits the explicit
+      marker, so the pipeline grows exactly one loop-visible verifier dispatch.
 
-    FakeDocker FIFO (scripts are consumed by ALL calls in order):
+      FakeDocker FIFO (scripts are consumed by ALL calls in order):
 
-      1. Initial agent _execute (streaming) — commits code
-      2. diff-sanity skill _execute — default success (no marker)
-      3. scope-check skill _execute — default success
-         (plan-compliance is skipped: empty prompt with no plan)
-      4. test-adequacy finder _execute — EXPLICIT OK marker via assistant event
-      5. ``make coverage 0`` (run_simple via FakeDocker) — exit 0, no
-         coverage.xml → coverage delta gracefully preserves the pass
-      6. VERIFIER _execute — CONCUR via assistant event  ← the new dispatch
-      7–9. pre-quality review / run-tool / implement gate — default success
+        1. Initial agent _execute (streaming) — commits code
+        2. diff-sanity skill _execute — default success (no marker)
+    3. scope-check skill _execute — reports "no input data" (MockWorld's
+       default plan declares no File Delta, so there is nothing to compare);
+       it no longer takes the no-PLAN auto-pass, which is a different branch
+    3b. plan-compliance skill _execute — runs, which it previously did not
+        4. test-adequacy finder _execute — EXPLICIT OK marker via assistant event
+        5. ``make coverage 0`` (run_simple via FakeDocker) — exit 0, no
+           coverage.xml → coverage delta gracefully preserves the pass
+        6. VERIFIER _execute — CONCUR via assistant event  ← the new dispatch
+        7–9. pre-quality review / run-tool / implement gate — default success
 
-    The AgentRunner in scenarios builds its own default config
-    (``build_real_agent_runner`` → ``ConfigFactory.create()``), so this test
-    also proves the kill-switch is default-ON and the verifier model default
-    is independent of the finder's: both are read from the invocation argv.
+      The AgentRunner in scenarios builds its own default config
+      (``build_real_agent_runner`` → ``ConfigFactory.create()``), so this test
+      also proves the kill-switch is default-ON and the verifier model default
+      is independent of the finder's: both are read from the invocation argv.
     """
     world = MockWorld(tmp_path, use_real_agent_runner=True)
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
@@ -1147,14 +1171,17 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
         commits=[("x.py", "ok")],
         cwd=worktree_cwd,
     )
-    # 2–3) diff-sanity + scope-check — default success
+    # 2–3) diff-sanity + plan-compliance — default success
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
     world.docker.script_run(_ok)
     world.docker.script_run(_ok)
-    # 4) test-adequacy finder — EXPLICIT OK (the verifier trigger)
+    world.docker.script_run(_ok)
+    # 5) test-adequacy finder — EXPLICIT OK (the verifier trigger)
     world.docker.script_run(
         _text_events("TEST_ADEQUACY_RESULT: OK\nSUMMARY: coverage adequate")
     )
-    # 5) make coverage 0 — exit 0, no coverage.xml (graceful preserve)
+    # 6) make coverage 0 — exit 0, no coverage.xml (graceful preserve)
     world.docker.script_run(_ok)
     # 6) independent verifier — CONCUR keeps the pass
     world.docker.script_run(

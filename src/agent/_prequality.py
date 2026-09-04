@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from change_chain import CHANGES_PREFIX
 from models import (
     LoopResult,
     Task,
@@ -25,6 +26,28 @@ from models import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+#: Paths the HARNESS writes into the worktree before the agent starts, as git
+#: pathspec exclusions for the diff the post-implementation skills judge.
+#:
+#: NOT reused from ``null_delivery._NON_DELIVERABLE_PREFIXES``: that set
+#: answers "is this a standalone deliverable for a code issue", which is a
+#: different question and wrong in both directions here. It omits the
+#: planner-copied ``.likec4`` diagrams (harness-written, so excluding them is
+#: required) and includes ``repo_wiki/`` and ``docs/arch/generated/``, which
+#: the AGENT writes via ``make arch-regen`` — hiding those would blind
+#: diff-sanity to the entire delivery of a wiki or arch issue, and an
+#: all-excluded diff short-circuits every blocking skill to a pass.
+#:
+#: ``_count_commits`` keeps its own list on purpose: counting delivery and
+#: judging a diff are different questions too, and one shared constant for
+#: both is how this went wrong the first time.
+HARNESS_WRITTEN_PATHSPECS: tuple[str, ...] = (
+    f":(exclude){CHANGES_PREFIX}",  # ADR-0149 artifact chain
+    ":(exclude).beads/issues.jsonl",  # task store, seeded pre-agent
+    ":(exclude).beads/.issues.jsonl.lock",
+)
 
 
 logger = logging.getLogger("hydraflow.agent")
@@ -237,17 +260,53 @@ SUMMARY: <one-line summary>
         )
 
     async def _get_branch_diff(self, worktree_path: Path, branch: str) -> str:
-        """Return the combined diff of *branch* against the base branch."""
+        """Return the combined diff of *branch* against the base branch.
+
+        Harness-written paths are excluded. This diff is what the
+        post-implementation skills judge, and scope-check is BLOCKING — so a
+        file the harness put on the branch before the agent started (the
+        ADR-0149 artifact chain, the beads task store, planner-copied
+        diagrams, regenerated arch artifacts) would be classified as
+        unplanned and could fail a change for work the agent never did.
+
+        The set is :data:`HARNESS_WRITTEN_PATHSPECS` in this module, which
+        ``_count_commits`` also consumes — one definition, so extending it
+        cannot leave the other consumer behind.
+        """
         try:
             result = await self._runner.run_simple(
                 [
                     "git",
                     "diff",
                     f"origin/{self._config.base_branch()}...{branch}",
+                    "--",
+                    ".",
+                    *HARNESS_WRITTEN_PATHSPECS,
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,
             )
+            if result.returncode != 0:
+                # KNOWN GAP, deliberately not closed here. `run_skill_check`
+                # short-circuits an empty diff to passed=True for every
+                # blocking skill, so a git failure reports passes it never
+                # made. Closing it means changing that contract — "" from a
+                # clean tree and "" from a broken git are indistinguishable
+                # at this return type — and doing so inside this PR would
+                # kill the build in every worktree that is not a git repo,
+                # which several tests legitimately use.
+                #
+                # The fail-open predates this change; what this PR adds is a
+                # more complex argv, hence the log line naming the exit code
+                # so the failure is at least greppable.
+                logger.warning(
+                    "git diff exited %d for %s; the post-implementation "
+                    "skills will see an empty diff and short-circuit to a "
+                    "pass: %s",
+                    result.returncode,
+                    branch,
+                    result.stderr,
+                )
             return result.stdout or ""
         except (TimeoutError, FileNotFoundError):
             return ""

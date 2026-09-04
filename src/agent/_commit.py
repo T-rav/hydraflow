@@ -14,8 +14,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent._prequality import HARNESS_WRITTEN_PATHSPECS
 from base_runner import BaseRunner
-from change_chain import CHANGES_PREFIX
 from models import (
     Task,
 )
@@ -171,9 +171,7 @@ class AgentCommitMixin(BaseRunner):
                     f"origin/{self._config.base_branch()}..{branch}",
                     "--",
                     ".",
-                    ":(exclude).beads/issues.jsonl",
-                    ":(exclude).beads/.issues.jsonl.lock",
-                    f":(exclude){CHANGES_PREFIX}",
+                    *HARNESS_WRITTEN_PATHSPECS,
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,

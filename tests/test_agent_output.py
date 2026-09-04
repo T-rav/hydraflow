@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent import AgentRunner
+from agent._prequality import HARNESS_WRITTEN_PATHSPECS
 from events import EventBus, EventType
 from models import LoopResult, Task, WorkerStatus
 from tests.conftest import TaskFactory, WorkerResultFactory
@@ -166,11 +167,10 @@ class TestCountCommits:
             "origin/main..agent/issue-42",
             "--",
             ".",
-            ":(exclude).beads/issues.jsonl",
-            ":(exclude).beads/.issues.jsonl.lock",
-            # ADR-0149: the harness commits the artifact chain before the
-            # agent starts, so it is not agent delivery.
-            ":(exclude)docs/changes",
+            # By reference, not re-listed: _count_commits and the judged
+            # branch diff consume the same tuple, so a path added there
+            # cannot leave this expectation (or the other consumer) behind.
+            *HARNESS_WRITTEN_PATHSPECS,
             cwd=str(tmp_path),
             stdin=None,
             stdout=asyncio.subprocess.PIPE,

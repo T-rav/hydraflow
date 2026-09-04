@@ -13,8 +13,10 @@ host against the real worktree and consumes no slots):
 
   1. Initial agent _execute (streaming) — commits code
   2. diff-sanity skill _execute — default success (no marker)
-  3. scope-check skill _execute — default success
-     (plan-compliance is skipped: empty prompt with no plan)
+  3. scope-check skill _execute — reports "no input data" (MockWorld's
+     default plan declares no File Delta, so there is nothing to compare);
+     it no longer takes the no-PLAN auto-pass, which is a different branch
+  3b. plan-compliance skill _execute — runs, which it previously did not
   4. test-adequacy finder _execute — EXPLICIT RETRY with GAPS
   5. REPAIR _execute — commits the missing test (HEAD moves)  ← #11593
   6. re-check finder _execute — EXPLICIT OK
@@ -60,7 +62,10 @@ async def test_adequacy_rejection_is_repaired_in_run_and_the_issue_merges(
         commits=[("x.py", "def frob(): return 1\n")],
         cwd=worktree_cwd,
     )
-    # 2–3) diff-sanity + scope-check — default success
+    # 2–3) diff-sanity + plan-compliance — default success
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     # 4) test-adequacy finder — EXPLICIT RETRY with a concrete gap
@@ -121,6 +126,10 @@ async def test_repair_telemetry_records_the_rescue(tmp_path) -> None:
     world.docker.script_run_with_commits(
         events=_OK, commits=[("x.py", "def frob(): return 1\n")], cwd=worktree_cwd
     )
+    # diff-sanity + plan-compliance — default success
+    # One MORE slot than before: plan-compliance now spawns (it has plan text
+    # at last). scope-check still spawns as it always did.
+    world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(

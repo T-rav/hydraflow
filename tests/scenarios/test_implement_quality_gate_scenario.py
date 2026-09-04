@@ -82,9 +82,13 @@ async def test_quality_fix_loop_reverifies_without_the_host_lock(tmp_path) -> No
         commits=[("x.py", "broken"), ("Makefile", _MAKEFILE)],
         cwd=worktree_cwd,
     )
-    # 2-5) post-implementation skills: diff-sanity, scope-check, test-adequacy
-    #      (+ its ``make coverage 0`` probe, also a FakeDocker slot) — success
-    for _ in range(4):
+    # 2-5) post-implementation skills: diff-sanity, plan-compliance,
+    #      test-adequacy (+ its ``make coverage 0`` probe, also a slot)
+    # Still four slots, but a different four: scope-check now returns an empty
+    # prompt (no File Delta in MockWorld's default plan) and short-circuits
+    # WITHOUT spawning, while plan-compliance — which used to short-circuit
+    # for want of a plan — now spawns. One in, one out.
+    for _ in range(5):
         world.docker.script_run(_OK)
     # 6-7) pre-quality review + run-tool — default success
     world.docker.script_run(_OK)

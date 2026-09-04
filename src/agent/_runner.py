@@ -188,6 +188,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             cmd = self._build_command(worktree_path)
             prompt, prompt_stats = await self._build_prompt_with_stats(
                 task,
+                worktree=worktree_path,
                 review_feedback=review_feedback,
                 prior_failure=prior_failure,
                 bead_mapping=bead_mapping,
@@ -216,15 +217,15 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             # Load plan text for skills that need it (e.g. plan-compliance)
             skill_plan_text, _ = self._extract_plan_comment(task.comments)
             if not skill_plan_text:
-                # NOT `worktree_path` — deliberately. Passing it makes the
-                # fallback find the committed chain, which flips scope-check
-                # from "auto-pass, no plan" to actually checking the diff
-                # against the plan's declared files. That is the point of
-                # ADR-0149 and it is a real behaviour change to a safety
-                # skill, so it lands in its own change with its own scenario
-                # updates (test_A10, test_A25 encode the current counts) —
-                # not silently inside the PR that establishes the chain.
-                skill_plan_text = self._load_plan_fallback(task.id)
+                # Pass the worktree: it is the one checkout carrying this
+                # change's committed chain (ADR-0149), and post-implementation
+                # skills run inside it. Without it the fallback sees only
+                # `.hydraflow/plans/`, so a GC'd or host-local cache miss left
+                # scope-check with no plan — and build_scope_check_prompt
+                # AUTO-PASSES on empty plan text. The committed chain is the
+                # copy that outlives the cache, which is the whole reason it
+                # is committed.
+                skill_plan_text = self._load_plan_fallback(task.id, worktree_path)
 
             # Run registered post-implementation skills (diff-sanity, test-adequacy, etc.)
             for skill in get_skills():
