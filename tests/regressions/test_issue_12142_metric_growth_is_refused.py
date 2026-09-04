@@ -25,6 +25,8 @@ test, and it is present.
 
 from __future__ import annotations
 
+import pytest
+
 from erosion.mass_baseline import MassBaseline, laundered_metrics
 
 
@@ -42,40 +44,52 @@ def test_a_metric_that_rises_while_another_falls_is_reported() -> None:
     assert grown == {"src/config.py:Cfg": {"methods": (45, 50)}}
 
 
-def test_a_rise_beside_an_UNCHANGED_metric_is_reported() -> None:
+@pytest.mark.parametrize(
+    ("recorded_entry", "live_entry", "expected"),
+    [
+        pytest.param(
+            {"loc": 5059, "methods": 45},
+            {"loc": 5059, "methods": 50},
+            {"methods": (45, 50)},
+            id="loc-unchanged-methods-rises",
+        ),
+        pytest.param(
+            {"loc": 5059, "methods": 45},
+            {"loc": 6000, "methods": 45},
+            {"loc": (5059, 6000)},
+            id="methods-unchanged-loc-rises",
+        ),
+        pytest.param(
+            {"loc": 5059, "methods": 45},
+            {"loc": 5059, "methods": 45},
+            {},
+            id="nothing-moved-at-all",
+        ),
+    ],
+)
+def test_a_rise_beside_an_UNCHANGED_metric_is_reported(
+    recorded_entry: dict[str, int],
+    live_entry: dict[str, int],
+    expected: dict[str, tuple[int, int]],
+) -> None:
     """The hole the first predicate had: `falls` required a STRICT fall.
 
-    With `loc` unchanged and `methods` climbing, nothing improved anywhere —
-    a pure unaccounted rise on one axis, and a weaker reason to touch the entry
-    than the mixed case that WAS caught. It passed silently, exit 0, no warning.
-    Found in review of #12151; the predicate is now "rises beside a metric that
-    does not rise", not "rises beside a fall".
+    With one metric unchanged and the other climbing, nothing improved
+    anywhere — a pure unaccounted rise, and a weaker reason to touch the entry
+    than the mixed case that WAS caught. It passed silently, exit 0, no
+    warning. Found in review of #12151; the predicate is now "rises beside a
+    metric that does not rise", not "rises beside a fall".
+
+    The no-movement case rides in the same group as the control: no rise means
+    nothing to account for, however many metrics are equal.
     """
-    recorded = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 45}})
-    live = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 50}})
+    key = "src/config.py:Cfg"
+    recorded = MassBaseline(classes={key: dict(recorded_entry)})
+    live = MassBaseline(classes={key: dict(live_entry)})
 
-    grown = laundered_metrics(recorded, live, ["src/config.py:Cfg"])
+    grown = laundered_metrics(recorded, live, [key])
 
-    assert grown == {"src/config.py:Cfg": {"methods": (45, 50)}}
-
-
-def test_the_same_hole_in_the_other_direction() -> None:
-    """`methods` unchanged while `loc` climbs is the identical shape."""
-    recorded = MassBaseline(classes={"src/config.py:Cfg": {"loc": 5059, "methods": 45}})
-    live = MassBaseline(classes={"src/config.py:Cfg": {"loc": 6000, "methods": 45}})
-
-    grown = laundered_metrics(recorded, live, ["src/config.py:Cfg"])
-
-    assert grown == {"src/config.py:Cfg": {"loc": (5059, 6000)}}
-
-
-def test_an_entry_that_did_not_move_at_all_reports_nothing() -> None:
-    """No rise means nothing to account for, however many metrics are equal."""
-    entry = {"loc": 5059, "methods": 45}
-    recorded = MassBaseline(classes={"src/config.py:Cfg": dict(entry)})
-    live = MassBaseline(classes={"src/config.py:Cfg": dict(entry)})
-
-    assert laundered_metrics(recorded, live, ["src/config.py:Cfg"]) == {}
+    assert grown == ({key: expected} if expected else {})
 
 
 def test_a_pure_shrink_reports_nothing() -> None:
