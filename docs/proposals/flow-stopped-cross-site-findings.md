@@ -4,7 +4,7 @@
 #11804, itself scoped by #11798/#11797's concept-scatter sensor finding, #10106/#10104).
 **Verdict:** all three definitions are **identical** (byte-for-byte body/signature/docstring, and
 semantically — same input contract, same pure logic, no side effects). Unification is **safe,
-conditional** on landing test evidence first; see [Evidence gap](#evidence-gap--read-before-trusting-this-note).
+conditional** on landing test evidence first; see [Evidence gap](#evidence-gap-read-before-trusting-this-note).
 
 ## Evidence gap — read before trusting this note
 
