@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 from prompt_telemetry import rewrite_command_model
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from config import HydraFlowConfig
 
 # The env keys the zai harness backend reads (mirrors runner_utils `_HARNESS_BACKENDS`
@@ -161,6 +163,31 @@ def kimi_key_present() -> bool:
 ANTHROPIC_LANE_PROVIDERS: frozenset[str] = frozenset({"claude", "gateway"})
 
 
+#: The env pair the gateway registers its z.ai upstream from. Both must be set:
+#: `hydraflow_gateway.settings._add_upstream` refuses a half-configured pair and
+#: registers nothing when the base URL is empty, so "one of them is set" means
+#: the lane does not exist.
+_GATEWAY_ZAI_UPSTREAM_ENVS = (
+    "GATEWAY_ZAI_HARNESS_BASE_URL",
+    "GATEWAY_ZAI_HARNESS_API_KEY",
+)
+
+
+def gateway_zai_lane_present(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the gateway has a z.ai upstream for a failover spawn to mint against.
+
+    Read from the environment the factory already forwards to spawns
+    (`subprocess_util`'s gateway passthrough), not from gateway settings — this
+    runs in the factory process, which is not the gateway and cannot ask it.
+    That makes this a *necessary* condition rather than a sufficient one: the
+    pair being set does not prove the upstream is healthy, only that it was
+    configured. It is enough for the failure this closes, where the pair is
+    absent entirely and the mint is certain to be refused.
+    """
+    env = os.environ if environ is None else environ
+    return all(env.get(name, "").strip() for name in _GATEWAY_ZAI_UPSTREAM_ENVS)
+
+
 def apply_credit_failover(
     provider: str, cmd: list[str], config: HydraFlowConfig
 ) -> tuple[str, list[str]]:
@@ -190,6 +217,19 @@ def apply_credit_failover(
     # receive a real local z.ai credential. Direct Claude retains the existing
     # key-presence guard byte-for-byte.
     if provider == "claude" and not zai_key_present():
+        return provider, cmd
+    # The gateway lane's own precondition, symmetric to the direct lane's above
+    # (#12131). The docstring's reason for NOT checking one — "the proxy mints a
+    # z.ai-bound virtual key" — is true only while the proxy has a z.ai upstream
+    # to mint against. Where it does not, the rerouted spawn asks for a
+    # `zai-harness` binding, the mint returns 422 "provider is unavailable", and
+    # the spawn dies holding a GatewayMintError instead of the
+    # CreditExhaustedError that would have paused the factory. The deployment
+    # then gets neither failover nor the pause: just an error on every spawn.
+    #
+    # Declining here lets the credit signal propagate to `_pause_for_credits`,
+    # which is the designed behaviour when there is nowhere to fail over to.
+    if provider == "gateway" and not gateway_zai_lane_present():
         return provider, cmd
     resolved_provider = "gateway" if provider == "gateway" else "zai"
     return resolved_provider, rewrite_command_model(cmd, config.credit_failover_model)

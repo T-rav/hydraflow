@@ -97,6 +97,11 @@ async def test_gateway_work_loop_engages_without_local_zai_key(
         "HYDRAFLOW_ZAI_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
+    # No LOCAL z.ai credential, but the gateway has an upstream (#12131). The
+    # distinction is the whole of this test now: the worker never holds a key,
+    # and the proxy still has to have a lane.
+    monkeypatch.setenv("GATEWAY_ZAI_HARNESS_BASE_URL", "https://zai.invalid")
+    monkeypatch.setenv("GATEWAY_ZAI_HARNESS_API_KEY", "not-a-real-credential")
     object.__setattr__(config, "planner_provider", "gateway")
     orch = HydraFlowOrchestrator(config)
     orch._start_failover_probe = MagicMock()  # type: ignore[method-assign]

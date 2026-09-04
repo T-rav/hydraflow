@@ -184,7 +184,21 @@ class OrchestratorCreditsMixin:
             return False
         if not getattr(exc, "authoritative", False):
             return False
-        gateway_route = self._loop_uses_gateway_transport(loop_name)
+        # A gateway-routed loop counts as failover-capable only when the gateway
+        # has a z.ai upstream to mint against (#12131). Transport alone was the
+        # test, and it assumes the proxy can serve the lane the failover rewrites
+        # to. Where it cannot, this returned True — "failed over" — so the caller
+        # skipped `_pause_for_credits`, and every rerouted spawn then died on a
+        # 422 "provider is unavailable" from the mint. The factory got neither
+        # failover nor the pause, and the operator saw mint errors rather than
+        # the credit cap that caused them.
+        #
+        # Returning False here is the honest answer to "did we fail over?" and
+        # lets the pause do what it exists for: stop, surface the cap, and wait.
+        gateway_route = (
+            self._loop_uses_gateway_transport(loop_name)
+            and credit_failover.gateway_zai_lane_present()
+        )
         if not credit_failover.zai_key_present() and not gateway_route:
             return False
         if credit_failover.is_active():
