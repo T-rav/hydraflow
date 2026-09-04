@@ -21,6 +21,7 @@ import time
 from typing import TYPE_CHECKING
 
 from adr_utils import is_adr_issue_title, next_adr_number
+from change_chain_reader import read_plan
 from change_chain_writer import ChangeChainWriter
 from exception_classify import reraise_on_credit_or_bug
 from harness_insights import (
@@ -203,12 +204,8 @@ class ImplementBuildMixin:
         return timeout
 
     def _read_plan_for_recording(self, issue_number: int) -> str:
-        """Read the plan file for *issue_number*, returning empty string on failure."""
-        plan_path = self._config.plans_dir / f"issue-{issue_number}.md"
-        try:
-            return plan_path.read_text()
-        except OSError:
-            return ""
+        """Read the plan: the committed chain first, then the disk cache."""
+        return read_plan(self._config, issue_number)
 
     def _prepare_adr_plan(self, issue: Task) -> None:
         """Seed a deterministic ADR execution plan when an ADR issue lacks one."""

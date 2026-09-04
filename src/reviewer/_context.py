@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     pass
 
 from base_runner import BaseRunner
+from change_chain_reader import read_plan
 from models import (
     CodeScanningAlert,
     PRInfo,
@@ -60,12 +61,8 @@ class ReviewContextMixin(BaseRunner):
             if PLAN_COMMENT_HEADING in comment:
                 return comment
 
-        # Fallback to saved plan file
-        plan_path = self._config.plans_dir / f"issue-{issue.id}.md"
-        if plan_path.is_file():
-            return plan_path.read_text(encoding="utf-8").strip()
-
-        return ""
+        # Fallback to the committed chain, then the disk cache
+        return read_plan(self._config, issue.id).strip()
 
     async def _run_precheck_context(
         self, pr: PRInfo, issue: Task, diff: str, worktree_path: Path

@@ -16,6 +16,7 @@ import logging
 import re
 
 from base_runner import BaseRunner
+from change_chain_reader import read_plan
 
 logger = logging.getLogger("hydraflow.agent")
 
@@ -71,21 +72,20 @@ class AgentPlanMixin(BaseRunner):
         return "\n".join(cleaned).strip()
 
     def _load_plan_fallback(self, issue_number: int) -> str:
-        """Attempt to load a saved plan from ``.hydraflow/plans/issue-N.md``.
+        """Load a saved plan: the committed chain first, then the disk cache.
 
         Returns the plan text or empty string if not found.
         """
-        plan_path = self._config.plans_dir / f"issue-{issue_number}.md"
-        if not plan_path.is_file():
+        content = read_plan(self._config, issue_number)
+        if not content:
             return ""
 
         logger.warning(
-            "No plan comment found for issue #%d — falling back to %s",
+            "No plan comment found for issue #%d — falling back to the "
+            "committed chain or plan cache",
             issue_number,
-            plan_path,
             extra={"issue": issue_number},
         )
-        content = plan_path.read_text()
 
         # Strip the header/footer added by PlannerRunner._save_plan
         content = re.sub(r"^# Plan for Issue #\d+\s*\n", "", content)
