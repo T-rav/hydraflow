@@ -26,7 +26,12 @@ import pytest
 
 from events import EventBus
 from execution import HostRunner
-from runner_utils import StreamConfig, stream_claude_process
+from subprocess_util import UnstubbedSpawnError
+from runner_utils import (
+    StreamConfig,
+    _refuse_unstubbed_stream,
+    stream_claude_process,
+)
 
 
 def _call(**config_kwargs: Any) -> Any:
@@ -93,18 +98,29 @@ async def test_a_patch_of_create_subprocess_exec_passes() -> None:
         await _call()
 
 
-@pytest.mark.asyncio
-async def test_the_opt_in_allows_a_deliberate_real_spawn() -> None:
-    """A test whose subject IS a real process tree says so explicitly."""
-    with mock.patch.dict(
-        "os.environ", {"HYDRAFLOW_ALLOW_REAL_LLM_SPAWN": "1"}
-    ):
-        # Past the guard: it reaches the real spawn and `bash -c true` exits 0
-        # rather than being refused. Anything but the guard's RuntimeError.
-        try:
-            await _call()
-        except RuntimeError as exc:  # pragma: no cover - defensive
-            assert "12147" not in str(exc)
+def test_the_opt_in_stands_the_guard_down() -> None:
+    """A test whose subject IS a real process tree can say so explicitly.
+
+    This asserts the guard's decision directly rather than driving a spawn
+    through the whole streaming path. The first version set the opt-in and then
+    called `stream_claude_process`, which — that being the entire point of the
+    opt-in — really did spawn `bash -c true`. It passed locally and died in CI's
+    offline-egress regression lane with `ConnectionResetError: Connection lost`,
+    turning staging red one commit after this file landed.
+
+    A test for the guard that stops tests spawning had no business spawning.
+    The property that matters is "with the opt-in set, the guard does not
+    refuse" — and that needs no subprocess to establish.
+    """
+    runner = HostRunner()
+
+    with mock.patch.dict("os.environ", {"HYDRAFLOW_ALLOW_REAL_LLM_SPAWN": "1"}):
+        _refuse_unstubbed_stream(runner)  # must not raise
+
+    # And without it, the same runner is refused — so the assertion above is
+    # about the opt-in, not about this runner being unremarkable.
+    with pytest.raises(UnstubbedSpawnError):
+        _refuse_unstubbed_stream(runner)
 
 
 class _Reached(Exception):
