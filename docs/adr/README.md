@@ -208,6 +208,7 @@ cadence and files remediation issues on drift.
 | [0146](0146-sre-v1-the-exception-sensor.md) | SRE v1 — the exception sensor | Accepted |
 | [0147](0147-the-gateway-is-the-only-path-for-llm-spawns.md) | The gateway is the only path for LLM spawns | Accepted |
 | [0148](0148-the-gateway-is-credential-agnostic.md) | The gateway is credential-agnostic | Accepted |
+| [0149](0149-the-per-change-artifact-chain.md) | The per-change artifact chain lives in the repo | Proposed |
 
 ## Adding a new ADR
 
