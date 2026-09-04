@@ -82,14 +82,13 @@ async def test_quality_fix_loop_reverifies_without_the_host_lock(tmp_path) -> No
         commits=[("x.py", "broken"), ("Makefile", _MAKEFILE)],
         cwd=worktree_cwd,
     )
-    # 2-6) post-implementation skills: diff-sanity, scope-check,
-    #      plan-compliance, test-adequacy (+ its ``make coverage 0`` probe,
-    #      also a FakeDocker slot) — success
-    # plan-compliance now runs too: ADR-0149 threads the issue worktree
-    # into the plan fallback, so the committed chain supplies the plan
-    # text that previously left it with an empty prompt (and left
-    # scope-check auto-passing for the same reason).
-    for _ in range(5):
+    # 2-5) post-implementation skills: diff-sanity, plan-compliance,
+    #      test-adequacy (+ its ``make coverage 0`` probe, also a slot)
+    # Still two slots, but a different two: scope-check now returns an empty
+    # prompt (no File Delta in MockWorld's default plan) and short-circuits
+    # WITHOUT spawning, while plan-compliance — which used to short-circuit
+    # for want of a plan — now spawns. One in, one out.
+    for _ in range(4):
         world.docker.script_run(_OK)
     # 6-7) pre-quality review + run-tool — default success
     world.docker.script_run(_OK)

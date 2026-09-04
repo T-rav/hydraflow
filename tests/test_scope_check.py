@@ -46,23 +46,27 @@ class TestBuildScopeCheckPrompt:
         )
         assert "new_line()" in prompt
 
-    def test_a_plan_with_no_file_delta_auto_passes(self):
-        """A plan this skill cannot judge is not evidence of scope creep.
+    def test_a_plan_with_no_file_delta_reports_no_input_rather_than_passing(self):
+        """ "Cannot judge" must be distinguishable from "judged and passed".
 
         This used to render `_(none extracted)_` and hand the classifier an
         empty planned-file set — under which every file in the diff is
-        "unplanned" and a FAIL classification routes the change to RETRY.
-        The path was mostly unreachable while the plan fallback returned ""
-        (the empty-plan branch auto-passed first); ADR-0149 arms it by
-        supplying plan text from the committed chain, so the empty set has
-        to answer for itself. It answers the same way the empty plan does.
+        "unplanned" and a FAIL routes the change to RETRY. Returning a canned
+        OK instead would be the opposite error: a blocking gate reporting a
+        pass it never made, indistinguishable in telemetry from a real one.
+
+        An empty prompt is the codebase's existing signal for this:
+        ``skill_gate.run_skill_check`` short-circuits it to
+        ``"<skill>: no input data"`` without spawning an agent.
         """
         plan = "## Implementation Plan\nDo stuff\n"
-        prompt = build_scope_check_prompt(
-            issue_number=5, issue_title="Refactor", diff="+ x", plan_text=plan
+
+        assert (
+            build_scope_check_prompt(
+                issue_number=5, issue_title="Refactor", diff="+ x", plan_text=plan
+            )
+            == ""
         )
-        assert "SCOPE_CHECK_RESULT: OK" in prompt
-        assert "no File Delta" in prompt
 
     def test_a_plan_with_a_file_delta_still_reaches_the_classifier(self):
         """The guard above must not swallow the case the skill exists for."""

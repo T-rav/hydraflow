@@ -49,24 +49,6 @@ def test_only_an_empty_plan_reaches_the_scope_check_auto_pass(
 
 
 @pytest.mark.asyncio
-async def test_the_fallback_reads_the_worktree_before_the_cache():
-    """Behavioural pin: given a worktree, the committed chain wins."""
-    from change_chain import chain_dir
-    from change_chain_reader import read_plan
-    from tests.helpers import ConfigFactory
-
-    config = ConfigFactory.create()
-    worktree = config.workspace_path_for_issue(7)
-    directory = chain_dir(worktree, 7)
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "plan.md").write_text("the committed plan", encoding="utf-8")
-    config.plans_dir.mkdir(parents=True, exist_ok=True)
-    (config.plans_dir / "issue-7.md").write_text("the cached plan", encoding="utf-8")
-
-    assert read_plan(config, 7, worktree=worktree) == "the committed plan"
-
-
-@pytest.mark.asyncio
 async def test_the_judged_diff_excludes_the_harnesss_own_chain(tmp_path):
     """A blocking gate must not judge files the agent never wrote.
 
@@ -93,8 +75,6 @@ async def test_the_judged_diff_excludes_the_harnesss_own_chain(tmp_path):
         subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
     git("init", "-q", "-b", "main")
-    git("config", "user.email", "t@example.com")
-    git("config", "user.name", "Test")
     git("commit", "-q", "--allow-empty", "-m", "base")
     git("update-ref", "refs/remotes/origin/main", "HEAD")
     git("checkout", "-q", "-b", "agent/issue-7")

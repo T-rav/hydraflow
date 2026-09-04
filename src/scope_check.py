@@ -85,29 +85,22 @@ def build_scope_check_prompt(
             "SUMMARY: Landing-only/verification-only task — no changes to planned files"
         )
 
-    # No planned files means nothing to compare against, and the classifier
-    # below treats every unlisted file as a FAIL candidate — so arming it
-    # with an empty list would fail every change whose plan carries no
-    # `## File Delta` section. That is not scope creep, it is a plan this
-    # skill cannot judge. Auto-pass, the same answer the empty-plan branch
-    # gives, for the same reason (ADR-0149 armed this path by supplying plan
-    # text where there previously was none).
+    # No planned files means this skill cannot judge the change. Return ""
+    # rather than a canned OK: `skill_gate.run_skill_check` short-circuits an
+    # empty prompt to `LoopResult(passed=True, summary="<skill>: no input
+    # data")` WITHOUT spawning an agent, which is both cheaper and — the
+    # point — distinguishable in telemetry from a real pass.
+    #
+    # This is the honest answer for the lite lane, which declares
+    # `## Files to Modify` rather than the `## File Delta` this parser reads,
+    # and for any plan that names no files at all. Arming scope-check across
+    # both lanes means teaching the shared parser the lite section, which the
+    # review phase also depends on — a separate change with its own evidence,
+    # not a silent widening here.
     if not planned_files:
-        return (
-            f"You are running the Scope Check skill for issue #{issue_number}: "
-            f"{issue_title}.\n\n"
-            "The plan declares no File Delta, so there is no planned-file set "
-            "to compare the diff against — auto-pass. A plan this skill "
-            "cannot judge is not evidence of scope creep.\n\n"
-            "SCOPE_CHECK_RESULT: OK\n"
-            "SUMMARY: Plan declares no File Delta — nothing to compare"
-        )
+        return ""
 
-    planned_section = (
-        "\n".join(f"- `{f}`" for f in planned_files)
-        if planned_files
-        else "_(none extracted)_"
-    )
+    planned_section = "\n".join(f"- `{f}`" for f in planned_files)
 
     return f"""You are running the Scope Check skill for issue #{issue_number}: {issue_title}.
 

@@ -16,8 +16,10 @@ host against the real worktree and consumes no slots):
 
   1. Initial agent _execute (streaming) — commits code
   2. diff-sanity skill _execute — default success (no marker)
-  3. scope-check skill _execute — real comparison against the committed plan
-  3b. plan-compliance skill _execute — runs for the same reason (ADR-0149)
+  3. scope-check skill _execute — reports "no input data" (MockWorld's
+     default plan declares no File Delta, so there is nothing to compare);
+     it no longer takes the no-PLAN auto-pass, which is a different branch
+  3b. plan-compliance skill _execute — runs, which it previously did not
   4. test-adequacy finder _execute — RETRY naming a NEW, UNANCHORED gap
      → the pinned demand is closed, so the contract records it as advisory
   5. ``make coverage 0`` — exit 0, no coverage.xml → the pass is preserved
@@ -77,11 +79,10 @@ def _world_with_a_pinned_demand(tmp_path) -> MockWorld:
         cwd=tmp_path / "worktrees" / "issue-1",
     )
     # diff-sanity, scope-check, plan-compliance — default success
-    # plan-compliance now runs too: ADR-0149 threads the issue worktree
-    # into the plan fallback, so the committed chain supplies the plan
-    # text that previously left it with an empty prompt (and left
-    # scope-check auto-passing for the same reason).
-    world.docker.script_run(_OK)
+    # Still two slots, but a different two: scope-check now returns an empty
+    # prompt (no File Delta in MockWorld's default plan) and short-circuits
+    # WITHOUT spawning, while plan-compliance — which used to short-circuit
+    # for want of a plan — now spawns. One in, one out.
     world.docker.script_run(_OK)
     world.docker.script_run(_OK)
     world.docker.script_run(_text_events(_NEW_UNANCHORED))

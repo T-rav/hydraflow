@@ -38,6 +38,22 @@ _NON_DELIVERABLE_PREFIXES: tuple[str, ...] = (
     f"{CHANGES_PREFIX}/",
 )
 
+#: Every harness-written path, as git pathspec exclusions. The single source
+#: for consumers that must keep these OUT of a diff the agent is judged on —
+#: `agent/_prequality._get_branch_diff` feeds the blocking post-implementation
+#: skills, and `agent/_commit._count_commits` counts delivery.
+#:
+#: Derived from the prefixes above rather than re-listed, because this file
+#: is where "not a deliverable" is decided and a second hand-maintained copy
+#: is how the exclusion goes N-1 — which it already did once: three
+#: consumers, and only two carried the chain prefix.
+HARNESS_WRITTEN_PATHSPECS: tuple[str, ...] = (
+    *(f":(exclude){prefix.rstrip('/')}" for prefix in _NON_DELIVERABLE_PREFIXES),
+    ":(exclude).beads/issues.jsonl",
+    ":(exclude).beads/.issues.jsonl.lock",
+)
+
+
 # Exact paths that are auto-generated metadata.
 _NON_DELIVERABLE_EXACT: frozenset[str] = frozenset(
     {
