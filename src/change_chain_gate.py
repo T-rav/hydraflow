@@ -37,6 +37,7 @@ from change_chain import (
     digest,
     resolve_chain_dir,
 )
+from delta_verifier import parse_file_delta
 
 FINDING_MISSING = "chain-artifact-missing"
 FINDING_DIGEST_MISMATCH = "chain-digest-mismatch"
@@ -168,7 +169,21 @@ def _scope_findings(
     report a finding against itself. Archived chain paths are excluded on
     the same grounds.
     """
-    named = {token for token in _PATH_IN_PLAN.findall(plan_text) if token}
+    # The plan's OWN structured declaration wins when it has one. The
+    # planner is required to emit a `## File Delta` section
+    # (plan_constants.py), and delta_verifier already parses it for the
+    # review phase — a second, fuzzier comparator over the same plan would
+    # be strictly worse than the answer sitting next to it.
+    #
+    # The regex is the fallback for a plan with no File Delta section. It is
+    # permissive by construction (`e.g.` and version strings look like
+    # paths), which is one of the reasons this gate ships report-only.
+    declared = parse_file_delta(plan_text)
+    named = (
+        set(declared)
+        if declared
+        else {token for token in _PATH_IN_PLAN.findall(plan_text) if token}
+    )
     return [
         ChainFinding(
             FINDING_SCOPE_DEPARTURE,

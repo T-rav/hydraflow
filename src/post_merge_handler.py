@@ -326,8 +326,14 @@ class PostMergeHandler:
 
         # ADR-0149 P4: report the artifact chain's state for this change.
         # Advisory — it returns findings, never a verdict, and the merge
-        # proceeds either way. Placed before the policy call so a chain
-        # finding is on the PR even when policy then denies the merge.
+        # proceeds either way.
+        #
+        # Placed AFTER the CI and visual gates on purpose, not before: those
+        # gates return early, and a chain report on a PR that is not going to
+        # merge this pass is noise the operator has to read past. The trade
+        # is that a tampered chain on a red-CI PR goes unreported until CI is
+        # fixed — acceptable while this is report-only, and worth revisiting
+        # if it ever blocks.
         await report_chain_findings(
             config=self._config,
             prs=self._prs,
