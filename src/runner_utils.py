@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
@@ -1319,6 +1320,7 @@ async def _claude_cli_complete(
     ``SimpleResult.stdout`` is the bare reply text callers always parsed, and
     the envelope's token usage is copied into *usage_out* (the
     ``StreamParser.usage_snapshot`` shape) for the telemetry row."""
+    _refuse_unstubbed_spawn(runner, source=source)
 
     from agent_cli import AgentTool, build_lightweight_command  # noqa: PLC0415
 
@@ -1510,6 +1512,52 @@ async def _openai_compatible_complete(
         usage_out["total_tokens"] = int(u.get("total_tokens", 0) or 0)
         usage_out["usage_available"] = bool(u.get("total_tokens"))
     return SimpleResult(stdout=content, returncode=0)
+
+
+_REAL_SPAWN_OPT_IN_ENV = "HYDRAFLOW_ALLOW_REAL_LLM_SPAWN"
+
+
+def _running_under_pytest() -> bool:
+    """Detect a test process, matching ``event_loop_watchdog``'s precedent."""
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules
+
+
+def _refuse_unstubbed_spawn(runner: SubprocessRunner, *, source: str) -> None:
+    """Fail CLOSED when a test would spawn a real model call (#12144).
+
+    Five loops resolve their LLM as "the injected fake, or else a real
+    ``_CLI*`` client". That seam failed *open*: a test reaching the LLM path
+    without injecting a fake spawned a subprocess, surfacing as ``rc=1`` or a
+    300s timeout on a host without a credential -- indistinguishable from host
+    contention, which is how it stayed latent through a phantom-failure triage.
+
+    Guarding here rather than at the five call sites is deliberate: every one
+    of them reaches the model through this function, as do the dozen other
+    lightweight-agent callers, so a loop added later inherits the protection
+    instead of repeating the defect.
+
+    Keyed on the runner's *type*: an injected fake is by definition not a
+    ``HostRunner``, so this cannot fire on a properly stubbed test.
+
+    Called AFTER ``_terminal_gateway_runner`` and only on the CLI branch, not
+    at function entry. A caller may legitimately hand in a real ``HostRunner``
+    that dispatch then replaces with an owned Docker runner, and the
+    OpenAI-compatible path never touches the runner at all -- guarding at entry
+    reddened four such tests that never reach a spawn.
+    """
+    if not _running_under_pytest():
+        return
+    if os.environ.get(_REAL_SPAWN_OPT_IN_ENV, "").strip():
+        return
+    if not isinstance(runner, HostRunner):
+        return
+    msg = (
+        f"refusing to spawn a real model call from a test (source={source!r}). "
+        f"Construct the loop with an injected fake LLM client, or set "
+        f"{_REAL_SPAWN_OPT_IN_ENV}=1 if this test genuinely intends a live "
+        f"call. See #12144."
+    )
+    raise RuntimeError(msg)
 
 
 async def run_lightweight_agent(

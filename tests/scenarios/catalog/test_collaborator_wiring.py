@@ -189,13 +189,6 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "falls back to Path.cwd() when unset, reading outside the "
         "scenario's tmp root. Pre-existing gap, out of scope for #11416"
     ),
-    ("sampled_audit", "adjudicator"): (
-        "production fallback lazily builds _CLIAdjudicatorLLM (real "
-        "subprocess), spawned only when both "
-        "sampled_audit_auto_adjudicate_enabled and "
-        "sampled_audit_reaudit_enabled are set (scenario configs default "
-        "both off). Pre-existing gap, out of scope for #11416"
-    ),
 }
 
 

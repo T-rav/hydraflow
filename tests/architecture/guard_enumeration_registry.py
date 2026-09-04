@@ -761,6 +761,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         test_issue_11891_fields_reach_their_producer,
         test_issue_11939_port_fake_name_is_a_hint,
         test_issue_11969_mirror_pins_are_real,
+        test_issue_12144_llm_seam_fails_closed,
     )
     from tests.sandbox_scenarios.runner import test_scenarios
     from tests.scenarios import (
@@ -1296,6 +1297,32 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             kind=EnumerationKind.CORPUS,
             why="Cases test_worker_receipts feeds its detector: buckets.",
             undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_12144_llm_seam_fails_closed._lazily_built_llm_clients()",
+            members=tuple(
+                str(item)
+                for item in test_issue_12144_llm_seam_fails_closed._lazily_built_llm_clients()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "AST-derived at import: every `self._x = _CLI*(...)` lazy-init "
+                "under src/. Floored by the module's own known-positive test."
+            ),
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_12144_llm_seam_fails_closed._llm_collaborators_by_loop()",
+            members=tuple(
+                str(item)
+                for item in test_issue_12144_llm_seam_fails_closed._llm_collaborators_by_loop()
+            ),
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "AST-derived at import: (loop, attr) for each loop that lazily "
+                "builds a real LLM client. Floored by the same known-positive test."
+            ),
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
         GuardedEnumeration(
             name="regression_issue_10094._generated_seed_files()",

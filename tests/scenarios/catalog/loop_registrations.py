@@ -58,6 +58,38 @@ def _scenario_dedup(
     return dedup
 
 
+class _UninjectedLLM:
+    """Stands in for an LLM collaborator a scenario did not inject (#12144).
+
+    Deliberately not ``None``: a ``None`` LLM collaborator makes the loop
+    lazily construct a REAL ``_CLI*`` client and spawn a subprocess mid-test,
+    which on a credential-less host surfaces as ``rc=1`` or a 300s timeout --
+    indistinguishable from host contention, which is how it stayed latent.
+
+    Deliberately not a canned reply either: a scenario that genuinely drives
+    the LLM path must inject its own fake, and a stand-in that answered would
+    let it pass vacuously. Raising names the port to seed.
+    """
+
+    def __init__(self, port_key: str) -> None:
+        self._port_key = port_key
+
+    def __getattr__(self, name: str) -> object:
+        async def _refuse(*_args: object, **_kwargs: object) -> object:
+            msg = (
+                f"scenario drove the LLM path ({name!r}) without injecting a "
+                f"fake; seed ports[{self._port_key!r}] with one. See #12144."
+            )
+            raise AssertionError(msg)
+
+        return _refuse
+
+
+def _llm_or_refusal(ports: dict, port_key: str) -> object:
+    """Injected fake if the scenario seeded one, else a refusing stand-in."""
+    return ports.get(port_key) or _UninjectedLLM(port_key)
+
+
 def _build_ci_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from ci_monitor_loop import CIMonitorLoop  # noqa: PLC0415
 
@@ -287,7 +319,8 @@ def _build_sampled_audit(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state=state,
         dedup=dedup,
         deps=deps,
-        auditor=ports.get("sampled_audit_auditor"),
+        auditor=_llm_or_refusal(ports, "sampled_audit_auditor"),
+        adjudicator=_llm_or_refusal(ports, "sampled_audit_adjudicator"),
     )
 
 
@@ -339,7 +372,7 @@ def _build_intervention_tally(ports: dict[str, Any], config: Any, deps: Any) -> 
         state=state,
         dedup=dedup,
         deps=deps,
-        classifier_llm=classifier,
+        classifier_llm=classifier or _UninjectedLLM("intervention_tally_classifier"),
     )
 
 
@@ -978,7 +1011,7 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
-        refine_llm=ports.get("skill_prompt_refine_llm"),
+        refine_llm=_llm_or_refusal(ports, "skill_prompt_refine_llm"),
     )
 
     # Rewire external I/O to seeded async callables (if provided).
