@@ -114,3 +114,41 @@ class _Reached(Exception):
 def test_asyncio_import_is_used() -> None:
     """The identity check needs the module object, not a from-import."""
     assert asyncio.create_subprocess_exec is not None
+
+
+def test_the_refusal_survives_the_catch_and_continue_idiom() -> None:
+    """The guard is worthless if the codebase's standard handler eats it.
+
+    Every spawning runner is required by CLAUDE.md to use::
+
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            ...  # treat as a routine crash, keep going
+
+    and `reraise_on_credit_or_bug` re-raises only `FATAL_EXCEPTIONS`. A bare
+    `RuntimeError` is in neither `INFRA_FATAL_EXCEPTIONS` nor
+    `LIKELY_BUG_EXCEPTIONS`, so the refusal was swallowed at exactly the call
+    sites this guard exists to protect — `report_issue_loop` turned it into
+    `agent_crashed=True`, `verification_judge` into a logged warning. The spawn
+    was still prevented; the SIGNAL was lost, and a loosely-asserting test reads
+    a degraded crash as a legitimate negative path.
+    """
+    from exception_classify import is_fatal, reraise_on_credit_or_bug
+    from subprocess_util import UnstubbedSpawnError
+
+    refusal = UnstubbedSpawnError("refusing to spawn ... See #12147.")
+
+    assert is_fatal(refusal), "the refusal must never be a swallowable error"
+    with pytest.raises(UnstubbedSpawnError):
+        reraise_on_credit_or_bug(refusal)
+
+    # A plain RuntimeError still is not fatal — this test would pass for the
+    # wrong reason if the fix had simply made everything fatal.
+    assert not is_fatal(RuntimeError("an ordinary transient spawn failure"))
+
+
+def test_the_refusal_is_still_a_runtimeerror() -> None:
+    """Callers that catch RuntimeError specifically keep working."""
+    from subprocess_util import UnstubbedSpawnError
+
+    assert issubclass(UnstubbedSpawnError, RuntimeError)

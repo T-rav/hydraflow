@@ -50,6 +50,7 @@ from stream_parser import StreamParser, parse_result_envelope
 from subprocess_util import (
     PROVIDER_ANTHROPIC,
     CreditExhaustedError,
+    UnstubbedSpawnError,
     is_credit_exhaustion,
     make_clean_env,
     parse_credit_resume_time,
@@ -1574,7 +1575,7 @@ def _refuse_unstubbed_stream(runner: SubprocessRunner) -> None:
         f"{_REAL_SPAWN_OPT_IN_ENV}=1 if this test genuinely intends a live "
         "call. See #12147."
     )
-    raise RuntimeError(msg)
+    raise UnstubbedSpawnError(msg)
 
 
 def _refuse_unstubbed_spawn(runner: SubprocessRunner, *, source: str) -> None:
@@ -1612,7 +1613,7 @@ def _refuse_unstubbed_spawn(runner: SubprocessRunner, *, source: str) -> None:
         f"{_REAL_SPAWN_OPT_IN_ENV}=1 if this test genuinely intends a live "
         f"call. See #12144."
     )
-    raise RuntimeError(msg)
+    raise UnstubbedSpawnError(msg)
 
 
 async def run_lightweight_agent(

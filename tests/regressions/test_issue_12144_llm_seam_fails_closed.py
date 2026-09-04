@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from execution import HostRunner, SimpleResult
+from subprocess_util import UnstubbedSpawnError
 from runner_utils import run_lightweight_agent
 from tests.helpers import ConfigFactory
 
@@ -92,16 +93,22 @@ def _call(runner: object) -> Any:
 async def test_real_host_runner_is_refused_under_pytest() -> None:
     """The defect itself: a real runner under pytest must not reach a spawn.
 
-    The refusal surfaces through this seam's documented soft-failure contract
-    (``rc=-1`` carrying the reason) rather than as an exception, because
-    ``run_lightweight_agent`` collapses backend failures by design. That is
-    still loud where it matters: each loop turns a non-zero rc into
-    ``RuntimeError: <role> LLM failed (rc=-1): refusing to spawn ...``.
+    The refusal used to surface through this seam's soft-failure contract
+    (``rc=-1`` carrying the reason), because ``run_lightweight_agent`` collapses
+    backend failures by design. That was not loud enough: a bare ``RuntimeError``
+    is in neither fatal set, so every ``except Exception:
+    reraise_on_credit_or_bug(exc)`` site — the idiom this repo mandates for
+    spawning runners — swallowed it and degraded the refusal into an ordinary
+    crash. ``report_issue_loop`` turned it into ``agent_crashed=True``, which a
+    loosely-asserting test reads as a legitimate negative path.
+
+    ``UnstubbedSpawnError`` is in ``INFRA_FATAL_EXCEPTIONS``, so it survives
+    those handlers. Found reviewing #12153; fixed for both seams at once
+    because they had the identical exposure.
     """
     runner, recorder = _host_runner_that_cannot_spawn()
-    result = await _call(runner)
-    assert result.returncode != 0
-    assert "inject" in result.stderr
+    with pytest.raises(UnstubbedSpawnError, match="inject"):
+        await _call(runner)
     assert recorder.calls == 0, "the guard must refuse BEFORE the runner is reached"
 
 

@@ -14,7 +14,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from subprocess_util import AuthenticationError, CreditExhaustedError
+from subprocess_util import (
+    AuthenticationError,
+    CreditExhaustedError,
+    UnstubbedSpawnError,
+)
 
 if TYPE_CHECKING:
     from ports import ObservabilityPort
@@ -44,6 +48,10 @@ INFRA_FATAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AuthenticationError,
     CreditExhaustedError,
     MemoryError,
+    # Test-only, and never raised in production: the spawn guards return early
+    # outside pytest. Listed here so a refusal cannot be downgraded to a routine
+    # crash by the catch-and-continue idiom every spawning runner uses.
+    UnstubbedSpawnError,
 )
 
 #: The canonical "must never be swallowed" set — the infrastructure failures
