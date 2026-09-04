@@ -14,6 +14,13 @@ PR ever accounted for. Measured on #12141: the PR added zero methods, yet the
 refresh would have moved the mark 45 -> 50, and `loc` was stale by 1,075 lines
 in the same entry. A shrink-only ratchet carrying that much unrecorded growth is
 not enforcing shrink-only; it is a mark nothing had to clear.
+
+No MockWorld scenario layer: `regen_mass_baseline` is an operator script run by
+hand from a decomposition PR. It is not wired into any loop, no Port reaches it,
+and nothing in the pipeline invokes it — a scenario would have to construct the
+CLI and call `main()`, which is what the two CLI tests below already do against
+a real baseline file on disk. The layer that would add coverage here is the CLI
+test, and it is present.
 """
 
 from __future__ import annotations
