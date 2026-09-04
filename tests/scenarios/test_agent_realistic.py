@@ -321,7 +321,9 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
 
       1. Initial agent _execute (streaming) — commits broken code
       2. diff-sanity skill _execute — default success (no marker → passed)
-      3. scope-check skill _execute — default success (auto-pass, no plan)
+      3. scope-check skill _execute — real comparison against the committed
+         plan (ADR-0149), no longer the no-plan auto-pass
+      3b. plan-compliance skill _execute — runs for the same reason
          plan-compliance is SKIPPED (empty prompt when no plan → no _execute call)
       4. test-adequacy skill _execute — default success
       5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
@@ -354,11 +356,16 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         commits=[("x.py", "broken")],
         cwd=worktree_cwd,
     )
-    # 2–5) Three post-implementation skill _execute calls + test-adequacy's
+    # 2–6) Four post-implementation skill _execute calls + test-adequacy's
     # ``make coverage 0`` probe — default success
-    # (diff-sanity, scope-check, test-adequacy)
-    # plan-compliance is skipped: returns empty prompt with no plan → no _execute
-    for _ in range(4):
+    # (diff-sanity, scope-check, plan-compliance, test-adequacy)
+    #
+    # plan-compliance USED to be skipped here ("empty prompt with no plan →
+    # no _execute"), and scope-check auto-passed for the same reason. Both
+    # now run: ADR-0149 threads the issue worktree into the plan fallback,
+    # so the committed artifact chain supplies the plan text that neither
+    # skill could previously find.
+    for _ in range(5):
         world.docker.script_run(_ok)
     # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
     world.docker.script_run(_ok)  # review pass
@@ -1112,8 +1119,9 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
 
       1. Initial agent _execute (streaming) — commits code
       2. diff-sanity skill _execute — default success (no marker)
-      3. scope-check skill _execute — default success
-         (plan-compliance is skipped: empty prompt with no plan)
+      3. scope-check skill _execute — real comparison against the committed
+         plan (ADR-0149), no longer the no-plan auto-pass
+      3b. plan-compliance skill _execute — runs for the same reason
       4. test-adequacy finder _execute — EXPLICIT OK marker via assistant event
       5. ``make coverage 0`` (run_simple via FakeDocker) — exit 0, no
          coverage.xml → coverage delta gracefully preserves the pass
@@ -1147,10 +1155,13 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
         commits=[("x.py", "ok")],
         cwd=worktree_cwd,
     )
-    # 2–3) diff-sanity + scope-check — default success
+    # 2–4) diff-sanity + scope-check + plan-compliance — default success.
+    # plan-compliance used to be skipped and scope-check auto-passed, both
+    # for want of plan text; ADR-0149's committed chain now supplies it.
     world.docker.script_run(_ok)
     world.docker.script_run(_ok)
-    # 4) test-adequacy finder — EXPLICIT OK (the verifier trigger)
+    world.docker.script_run(_ok)
+    # 5) test-adequacy finder — EXPLICIT OK (the verifier trigger)
     world.docker.script_run(
         _text_events("TEST_ADEQUACY_RESULT: OK\nSUMMARY: coverage adequate")
     )
