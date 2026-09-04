@@ -142,3 +142,19 @@ def test_an_issue_body_with_a_credential_shaped_token_does_not_crash(config):
     )
 
     assert record_chain(config, hostile, "step one", "s", None) is not None
+
+
+def test_an_audit_stream_defect_does_not_kill_the_planning_run(config, monkeypatch):
+    """A broken append is a lost anchor, never a dead plan phase."""
+    import change_chain_recorder
+
+    class _Exploding:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def append(self, *_args, **_kwargs):
+            raise ValueError("scrubber corrupted the payload")
+
+    monkeypatch.setattr(change_chain_recorder, "AuditChain", _Exploding)
+
+    assert record_chain(config, _task(), "step one", "s", None) is None

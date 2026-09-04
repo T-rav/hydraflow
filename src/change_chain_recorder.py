@@ -101,7 +101,14 @@ def record_chain(
         _write_bodies(config, record)
         config.change_chain_path.parent.mkdir(parents=True, exist_ok=True)
         AuditChain(config.change_chain_path).append(record.to_json_dict())
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError as well as OSError: `AuditChain.append` scrubs the
+        # serialized payload with regexes whose value classes have been
+        # observed to corrupt it into invalid JSON, raising JSONDecodeError
+        # (a ValueError). This module keeps arbitrary prose out of the
+        # payload precisely so that cannot happen here — but a planning run
+        # must not die on an audit-stream defect either way, and the guard
+        # costs nothing.
         logger.warning(
             "Could not anchor the artifact chain for issue #%d — its "
             "committed chain will not be verifiable",

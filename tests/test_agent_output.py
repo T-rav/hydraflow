@@ -168,6 +168,9 @@ class TestCountCommits:
             ".",
             ":(exclude).beads/issues.jsonl",
             ":(exclude).beads/.issues.jsonl.lock",
+            # ADR-0149: the harness commits the artifact chain before the
+            # agent starts, so it is not agent delivery.
+            ":(exclude)docs/changes",
             cwd=str(tmp_path),
             stdin=None,
             stdout=asyncio.subprocess.PIPE,
