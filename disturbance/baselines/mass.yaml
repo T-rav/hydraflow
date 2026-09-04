@@ -9,8 +9,8 @@ classes:
     loc: 713
     methods: 40
   src/config.py:HydraFlowConfig:
-    loc: 5059
-    methods: 45
+    loc: 4983
+    methods: 50
   src/contract_refresh_loop.py:ContractRefreshLoop:
     loc: 671
     methods: 23
@@ -49,7 +49,8 @@ comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC o
   \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
   \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
   \ one entry with --only so unrelated growth is never laundered through an unrelated\
-  \ PR. Last moved: batch 8: WikiCompiler decomposed into a mixin package (Refs #11547)"
+  \ PR. Last moved: decomposed HydraFlowConfig: trust-fleet dials to three mixins\
+  \ (#11547)"
 files:
   src/config.py: 7339
   src/dashboard_routes/_routes.py: 2109
