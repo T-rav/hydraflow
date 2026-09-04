@@ -26,6 +26,14 @@ from audit_chain import AuditChain
     [
         pytest.param("secret_key=" + "A" * 25 + '"deploy" notes', id="unquoted-value"),
         pytest.param('password="' + "B" * 12 + '" in the runbook', id="quoted-value"),
+        # Unbalanced quote: an ordinary typo in a PR title, and the shape the
+        # FIRST cut of this fix corrupted. Review of #12149 caught that the
+        # balanced cases above cannot detect it -- pre-fix the pattern was
+        # dead on this path and short-circuited; post-first-fix it ate the
+        # field's own structural closing quote. Only an odd quote count
+        # exercises either failure.
+        pytest.param('password="never rotated', id="unbalanced-quote"),
+        pytest.param('token="' + "D" * 12 + " unterminated", id="unbalanced-token"),
         pytest.param(
             "GATEWAY_CONTROL_TOKEN=" + "C" * 20 + '"prod"', id="gateway-token"
         ),

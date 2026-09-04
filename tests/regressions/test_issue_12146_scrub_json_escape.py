@@ -84,3 +84,40 @@ def test_scrubbing_serialized_json_stays_parseable(label: str) -> None:
     assert scrubbed != line, f"{label!r} was not redacted at all"
     json.loads(scrubbed)  # must not raise
     assert secret.strip() not in scrubbed, f"{label!r} survived the scrub"
+
+
+@pytest.mark.parametrize("keyword", ["password", "secret", "token", "api_key"])
+def test_an_unbalanced_quote_does_not_corrupt_the_record(keyword: str) -> None:
+    """The regression the FIRST fix introduced, found in review of #12149.
+
+    Making the quoted pattern tolerate a JSON escape with `\\\\?` on each side
+    independently was wrong in the same way #12146 itself was wrong. Given an
+    unbalanced quote — an ordinary human typo in a PR title — the opener
+    consumed the escape, the value class ran past it to the field's own
+    STRUCTURAL closing quote, and the trailing `\\\\?['\\"]` ate that too:
+
+        {"body": "password=\\"never rotated"}
+          -> {"body": "[REDACTED:Generic secret assignment]}
+          -> JSONDecodeError: Unterminated string
+
+    Requiring the delimiters to MATCH means an unbalanced quote simply fails to
+    match. Fail safe, not fail corrupt: the occurrence is left unredacted rather
+    than the record being destroyed. Nothing is leaked that a matching pattern
+    would have caught, because there is no closing delimiter to bound it.
+    """
+    line = json.dumps({"body": f'{keyword}="never rotated', "z": "tail"})
+
+    scrubbed = scrub_secrets(line)
+
+    json.loads(scrubbed)  # must not raise
+
+
+def test_an_unbalanced_quote_still_lets_a_LATER_balanced_secret_be_caught() -> None:
+    """Failing to match one occurrence must not blind the scrubber to the next."""
+    secret = "Z" * 14
+    line = json.dumps({"a": 'password="unterminated', "b": f'password="{secret}"'})
+
+    scrubbed = scrub_secrets(line)
+
+    json.loads(scrubbed)
+    assert secret not in scrubbed, "the balanced secret after it must still redact"

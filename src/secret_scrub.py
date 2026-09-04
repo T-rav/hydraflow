@@ -145,7 +145,23 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             # ``_scrub_payload`` runs it on (#12146). The inner class admits the
             # backslash so the closing escape is consumed with its quote, which
             # keeps the redacted line parseable.
-            r"(?:secret|password|token|api_key)\s*[:=]\s*\\?['\"][^'\"]{8,}\\?['\"]",
+            # Two ALTERNATIVES, not an optional escape. `\\?` on each side
+            # independently was wrong in the same way #12146 itself was wrong:
+            # given an UNBALANCED quote (`password="never rotated`), the opener
+            # consumed the JSON escape, the value class ran to the field's own
+            # STRUCTURAL closing quote, and the trailing `\\?['\"]` ate that --
+            # redacting the closing delimiter and producing invalid JSON. The
+            # bug it was written to fix, via a different mechanism.
+            #
+            # Requiring the delimiters to MATCH each other means an unbalanced
+            # quote simply fails to match: no redaction of that occurrence,
+            # rather than a corrupted record. Fail safe, not fail corrupt.
+            r"(?:secret|password|token|api_key)\s*[:=]\s*"
+            r"(?:"
+            r'\\"[^"\\]{8,}\\"'  # serialized-JSON form: \"value\"
+            r"|"
+            r"['\"][^'\"]{8,}['\"]"  # raw-text form: 'value' or "value"
+            r")",
             re.IGNORECASE,
         ),
     ),
