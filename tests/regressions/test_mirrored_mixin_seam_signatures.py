@@ -22,6 +22,7 @@ until someone happens to run a type checker.
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -56,8 +57,19 @@ def _walk_functions(tree: ast.AST):
             yield node
 
 
+@lru_cache(maxsize=1)
 def _collect() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Return (declarations, implementations) as name -> set of annotations."""
+    """Return (declarations, implementations) as name -> set of annotations.
+
+    Cached: this parses every module under ``src/`` and takes ~3.5s. The
+    guard-enumeration gate calls the drop-detector once per member, and with
+    143 members an uncached sweep costs ~8.5 minutes — enough to get the
+    Architecture Check job killed, which CI reports as `cancelled` and the
+    CI Gate reports as a failure with no test named. Derived once per
+    process is still derived; the detector's claim is that a seam cannot
+    leave the set while it exists in source, not that it re-reads the disk
+    on every call.
+    """
     declarations: dict[str, set[str]] = {}
     implementations: dict[str, set[str]] = {}
     for path in sorted(SRC.rglob("*.py")):
