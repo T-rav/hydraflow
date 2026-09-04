@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
-from change_chain import CHANGES_PREFIX
+from change_chain import HARNESS_WRITTEN_PATHSPECS
 from models import (
     LoopResult,
     Task,
@@ -26,28 +26,6 @@ from models import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-
-#: Paths the HARNESS writes into the worktree before the agent starts, as git
-#: pathspec exclusions for the diff the post-implementation skills judge.
-#:
-#: NOT reused from ``null_delivery._NON_DELIVERABLE_PREFIXES``: that set
-#: answers "is this a standalone deliverable for a code issue", which is a
-#: different question and wrong in both directions here. It omits the
-#: planner-copied ``.likec4`` diagrams (harness-written, so excluding them is
-#: required) and includes ``repo_wiki/`` and ``docs/arch/generated/``, which
-#: the AGENT writes via ``make arch-regen`` — hiding those would blind
-#: diff-sanity to the entire delivery of a wiki or arch issue, and an
-#: all-excluded diff short-circuits every blocking skill to a pass.
-#:
-#: ``_count_commits`` keeps its own list on purpose: counting delivery and
-#: judging a diff are different questions too, and one shared constant for
-#: both is how this went wrong the first time.
-HARNESS_WRITTEN_PATHSPECS: tuple[str, ...] = (
-    f":(exclude){CHANGES_PREFIX}",  # ADR-0149 artifact chain
-    ":(exclude).beads/issues.jsonl",  # task store, seeded pre-agent
-    ":(exclude).beads/.issues.jsonl.lock",
-)
 
 
 logger = logging.getLogger("hydraflow.agent")
@@ -269,7 +247,7 @@ SUMMARY: <one-line summary>
         diagrams, regenerated arch artifacts) would be classified as
         unplanned and could fail a change for work the agent never did.
 
-        The set is :data:`HARNESS_WRITTEN_PATHSPECS` in this module, which
+        The set is :data:`change_chain.HARNESS_WRITTEN_PATHSPECS`, which
         ``_count_commits`` also consumes — one definition, so extending it
         cannot leave the other consumer behind.
         """

@@ -20,9 +20,11 @@ since ADR-0149 landed, and what was missing is anyone passing it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from agent._prequality import HARNESS_WRITTEN_PATHSPECS
+from change_chain import HARNESS_WRITTEN_PATHSPECS
 from scope_check import build_scope_check_prompt
 
 _AUTO_PASS = "No implementation plan is available"
@@ -60,6 +62,29 @@ def test_only_a_genuinely_absent_plan_reaches_the_no_plan_auto_pass(
         assert "Classification Rules" in prompt
 
 
+
+def test_the_harness_written_set_has_not_shrunk():
+    """A content pin, because parametrising by reference cannot see a drop.
+
+    Both consumers splat this tuple and the case list iterates it, so
+    deleting an entry removes it from the argv, from the expectation AND
+    from the parametrize list — every assertion adjusts and stays green
+    while the exclusion is gone. This is the one place that names the
+    members, so a removal has to be deliberate.
+
+    Each entry is load-bearing:
+      - docs/changes     the ADR-0149 chain, committed pre-agent
+      - .beads/*         the task store, seeded pre-agent
+      - *.likec4         planner context diagrams, copied pre-agent by
+                         PlannerRunner.copy_diagrams_to_workspace
+    """
+    assert set(HARNESS_WRITTEN_PATHSPECS) == {
+        ":(exclude)docs/changes",
+        ":(exclude).beads/issues.jsonl",
+        ":(exclude).beads/.issues.jsonl.lock",
+        ":(exclude)docs/architecture/*.likec4",
+    }
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "pathspec",
@@ -93,13 +118,18 @@ async def test_the_judged_diff_excludes_every_harness_written_path(
     git("update-ref", "refs/remotes/origin/main", "HEAD")
     git("checkout", "-q", "-b", "agent/issue-7")
 
-    # Derived from the pathspec so the case list cannot drift from the set:
-    # a prefix entry needs a file under it, a file entry is the file.
+    # Derived from the pathspec so the case list cannot drift from the set.
+    # A glob names its own file; a path with a suffix IS the file; anything
+    # else is a directory prefix needing a file under it. Asserted below, so
+    # a new entry shape cannot silently produce a path that is trivially
+    # absent from the diff and pass without exercising anything.
     excluded = pathspec.removeprefix(":(exclude)")
-    harness_path = (
-        excluded if excluded.endswith(".jsonl") or excluded.endswith(".lock")
-        else f"{excluded}/issue-7/plan.md"
-    )
+    if "*" in excluded:
+        harness_path = excluded.replace("*", "ctx")
+    elif Path(excluded).suffix:
+        harness_path = excluded
+    else:
+        harness_path = f"{excluded}/issue-7/plan.md"
     target = repo / harness_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("harness wrote this\n", encoding="utf-8")
@@ -114,6 +144,10 @@ async def test_the_judged_diff_excludes_every_harness_written_path(
 
     diff = await _Host()._get_branch_diff(repo, "agent/issue-7")
 
+    assert target.exists(), (
+        f"the case derived {harness_path!r} from {pathspec!r} but wrote no "
+        "file — the exclusion was never exercised"
+    )
     assert "real_work.py" in diff, "the agent's own work must still be judged"
     assert harness_path not in diff, (
         f"{harness_path} is harness-written and reached the diff a BLOCKING "

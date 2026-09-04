@@ -14,8 +14,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent._prequality import HARNESS_WRITTEN_PATHSPECS
 from base_runner import BaseRunner
+from change_chain import HARNESS_WRITTEN_PATHSPECS
 from models import (
     Task,
 )
