@@ -73,8 +73,8 @@ graph LR
     src -- "5" --> src_workspace
     src_arch -- "1" --> src_disturbance
     src_arch -- "3" --> src_policy
-    src_arch_extractors -- "7" --> src_arch
-    src_arch_generators -- "16" --> src_arch
+    src_arch_extractors -- "8" --> src_arch
+    src_arch_generators -- "17" --> src_arch
     src_arch_generators -- "1" --> src_policy
     src_arch_generators -- "1" --> src_vitals
     src_audit -- "1" --> src_escape

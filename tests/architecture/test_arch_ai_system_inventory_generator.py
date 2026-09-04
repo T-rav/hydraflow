@@ -172,6 +172,48 @@ def test_synthetic_model_role_survives_helper_becoming_a_package(
     )
 
 
+def test_synthetic_model_roles_survive_the_config_being_decomposed(
+    synthetic_repo: Path,
+):
+    """The inventory is derived from a config that no longer lives in one file.
+
+    ``src/config.py`` is the largest god class on the board and #11547's remedy
+    moves field groups onto mixins in sibling modules. Reading only that file's
+    own class body returned no ``*_model`` names at all, so every worker's model
+    role rendered as a dash — and reading it for ``_ENV_COMBO_OVERRIDES``
+    returned ``[]``, so the "Model roles" section rendered as a bare header.
+    Neither raised.
+    """
+    (synthetic_repo / "src/config.py").write_text(
+        "from config_dials import RoleDials\n"
+        "from config_env_tables import _ENV_COMBO_OVERRIDES\n\n"
+        "class HydraFlowConfig(RoleDials):\n"
+        "    pass\n"
+    )
+    (synthetic_repo / "src/config_dials.py").write_text(
+        "class RoleDials:\n"
+        "    widget_tool: str = 'claude'\n"
+        "    widget_model: str = 'opus'\n"
+        "    gadget_model: str = 'haiku'\n"
+    )
+    (synthetic_repo / "src/config_env_tables.py").write_text(
+        "_ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [\n"
+        "    ('HYDRAFLOW_WIDGET', 'widget_tool', 'widget_model'),\n"
+        "]\n"
+    )
+
+    rows = _collect(synthetic_repo)
+    assert rows is not None
+    widget = next(r for r in rows if r.worker == "widget")
+    assert widget.model_fields == ["widget_model"], (
+        "the model role was lost when the config was decomposed — the reader "
+        "saw only HydraFlowConfig's own class body"
+    )
+    assert "| `HYDRAFLOW_WIDGET` | `widget_tool` | `widget_model` |" in _render(
+        synthetic_repo
+    ), "the role registry was lost when it moved out of config.py"
+
+
 # ---------------------------------------------------------------------------
 # Synthetic tree — fail-loud contract
 # ---------------------------------------------------------------------------
