@@ -20,6 +20,18 @@ from __future__ import annotations
 import re
 
 # (label, compiled regex). Specific-prefix / structured patterns only.
+#: Characters an UNQUOTED assignment value may not contain. Excludes whitespace,
+#: the JSON structural characters, AND the backslash -- ``scrub_secrets`` runs
+#: over SERIALIZED JSON (``AuditChain._scrub_payload``, ``append_jsonl``), where
+#: a quote inside a string arrives as ``\"``. A class that excludes the quote
+#: but not its escape consumes the backslash and leaves the quote closing the
+#: JSON string early, so re-parsing the scrubbed line raises (#12146).
+#:
+#: Defined once and shared: the three patterns below each spelled their own
+#: class, two of them already excluding brackets and one not, and the fix had to
+#: be applied three times to be complete. A pattern added later inherits it.
+_UNQUOTED_VALUE = r"[^\s'\",}\[\]\\]"
+
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("GitHub PAT (classic)", re.compile(r"ghp_[A-Za-z0-9]{36,}")),
     ("GitHub PAT (fine-grained)", re.compile(r"github_pat_[A-Za-z0-9_]{40,}")),
@@ -35,7 +47,9 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         # corrupt the serialized JSON line append_jsonl scrubs. IGNORECASE also
         # catches the uppercase AWS_SECRET_ACCESS_KEY=... env-var form.
         re.compile(
-            r"(?:aws_secret_access_key|secret_key)\s*[:=]\s*[^\s'\",}]{20,}",
+            r"(?:aws_secret_access_key|secret_key)\s*[:=]\s*"
+            + _UNQUOTED_VALUE
+            + r"{20,}",
             re.IGNORECASE,
         ),
     ),
@@ -86,7 +100,9 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "HydraFlow gateway control token (assignment)",
         re.compile(
-            r"(?:HYDRAFLOW_)?GATEWAY_CONTROL_TOKEN\s*[:=]\s*[^\s'\",}\[\]]{16,}",
+            r"(?:HYDRAFLOW_)?GATEWAY_CONTROL_TOKEN\s*[:=]\s*"
+            + _UNQUOTED_VALUE
+            + r"{16,}",
             re.IGNORECASE,
         ),
     ),
@@ -108,7 +124,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "HydraFlow operator token (assignment)",
         re.compile(
-            r"(?:HYDRAFLOW_)?OPERATOR_TOKEN\s*[:=]\s*[^\s'\",}\[\]]{16,}",
+            r"(?:HYDRAFLOW_)?OPERATOR_TOKEN\s*[:=]\s*" + _UNQUOTED_VALUE + r"{16,}",
             re.IGNORECASE,
         ),
     ),
@@ -123,7 +139,29 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "Generic secret assignment",
         re.compile(
-            r"(?:secret|password|token|api_key)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
+            # ``\\?`` before each quote: in SERIALIZED JSON the delimiter arrives as
+            # ``\"``, so a bare ``['\"]`` never matches the OPENING quote and this
+            # pattern was silently dead on the audit-write path -- the only path
+            # ``_scrub_payload`` runs it on (#12146). The inner class admits the
+            # backslash so the closing escape is consumed with its quote, which
+            # keeps the redacted line parseable.
+            # Two ALTERNATIVES, not an optional escape. `\\?` on each side
+            # independently was wrong in the same way #12146 itself was wrong:
+            # given an UNBALANCED quote (`password="never rotated`), the opener
+            # consumed the JSON escape, the value class ran to the field's own
+            # STRUCTURAL closing quote, and the trailing `\\?['\"]` ate that --
+            # redacting the closing delimiter and producing invalid JSON. The
+            # bug it was written to fix, via a different mechanism.
+            #
+            # Requiring the delimiters to MATCH each other means an unbalanced
+            # quote simply fails to match: no redaction of that occurrence,
+            # rather than a corrupted record. Fail safe, not fail corrupt.
+            r"(?:secret|password|token|api_key)\s*[:=]\s*"
+            r"(?:"
+            r'\\"[^"\\]{8,}\\"'  # serialized-JSON form: \"value\"
+            r"|"
+            r"['\"][^'\"]{8,}['\"]"  # raw-text form: 'value' or "value"
+            r")",
             re.IGNORECASE,
         ),
     ),
