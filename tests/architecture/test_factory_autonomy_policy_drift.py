@@ -1,9 +1,9 @@
-"""Drift CI binding the factory-autonomy README table to policy.yaml (CH-3, #9731).
+"""Drift CI binding the factory-autonomy README table to the charter (CH-3, #9731).
 
 Two writers, one set (same pattern as the ADR/term drift tests): the prose
 act-vs-ask table in ``docs/standards/factory_autonomy/README.md`` is
-commentary; ``policy.yaml`` in the same directory is the normative encoding
-enforced at the factory's merge seams (``src/merge_policy.py``). Every table
+commentary; ``charter.yaml``'s ``policy:`` section is the normative encoding
+enforced at the factory's merge seams (``src/merge_policy.py``) since #12116. Every table
 row must have exactly one policy entry (matched on ``readme_row``) and vice
 versa, each row's Action-column direction must agree with the entry's
 ``autonomy``, and the README must carry the normative-policy marker section.
@@ -36,7 +36,12 @@ def readme_text(real_repo_root: Path) -> str:
 
 @pytest.fixture
 def policy(real_repo_root: Path) -> MergePolicy:
-    return load_merge_policy(real_repo_root / _STANDARD_DIR / "policy.yaml")
+    # This repo's GOVERNING copy, not the shipped default (#12116): the README
+    # describes how HydraFlow governs itself, so the binding has to be against
+    # the file that actually decides. `test_shipped_default_matches_the_charter`
+    # holds the packaged seed to this same section, so the standard HydraFlow
+    # ships and the standard HydraFlow runs stay one table.
+    return load_merge_policy(real_repo_root / "charter.yaml")
 
 
 def _table_rows(readme_text: str) -> dict[str, str]:
@@ -61,9 +66,9 @@ class TestTableAndPolicyAreOneSet:
         missing_in_policy = readme_rows - policy_rows
         missing_in_readme = policy_rows - readme_rows
         assert not missing_in_policy, (
-            f"README table row(s) with no policy.yaml entry: "
+            f"README table row(s) with no charter policy entry: "
             f"{sorted(missing_in_policy)} — add an entry with a matching "
-            "readme_row (policy.yaml is normative; the table is commentary)"
+            "readme_row (the charter is normative; the table is commentary)"
         )
         assert not missing_in_readme, (
             f"policy.yaml entr(y/ies) with no README table row: "
@@ -86,9 +91,34 @@ class TestTableAndPolicyAreOneSet:
 
 
 class TestNormativeMarker:
-    def test_readme_declares_policy_yaml_normative(self, readme_text: str) -> None:
+    def test_readme_points_at_the_file_that_actually_decides(
+        self, readme_text: str, real_repo_root: Path
+    ) -> None:
+        """The README must name the charter, and every path it cites must exist.
+
+        This asserted the bare substring `"policy.yaml"` — which #12116 left
+        passing on a dead relative link to a deleted file, since the string
+        still appeared in the prose describing it. A marker test that survives
+        the thing it marks going away is not marking anything.
+
+        So it checks the pointer, and then resolves every repo path the section
+        mentions. A broken link in the one document `CLAUDE.md` sends an
+        operator to for autonomy policy is worse than no document.
+        """
         assert "## Machine-readable policy (normative)" in readme_text
-        assert "policy.yaml" in readme_text
+        assert "charter.yaml" in readme_text, (
+            "the README does not name charter.yaml, which is what "
+            "config.merge_policy_path resolves to for this repo"
+        )
+
+        cited = set(re.findall(r"`([a-z0-9_./]+\.(?:yaml|py))`", readme_text))
+        missing = sorted(
+            path
+            for path in cited
+            if "/" in path and not (real_repo_root / path).exists()
+        )
+
+        assert not missing, f"README cites paths that do not exist: {missing}"
 
     def test_readme_documents_break_glass_and_kill_switch(
         self, readme_text: str, policy: MergePolicy

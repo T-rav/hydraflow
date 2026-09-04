@@ -118,6 +118,17 @@ _SELF_MOD_SUBSTRINGS: tuple[str, ...] = (
     # decoration. Measured before adding: `policy.yaml` classified
     # self_modification, `charter.yaml` classified UNCLASSED.
     "charter.yaml",
+    # The policy HydraFlow SHIPS (#12116). It used to live under
+    # `docs/standards/`, which is in this set two entries down, so it was
+    # covered by location rather than by name. Moving it into package data —
+    # so it reaches a wheel install, which `docs/` never did — walked it out
+    # from under that cover: measured after the move,
+    # `src/assets/factory_autonomy_policy.yaml` classified UNCLASSED.
+    #
+    # It is stamped into every newly onboarded repo's charter, so editing it
+    # changes the rules a repo is born with. That is the same authority
+    # `charter.yaml` carries, one hop earlier.
+    "src/assets/factory_autonomy_policy.yaml",
     "src/convergence_gate.py",
     "src/escalation_gate.py",
     "src/precondition_gate.py",

@@ -120,13 +120,14 @@ loops:
 # and vice versa, matched on `readme_row`. Editing one without the other
 # reddens CI.
 #
-# `policy.yaml` still ships in the standards directory because the kernel
-# writer stamps it into newly onboarded repos, which have no policy in their
-# charter yet. While both exist they are held identical by
-# `tests/architecture/test_charter_policy_is_the_standard_policy.py` — two
-# normative-looking files with only one of them checked is the shape this
-# consolidation exists to remove, and it must not be reintroduced by the
-# migration itself.
+# `docs/standards/factory_autonomy/policy.yaml` is gone (#12116 step two). The
+# same content ships as `src/assets/factory_autonomy_policy.yaml` — package
+# data, so it reaches a wheel install, which `docs/` never did — and it is a
+# SEED rather than a declaration: onboarding stamps it into a new repo's
+# charter, and `merge_policy_path` falls back to it for a repo declaring none.
+# `tests/architecture/test_charter_policy_is_the_standard_policy.py` holds it
+# identical to this section, so the standard HydraFlow ships is the standard
+# HydraFlow runs.
 policy:
   schema_version: 1
   merge_gate:

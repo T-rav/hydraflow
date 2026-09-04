@@ -25,7 +25,7 @@ from pydantic import (
 )
 
 import file_util
-from package_resources import ResourceNotFoundError, checkout_path
+from package_resources import checkout_path
 from queue_strategy import BandWeights, QueueStrategy
 from scheduling_model import (
     ExecutionRuntime,
@@ -1325,6 +1325,17 @@ def _declares_a_policy(charter: Path) -> bool:
     return isinstance(raw, dict) and "policy" in raw
 
 
+#: The act-vs-ask policy HydraFlow ships. Package data beside
+#: ``model_pricing.json``, not a `docs/` file: since #12116 the policy a repo is
+#: GOVERNED by lives in its own `charter.yaml`, and this is the seed onboarding
+#: stamps into a new charter plus the last-resort fallback for a repo declaring
+#: none. `docs/` is documentation and absent from the wheel, so the old
+#: `checkout_path` fallback had nothing to reach in an installed HydraFlow.
+DEFAULT_AUTONOMY_POLICY_PATH: Path = (
+    Path(__file__).parent / "assets" / "factory_autonomy_policy.yaml"
+)
+
+
 class HydraFlowConfig(BaseModel):
     """Configuration for the HydraFlow orchestrator."""
 
@@ -1758,7 +1769,6 @@ class HydraFlowConfig(BaseModel):
         wheel with no checkout cannot arm S4, and the director refuses to run
         instead of asserting against nothing (#11589).
         """
-        from package_resources import checkout_path
 
         return checkout_path(
             "tests",
@@ -7271,12 +7281,15 @@ class HydraFlowConfig(BaseModel):
 
         The repo's ``charter.yaml`` when it DECLARES a policy (#12116 — the
         charter is the single governing declaration); otherwise a managed
-        repo's own ``docs/standards/factory_autonomy/policy.yaml``
-        when present; otherwise the copy in the HydraFlow *checkout* (the
-        standard applies to every HydraFlow-format project). ``docs/`` is
-        documentation, not package data, so a wheel install has no second
-        copy — the property then names the managed repo's own expected
-        location, which is the one path an operator can act on.
+        repo's own ``docs/standards/factory_autonomy/policy.yaml`` when
+        present (the pre-#12116 shape, kept so an unmigrated repo keeps
+        merging); otherwise the shipped default in package data.
+
+        That last hop used to be ``checkout_path("docs", ...)``, which exists
+        for "development-only inputs deliberately absent from the wheel" — so
+        in a wheel install the fallback had nothing to fall back to and the
+        property named a file that was not there. The default is package data
+        beside ``model_pricing.json`` now, so it ships.
         ``merge_policy.enforce_merge_policy`` fails CLOSED on a missing or
         invalid file either way (#11589).
 
@@ -7294,10 +7307,7 @@ class HydraFlowConfig(BaseModel):
         )
         if repo_local.exists():
             return repo_local
-        try:
-            return checkout_path("docs", "standards", "factory_autonomy", "policy.yaml")
-        except ResourceNotFoundError:
-            return repo_local
+        return DEFAULT_AUTONOMY_POLICY_PATH
 
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.

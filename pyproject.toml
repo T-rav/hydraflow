@@ -18,7 +18,11 @@ exclude = ["ui*", "templates*", "tests*", "hydraflow_resources.*"]
 # and py-modules cannot be a glob (#11580). Runtime data read relative to
 # __file__ must be declared here or the wheel boots and fails on first use.
 [tool.setuptools.package-data]
-assets = ["*.json"]
+# *.yaml joined *.json when the factory-autonomy policy moved out of
+# docs/standards/ and under src/assets/ to become a runtime resource: an
+# undeclared data file is simply absent from the wheel, so the installed
+# package would resolve it to nothing while a checkout worked fine.
+assets = ["*.json", "*.yaml"]
 # prompts/, templates/ and static/ — the runtime resources resolved through
 # src/package_resources.py. They live under src/ precisely so that one
 # expression (`package_root() / "hydraflow_resources"`) finds them in a

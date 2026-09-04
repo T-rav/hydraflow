@@ -16,9 +16,10 @@ and, under H2, the change classes requiring an operator — did not.
 **Direction of travel (operator ruling, 2026-09-03): `charter.yaml` is the
 single governing declaration and the autonomy policy's roles move under it.**
 So `charter.yaml` is the one that has to be protected for the long run, and
-the `policy.yaml` assertion below is transitional — it holds until the
-consolidation lands, and should be deleted with the file rather than kept as
-evidence that two governing declarations is the intended shape. It is not.
+the second assertion below followed the policy content when it moved: the
+consolidation landed, `docs/standards/factory_autonomy/policy.yaml` is gone,
+and what remains is `src/assets/factory_autonomy_policy.yaml` — the seed a new
+repo is stamped with, not a second governing declaration.
 """
 
 from __future__ import annotations
@@ -32,13 +33,21 @@ def test_the_charter_is_self_modification() -> None:
     assert is_self_modification(classify_paths(["charter.yaml"]))
 
 
-def test_the_autonomy_policy_is_self_modification() -> None:
-    """`policy.yaml` carries the act/ask classes and their approval
-    requirements. Already covered; asserted here TRANSITIONALLY.
+def test_the_shipped_autonomy_policy_is_self_modification() -> None:
+    """The act/ask classes HydraFlow ships are still self-modification class.
 
-    Per the operator ruling, these roles fold under `charter.yaml` and this
-    file goes away. Delete this test with it — keeping it would preserve the
-    two-declaration shape the ruling removes.
+    This was written TRANSITIONALLY against
+    `docs/standards/factory_autonomy/policy.yaml`, to be deleted with that
+    file. The file is gone (#12116) — but deleting the test with it would have
+    been wrong, because the content did not stop existing. It became
+    `src/assets/factory_autonomy_policy.yaml`, the seed stamped into every
+    newly onboarded repo's charter.
+
+    That move mattered: `docs/standards/` is itself in the self-modification
+    set, so the old path was covered by LOCATION, and the new one classified
+    UNCLASSED until it was named. Editing the shipped default changes the rules
+    a repo is born with — the same authority `charter.yaml` carries, one hop
+    earlier — so it is named now and this asserts it.
 
     Written as its own test rather than a parametrised pair on purpose. The
     two are a set of exactly two known files, and a module-level sequence fed
@@ -48,7 +57,7 @@ def test_the_autonomy_policy_is_self_modification() -> None:
     tests carry the same coverage and a deletion is visible as a deleted test.
     """
     assert is_self_modification(
-        classify_paths(["docs/standards/factory_autonomy/policy.yaml"])
+        classify_paths(["src/assets/factory_autonomy_policy.yaml"])
     )
 
 
