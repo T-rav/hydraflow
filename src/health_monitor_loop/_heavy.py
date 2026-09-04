@@ -159,7 +159,16 @@ class HealthMonitorHeavyPassMixin:
         try:
             await self._run_fleet_vitals(metrics)
         except (OSError, RuntimeError, TypeError, ValueError, KeyError):
-            logger.debug("fleet-vitals evaluation failed", exc_info=True)
+            # WARNING, not debug. Fail-soft must not mean fail-silent: at
+            # default log levels a failing evaluation and a healthy one both
+            # produced nothing, so "no alarms" could not be told apart from
+            # "never evaluated". #11393 asks the operator to read an empty
+            # alarm log as a PASS for band placement — which is only sound if
+            # a broken supervisor is loud. The founding incident for this
+            # whole feature was a real signal going out at a level nobody
+            # watched; swallowing its supervisor's own failure the same way
+            # reproduces the bug one level up.
+            logger.warning("fleet-vitals evaluation failed", exc_info=True)
 
         self._verify_pending_adjustments(metrics)
         adjustments_made = self._apply_adjustments(metrics)
