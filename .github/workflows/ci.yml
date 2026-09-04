@@ -75,6 +75,13 @@ jobs:
               # unrelated build went red (#10926). Same rule as scripts/**
               # above — under-inclusive is merely expensive for a TEST filter.
               - 'docs/wiki/**'
+              # docs/standards/** for the SAME reason, and because leaving it out
+              # breaks the subset invariant asserted further down: `core_python`
+              # lists docs/standards/** and `python` did not, so a standards-only
+              # PR set core_python=true with python=false and tripped the #9908
+              # guard — which exists to catch a filter REGRESSION and was instead
+              # firing on a filter GAP, failing CI Gate with no way to pass.
+              - 'docs/standards/**'
               # control/** holds the fleet register + human-signed setpoints
               # (#10824). The PR that SIGNS a setpoint edits only YAML here —
               # and flips a live regulator from inert to acting — so it must
