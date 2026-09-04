@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from change_chain_reader import active_worktree, read_plan
 from models import MergeApprovalContext, ReviewVerdict
 from phase_utils import run_with_fatal_guard
 
@@ -326,13 +327,12 @@ class SelfFixMixin:
         """
         from delta_verifier import parse_file_delta, verify_delta
 
-        plan_path = self._config.plans_dir / f"issue-{pr.issue_number}.md"
-        if not plan_path.exists():
-            return ""
-
-        try:
-            plan_text = plan_path.read_text()
-        except OSError:
+        plan_text = read_plan(
+            self._config,
+            pr.issue_number,
+            worktree=active_worktree(self._state, pr.issue_number),
+        )
+        if not plan_text:
             return ""
 
         planned_files = parse_file_delta(plan_text)

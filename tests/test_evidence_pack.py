@@ -495,6 +495,7 @@ class TestAuditJson:
             "inference_telemetry",
             "approval_records",
             "evidence_packs",
+            "change_chain",
         }
         assert all(entry["ok"] for entry in streams.values())
         assert streams["approval_records"]["chained_records"] == 2

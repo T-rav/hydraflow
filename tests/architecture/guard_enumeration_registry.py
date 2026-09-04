@@ -724,6 +724,9 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
     from tests.architecture import test_admission_rule_tables as admission
     from tests.architecture import test_audit_src_layout_ratchet as src_layout
     from tests.architecture import test_canary_family_conformance as canary_sweep
+    from tests.architecture import (
+        test_change_chain_no_agent_write_path as chain_write_path,
+    )
     from tests.architecture import test_director_no_authority as director
     from tests.architecture import test_fatal_exception_set_centralized as fatal
     from tests.architecture import test_import_boundary_gate as boundaries
@@ -762,6 +765,9 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         test_issue_11939_port_fake_name_is_a_hint,
         test_issue_11969_mirror_pins_are_real,
         test_issue_12144_llm_seam_fails_closed,
+    )
+    from tests.regressions import (
+        test_mirrored_mixin_seam_signatures as mirrored_seams,
     )
     from tests.sandbox_scenarios.runner import test_scenarios
     from tests.scenarios import (
@@ -926,6 +932,23 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
 
         return member in HydraFlowConfig.model_fields
 
+    def _required_prompt_root_drop_is_caught(member: str) -> bool:
+        """A dropped root leaves real prompt files unrequired by the sweep.
+
+        Witnessed against the FILESYSTEM, not against PROMPT_ROOTS: the
+        latter is a superset of REQUIRED_ROOTS by construction, so reading
+        it answers True for every member and certifies nothing. The real
+        question is whether the tree still holds prompts that would stop
+        being required — which is what the per-root test asserts.
+        """
+        root = chain_write_path.REPO_ROOT / member  # noqa: SLF001
+        if not root.is_dir():
+            return False
+        return any(
+            path.is_file() and path.suffix in chain_write_path.PROMPT_SUFFIXES  # noqa: SLF001
+            for path in root.rglob("*")
+        )
+
     def _policy_purity_drop_is_caught(member: str) -> bool:
         classified = (
             set(policy_purity._PURE_SOURCES) | set(policy_purity._IO_SOURCES)  # noqa: SLF001
@@ -1033,6 +1056,58 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
                 "does not raise, it spends on a lane the ledger never sees, "
                 "which is the exact blindness ADR-0147 exists to end. The "
                 "floor in test_there_are_dials_to_guard catches the drop."
+            ),
+        ),
+        GuardedEnumeration(
+            name="test_mirrored_mixin_seam_signatures._MIRRORED",
+            members=tuple(mirrored_seams._MIRRORED),  # noqa: SLF001
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "Every mixin method declared in one file as a TYPE_CHECKING "
+                "stub and implemented in another. The mismatch it catches is "
+                "invisible at runtime — the stub never executes, so no test "
+                "can call the difference into failure, only a type checker. "
+                "Derived from source by AST at import, not listed, so the "
+                "producer's own floor is what guards the population: "
+                "test_the_sweep_found_mirrored_seams (non-empty) and "
+                "test_the_known_regression_subject_is_in_the_set (the seam "
+                "whose stale mirror this exists for)."
+            ),
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_change_chain_no_agent_write_path._prompt_files()",
+            members=tuple(
+                chain_write_path._relative(path)  # noqa: SLF001
+                for path in chain_write_path._prompt_files()  # noqa: SLF001
+            ),
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "ADR-0149's security property: the artifact chain is written "
+                "by the harness and never by an agent, so no prompt may name "
+                "docs/changes/. Each member is one prompt file the needle runs "
+                "against, asserted per case — dropping one narrows the proof, "
+                "it does not make the rule vacuous. The POPULATION is guarded "
+                "per root by "
+                "test_each_required_prompt_root_still_contributes_files, which "
+                "is what reddens when a root moves and its files stop being "
+                "swept."
+            ),
+            undetected_reason=_CORPUS_IS_EVIDENCE,
+        ),
+        GuardedEnumeration(
+            name="test_change_chain_no_agent_write_path.REQUIRED_ROOTS",
+            members=tuple(str(root) for root in chain_write_path.REQUIRED_ROOTS),
+            kind=EnumerationKind.SUBJECT,
+            detects_drop=_required_prompt_root_drop_is_caught,
+            why=(
+                "The roots that must keep contributing files to the prompt "
+                "sweep. This IS the population check: dropping a root stops "
+                "that tree being required, which is how half the corpus could "
+                "leave the sweep while it stayed green. Witnessed against the "
+                "prompt roots actually present on disk, not against "
+                "PROMPT_ROOTS — a superset literal would answer True for "
+                "every member and certify a detection that does not exist."
             ),
         ),
         GuardedEnumeration(

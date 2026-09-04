@@ -518,9 +518,20 @@ async def test_A12_multi_commit_implement(tmp_path) -> None:
 
     assert result.issue(1).merged, f"expected merged=True; outcome={result.issue(1)}"
 
-    # Verify 3 agent-generated commits on the branch (excludes initial empty commit on main)
+    # Verify 3 AGENT-generated commits on the branch (excludes the initial
+    # empty commit on main, and the harness's own artifact-chain commit —
+    # ADR-0149 — which production's _count_commits excludes on the same
+    # grounds: it is not implementation delivery).
     count = subprocess.run(
-        ["git", "rev-list", "--count", "origin/main..agent/issue-1"],
+        [
+            "git",
+            "rev-list",
+            "--count",
+            "origin/main..agent/issue-1",
+            "--",
+            ".",
+            ":(exclude)docs/changes",
+        ],
         cwd=worktree_cwd,
         capture_output=True,
         text=True,

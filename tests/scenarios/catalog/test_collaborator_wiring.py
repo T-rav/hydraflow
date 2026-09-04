@@ -177,9 +177,12 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
     # but not part of that fix's scope — flagged here rather than silently
     # dropped so a future pass has a precise, audited list to work from.
     ("report_issue", "runner"): (
-        "passed straight to stream_claude_with_telemetry(); production "
-        "fallback there spawns a real subprocess runner. Pre-existing "
-        "gap, out of scope for #11416"
+        "passed straight to stream_claude_with_telemetry(); the production "
+        "fallback there builds a real subprocess runner. The scenario-safety "
+        "half of that is closed by #12147 — stream_claude_process now refuses "
+        "an unstubbed real spawn under pytest — so an unforwarded port can no "
+        "longer reach a live subprocess from a test. The kwarg is still not "
+        "forwarded, which is why this entry stays"
     ),
     ("disturbance_dampener", "pr_opener"): (
         "falls back to generate_and_open_pr_async, a real PR-opening "

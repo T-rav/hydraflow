@@ -526,3 +526,66 @@ def test_a_present_but_unreadable_declaration_is_rejected(
     (tmp_path / filename).write_text(body)
     with pytest.raises(CharterError, match=expected):
         load_charter(tmp_path)
+
+
+class TestArtifactsChain:
+    """The charter declares which per-change artifacts a repo requires."""
+
+    def test_the_chain_declaration_is_parsed(self):
+        charter = Charter.from_dict(
+            {
+                "schema_version": 1,
+                "artifacts": {"required": [], "chain": ["intent", "plan"]},
+            }
+        )
+
+        assert charter.artifacts.chain == ("intent", "plan")
+
+    def test_an_unknown_chain_artifact_is_rejected_at_load(self):
+        with pytest.raises(CharterError, match="names no chain artifact"):
+            Charter.from_dict(
+                {
+                    "schema_version": 1,
+                    "artifacts": {"required": [], "chain": ["nope"]},
+                }
+            )
+
+    def test_an_absent_chain_declaration_is_an_empty_tuple(self):
+        charter = Charter.from_dict(
+            {"schema_version": 1, "artifacts": {"required": []}}
+        )
+
+        assert charter.artifacts.chain == ()
+
+    def test_a_chain_only_charter_declares_something_checkable(self):
+        charter = Charter.from_dict(
+            {"schema_version": 1, "artifacts": {"required": [], "chain": ["plan"]}}
+        )
+
+        assert charter.declares_nothing_checkable is False
+
+    def test_the_chain_survives_a_round_trip(self):
+        charter = Charter.from_dict(
+            {
+                "schema_version": 1,
+                "artifacts": {"required": [], "chain": ["intent", "plan"]},
+            }
+        )
+
+        assert Charter.from_dict(charter.to_dict()).artifacts.chain == (
+            "intent",
+            "plan",
+        )
+
+
+def test_the_charter_vocabulary_matches_the_chain_artifacts():
+    """Two writers, one set (ADR-0149).
+
+    charter_model holds the artifact NAMES so it can stay inside its purity
+    pin; change_chain holds the enum with the behaviour. Neither may move
+    without the other.
+    """
+    from change_chain import ChainArtifact
+    from charter_model import CHAIN_ARTIFACT_NAMES
+
+    assert {artifact.value for artifact in ChainArtifact} == CHAIN_ARTIFACT_NAMES

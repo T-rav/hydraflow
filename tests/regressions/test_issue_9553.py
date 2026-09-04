@@ -37,6 +37,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from unittest import mock
 import signal
 import sys
 import time
@@ -131,20 +132,31 @@ class _ProcessTreeProbeLoop(BaseBackgroundLoop):
         else:
             from runner_utils import StreamConfig, stream_claude_process
 
+            # This test's whole subject is a REAL process tree: it spawns
+            # `bash -c "sleep 300 & ..."` so the reap can be observed killing
+            # the group. The #12147 seam guard cannot tell that from a model
+            # spawn, so say so rather than let it refuse a deliberate one.
+            # Scoped with patch.dict, never a bare assignment: a leaked
+            # HYDRAFLOW_ALLOW_REAL_LLM_SPAWN would silently disable the guard
+            # for every later test in this worker.
+            #
             # Streaming path: stream_claude_process parks on proc.stdout until
             # the cycle is cancelled, then group-kills on CancelledError (#9800).
             # timeout huge so the watchdog's cancel — not the stream's own
             # wait_for — is what fires.
-            await stream_claude_process(
-                cmd=["bash", "-c", script],
-                prompt="",
-                cwd=Path.cwd(),
-                active_procs=self._active_procs,
-                event_bus=self._bus,
-                event_data={"issue": 9553, "source": "test_9553"},
-                logger=logging.getLogger("test_9553"),
-                config=StreamConfig(timeout=300.0),
-            )
+            with mock.patch.dict(
+                os.environ, {"HYDRAFLOW_ALLOW_REAL_LLM_SPAWN": "1"}
+            ):
+                await stream_claude_process(
+                    cmd=["bash", "-c", script],
+                    prompt="",
+                    cwd=Path.cwd(),
+                    active_procs=self._active_procs,
+                    event_bus=self._bus,
+                    event_data={"issue": 9553, "source": "test_9553"},
+                    logger=logging.getLogger("test_9553"),
+                    config=StreamConfig(timeout=300.0),
+                )
         return None
 
 
