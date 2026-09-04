@@ -155,6 +155,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0146 | — | `pytest:tests/test_sentry_observability_adapter.py::TestTheDsnIsTheSwitch::test_no_dsn_gets_the_no_op`, `pytest:tests/test_sentry_observability_adapter.py::TestErrorsOnly::test_tracing_is_initialised_off`, `pytest:tests/test_triage_phase.py::TestTheExceptionSensorRoute::test_the_sensor_label_routes_a_failed_triage_to_auto_close` |
 | ADR-0147 | — | `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_defaults_to_the_gateway`, `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_capable_set_covers_every_dial`, `pytest:tests/architecture/test_every_dial_routes_through_the_gateway.py::test_the_dial_keeps_a_direct_escape_hatch` |
 | ADR-0148 | — | `pytest:tests/test_gateway_oauth_passthrough.py::TestTheOAuthHeadersAreBuilt::test_a_clients_own_betas_survive`, `pytest:tests/test_gateway_oauth_passthrough.py::TestAProxiedRequestOnTheSubscriptionLane::test_the_upstream_gets_the_subscription_token`, `pytest:tests/test_gateway_oauth_passthrough.py::TestAllThreeCredentialsCanShareOnePool::test_the_subscription_account_needs_no_environment_secret`, `pytest:tests/test_gateway_subscription_credential.py::TestTheSource::test_a_stale_token_with_no_refresh_command_fails_closed` |
+| ADR-0149 | — | `nothing yet — deliberately.` |
 
 ## Module → ADRs
 
