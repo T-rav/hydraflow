@@ -17,15 +17,42 @@ from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from change_chain import CHANGES_PREFIX
 from models import (
     LoopResult,
     Task,
     WorkerStatus,
 )
-from null_delivery import HARNESS_WRITTEN_PATHSPECS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+#: Paths the HARNESS writes into the worktree before the agent starts, as git
+#: pathspec exclusions for the diff the post-implementation skills judge.
+#:
+#: NOT reused from ``null_delivery._NON_DELIVERABLE_PREFIXES``: that set
+#: answers "is this a standalone deliverable for a code issue", which is a
+#: different question and wrong in both directions here. It omits the
+#: planner-copied ``.likec4`` diagrams (harness-written, so excluding them is
+#: required) and includes ``repo_wiki/`` and ``docs/arch/generated/``, which
+#: the AGENT writes via ``make arch-regen`` — hiding those would blind
+#: diff-sanity to the entire delivery of a wiki or arch issue, and an
+#: all-excluded diff short-circuits every blocking skill to a pass.
+#:
+#: ``_count_commits`` keeps its own list on purpose: counting delivery and
+#: judging a diff are different questions too, and one shared constant for
+#: both is how this went wrong the first time.
+HARNESS_WRITTEN_PATHSPECS: tuple[str, ...] = (
+    f":(exclude){CHANGES_PREFIX}",  # ADR-0149 artifact chain
+    ":(exclude).beads/issues.jsonl",  # task store, seeded pre-agent
+    ":(exclude).beads/.issues.jsonl.lock",
+    ":(exclude)docs/architecture/*.likec4",  # planner-copied context diagrams
+)
+
+
+class BranchDiffUnavailableError(RuntimeError):
+    """git could not produce the branch diff the skills are judged on."""
 
 
 logger = logging.getLogger("hydraflow.agent")
@@ -265,6 +292,14 @@ SUMMARY: <one-line summary>
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,
             )
+            if result.returncode != 0:
+                # NOT "" — `skill_gate.run_skill_check` short-circuits an
+                # empty diff to passed=True for every blocking skill, so a
+                # git failure would report three passes it never made. This
+                # PR complicates the argv, which widens that surface.
+                raise BranchDiffUnavailableError(
+                    f"git diff exited {result.returncode}: {result.stderr}"
+                )
             return result.stdout or ""
         except (TimeoutError, FileNotFoundError):
             return ""

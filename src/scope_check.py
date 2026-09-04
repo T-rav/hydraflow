@@ -46,13 +46,13 @@ def build_scope_check_prompt(
     since there is nothing to compare against.
     """
     if not plan_text.strip():
-        return (
-            f"You are running the Scope Check skill for issue #{issue_number}: "
-            f"{issue_title}.\n\n"
-            "No implementation plan is available — auto-pass.\n\n"
-            "SCOPE_CHECK_RESULT: OK\n"
-            "SUMMARY: No plan available for comparison"
-        )
+        # Same answer as the no-planned-files branch below, for the same
+        # reason: an empty prompt makes `skill_gate.run_skill_check` report
+        # "<skill>: no input data" without spawning, so "could not run" stays
+        # distinguishable from "judged and passed". Returning a canned OK
+        # here would be the exact degradation this module's caller was
+        # changed to remove — a blocking gate recording a pass it never made.
+        return ""
 
     planned_files = parse_file_delta(plan_text)
 

@@ -30,37 +30,53 @@ _DIFF = "diff --git a/src/unplanned.py b/src/unplanned.py\n"
 
 
 @pytest.mark.parametrize(
-    ("plan_text", "expect_auto_pass"),
+    ("plan_text", "expect_prompt"),
     [
-        ("", True),
-        ("   \n  ", True),
-        (_PLAN, False),
+        ("", False),
+        ("   \n  ", False),
+        ("## Plan\n\n1. Do the thing", False),
+        (_PLAN, True),
     ],
+    ids=["no-plan", "whitespace", "no-file-delta", "real-plan"],
 )
-def test_only_an_empty_plan_reaches_the_scope_check_auto_pass(
-    plan_text: str, expect_auto_pass: bool
+def test_scope_check_judges_only_when_it_has_a_planned_file_set(
+    plan_text: str, expect_prompt: bool
 ):
-    """The degradation this exists to keep unreachable, pinned as fact."""
+    """Empty prompt means "cannot run"; a real prompt means it judges.
+
+    Asserting the CLASSIFIER is present, not merely that some old auto-pass
+    string is absent — "" satisfies an absence assertion, and "" is the
+    silent no-op this file exists to keep visible.
+    """
     prompt = build_scope_check_prompt(
         issue_number=1, issue_title="t", diff=_DIFF, plan_text=plan_text
     )
 
-    assert (_AUTO_PASS in prompt) is expect_auto_pass
+    assert bool(prompt) is expect_prompt
+    if expect_prompt:
+        assert "Classification Rules" in prompt
+        assert "src/a.py" in prompt
 
 
 @pytest.mark.asyncio
-async def test_the_judged_diff_excludes_the_harnesss_own_chain(tmp_path):
+@pytest.mark.parametrize(
+    "harness_path",
+    [
+        "docs/changes/issue-7/plan.md",
+        ".beads/issues.jsonl",
+        "docs/architecture/ctx.likec4",
+    ],
+    ids=lambda p: p,
+)
+async def test_the_judged_diff_excludes_every_harness_written_path(
+    tmp_path, harness_path: str
+):
     """A blocking gate must not judge files the agent never wrote.
 
-    `_get_branch_diff` feeds the post-implementation skills, and scope-check
-    is blocking. The harness commits `docs/changes/issue-N/*.md` to the
-    branch BEFORE the agent starts, so those files are in the branch diff of
-    every change — and no plan's File Delta names them. Without the
-    exclusion, arming scope-check lets it fail a change for the artifact
-    chain itself.
-
-    The two other consumers of this diff already exclude it for the same
-    reason (`agent/_commit.py`, `null_delivery.py`); this is the third.
+    Parametrised over the paths `HARNESS_WRITTEN_PATHSPECS` names — one case
+    per exclusion, so dropping any single entry reddens. A single-path test
+    let four of five be deleted silently, which is exactly what
+    docs/standards/parametrised_guards/ exists to prevent.
     """
     import subprocess
 
@@ -79,12 +95,12 @@ async def test_the_judged_diff_excludes_the_harnesss_own_chain(tmp_path):
     git("update-ref", "refs/remotes/origin/main", "HEAD")
     git("checkout", "-q", "-b", "agent/issue-7")
 
-    chain = repo / "docs" / "changes" / "issue-7"
-    chain.mkdir(parents=True)
-    (chain / "plan.md").write_text("the committed plan\n", encoding="utf-8")
+    target = repo / harness_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("harness wrote this\n", encoding="utf-8")
     (repo / "real_work.py").write_text("def frob(): return 1\n", encoding="utf-8")
     git("add", "-A")
-    git("commit", "-q", "-m", "work plus the harness chain")
+    git("commit", "-q", "-m", "work plus a harness artifact")
 
     class _Host(AgentPreQualityReviewMixin):
         def __init__(self) -> None:
@@ -94,7 +110,75 @@ async def test_the_judged_diff_excludes_the_harnesss_own_chain(tmp_path):
     diff = await _Host()._get_branch_diff(repo, "agent/issue-7")
 
     assert "real_work.py" in diff, "the agent's own work must still be judged"
-    assert "docs/changes" not in diff, (
-        "the harness's artifact chain is in the diff scope-check judges; a "
-        "blocking gate can now fail a change for files the agent never wrote"
+    assert harness_path not in diff, (
+        f"{harness_path} is harness-written and reached the diff a BLOCKING "
+        "scope-check judges; it can fail a change for work the agent never did"
     )
+
+
+@pytest.mark.asyncio
+async def test_an_agent_written_generated_path_is_still_judged(tmp_path):
+    """The exclusion must not blind the skills to the agent's own delivery.
+
+    `repo_wiki/` and `docs/arch/generated/` are written BY the agent via
+    `make arch-regen`. Excluding them (as an earlier cut of this change did,
+    by reusing null_delivery's "not a deliverable" set) hides the entire
+    delivery of a wiki or arch issue — and an all-excluded diff short-
+    circuits every blocking skill to a pass.
+    """
+    import subprocess
+
+    from agent._prequality import AgentPreQualityReviewMixin
+    from execution import get_default_runner
+    from tests.helpers import ConfigFactory
+
+    repo = tmp_path / "wt"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("commit", "-q", "--allow-empty", "-m", "base")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("checkout", "-q", "-b", "agent/issue-7")
+
+    generated = repo / "docs" / "arch" / "generated" / "modules.md"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("the agent regenerated this\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "arch regen delivery")
+
+    class _Host(AgentPreQualityReviewMixin):
+        def __init__(self) -> None:
+            self._config = ConfigFactory.create()
+            self._runner = get_default_runner()
+
+    diff = await _Host()._get_branch_diff(repo, "agent/issue-7")
+
+    assert "docs/arch/generated/modules.md" in diff, (
+        "the agent's own generated-arch delivery was hidden from the skills; "
+        "an all-excluded diff short-circuits every blocking gate to a pass"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_git_failure_raises_rather_than_reading_as_an_empty_diff(tmp_path):
+    """"" short-circuits EVERY blocking skill to passed=True."""
+    from agent._prequality import (
+        AgentPreQualityReviewMixin,
+        BranchDiffUnavailableError,
+    )
+    from execution import get_default_runner
+    from tests.helpers import ConfigFactory
+
+    repo = tmp_path / "not-a-repo"
+    repo.mkdir()
+
+    class _Host(AgentPreQualityReviewMixin):
+        def __init__(self) -> None:
+            self._config = ConfigFactory.create()
+            self._runner = get_default_runner()
+
+    with pytest.raises(BranchDiffUnavailableError):
+        await _Host()._get_branch_diff(repo, "agent/issue-7")

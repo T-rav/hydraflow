@@ -16,10 +16,8 @@ host against the real worktree and consumes no slots):
 
   1. Initial agent _execute (streaming) — commits code
   2. diff-sanity skill _execute — default success (no marker)
-  3. scope-check skill _execute — reports "no input data" (MockWorld's
-     default plan declares no File Delta, so there is nothing to compare);
-     it no longer takes the no-PLAN auto-pass, which is a different branch
-  3b. plan-compliance skill _execute — runs, which it previously did not
+  3. plan-compliance skill _execute — runs, which it previously did not
+     (scope-check returns an empty prompt and never reaches FakeDocker)
   4. test-adequacy finder _execute — RETRY naming a NEW, UNANCHORED gap
      → the pinned demand is closed, so the contract records it as advisory
   5. ``make coverage 0`` — exit 0, no coverage.xml → the pass is preserved

@@ -388,7 +388,7 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         f"docker_invocations={len(world.docker.invocations)}"
     )
     # FakeDocker invocations:
-    # 1 agent + 4 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
+    # 1 agent + 3 spawning skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
     # + 1 fix-agent + 1 quality-lite-pass + 1 test step = 11.
     # Names the skill rather than counting: the previous `>= 11` lower bound
     # passed with the fix reverted, because a misaligned queue still produced
@@ -426,10 +426,11 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     (ConfigFactory default is 0, which skips wait_for_ci entirely in
     PostMergeHandler._run_ci_gate). We pass a custom config so the CI gate runs.
 
-    FakeDocker invocations (10 total — the gate passes first attempt):
+    FakeDocker invocations (9 total — the gate passes first attempt):
       1. Initial agent _execute (streaming) — commits code
-      2–5. Four post-implementation skill _execute calls — default success
-           (diff-sanity, scope-check, plan-compliance, test-adequacy)
+      2–4. Three post-implementation skill _execute calls — default success
+           (diff-sanity, plan-compliance, test-adequacy; scope-check returns
+           an empty prompt and short-circuits without spawning)
       5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
       6. Pre-quality review _execute, attempt 1 — default success
       7. Pre-quality run-tool _execute, attempt 1 — default success

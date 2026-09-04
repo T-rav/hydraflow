@@ -84,7 +84,7 @@ async def test_quality_fix_loop_reverifies_without_the_host_lock(tmp_path) -> No
     )
     # 2-5) post-implementation skills: diff-sanity, plan-compliance,
     #      test-adequacy (+ its ``make coverage 0`` probe, also a slot)
-    # Still two slots, but a different two: scope-check now returns an empty
+    # Still four slots, but a different four: scope-check now returns an empty
     # prompt (no File Delta in MockWorld's default plan) and short-circuits
     # WITHOUT spawning, while plan-compliance — which used to short-circuit
     # for want of a plan — now spawns. One in, one out.

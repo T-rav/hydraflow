@@ -12,21 +12,32 @@ from scope_check import (
 class TestBuildScopeCheckPrompt:
     """Prompt builder tests."""
 
-    def test_empty_plan_auto_passes(self):
-        prompt = build_scope_check_prompt(
-            issue_number=1, issue_title="Add feature", diff="+ line", plan_text=""
-        )
-        assert "SCOPE_CHECK_RESULT: OK" in prompt
-        assert "No plan available" in prompt
+    def test_an_empty_plan_reports_no_input_rather_than_passing(self):
+        """A blocking gate must not record a pass it never made.
 
-    def test_whitespace_only_plan_auto_passes(self):
-        prompt = build_scope_check_prompt(
-            issue_number=1,
-            issue_title="Add feature",
-            diff="+ line",
-            plan_text="   \n  ",
+        An empty prompt makes `skill_gate.run_skill_check` short-circuit to
+        "<skill>: no input data" WITHOUT spawning, so "could not run" stays
+        distinguishable from "judged and passed" in telemetry. The previous
+        canned OK was indistinguishable from a real verdict and burned an
+        agent invocation to have the model echo it back.
+        """
+        assert (
+            build_scope_check_prompt(
+                issue_number=1, issue_title="Add feature", diff="+ line", plan_text=""
+            )
+            == ""
         )
-        assert "SCOPE_CHECK_RESULT: OK" in prompt
+
+    def test_a_whitespace_only_plan_reports_no_input(self):
+        assert (
+            build_scope_check_prompt(
+                issue_number=1,
+                issue_title="Add feature",
+                diff="+ line",
+                plan_text="   \n  ",
+            )
+            == ""
+        )
 
     def test_plan_with_file_delta(self):
         plan = "## File Delta\nMODIFIED: src/users.py\nADDED: src/pagination.py\n"
@@ -75,7 +86,7 @@ class TestBuildScopeCheckPrompt:
             issue_number=5, issue_title="Refactor", diff="+ x", plan_text=plan
         )
         assert "src/a.py" in prompt
-        assert "no File Delta" not in prompt
+        assert "Classification Rules" in prompt
 
     def test_includes_classification_rules(self):
         plan = "## File Delta\nMODIFIED: src/a.py\n"
@@ -86,11 +97,9 @@ class TestBuildScopeCheckPrompt:
         assert "WARN" in prompt
         assert "FAIL" in prompt
 
-    def test_default_plan_text_is_empty(self):
-        """plan_text defaults to empty string when not provided."""
-        prompt = build_scope_check_prompt(issue_number=1, issue_title="T", diff="+")
-        assert "SCOPE_CHECK_RESULT: OK" in prompt
-        assert "No plan available" in prompt
+    def test_an_omitted_plan_text_reports_no_input(self):
+        """plan_text defaults to "", which is the no-input case."""
+        assert build_scope_check_prompt(issue_number=1, issue_title="T", diff="+") == ""
 
 
 class TestChangedFilesInDiff:
