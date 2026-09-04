@@ -23,11 +23,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from change_chain import CHANGES_PREFIX
+
 # Directory prefixes whose contents are auto-generated knowledge artifacts —
 # never a standalone deliverable for a code issue.
 _NON_DELIVERABLE_PREFIXES: tuple[str, ...] = (
     "repo_wiki/",  # per-repo wiki ingest (RepoWikiLoop)
     "docs/arch/generated/",  # auto-regenerated arch artifacts (arch.runner)
+    # Per-change artifact chain (ADR-0149). The harness commits it into the
+    # worktree BEFORE the agent starts, so it is present in the branch diff of
+    # every change including one that delivered nothing. Counting it as a
+    # deliverable would let a null delivery past this guard — the same
+    # #9480 shape the module exists to catch, one artifact later.
+    f"{CHANGES_PREFIX}/",
 )
 
 # Exact paths that are auto-generated metadata.

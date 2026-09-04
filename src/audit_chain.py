@@ -211,6 +211,12 @@ def audit_streams(config: HydraFlowConfig) -> tuple[AuditStreamSpec, ...]:
             timestamp_key="timestamp",
             retention_days=config.audit_retention_days_evidence_packs,
         ),
+        AuditStreamSpec(
+            name="change_chain",
+            path=config.change_chain_path,
+            timestamp_key="recorded_at",
+            retention_days=config.audit_retention_days_change_chain,
+        ),
     )
 
 

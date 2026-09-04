@@ -90,6 +90,43 @@ def _llm_or_refusal(ports: dict, port_key: str) -> object:
     return ports.get(port_key) or _UninjectedLLM(port_key)
 
 
+def _override_or_refuse(loop: Any, attr: str, ports: dict, port_key: str) -> None:
+    """Install the seeded override, or a stand-in that REFUSES on first use.
+
+    These six attributes shadow methods that build a raw ``cmd = [...]``
+    subprocess -- ``gh run download``, ``make audit-json``,
+    ``make trust-adversarial`` -- rather than going through a Port. The builder
+    installed the override only ``if ports.get(key) is not None`` and otherwise
+    left the real method in place, so a scenario reaching the path ran the real
+    command against the real repo (#12148).
+
+    Scoped by reading each method, not by pattern-matching its prose: the four
+    ``*_reconcile_closed`` keys look identical at the call site but every one
+    delegates to the PRPort-based ``EscalationReconciler``. Their docstrings
+    NAME the ``gh issue list`` subprocess they replaced, which is what a text
+    sweep matches on -- three scenarios reddened against that false positive
+    before the bodies were read.
+
+    Refusing beats a canned return: a scenario that genuinely drives one of
+    these paths must seed it, and a stand-in that answered would let it pass
+    vacuously. The message names the port to seed.
+    """
+    injected = ports.get(port_key)
+    if injected is not None:
+        setattr(loop, attr, injected)
+        return
+
+    async def _refuse(*_args: object, **_kwargs: object) -> object:
+        msg = (
+            f"scenario reached {type(loop).__name__}.{attr}, which runs a raw "
+            f"subprocess rather than going through a Port. Seed "
+            f"ports[{port_key!r}] with a fake. See #12148."
+        )
+        raise AssertionError(msg)
+
+    setattr(loop, attr, _refuse)
+
+
 def _build_ci_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from ci_monitor_loop import CIMonitorLoop  # noqa: PLC0415
 
@@ -945,10 +982,7 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     fetch = ports.get("flake_fetch_runs")
     if fetch is not None:
         loop._fetch_recent_runs = fetch  # type: ignore[method-assign]
-    download = ports.get("flake_download_junit")
-    if download is not None:
-        # The real method takes one positional ``run`` arg; AsyncMock handles it.
-        loop._download_junit = download  # type: ignore[method-assign]
+    _override_or_refuse(loop, "_download_junit", ports, "flake_download_junit")
     reconcile = ports.get("flake_reconcile_closed")
     if reconcile is not None:
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
@@ -959,9 +993,7 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     loop._fetch_xdist_audit_runs = ports.get(  # type: ignore[method-assign]
         "flake_fetch_xdist_runs"
     ) or AsyncMock(return_value=[])
-    xdist_download = ports.get("flake_download_xdist")
-    if xdist_download is not None:
-        loop._download_xdist_audit = xdist_download  # type: ignore[method-assign]
+    _override_or_refuse(loop, "_download_xdist_audit", ports, "flake_download_xdist")
 
     return loop
 
@@ -1015,9 +1047,7 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
     )
 
     # Rewire external I/O to seeded async callables (if provided).
-    corpus = ports.get("skill_corpus_runner")
-    if corpus is not None:
-        loop._run_corpus = corpus  # type: ignore[method-assign]
+    _override_or_refuse(loop, "_run_corpus", ports, "skill_corpus_runner")
     reconcile = ports.get("skill_reconcile_closed")
     if reconcile is not None:
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
@@ -1081,9 +1111,7 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     fetch_jobs = ports.get("rc_budget_fetch_jobs")
     if fetch_jobs is not None:
         loop._fetch_job_breakdown = fetch_jobs  # type: ignore[method-assign]
-    fetch_junit = ports.get("rc_budget_fetch_junit")
-    if fetch_junit is not None:
-        loop._fetch_junit_tests = fetch_junit  # type: ignore[method-assign]
+    _override_or_refuse(loop, "_fetch_junit_tests", ports, "rc_budget_fetch_junit")
     reconcile = ports.get("rc_budget_reconcile_closed")
     if reconcile is not None:
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
@@ -1202,9 +1230,7 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
     reconcile = ports.get("fake_coverage_reconcile_closed")
     if reconcile is not None:
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
-    grep = ports.get("fake_coverage_grep")
-    if grep is not None:
-        loop._grep_scenario_for_helper = grep  # type: ignore[method-assign]
+    _override_or_refuse(loop, "_grep_scenario_for_helper", ports, "fake_coverage_grep")
     # #8986 — the rollup-existence probe also shells out to ``gh``; default
     # to "no open rollups" so scenarios don't need to seed it unless they
     # specifically test the closed-by-human / update-existing paths.
@@ -1988,9 +2014,7 @@ def _build_principles_audit(ports: dict[str, Any], config: Any, deps: Any) -> An
     )
 
     # Rewire external I/O to seeded async callables (if provided).
-    run_audit = ports.get("principles_audit_run_audit")
-    if run_audit is not None:
-        loop._run_audit = run_audit  # type: ignore[method-assign]
+    _override_or_refuse(loop, "_run_audit", ports, "principles_audit_run_audit")
     refresh_checkout = ports.get("principles_audit_refresh_checkout")
     if refresh_checkout is not None:
         loop._refresh_checkout = refresh_checkout  # type: ignore[method-assign]

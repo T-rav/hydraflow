@@ -21,6 +21,9 @@ import time
 from typing import TYPE_CHECKING
 
 from adr_utils import is_adr_issue_title, next_adr_number
+from change_chain import CHANGES_PREFIX, chain_dir
+from change_chain_reader import active_worktree, read_plan
+from change_chain_writer import ChangeChainWriter
 from harness_insights import (
     FailureCategory,
     format_known_traps_for_prompt,
@@ -30,6 +33,11 @@ from implement_timeout import tiered_implement_timeout
 from issue_cache import classification_complexity
 from models import PipelineStage
 from phase_utils import record_harness_failure
+from subprocess_util import (
+    CircuitBreakerOpenError,
+    SubprocessTimeoutError,
+    run_subprocess_result,
+)
 
 from ._common import _pinned_adequacy_demand
 
@@ -61,6 +69,7 @@ class ImplementBuildMixin:
     # ------------------------------------------------------------------
     _agents: AgentRunner
     _beads_manager: BeadsManager | None
+    _chain_writer: ChangeChainWriter
     _config: HydraFlowConfig
     _harness_insights: HarnessInsightStore | None
     _issue_cache: IssueCache | None
@@ -200,12 +209,12 @@ class ImplementBuildMixin:
         return timeout
 
     def _read_plan_for_recording(self, issue_number: int) -> str:
-        """Read the plan file for *issue_number*, returning empty string on failure."""
-        plan_path = self._config.plans_dir / f"issue-{issue_number}.md"
-        try:
-            return plan_path.read_text()
-        except OSError:
-            return ""
+        """Read the plan: the committed chain first, then the disk cache."""
+        return read_plan(
+            self._config,
+            issue_number,
+            worktree=active_worktree(self._state, issue_number),
+        )
 
     def _prepare_adr_plan(self, issue: Task) -> None:
         """Seed a deterministic ADR execution plan when an ADR issue lacks one."""
@@ -287,6 +296,7 @@ class ImplementBuildMixin:
         else:
             wt_path = await self._workspaces.create(issue.id, branch)
         self._state.set_workspace(issue.id, str(wt_path))
+        await self._materialise_chain(issue, wt_path)
         await self._prs.push_branch(wt_path, branch, force=reset_for_retry)
         await self._transitioner.post_comment(
             issue.id,
@@ -295,6 +305,99 @@ class ImplementBuildMixin:
             f"Implementation in progress.",
         )
         return wt_path
+
+    async def _materialise_chain(self, issue: Task, wt_path: Path) -> None:
+        """Commit the artifact chain into the worktree before the agent runs.
+
+        ADR-0149: the implementer inherits the chain as history it cannot
+        rewrite, rather than authoring the files the gate later reads. Runs
+        before ``push_branch`` so the chain commit ships with the branch.
+
+        Never aborts the build on an infrastructure failure. A change planned
+        before the chain existed has no record, and refusing to implement it
+        would stall the factory on its own backlog; a missing chain is a gate
+        finding instead.
+
+        The except is narrow, not broad-with-``reraise_on_credit_or_bug``.
+        That guard exists for runners that spawn an *agent*, where a
+        swallowed ``CreditExhaustedError`` burns attempt budget against an
+        exhausted billing signal. This writer spawns ``git``, so no credit
+        signal can originate here — and anything outside the two
+        infrastructure failures below is a bug that should surface, not be
+        logged and stepped over.
+        """
+        try:
+            outcome = await self._chain_writer.materialise(wt_path, issue.id)
+            if outcome.written and not outcome.committed:
+                # The files are on disk and untracked. The agent's own
+                # `git add -A` would sweep them into ITS commit, which hands
+                # back the write path ADR-0149 removed while leaving the
+                # digest matching. Remove them rather than leave the property
+                # silently gone.
+                await self._discard_uncommitted_chain(wt_path, issue.id)
+            elif outcome.rejected:
+                logger.warning(
+                    "Chain for issue #%d: %d artifact(s) failed their digest "
+                    "check and were not committed",
+                    issue.id,
+                    len(outcome.rejected),
+                    extra={"issue": issue.id},
+                )
+        except (OSError, SubprocessTimeoutError, CircuitBreakerOpenError):
+            logger.warning(
+                "Chain materialisation failed for issue #%d — the change will "
+                "carry no committed chain",
+                issue.id,
+                exc_info=True,
+                extra={"issue": issue.id},
+            )
+
+    async def _discard_uncommitted_chain(
+        self, wt_path: Path, issue_number: int
+    ) -> None:
+        """Delete chain files that were written but not committed.
+
+        An uncommitted chain is worse than no chain: the agent inherits
+        writable, untracked files that its own commit will absorb, so the
+        branch ends up carrying a chain the agent authored while the digests
+        still match. Leaving nothing is the honest outcome — the gate then
+        reports the change as unanchored.
+        """
+        # Unstage FIRST. `_commit` runs `git add` before `git commit`, so on
+        # the add-succeeded/commit-failed path the blobs are already in the
+        # index; unlinking the files alone leaves them staged, and the
+        # implementer's next plain commit carries them anyway.
+        rel = f"{CHANGES_PREFIX}/issue-{issue_number}"
+
+        # Never delete something git is already tracking. The writer treats
+        # "already committed" as success now, so this should be unreachable
+        # on the resumed path — but the cost of being wrong here is deleting
+        # a committed chain and letting the agent commit the deletions, so
+        # the check stays as a floor rather than a comment.
+        tracked = await run_subprocess_result(
+            "git", "ls-files", "--error-unmatch", "--", rel, cwd=wt_path
+        )
+        if tracked.returncode == 0:
+            logger.warning(
+                "Chain for issue #%d is tracked at HEAD — refusing to discard it",
+                issue_number,
+                extra={"issue": issue_number},
+            )
+            return
+
+        await run_subprocess_result("git", "reset", "-q", "--", rel, cwd=wt_path)
+        directory = chain_dir(wt_path, issue_number)
+        for path in directory.glob("*.md"):
+            with contextlib.suppress(OSError):
+                path.unlink()
+        with contextlib.suppress(OSError):
+            directory.rmdir()
+        logger.warning(
+            "Chain for issue #%d was written but not committed — discarded it "
+            "so the agent cannot absorb it into its own commit",
+            issue_number,
+            extra={"issue": issue_number},
+        )
 
     async def _record_impl_metrics(
         self, issue: Task, result: WorkerResult, review_feedback: str

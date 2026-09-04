@@ -307,11 +307,36 @@ class Articles:
         }
 
 
+#: The per-change artifact names a charter may require (ADR-0149).
+#:
+#: Held here, not imported from ``change_chain``, because that module owns the
+#: chain's *behaviour* — digests, renderers, filesystem resolution — and
+#: importing it would drag ``pathlib.Path`` across this module's purity pin
+#: (``tests/architecture/test_policy_engine_is_pure.py``). Same move
+#: ``data_class_vocabulary`` already makes: a pure module gets to ask "is this
+#: a valid name?" without dragging I/O in behind the answer.
+#:
+#: Two writers, one set: ``tests/test_charter.py`` binds this to
+#: ``ChainArtifact`` so the copy cannot rot.
+CHAIN_ARTIFACT_NAMES: frozenset[str] = frozenset(
+    {"intent", "criteria", "plan", "evidence"}
+)
+
+
 @dataclass(frozen=True)
 class Artifacts:
-    """The Artifacts layer: paths whose presence the repo commits to."""
+    """The Artifacts layer: paths whose presence the repo commits to.
+
+    ``required`` names standing paths — directories and files that must
+    exist in the repo at all times. ``chain`` names the PER-CHANGE
+    artifacts every change must carry (ADR-0149); its entries are artifact
+    names, not paths, because a change's directory moves under quarterly
+    compaction and a declaration pinned to a path would go stale the first
+    time a quarter folded.
+    """
 
     required: tuple[str, ...] = ()
+    chain: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: Any) -> Artifacts:
@@ -326,10 +351,28 @@ class Artifacts:
                     "declares nothing about that repo."
                 )
                 raise CharterError(msg)
-        return cls(required=required)
+        chain = _as_str_tuple("artifacts.chain", raw.get("chain"))
+        for name in chain:
+            if name not in CHAIN_ARTIFACT_NAMES:
+                msg = (
+                    f"charter `artifacts.chain` entry {name!r} names no chain "
+                    f"artifact. Known: {sorted(CHAIN_ARTIFACT_NAMES)}. A declaration "
+                    "naming a subject that cannot exist is worse than no "
+                    "declaration — nothing would ever check it."
+                )
+                raise CharterError(msg)
+        return cls(required=required, chain=chain)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"required": list(self.required)}
+        # `chain` is emitted only when declared. Absent and empty are
+        # different claims: rendering `chain: []` into a repo that never
+        # opted into ADR-0149 writes a positive "this repo requires no chain
+        # artifacts" into a file the drift caretaker then audits. Same rule
+        # `Charter.to_dict` applies to its own optional blocks.
+        rendered: dict[str, Any] = {"required": list(self.required)}
+        if self.chain:
+            rendered["chain"] = list(self.chain)
+        return rendered
 
 
 @dataclass(frozen=True)
@@ -884,6 +927,7 @@ class Charter:
         return not (
             self.articles.standards
             or self.artifacts.required
+            or self.artifacts.chain
             or self.rails.layers
             or self.rails.domain_gate_scripts
             or self.rails.coverage_floor > 0

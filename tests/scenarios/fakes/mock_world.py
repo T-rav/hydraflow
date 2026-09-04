@@ -831,6 +831,22 @@ class MockWorld:
             self._loop_ports["github"] = self._github
             self._loop_ports["workspace"] = self._workspace
             self._loop_ports["state"] = self._harness.state
+
+        # #12148 air-gap, same shape as the #11298 note below: six catalog
+        # method-overrides shadow a loop method that builds a raw
+        # ``cmd = [...]`` subprocess, and the builder installed the override
+        # only when the port was seeded — leaving the REAL method in place
+        # otherwise. `s17_skill_prompt_eval_clean_corpus` reached
+        # ``SkillPromptEvalLoop._run_corpus`` that way and ran
+        # ``make trust-adversarial`` for real, which its own docstring notes can
+        # spend LLM budget. The scenario's docstring already claimed the "corpus
+        # runner returns empty list" it never seeded, so it passed for a false
+        # reason. Defaulting here makes that claim true.
+        async def _empty_corpus(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+            return []
+
+        self._loop_ports.setdefault("skill_corpus_runner", _empty_corpus)
+
         # #11298 light lane air-gap (unconditional, mirrors sandbox_main's
         # ``air_gap_runner_sentinels``): the catalog-built AutoAgentPreflightLoop
         # constructs its AutoAgentRunner INSIDE ``_build_spawn_fn``, so without

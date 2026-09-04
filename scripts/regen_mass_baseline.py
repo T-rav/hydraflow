@@ -58,6 +58,18 @@ def main(argv: list[str] | None = None) -> int:
             "repeatable. Every other entry stays byte-identical."
         ),
     )
+    ap.add_argument(
+        "--allow-metric-growth",
+        action="store_true",
+        help=(
+            "record a metric that RISES while another in the same entry FALLS. "
+            "Off by default: a class entry holds loc AND methods, so a "
+            "re-record for a genuine loc shrink carries methods along at "
+            "whatever it currently is, laundering growth nobody reviewed "
+            "(#12142). A uniform rise is the documented accepted-growth flow "
+            "and is never blocked."
+        ),
+    )
     ap.add_argument("--src", type=Path, default=Path("src"))
     ap.add_argument("--out", type=Path, default=_BASELINE)
     args = ap.parse_args(argv)
@@ -66,6 +78,8 @@ def main(argv: list[str] | None = None) -> int:
 
     from erosion.mass import collect_sources, compute
     from erosion.mass_baseline import (
+        baseline_from,
+        laundered_metrics,
         load_mass_baseline,
         refresh_entries,
         save_mass_baseline,
@@ -84,6 +98,33 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     baseline = load_mass_baseline(args.out)
+
+    # Refuse to RAISE a mark that was not the point of this refresh. `--only`
+    # isolates entries from each other; it cannot isolate the metrics within
+    # one, and both numbers sit on adjacent lines so the rise is invisible in
+    # review (#12142).
+    grown = laundered_metrics(baseline, baseline_from(finding), args.only)
+    if grown and not args.allow_metric_growth:
+        print(
+            "error: this refresh lowers one metric and raises another in the "
+            "same entry — the raise was not the errand:",
+            file=sys.stderr,
+        )
+        for key, rises in grown.items():
+            for metric, (old, new) in rises.items():
+                print(
+                    f"  {key}  {metric}: {old} -> {new}  (+{new - old})",
+                    file=sys.stderr,
+                )
+        print(
+            "\nA class entry holds loc AND methods on adjacent lines, so a "
+            "re-record for one carries the other silently (#12142). Either "
+            "bring the raised metric back under its mark, or pass "
+            "--allow-metric-growth and account for it in --reason.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         refreshed, updated, removed = refresh_entries(baseline, finding, args.only)
     except KeyError as exc:

@@ -67,7 +67,7 @@ graph LR
     src -- "1" --> src_reviewer
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
-    src -- "68" --> src_state
+    src -- "69" --> src_state
     src -- "6" --> src_vitals
     src -- "10" --> src_wiki_compiler
     src -- "5" --> src_workspace

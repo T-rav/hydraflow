@@ -11,6 +11,7 @@ that only appear for product-track issues.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from base_runner import BaseRunner
@@ -73,7 +74,7 @@ class AgentPromptMixin(BaseRunner):
         def _get_review_feedback_section(self) -> str: ...  # provided by _context
 
         def _load_plan_fallback(
-            self, issue_number: int
+            self, issue_number: int, worktree: Path | None = None
         ) -> str: ...  # provided by _plan
 
         def _summarize_for_prompt(
