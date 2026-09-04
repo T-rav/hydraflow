@@ -148,6 +148,50 @@ def _reconcile(
     return "unchanged"
 
 
+def laundered_metrics(
+    baseline: MassBaseline,
+    live: MassBaseline,
+    keys: Iterable[str],
+    /,
+) -> dict[str, dict[str, tuple[int, int]]]:
+    """Metrics a refresh would RAISE while another metric in the same entry FALLS.
+
+    ``--only`` isolates entries from each other but cannot isolate the metrics
+    WITHIN one, because a class entry is a single mapping of ``loc`` and
+    ``methods``. Re-recording to capture a genuine ``loc`` shrink also re-records
+    ``methods`` at whatever it currently is — growth no PR accounted for, on the
+    line below the one being reviewed (#12142).
+
+    The signature is **mixed movement**, not any rise. A uniform rise is the
+    tool's documented "a new oversized class is an accepted decision" flow, and
+    adopting an unbaselined entry is not raising an existing mark; refusing
+    those would break the mode this script exists to serve. It is the entry that
+    falls in one metric and climbs in another that says a shrink was the errand
+    and the climb was a passenger.
+
+    A file entry records a single number, so it can never be mixed and is never
+    reported here.
+    """
+    laundered: dict[str, dict[str, tuple[int, int]]] = {}
+    for key in dict.fromkeys(keys):
+        if ":" not in key:
+            continue  # file entries hold one metric; nothing can ride along
+        old_entry = baseline.classes.get(key)
+        new_entry = live.classes.get(key)
+        if old_entry is None or new_entry is None:
+            continue  # adoption or removal, not a mark being raised
+        shared = [m for m in old_entry if m in new_entry]
+        rises = {
+            m: (old_entry[m], new_entry[m])
+            for m in shared
+            if new_entry[m] > old_entry[m]
+        }
+        falls = [m for m in shared if new_entry[m] < old_entry[m]]
+        if rises and falls:
+            laundered[key] = rises
+    return laundered
+
+
 def refresh_entries(
     baseline: MassBaseline,
     finding: MassFinding,
