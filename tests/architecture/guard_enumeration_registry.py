@@ -762,6 +762,7 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
         test_issue_11939_port_fake_name_is_a_hint,
         test_issue_11969_mirror_pins_are_real,
         test_issue_12144_llm_seam_fails_closed,
+        test_issue_12146_scrub_json_escape,
     )
     from tests.sandbox_scenarios.runner import test_scenarios
     from tests.scenarios import (
@@ -1371,6 +1372,18 @@ def registered_enumerations() -> tuple[GuardedEnumeration, ...]:
             why=(
                 "AST-derived at import: (loop, attr) for each loop that lazily "
                 "builds a real LLM client. Floored by the same known-positive test."
+            ),
+            undetected_reason=_DERIVED_CANNOT_GO_STALE,
+        ),
+        GuardedEnumeration(
+            name="test_issue_12146_scrub_json_escape._LABELS",
+            members=tuple(test_issue_12146_scrub_json_escape._LABELS),
+            kind=EnumerationKind.CORPUS,
+            why=(
+                "Derived at import from the live SECRET_PATTERNS, so a pattern "
+                "added later is exercised without editing this row. Floored by "
+                "test_every_pattern_has_a_probe, which fails if the label set "
+                "and the probe table disagree."
             ),
             undetected_reason=_DERIVED_CANNOT_GO_STALE,
         ),
